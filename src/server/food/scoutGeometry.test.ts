@@ -69,6 +69,10 @@ describe('q-9 Node3 scoutGeometry parity (verbatim extract, hypothesis 2)', () =
   it('merge + cluster + validate keep semantics', () => {
     expect(mergeScoutItems([{ a: 1 }], [])).toEqual([{ a: 1 }]);
     expect(clusterSpatialCompositeDishes([], () => {})).toEqual([]);
+    // card-19 guard: a single dish returns early, so the box work must not start
+    // inventing components on ordinary one-dish meals.
+    const solo = { originalName: 'Green Grapes', boundingBox2D: [390, 110, 875, 880] };
+    expect(clusterSpatialCompositeDishes([solo], () => {})[0]).toBe(solo);
     const schema = z.object({ items: z.array(z.object({ a: z.string().optional() })).optional() });
     const out = validateOrFallback(schema, { items: [{ a: 'x' }] }, 'raw', 't', { items: [] }, () => {});
     expect(out).toEqual({ items: [{ a: 'x' }] });
@@ -95,5 +99,41 @@ describe('q-9 Node3 scoutGeometry parity (verbatim extract, hypothesis 2)', () =
     expect(clustered).toHaveLength(2);
     expect(clustered[0].originalName).toBe('Green Grapes');
     expect(clustered[1].originalName).toBe('Plum');
+  });
+
+  // card-19: clustering unions boxes onto the composite (correct) but never
+  // copied each component's own box, destroying it. Boxes: job_1790784359089_kvt6r0c0g.
+  type Box = [number, number, number, number];
+  const OATS: Box = [250, 100, 955, 990], GRAPES: Box = [390, 110, 875, 880];
+  const d = (name: string, box: Box, g: number) => ({
+    originalName: name, keyword: name, name, estimatedWeightGrams: g, weightGrams: g,
+    boundingBox2D: box, sourceImageIndex: 0, calories: g, nutrients: { calories: g, protein: 2, totalFat: 1, saturatedFat: 0.2, carbohydrates: 10, sodium: 50 },
+  });
+  const comps = (o: any[]) => o[0].compositeSiblings ?? o[0].components;
+  it('keeps each clustered component\'s own boundingBox2D (card-19)', () => {
+    const out = clusterSpatialCompositeDishes([d('Sainsbury Oat and Fruit', OATS, 220), d('Green Grapes', GRAPES, 100)], () => {});
+    expect(out).toHaveLength(1);
+    expect(out[0].hasComponents).toBe(true);
+    expect(comps(out)).toHaveLength(2);  // one composite, two components
+    const by = new Map<string, any>(comps(out).map((c: any) => [String(c.name), c])); // both undefined before the fix
+    expect(by.get('Sainsbury Oat and Fruit')?.boundingBox2D).toEqual(OATS);
+    expect(by.get('Green Grapes')?.boundingBox2D).toEqual(GRAPES);
+    expect(by.get('Green Grapes')?.sourceImageIndex).toBe(0);
+    expect(out[0].boundingBox2D).toEqual(OATS); // composite stays the union
+  });
+
+  it("a parent's own box reaches its sub-components (the other push site)", () => {
+    // Each `c` has no box, so the parent's is the only honest annotation.
+    const parent: any = d('Sainsbury Oat and Fruit', OATS, 220);
+    parent.components = [
+      { name: 'Oats', weightGrams: 140, volumePercentage: 64, searchQuery: 'oats' },
+      { name: 'Dried fruit', weightGrams: 80, volumePercentage: 36, searchQuery: 'dried fruit' },
+    ];
+    const out = clusterSpatialCompositeDishes([parent, d('Green Grapes', GRAPES, 100)], () => {});
+    expect(out).toHaveLength(1);
+    for (const n of ['Oats', 'Dried fruit', 'Green Grapes']) {
+      expect(comps(out).find((c: any) => String(c.name) === n)?.boundingBox2D)
+        .toEqual(n === 'Green Grapes' ? GRAPES : OATS); // the fallback must not overwrite
+    }
   });
 });

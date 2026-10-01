@@ -24,6 +24,10 @@ set -eo pipefail
 
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 REPO_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.."; pwd)"
+# Proves the coder worktree's TypeScript compiler is real before any build
+# output is believed. See scripts/lib/coder-toolchain.mjs for why `npx tsc`
+# cannot be trusted here.
+TOOLCHAIN_HELPER="${REPO_DIR}/scripts/lib/coder-toolchain.mjs"
 cd "$REPO_DIR"
 
 HERMES_DIR="${HERMES_DIR:-${HOME}/.hermes}"
@@ -611,7 +615,7 @@ if [ "$PRINT_PLAN" = "1" ]; then
     echo "plan_gates=${TICKET_GATES:-none}"
   fi
   if [ "$REQUESTED_TOOL" = "opencode" ] || [ "$REQUESTED_TOOL" = "auto" ]; then
-    echo "opencode_argv=opencode run --auto --dir ${REPO_DIR} -m $(opencode_model_id "$PREFERRED_MODEL") <prompt>"
+    echo "opencode_argv=(cd ${CODER_DIR:-$REPO_DIR} && opencode run --auto -m $(opencode_model_id "$PREFERRED_MODEL") <prompt>)"
   fi
   exit 0
 fi
@@ -963,22 +967,56 @@ record_audit() {
 # ---------------------------------------------------------------
 SNAP_FILE=""
 BASE_HEAD=""
+# One line per dirty path: "<porcelain status>\t<path>\t<content hash>".
+#
+# The content hash is the whole point. `git status --porcelain` reports path and
+# status letter, NOT what is in the file, so an agent that edits a file which was
+# ALREADY modified produces a byte-identical porcelain line. Diffing porcelain
+# lines therefore reports zero changes for real work — proven with a throwaway
+# repo: modify f.txt, snapshot, modify it again, and `comm -13` returns nothing but
+# the temp file it made.
+#
+# That is not hypothetical. A reused dispatch worktree carries dirt from an earlier
+# aborted attempt, so card #19's coder produced a real fix and the dispatcher
+# reported "No code changes produced", blocked the card, and charged a
+# tool-allowance failure against the agent for work it had actually done.
+workspace_fingerprint() {
+  git -C "$CODER_DIR" status --porcelain -uall 2>/dev/null \
+    | grep -v 'src/git-version.generated.ts' \
+    | while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        path=${line:3}
+        # A rename/copy line is "R  old -> new"; the path that exists is the new one.
+        case "$path" in *' -> '*) path=${path##*' -> '} ;; esac
+        if [ -f "$CODER_DIR/$path" ]; then
+          h=$(git hash-object -- "$CODER_DIR/$path" 2>/dev/null || echo "-")
+        elif [ -d "$CODER_DIR/$path" ]; then
+          h="dir"
+        else
+          h="absent"
+        fi
+        printf '%s\t%s\t%s\n' "${line:0:2}" "$path" "$h"
+      done
+}
+
 snapshot_workspace() {
   rm -f "${SNAP_FILE:-}"
   SNAP_FILE=$(mktemp)
   BASE_HEAD=$(git -C "$CODER_DIR" rev-parse HEAD 2>/dev/null || true)
-  git -C "$CODER_DIR" status --porcelain | grep -v 'src/git-version.generated.ts' > "$SNAP_FILE" || true
+  workspace_fingerprint > "$SNAP_FILE" || true
 }
 
-# Lines that appeared after snapshot_workspace. Pre-existing dirt does not count.
+# Paths that appeared OR CHANGED after snapshot_workspace. Pre-existing dirt that
+# the agent did not touch does not count — but dirt the agent did touch does, even
+# when it was already dirty before the run.
 new_changes() {
   local now
   now=$(mktemp)
-  git -C "$CODER_DIR" status --porcelain | grep -v 'src/git-version.generated.ts' > "$now" || true
-  if [ -n "$SNAP_FILE" ] && [ -f "$SNAP_FILE" ]; then
-    comm -13 <(sort "$SNAP_FILE") <(sort "$now") || true
+  workspace_fingerprint > "$now" || true
+  if [ -n "${SNAP_FILE:-}" ] && [ -f "$SNAP_FILE" ]; then
+    comm -13 <(sort "$SNAP_FILE") <(sort "$now") | cut -f2 | sort -u || true
   else
-    cat "$now" || true
+    cut -f2 "$now" | sort -u || true
   fi
   rm -f "$now"
 }
@@ -1069,10 +1107,30 @@ ${tail_output:-No output logged}
 \`\`\`
 $(printf '%s\n' "$diff_files" | head -10)
 \`\`\`
-Running TypeScript build check ('npx tsc --noEmit')..."
+Running TypeScript build check ('tsc --noEmit')..."
+
+  # ENVIRONMENT FIRST. `npx tsc` does not fail when the worktree has no local
+  # compiler — it resolves the npm package named `tsc` (2.0.4, "a deprecated
+  # release of the TypeScript compiler"), which prints "This is not the tsc
+  # command you are looking for". That banner reads as a build failure, so the
+  # attempt gets reverted and nudged against a cause no amount of retrying can
+  # touch (card #19, 2026-10-01: 4 identical args hashes, and the agent's own
+  # test passed 2/2 as soon as deps existed). Prove the compiler first; if the
+  # environment is broken, say so, keep the work, and refuse to nudge.
+  local tc_out tc_rc=0
+  tc_out=$(node "$TOOLCHAIN_HELPER" --dir="$CODER_DIR" 2>&1) || tc_rc=$?
+  if [ "$tc_rc" -ne 0 ]; then
+    tg_msg "🚧 *[Orchestrator]* Toolchain broken in the coder worktree (\`$BUG_ID\`, \`$CODER_DIR\`) — the build check was NOT run:
+\`\`\`
+${tc_out:0:600}
+\`\`\`
+*This is the environment, not the attempt.* The agent's work is left in place for a human. Not reverting, not nudging."
+    return 3
+  fi
+  echo "[Dispatcher] $tc_out"
 
   local tsc_output
-  if tsc_output=$(git -C "$CODER_DIR" rev-parse --show-toplevel >/dev/null 2>&1 && (cd "$CODER_DIR" && npx tsc --noEmit 2>&1)); then
+  if tsc_output=$(git -C "$CODER_DIR" rev-parse --show-toplevel >/dev/null 2>&1 && (cd "$CODER_DIR" && node ./node_modules/typescript/bin/tsc --noEmit 2>&1)); then
     echo "[Dispatcher] tsc clean."
 
     # BOT-23: Pre-dispatch dev regression & blast radius verification
@@ -1290,10 +1348,10 @@ Ensure the root page background renders the dark theme navy (#0f172a) properly f
 
   if [ "$THINKING" = "low" ]; then
     base_prompt="${base_prompt}
-Make a minimal, single-file atomic change. Verify with npx tsc --noEmit before finishing."
+Make a minimal, single-file atomic change. Stay inside allowed_files. Do not run the build yourself — the dispatcher runs \`tsc --noEmit\` after you finish, and it uses the worktree's own compiler (never \`npx tsc\`, which silently resolves a decoy package named tsc)."
   else
     base_prompt="${base_prompt}
-Think carefully before modifying files. Verify with npx tsc --noEmit before finishing."
+Think carefully before modifying files. Stay inside allowed_files. Do not run the build yourself — the dispatcher runs \`tsc --noEmit\` after you finish, and it uses the worktree's own compiler (never \`npx tsc\`, which silently resolves a decoy package named tsc)."
   fi
 
   if [ -n "${MEMORY_CONTEXT:-}" ]; then
@@ -1315,8 +1373,15 @@ run_opencode_agent() {
   local model_id
   model_id=$(opencode_model_id "$model")
   snapshot_workspace
-  echo "[Dispatcher] opencode run --auto --dir ${CODER_DIR} -m ${model_id}"
-  ( cd "$CODER_DIR" && run_with_timeout "$duration" "$OPENCODE_BIN" run --auto --dir "$CODER_DIR" -m "$model_id" "$prompt" 2>&1 | tee "$log_file" ) || true
+  echo "[Dispatcher] opencode run --auto -m ${model_id}  (cwd ${CODER_DIR})"
+  # No --dir: `opencode run` has no directory flag. It resolves the project from
+  # its working directory, so the `cd` below is what scopes the coder to its own
+  # worktree. Passing --dir made the CLI exit with "Unrecognized flag: --dir"
+  # before the agent ever started, so every opencode dispatch on this box failed
+  # at launch. The dispatcher then reported "No code changes produced by
+  # opencode", which reads like a lazy agent rather than a broken invocation —
+  # and the tool allowance was recorded as a failure against the wrong cause.
+  ( cd "$CODER_DIR" && run_with_timeout "$duration" "$OPENCODE_BIN" run --auto -m "$model_id" "$prompt" 2>&1 | tee "$log_file" ) || true
   # Refresh claimed files with what this attempt actually touched (prompt may
   # not have named them all).
   if [ -f "$FILE_LOCKS_CLI" ]; then
@@ -1369,7 +1434,10 @@ $prompt_preview
       start_heartbeat "OpenCode (free fallback)" "$alt_log"
       run_opencode_agent "$prompt" "$alt_log" 8m "$alt_model"
       stop_heartbeat
-      if check_git_and_tsc "opencode" "$alt_model" "$alt_log"; then return 0; fi
+      local fb_rc=0
+      check_git_and_tsc "opencode" "$alt_model" "$alt_log" || fb_rc=$?
+      if [ "$fb_rc" -eq 0 ]; then return 0; fi
+      if [ "$fb_rc" -eq 3 ]; then return 3; fi
     fi
     if [ "$CASCADE" -eq 1 ]; then
       tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\` (no free model succeeded). Escalating to Cline..."
@@ -1388,7 +1456,14 @@ $prompt_preview
     return 2
   fi
 
-  if check_git_and_tsc "opencode" "$model" "$log_file"; then return 0; fi
+  # Exit 3 from the gate means the CODER WORKTREE's toolchain is broken, not
+  # that the attempt was bad. Nudging replays the identical invocation into the
+  # identical wall — that is what burned card #19 four times on one args hash —
+  # so stop here, keep the work, and let a human fix the environment.
+  local gate_rc=0
+  check_git_and_tsc "opencode" "$model" "$log_file" || gate_rc=$?
+  if [ "$gate_rc" -eq 0 ]; then return 0; fi
+  if [ "$gate_rc" -eq 3 ]; then return 3; fi
 
   # One nudge attempt
   tg_msg "🔄 *[Orchestrator]* OpenCode nudged to retry \`$BUG_ID\`..."
@@ -1397,7 +1472,10 @@ $prompt_preview
   start_heartbeat "OpenCode (nudge)" "$nudge_log"
   run_opencode_agent "Previous attempt for $BUG_ID had errors or no changes. Inspect git status, analyze errors, and complete the fix now." "$nudge_log" 4m "$model"
   stop_heartbeat
-  if check_git_and_tsc "opencode" "$model" "$nudge_log"; then return 0; fi
+  local nudge_rc=0
+  check_git_and_tsc "opencode" "$model" "$nudge_log" || nudge_rc=$?
+  if [ "$nudge_rc" -eq 0 ]; then return 0; fi
+  if [ "$nudge_rc" -eq 3 ]; then return 3; fi
 
   if [ "$CASCADE" -eq 1 ]; then
     tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\`. Escalating to Cline..."

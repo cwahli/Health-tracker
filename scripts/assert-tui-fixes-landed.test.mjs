@@ -207,6 +207,149 @@ console.log('assert-tui-fixes-landed:');
   check('the missing file is named', r.out.includes(TUI_FILE), r.out);
 }
 
+{
+  // 8. THE 2026-10-01 CASE. A squash merge puts a NEW commit on the base and
+  //    leaves the branch's original sha unreachable forever, so reachability
+  //    condemns landed work. Once the base moves past the change the blob
+  //    escape hatch closes too. `git cherry` still sees the patch upstream.
+  const dir = makeRepo();
+  cleanup.push(dir);
+  git(dir, 'checkout', '-q', '-b', 'feat/forge');
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 2;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'feat(forge): one click to create a bot', { hoursAgo: 30 });
+  git(dir, 'checkout', '-q', 'main');
+  // The squash: same change, new sha — what a squash merge actually writes.
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 2;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'feat(forge): one click to create a bot (#373)', { hoursAgo: 29 });
+  // And then the base moves on, so branch and base blobs differ again.
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 3; // serve the registry as of the request\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'feat(forge): serve the registry as of the request', { hoursAgo: 2 });
+
+  // The precondition that made this a false positive: the sha really is
+  // unreachable and the blobs really do differ. If either stops being true the
+  // test is no longer proving what it claims to.
+  const unreachable = git(dir, 'log', '--format=%s', 'main..feat/forge');
+  check('the squash residue is unreachable from main', unreachable.includes('one click to create a bot'), unreachable);
+  const branchBlob = git(dir, 'rev-parse', 'feat/forge:scripts/tui-gateway.mjs');
+  const mainBlob = git(dir, 'rev-parse', 'main:scripts/tui-gateway.mjs');
+  check('the blob escape hatch is closed (they differ)', branchBlob !== mainBlob);
+
+  const r = runGate(dir);
+  check('a squash-merged branch is NOT stranded', r.code === 0, r.out.trim().split('\n').pop());
+}
+
+{
+  // 9. Work in review is not stranded. An open PR is the opposite of an
+  //    unlanded fix reading as a done fix.
+  const dir = makeRepo();
+  cleanup.push(dir);
+  git(dir, 'checkout', '-q', '-b', 'fix/tui-scroll-multiclient');
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 2;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'fix(tui): lane-shared page-key scroll', { hoursAgo: 26 });
+  git(dir, 'checkout', '-q', 'main');
+  check('without the PR list it is still flagged', runGate(dir).code === 1);
+  check('with an open PR it is not stranded',
+    runGate(dir, ['--open-pr-branches=fix/tui-scroll-multiclient']).code === 0);
+  // CI only ever sees remote-tracking refs, so origin/<name> must match too.
+  check('an origin/ prefixed name matches as well',
+    runGate(dir, ['--open-pr-branches=origin/fix/tui-scroll-multiclient']).code === 0);
+}
+
+{
+  // 10. The new senses must not become a wider hole. A branch that is neither
+  //     patch-upstream nor under an open PR is still stranded, even when
+  //     ANOTHER branch in the same repo has an open PR.
+  const dir = makeRepo();
+  cleanup.push(dir);
+  git(dir, 'checkout', '-q', '-b', 'fix/in-review');
+  writeFileSync(join(dir, OTHER_FILE), 'export const o = 2;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'feat(other): reviewed work', { hoursAgo: 40 });
+  git(dir, 'checkout', '-q', 'main');
+  git(dir, 'checkout', '-q', '-b', 'fix/tui-abandoned');
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 9;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'fix(tui): nobody is reviewing this', { hoursAgo: 50 });
+  git(dir, 'checkout', '-q', 'main');
+  const r = runGate(dir, ['--open-pr-branches=fix/in-review']);
+  check('an unlisted old TUI branch still fails', r.code === 1);
+  check('and it is the abandoned one that is named', r.out.includes('nobody is reviewing this'), r.out);
+}
+
+{
+  // 11. A branch holding one landed commit AND one genuinely stranded commit
+  //     must be judged per commit: the patch-upstream sense excuses only the
+  //     first. This is what stops `git cherry` from becoming a blanket pass.
+  const dir = makeRepo();
+  cleanup.push(dir);
+  git(dir, 'checkout', '-q', '-b', 'feat/mixed');
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 2;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'feat(forge): landed by a squash', { hoursAgo: 30 });
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 77;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'fix(tui): the half that never landed', { hoursAgo: 31 });
+  git(dir, 'checkout', '-q', 'main');
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 2;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'feat(forge): landed by a squash (#373)', { hoursAgo: 29 });
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 3; // moved on\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'feat(forge): the base moved past it', { hoursAgo: 2 });
+  const r = runGate(dir);
+  check('a mixed branch still fails', r.code === 1);
+  check('the landed half is not named', !r.out.includes('landed by a squash (#373'), r.out);
+  check('the stranded half IS named', r.out.includes('the half that never landed'), r.out);
+}
+
+{
+  // 9b. The same work, rebuilt. 2026-10-01: cf8f68f7 sat on the leftover
+  //     `fix/tui-scroll-multiclient` while the reviewed
+  //     `agent/tui-scroll-multiclient` carried the SAME change as a different
+  //     sha. Branch names differ and neither sha is reachable from the other,
+  //     so only a patch-level comparison finds it.
+  const dir = makeRepo();
+  cleanup.push(dir);
+  git(dir, 'checkout', '-q', '-b', 'fix/tui-scroll-multiclient');
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 2;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'fix(tui): lane-shared page-key scroll', { hoursAgo: 26 });
+  git(dir, 'checkout', '-q', 'main');
+  git(dir, 'checkout', '-q', '-b', 'agent/tui-scroll-multiclient');
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 2;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'fix(tui): lane-shared page-key scroll', { hoursAgo: 1 });
+  git(dir, 'checkout', '-q', 'main');
+  check('without the PR list the leftover branch is flagged', runGate(dir).code === 1);
+  check('the rebuilt work is recognised as in review',
+    runGate(dir, ['--open-pr-branches=agent/tui-scroll-multiclient']).code === 0);
+  // Same patch, unreviewed branch: still stranded. The patch check must be
+  // scoped to branches that actually have an open PR.
+  check('the same patch on an unreviewed branch is still stranded',
+    runGate(dir, ['--open-pr-branches=agent/something-else']).code === 1);
+}
+
+{
+  // 9c. A PR name this checkout cannot resolve (a CI clone has only
+  //     origin/<name>; a shallow local clone may have neither) must still
+  //     exempt by name AND say so — a gate that quietly stops checking is worse
+  //     than one that fails.
+  const dir = makeRepo();
+  cleanup.push(dir);
+  git(dir, 'checkout', '-q', '-b', 'fix/tui-ghost-ref');
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 2;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'fix(tui): work whose PR ref is not fetched', { hoursAgo: 26 });
+  git(dir, 'checkout', '-q', 'main');
+  const r = runGate(dir, ['--open-pr-branches=origin/fix/tui-ghost-ref']);
+  check('an unresolvable PR ref still exempts by name', r.code === 0, r.out.trim().split('\n').pop());
+  check('and the gate says the ref was not in the checkout', r.out.includes('not in this checkout'), r.out);
+}
+
 for (const dir of cleanup) rmSync(dir, { recursive: true, force: true });
 
 console.log(`\n${passed} pass, ${failed} fail`);

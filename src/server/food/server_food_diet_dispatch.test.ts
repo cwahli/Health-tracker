@@ -148,6 +148,21 @@ describe('F-8.10 shard 28 — create-skip synthesis and salvaged aggregates', ()
     expect(JSON.parse(out.textOutput)).toEqual(out.rawParsed);
   });
 
+  it('carries the preCalculated item\'s boundingBox2D onto each row', () => {
+    // Same defect class as the fallback rebuild, and a separate code path: a
+    // fixture over one proves nothing about the other. Null when absent —
+    // a fabricated full-frame box would be worse than an absent one.
+    const box = [390, 110, 875, 880];
+    const run = (extra: any) => buildCreateSkipResponse({
+      rawScoutData: {}, visionScoutItems: [{ originalName: 'Grapes', keyword: 'grapes' }],
+      preCalculatedItems: [{ keyword: 'grapes', originalName: 'Grapes', estimatedWeightGrams: 100, dbSource: 'estimated', nutrients: {}, ...extra }],
+      totals: { totalGrams: 100, totalCals: 0, totalP: 0, totalC: 0, totalF: 0, totalSugar: 0, totalAddedSugar: 0, totalSatFat: 0 },
+      scoutVerdict: { label: 'x', level: 'good' }, rawAdvice: '', language: 'en',
+    });
+    expect(run({ boundingBox2D: box }).rawParsed.foodData.itemsBreakdown[0].boundingBox2D).toEqual(box);
+    expect(run({}).rawParsed.foodData.itemsBreakdown[0].boundingBox2D).toBeNull();
+  });
+
   it('sums salvaged aggregates across items', () => {
     const agg = sumSalvagedAggregates([
       { nutrients: { calories: 100, protein: 10 } },

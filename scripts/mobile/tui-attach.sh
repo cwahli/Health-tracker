@@ -195,12 +195,42 @@ RESOLVED=$(node --input-type=module -e '
 
   const isCline = out.SURFACE === "cline";
   const map = readJson(path.join(stateDir, isCline ? "cline-sessions.json" : "sessions.json")) || {};
-  const matches = (v) => tui.sessionIdMatchesSurface(v, out.SURFACE);
-  if (chatId && matches(map[chatId])) {
-    out.SID = String(map[chatId]);
+  // sessions.json rows are workspace-scoped since #365 (`<workspace>\0<id>`);
+  // older rows (and cline-sessions.json) are bare ids. The scope is split
+  // here, never matched: matching the packed string against `^ses_` is how
+  // vm3 TUI ended up on a fresh session while Telegram answered from the
+  // chat real one (2026-10-01: SID empty, SOURCE legacy-first, live).
+  const SEP = "\u0000";
+  const unscope = (v) => {
+    const s = String(v ?? "");
+    const cut = s.indexOf(SEP);
+    return cut === -1
+      ? { workspace: "", sessionId: s.trim() }
+      : { workspace: s.slice(0, cut), sessionId: s.slice(cut + 1).trim() };
+  };
+  // A row belongs to this attach when its session fits the lane AND it is
+  // this workspace row (or a legacy bare row from before scoping, which
+  // carries no workspace to check). Another workspace row is never
+  // borrowed: that is the cross-project drift scoping was built to stop.
+  const rowForThisAttach = (v) => {
+    const { workspace: ws, sessionId } = unscope(v);
+    if (!tui.sessionIdMatchesSurface(sessionId, out.SURFACE)) return "";
+    if (!ws) return sessionId;
+    return ws === String(workspace || "") ? sessionId : "";
+  };
+  const chatSid = chatId ? rowForThisAttach(map[chatId]) : "";
+  if (chatSid) {
+    out.SID = chatSid;
     out.SOURCE = fromEnvHit ? "explicit-hit" : "tui-open-hit";
+  } else if (!isCline && chatId && String(tuiOpen.chatId || "") === chatId && tui.sessionIdMatchesSurface(tuiOpen.sessionId, out.SURFACE)) {
+    // The map lost the chat row (a pre-scope restart, a wiped map) but /tui
+    // recorded the session for THIS workspace seconds ago. The snapshot is the
+    // chat own conversation, and only when this attach is for the chat that
+    // opened it; another chat row (legacy-first) is not.
+    out.SID = String(tuiOpen.sessionId).trim();
+    out.SOURCE = "tui-open-snapshot";
   } else {
-    out.SID = Object.values(map).map((v) => String(v || "").trim()).filter(matches)[0] || "";
+    out.SID = Object.values(map).map(rowForThisAttach).filter(Boolean)[0] || "";
   }
   // A Cline chat whose turn has not written its map yet still has a thread on
   // disk. Resuming the newest one for this checkout shows the conversation the
@@ -440,7 +470,14 @@ HEARTBEAT_PID=$!
 
 cleanup() {
   kill "$HEARTBEAT_PID" 2>/dev/null || true
-  rm -f "$TUI_LEASE" 2>/dev/null || true
+  # Only clear the lease when nobody is left in the tmux session. ttyd spawns
+  # ONE tui-attach.sh per browser client, so desktop + phone on the same
+  # session means TWO holders: the first client to detach must not delete the
+  # lease out from under the second, or the bot reports "none open" while the
+  # phone is still looking at the terminal.
+  if [ "$(tmux list-clients -t "$TMUX_NAME" 2>/dev/null | wc -l | tr -d ' ')" = "0" ]; then
+    rm -f "$TUI_LEASE" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT INT TERM
 
@@ -450,6 +487,11 @@ trap cleanup EXIT INT TERM
 # stays off for these sessions: on a phone screen it is a wasted row and a
 # visual frame, and the tool draws its own status line.
 #
+# aggressive-resize: with desktop + phone on the same session the pane would
+# otherwise size to the SMALLEST client, shrinking the desktop to phone width.
+# `aggressive-resize on` sizes the pane to the LARGEST client instead, so each
+# screen keeps its own width (xterm reflows per client).
+#
 # The command is the argv from scripts/lib/tui-surface.mjs, not
 # "$OPENCODE_BIN" "${SID_ARG[@]}": that hardcoded argv WAS the defect — it named
 # OpenCode whatever lane the chat was actually on. It arrives as ARG0/ARG1/…
@@ -457,4 +499,5 @@ trap cleanup EXIT INT TERM
 # space in it survives; no eval, no re-splitting.
 tmux new-session -d -A -s "$TMUX_NAME" "${LAUNCH_ARGV[@]}"
 tmux set-option -t "$TMUX_NAME" status off 2>/dev/null || true
+tmux set-window-option -t "$TMUX_NAME" aggressive-resize on 2>/dev/null || true
 tmux attach-session -t "$TMUX_NAME"

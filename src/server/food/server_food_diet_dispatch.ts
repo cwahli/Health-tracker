@@ -314,6 +314,12 @@ export function buildCreateSkipResponse(args: CreateSkipSynthesisArgs): {
         foodType: p.foodType || 'composed',
         rawNutritionLabel: p.rawNutritionLabel || null,
         labelNutrientsPerServing: p.labelNutrientsPerServing || null,
+        // The scout's own box. This row is rebuilt from the scout item rather
+        // than taken from the agent, so an omitted field here is not a display
+        // detail — the box is gone for good, and the meal can no longer be traced
+        // back to the region of the photo it came from. Null when the scout had
+        // none: a fabricated full-frame box would be worse than an absent one.
+        boundingBox2D: Array.isArray(p.boundingBox2D) ? p.boundingBox2D : null,
       }))
     }
   });

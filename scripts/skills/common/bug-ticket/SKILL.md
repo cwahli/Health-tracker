@@ -142,8 +142,8 @@ list/show answer — hand them the live board, not just prose:
 - Never paste the board URL as a plain link: a plain browser open carries no
   initData and lands on a dead bootstrap page.
 - If buttons are unavailable, or the gateway is not serving `/bugs`, end the
-  answer with: `Ask the VM bot for /bugs — it serves the bug board button.`
-  Never invent a gateway URL.
+  answer with: `Ask the VM bot for /bugs — its reply carries the live count.`
+  Never invent a gateway URL; its count and generated_at are the store's.
 
 ### The Three Laws
 

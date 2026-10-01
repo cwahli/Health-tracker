@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,8 +8,15 @@ import { assertReadOnlySql, parseEnvFile, loadD1Config, createD1Reader, resolveP
 import { parseCsvLine, isoDate, mapSheetTest, parseSheetCsv, parseSheetDump, sheetRecord, MARKER_LABELS } from './lib/health/sheet.mjs';
 import { extractAppState, reconcile, evaluateFixList, unreviewedAppRows, valuesEqual, FIX_LIST } from './lib/health/reconcile.mjs';
 import { KNOWN_PROJECTS, resolveProjectId, resolveRoleId, getProjectRoles, getRoleInstructions, getProjectSoul, seedProjectWorkspace } from './lib/project-registry.mjs';
-import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile } from './health-runner.mjs';
-import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, sectionPlan, unknownSections, renderDoc, renderSection, refusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore, validateAnalysisSections, ANALYSIS_SECTIONS } from './lib/health/docs.mjs';
+import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText, RESEARCH_LOG, DOCTOR_FILE, DOCTOR_ARTIFACT, ANALYSIS_FILE, extractAnalysisPayload } from './health-runner.mjs';
+import { loadSearchFixture, recordedFetch, vendorCalls, providerOf, FIXTURE_FILE } from './fixtures/search-providers.mjs';
+import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, doctorReview, sectionPlan, unknownSections, renderDoc, renderSection, refusalText, staleRefusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore, validateAnalysisSections, ANALYSIS_SECTIONS } from './lib/health/docs.mjs';
+import { searchAvailability, webSearch, fetchHit, validateInsightCitations, citationRefusalText, loadResearchLog, CITATION_SOURCES, SEARCH_PROVIDERS, MAX_HITS_PER_QUERY } from './lib/health/research.mjs';
+import { buildHealthContext, renderContextBlock, clipToBudget, CONTEXT_CANDIDATES, CONTEXT_BUDGET } from './lib/health/context.mjs';
+import { readWorkspaceContext, contextProviderFor, runCouncilStage, getCouncilStatus, getCouncilPhases, resolveCouncilStage, isCaseProject, LEGACY_CHECKPOINTS } from './council-runner.mjs';
+import { validateDoctorReport } from './lib/health/doctor.mjs';
+import { checkHealthReadiness, formatReadinessText, STALE_AFTER_DAYS } from './lib/health/readiness.mjs';
+import { execFileSync } from 'node:child_process';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -277,6 +285,7 @@ const brokenRows = [
   eq('its template dir is committed', path.relative(ROOT, project?.templateDir || ''), 'projects/external-health');
   check('its workspace is the brief project folder', /projects\/external-health-coach$/.test(project?.workspace || ''), project?.workspace);
   eq('its Drive folder is named', project?.gdriveFolder, 'External-Personal-Health-Coach');
+  eq('it declares its seat context provider', project?.contextProvider, 'health');
 
   for (const alias of ['health', 'health coach', 'personal health', 'external health', 'external-health', 'coach']) {
     eq(`/project ${alias} resolves`, resolveProjectId(alias), 'external-health');
@@ -285,10 +294,17 @@ const brokenRows = [
   eq('python/junk still rejected', resolveProjectId('banana'), null);
 
   const roles = getProjectRoles('external-health').map((r) => r.id).sort();
-  eq('the five seats are loadable from the committed roles dir', roles, ['data_steward', 'health_analyst', 'research_lead', 'safety_reviewer', 'test_planner']);
-  for (const [alias, id] of [['steward', 'data_steward'], ['analyst', 'health_analyst'], ['planner', 'test_planner'], ['research', 'research_lead'], ['safety', 'safety_reviewer']]) {
+  eq('the six seats are loadable from the committed roles dir', roles, ['data_steward', 'doctor', 'health_analyst', 'research_lead', 'safety_reviewer', 'test_planner']);
+  for (const [alias, id] of [['steward', 'data_steward'], ['analyst', 'health_analyst'], ['planner', 'test_planner'], ['research', 'research_lead'], ['safety', 'safety_reviewer'], ['doctor', 'doctor']]) {
     eq(`/role ${alias} resolves`, resolveRoleId(alias, 'external-health'), id);
   }
+  // The declared order is the running order, not the directory's: the Doctor
+  // runs last because it checks the seats that ran before it, and the seats a
+  // chat already numbers keep their numbers.
+  eq('the seats run in their declared order, the doctor last', getProjectRoles('external-health').map((r) => r.id), ['data_steward', 'health_analyst', 'test_planner', 'research_lead', 'safety_reviewer', 'doctor']);
+  const doctorRole = getProjectRoles('external-health').find((r) => r.id === 'doctor');
+  eq('the doctor declares the artifact it owns and its checker', [doctorRole?.outputFile, doctorRole?.validator], [DOCTOR_FILE, 'doctor']);
+  check('the doctor seat names the pass-on-absence rule', /PASS/.test(getRoleInstructions('external-health', 'doctor') || '') && /absence/i.test(getRoleInstructions('external-health', 'doctor') || ''), 'the seat file no longer names its own failure mode');
   const inst = getRoleInstructions('external-health', 'safety_reviewer') || '';
   check('the safety seat carries its mandate', /strike|no diagnosis/i.test(inst), inst.slice(0, 80));
   check('the analyst seat respects the data gate', /data gate|fix-list item is open/i.test(getRoleInstructions('external-health', 'health_analyst') || ''));
@@ -361,9 +377,21 @@ const fixtureArtifact = (state = 'open') => ({
 });
 
 const ANALYSIS_MARKER = 'HBA1C-TREND-CLAIM-MARKER';
-const analysisPayload = () => Object.fromEntries(
-  Object.values(SECTION_SOURCES).filter((s) => s.startsWith('analysis.')).map((s) => [s, [`- ${ANALYSIS_MARKER}: HbA1c 39 (2026-03-04) → 40 (2026-06-05), +1 mmol/mol.`]]),
+/** The one link the fixtures fetch and record; `cite` puts it on the doc-4 lines. */
+const CITATION = 'https://example.test/khor-2024';
+const analysisPayload = ({ cite = '' } = {}) => Object.fromEntries(
+  Object.values(SECTION_SOURCES)
+    .filter((s) => s.startsWith('analysis.'))
+    .map((s) => [s, [`- ${ANALYSIS_MARKER}: HbA1c 39 (2026-03-04) → 40 (2026-06-05), +1 mmol/mol.${cite && CITATION_SOURCES.includes(s) ? ` Cited: Khor 2024, 2024, ${cite}` : ''}`]]),
 );
+
+/** A fetch log in the shape `/health research` writes: one receipt per url. */
+function researchLog({ fetched = [], refused = [] } = {}) {
+  const hits = {};
+  for (const url of fetched) hits[url] = { url, ok: true, status: 200, bytes: 4096, sha256: 'b'.repeat(64), fetchedAt: '2026-10-01T07:00:00.000Z', title: 'Khor 2024', query: 'HbA1c', snippet: '' };
+  for (const url of refused) hits[url] = { url, ok: false, status: 403, bytes: 0, sha256: '', fetchedAt: '2026-10-01T07:00:00.000Z', error: 'HTTP 403' };
+  return { version: 1, updatedAt: '2026-10-01T07:00:00.000Z', queries: [], hits };
+}
 
 /** A fake store: records every call, so create/update/skip is judged on what was asked. */
 function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix = 'doc_' } = {}) {
@@ -557,6 +585,27 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
     eq('refresh publishes four drafts while the gate is open', [first.artifact.mode, first.artifact.counts.created, first.artifact.counts.updated], ['draft', 4, 0]);
     check('refresh reports the withheld analysis sections', first.artifact.refused.length > 0, JSON.stringify(first.artifact.refused));
     check('refresh writes its artifacts', ['health-refresh.json', 'health-refresh.md', 'health-docs.json'].every((f) => fs.existsSync(path.join(dir, 'result', f))));
+
+    // The seat context pack, read from the workspace the real run just wrote:
+    // the reader must find what the writer wrote, in the same paths. The brief
+    // is the user's, so it is not written by any command — the pack refuses
+    // without it, which section 10 pins; here it stands in for the real folder.
+    fs.writeFileSync(path.join(dir, 'BRIEF.md'), '# Brief\n\nThe four living documents, renewed monthly.\n');
+    const ctx = buildHealthContext(dir);
+    check('the context pack accepts a workspace a real run produced', ctx.ok === true, ctx.refuses.join('; '));
+    const verifySection = ctx.sections.find((s) => s.key === 'verify')?.text || '';
+    check('the context pack reads the verify artifact the run wrote', Boolean(verifySection) && !ctx.absent.some((a) => a.key === 'verify'), ctx.sections.map((s) => s.key).join(','));
+    const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'result', 'health-verify.json'), 'utf8'));
+    const openIds = (onDisk.fixList?.items || []).filter((i) => i.state === 'open').map((i) => i.id);
+    check('the pack states the gate the artifact states', openIds.length
+      ? verifySection.includes(`data gate: OPEN (${openIds.length}: ${openIds.join(', ')})`)
+      : verifySection.includes('data gate: CLOSED'), verifySection.split('\n')[1]);
+    check('the context pack sees the fix list the run wrote', ctx.sections.some((s) => s.key === 'fix_list'));
+    check('the context pack sees the banked sources', ctx.sections.some((s) => s.key === 'sources') && ctx.sections.find((s) => s.key === 'sources').text.includes('sheet_2026-09-30.json'));
+    check('the pack names the analysis payload as absent', ctx.absent.some((a) => a.key === 'analysis'), JSON.stringify(ctx.absent.map((a) => a.key)));
+    const ctxBlock = renderContextBlock(ctx);
+    check('the rendered block carries the not-present line', /not present: result\/health-analysis\.json/.test(ctxBlock), ctxBlock.slice(-300));
+    check('the rendered block names the sheet it was built from', ctxBlock.includes('sheet (the source of truth): sheet_2026-09-30.json'), ctxBlock.slice(0, 600));
     const registry = loadDocsRegistry(path.join(dir, 'result', 'health-docs.json'));
     eq('the registry on disk names the four documents', Object.keys(registry.docs).sort(), ['conditions', 'insights', 'snapshot', 'test_plan']);
     const text = store.files[registry.docs.conditions.id];
@@ -586,7 +635,10 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   const closedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-refresh-closed-'));
   fs.cpSync(path.join(dir, 'sources'), path.join(closedDir, 'sources'), { recursive: true });
   fs.mkdirSync(path.join(closedDir, 'result'), { recursive: true });
-  fs.writeFileSync(path.join(closedDir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: analysisPayload() }));
+  // The citation the analysis carries has to be in the lane's own log: the
+  // publisher checks the rendered lines against `result/health-research.json`.
+  fs.writeFileSync(path.join(closedDir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: analysisPayload({ cite: CITATION }) }));
+  fs.writeFileSync(path.join(closedDir, 'result', 'health-research.json'), JSON.stringify(researchLog({ fetched: [CITATION] })));
   const closedRun = await runHealthRefresh({
     workspace: closedDir,
     env,
@@ -603,6 +655,37 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
     const closedText = closedStore.files[closedRun.registry.docs.conditions.id];
     check('the published bytes carry the analysis payload', closedText.includes(ANALYSIS_MARKER), closedText.slice(0, 200));
     check('the published bytes carry no refusal', !/Not published while the data gate is open/.test(closedText), 'refusal text left in a closed-gate document');
+    eq('every citation in document 4 rests on a hit the lane recorded', closedRun.artifact.citationRefusals, []);
+    eq('the run reports the citable links the log holds', closedRun.artifact.citedLinks, 1);
+    const closedInsights = closedRun.plan.items.find((i) => i.key === 'insights').text;
+    check('document 4 publishes the recorded link', closedInsights.includes(CITATION), closedInsights.slice(0, 300));
+    check('the other three documents never carry it', closedRun.plan.items.filter((i) => i.key !== 'insights').every((i) => !i.text.includes(CITATION)));
+  }
+
+  // The rule the lane exists for: the same closed gate and the same analysis,
+  // but no fetch log — so document 4 carries the refusal instead of the links,
+  // and the three documents that are not the cited digest are untouched.
+  const uncitedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-refresh-uncited-'));
+  fs.cpSync(path.join(dir, 'sources'), path.join(uncitedDir, 'sources'), { recursive: true });
+  fs.mkdirSync(path.join(uncitedDir, 'result'), { recursive: true });
+  fs.writeFileSync(path.join(uncitedDir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: analysisPayload({ cite: CITATION }) }));
+  const uncitedRun = await runHealthRefresh({
+    workspace: uncitedDir,
+    env,
+    fetchImpl: makeFetch({ age: 43, height: 163, weight: 62, dateOfBirth: '1983-06-15' }, fullFixture),
+    now: new Date('2026-10-01T09:00:00Z'),
+    token: 't',
+    store: fakeStore(),
+    templates: readTemplates(),
+  });
+  check('a cited claim with no fetch log refuses rather than publishing', uncitedRun.ok === true, uncitedRun.error || '');
+  if (uncitedRun.ok) {
+    eq('the four document-4 sections are refused as unverified', uncitedRun.artifact.citationRefusals.map((c) => `${c.heading}=${c.reason}`), ['For this profile=unverified', 'By marker=unverified', 'Contradictory or unsettled evidence=unverified', 'What is not settled by the literature=unverified']);
+    const uncitedInsights = uncitedRun.plan.items.find((i) => i.key === 'insights').text;
+    check('the refusal sentence is what document 4 carries', uncitedInsights.includes('an unverified link is not a link'), uncitedInsights.slice(0, 400));
+    check('no uncited claim reaches document 4', !uncitedInsights.includes(ANALYSIS_MARKER), uncitedInsights.slice(0, 400));
+    check('documents 1\u20133 are unaffected by the citation contract', uncitedRun.plan.items.filter((i) => i.key !== 'insights').every((i) => i.citationRefused.length === 0), 'the contract leaked past document 4');
+    check('and an analysis section still publishes outside document 4', uncitedRun.plan.items.find((i) => i.key === 'conditions').text.includes(ANALYSIS_MARKER));
   }
 
   // A malformed payload is the same shape of failure as a template that will not
@@ -636,12 +719,12 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   check('refresh fails closed on a template that cannot render', noTemplate.ok === false && noTemplate.stage === 'template', JSON.stringify({ stage: noTemplate.stage, error: noTemplate.error }));
 
   // Analyze: the entry point refuses while the gate is open and names the inputs when it closes.
-  const refused = runHealthAnalyze({ workspace: dir, env });
+  const refused = await runHealthAnalyze({ workspace: dir, env });
   check('analyze refuses while the gate is open', refused.ok === false && refused.stage === 'gate', JSON.stringify(refused));
   eq('the refusal names every open item', (refused.openItems || []).map((i) => i.id), ['H-1', 'H-6']);
   check('the refusal carries each item title', (refused.openItems || []).every((i) => i.title === FIX_TITLES[i.id]), JSON.stringify(refused.openItems));
   check('the refusal reply names the items', /H-1 Profile demographics match the sheet/.test(formatAnalyzeText(refused)), formatAnalyzeText(refused));
-  const never = runHealthAnalyze({ workspace: fs.mkdtempSync(path.join(os.tmpdir(), 'health-no-verify-')), env });
+  const never = await runHealthAnalyze({ workspace: fs.mkdtempSync(path.join(os.tmpdir(), 'health-no-verify-')), env });
   check('analyze refuses when nothing was verified yet', never.ok === false && never.stage === 'verify', JSON.stringify(never));
   eq('analyze could not read a broken analysis file', loadAnalysisFile(path.join(dir, 'nope.json')).ok, false);
 
@@ -703,16 +786,1315 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   const analyzeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-analyze-closed-'));
   fs.mkdirSync(path.join(analyzeDir, 'result'), { recursive: true });
   fs.writeFileSync(path.join(analyzeDir, 'result', 'health-verify.json'), JSON.stringify(closedArtifact));
-  const ready = runHealthAnalyze({ workspace: analyzeDir, env });
-  check('analyze opens when the gate is closed', ready.ok === true, JSON.stringify(ready));
-  if (ready.ok) {
-    eq('the entry point names the analyst role', ready.ready.role, 'health_analyst');
-    eq('the entry point names every analysis section', ready.ready.sections.length, Object.values(SECTION_SOURCES).filter((s) => s.startsWith('analysis.')).length);
-    eq('the entry point names the four documents', ready.ready.documents.length, 4);
-    check('the entry point names the payload file', /health-analysis\.json$/.test(ready.ready.analysisFile), ready.ready.analysisFile);
-    check('the ready reply names the payload', /Data gate closed/.test(formatAnalyzeText(ready)), formatAnalyzeText(ready).slice(0, 120));
-  }
+  // With the gate closed the producer runs; this workspace holds no brief, so
+  // the refusal is the pack's, not the gate's — and it still writes nothing.
+  const ready = await runHealthAnalyze({ workspace: analyzeDir, env });
+  check('with the gate closed the producer runs and refuses on the pack, not the gate', ready.ok === false && ready.stage === 'context', JSON.stringify(ready).slice(0, 200));
+  eq('that refusal wrote nothing', fs.readdirSync(path.join(analyzeDir, 'result')), ['health-verify.json']);
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------- 10. the seat context pack
+{
+  // Refusals first: a workspace with no brief must not seat a turn at all.
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'health-bare-'));
+  const refused = buildHealthContext(bare);
+  check('a workspace with no brief is refused', refused.ok === false && /no brief or charter/.test(refused.refuses.join(' ')), JSON.stringify(refused.refuses));
+  check('a refused pack renders nothing into the prompt', renderContextBlock(refused) === '', renderContextBlock(refused).slice(0, 80));
+  eq('a refused pack still accounts for every source', [refused.sections.length, refused.absent.length], [0, CONTEXT_CANDIDATES.length]);
+  const noSuch = buildHealthContext(path.join(bare, 'nope'));
+  check('a workspace that does not exist is refused', noSuch.ok === false && /is not a directory/.test(noSuch.refuses.join(' ')), JSON.stringify(noSuch.refuses));
+  fs.rmSync(bare, { recursive: true, force: true });
+
+  // The budget is bytes, not code units: a multi-byte arrow must never be sliced in half.
+  const arrows = '→'.repeat(10);
+  const clipped = clipToBudget(arrows, 5);
+  eq('a byte budget keeps whole characters', [Buffer.byteLength(clipped.text.split('\n')[0]), clipped.truncatedBytes], [3, 27]);
+  check('the truncation marker names the withheld bytes', /\[truncated: 27 bytes withheld\]/.test(clipped.text), clipped.text);
+  const untouched = clipToBudget('short', 5);
+  eq('a section inside its budget is not marked', [untouched.text, untouched.truncatedBytes], ['short', 0]);
+
+  // A full workspace: every candidate is either a section or an explicit absence.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-context-'));
+  fs.mkdirSync(path.join(dir, 'result'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'sources'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'BRIEF.md'), '# Brief\n\nThe four documents, renewed monthly.\n');
+  fs.writeFileSync(path.join(dir, 'sources', 'sheet_2026-09-30.json'), JSON.stringify({ data: {} }));
+  fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify({ ...fixtureArtifact('open'), summary: { match: 2, missing: 1, appOnlyUnreviewed: 1, gap: 1 } }));
+  fs.writeFileSync(path.join(dir, 'result', 'health-fix-list.md'), '# Data fix list\n\n- [ ] **H-1 — mis-filed rows**\n');
+  fs.writeFileSync(path.join(dir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: analysisPayload() }));
+
+  const ctx = buildHealthContext(dir);
+  check('the pack accepts a workspace with a brief', ctx.ok === true, ctx.refuses.join('; '));
+  {
+    const keys = [...ctx.sections.map((s) => s.key), ...ctx.absent.map((a) => a.key)];
+    const candidates = CONTEXT_CANDIDATES.map((c) => c.key);
+    eq('every candidate is a section or an absence, exactly once', keys.slice().sort(), candidates.slice().sort());
+    eq('no candidate is dropped', new Set(keys).size, candidates.length);
+  }
+  const brief = ctx.sections.find((s) => s.key === 'brief');
+  check('the brief is read from its file', brief?.path === 'BRIEF.md' && brief.text.includes('renewed monthly'), JSON.stringify(brief).slice(0, 160));
+  const verify = ctx.sections.find((s) => s.key === 'verify')?.text || '';
+  check('the verify digest states the open gate', /data gate: OPEN \(8: H-1, H-2/.test(verify), verify.split('\n')[1]);
+  check('the verify digest lists every open item by id', Object.keys(FIX_TITLES).every((id) => verify.includes(id)), verify.slice(0, 300));
+  check('the verify digest names the newest sheet date', verify.includes('newest 2026-06-09'), verify);
+  check('the verify digest carries the coverage counts', /coverage: 2 exact matches/.test(verify), verify);
+  // An artifact with no summary block is reported as such, not as a zero.
+  fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify(fixtureArtifact('open')));
+  check('an artifact with no summary block says so', /coverage: the artifact carries no summary block/.test(buildHealthContext(dir).sections.find((s) => s.key === 'verify')?.text || ''), 'the digest invented coverage numbers');
+  fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify({ ...fixtureArtifact('open'), summary: { match: 2, missing: 1, appOnlyUnreviewed: 1, gap: 1 } }));
+  const analysis = ctx.sections.find((s) => s.key === 'analysis')?.text || '';
+  check('the analysis payload is shown with its shape verdict', /shape: accepted — 11 analysis section\(s\)/.test(analysis) && analysis.includes(ANALYSIS_MARKER), analysis.slice(0, 200));
+  eq('every artifact that is missing is named', ctx.absent.map((a) => a.key).sort(), ['docs', 'refresh', 'research']);
+  const block = renderContextBlock(ctx);
+  check('the rendered block names the absent artifacts as findings', /not present: result\/health-docs\.json/.test(block) && /not present: result\/health-refresh\.json/.test(block), block.slice(-400));
+  check('and the missing literature log says no link may be cited yet', /no link can be cited in document 4 yet/.test(block), block.slice(-500));
+  check('the rendered block carries every section with its path and date', ctx.sections.every((s) => block.includes(`### ${s.label} — ${s.path}${s.date ? ` (${s.date})` : ''}`)), block.split('\n').filter((l) => l.startsWith('### ')).join(' | '));
+
+  // A malformed payload is the object under review, so it is shown AND flagged.
+  fs.writeFileSync(path.join(dir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: { 'analysis.conditions': { marker: 'LDL' } } }));
+  const bad = buildHealthContext(dir).sections.find((s) => s.key === 'analysis')?.text || '';
+  check('a refused payload is flagged and still visible', /shape: REFUSED —/.test(bad) && bad.includes('"marker":"LDL"'), bad.slice(0, 300));
+  fs.writeFileSync(path.join(dir, 'result', 'health-analysis.json'), '{ not json');
+  const unparseable = buildHealthContext(dir).sections.find((s) => s.key === 'analysis')?.text || '';
+  check('an unparseable payload is flagged, not dropped', /shape: REFUSED — does not parse/.test(unparseable), unparseable.slice(0, 200));
+
+  // Truncation is declared, with the size of what was withheld.
+  const big = `- [ ] **H-9 — a very long item**\n${'x'.repeat(CONTEXT_BUDGET.fix_list * 2)}\n`;
+  fs.writeFileSync(path.join(dir, 'result', 'health-fix-list.md'), big);
+  const fixSection = buildHealthContext(dir).sections.find((s) => s.key === 'fix_list');
+  eq('an over-budget section reports the bytes it withheld', fixSection?.truncatedBytes, Buffer.byteLength(big) - CONTEXT_BUDGET.fix_list);
+  check('the over-budget section says so inline', /\[truncated: \d+ bytes withheld\]/.test(fixSection?.text || ''), (fixSection?.text || '').slice(-80));
+
+  // The council path: the health project is served by the provider, and the
+  // case/ projects keep exactly the reader they had.
+  const seat = readWorkspaceContext(dir, { projectId: 'external-health' });
+  eq('the council reader uses the health provider', seat.provider, 'health');
+  check('the council text is the rendered pack', seat.text === renderContextBlock(seat.context) && seat.text.includes('## Workspace context'), seat.text.slice(0, 120));
+  const refusedSeat = readWorkspaceContext(fs.mkdtempSync(path.join(os.tmpdir(), 'health-none-')), { projectId: 'external-health' });
+  check('a refused workspace refuses the council turn', refusedSeat.ok === false && refusedSeat.text === '' && refusedSeat.refuses.length > 0, JSON.stringify(refusedSeat.refuses));
+  eq('the provider is declared per project, not guessed from the path', contextProviderFor(KNOWN_PROJECTS['external-health'].workspace), 'health');
+
+  const caseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'council-case-'));
+  fs.mkdirSync(path.join(caseDir, 'case'), { recursive: true });
+  fs.mkdirSync(path.join(caseDir, 'working'), { recursive: true });
+  fs.writeFileSync(path.join(caseDir, '01_Case_Facts.md'), 'AAA');
+  fs.writeFileSync(path.join(caseDir, 'notes.txt'), 'not markdown, not context');
+  fs.writeFileSync(path.join(caseDir, 'case', '02_Ledger.md'), 'BBB');
+  fs.writeFileSync(path.join(caseDir, 'working', 'A_Talking_Points.md'), 'C'.repeat(1200));
+  const legacy = readWorkspaceContext(caseDir, { projectId: 'external-1' });
+  eq('a case/ project keeps the legacy reader', legacy.provider, 'legacy');
+  eq('the legacy reader keeps its file map', Object.keys(legacy.context).sort(), ['01_Case_Facts.md', 'case/02_Ledger.md', 'working/A_Talking_Points.md']);
+  check('the legacy text keeps its ### File: shape', /^### File: 01_Case_Facts\.md\nAAA\.\.\.\n/.test(legacy.text), legacy.text.slice(0, 80));
+  check('the legacy text still slices at 1000 characters', legacy.text.includes(`${'C'.repeat(1000)}...`), legacy.text.slice(-40));
+  check('the legacy reader ignores non-markdown files', !legacy.text.includes('not markdown'), legacy.text.slice(0, 200));
+  eq('a legacy project is never served health context', contextProviderFor(caseDir), '');
+  fs.rmSync(caseDir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ------------------------------------------------- 11. council stages resolve from the project's own seats
+{
+  const captured = [];
+  // The Doctor's report is checked before it is written, so the fake model has
+  // to answer in the shape the seat promises. This workspace holds no analysis
+  // payload, so the honest report reviews no claims and says so.
+  const SENSOR_DOCTOR_REPORT = [
+    "# Doctor's report — 2026-10-01",
+    '',
+    'Coverage: 0 claim(s) reviewed · sections seen: verify, fix_list',
+    'Not seen: result/health-analysis.json — the analysis pass has not written a payload',
+    'Gate: OPEN (H-1, H-2, H-3, H-4, H-5, H-6, H-7, H-8)',
+    'Payload: not present',
+  ].join('\n');
+  const fakeModel = async ({ prompt }) => {
+    captured.push(prompt);
+    const isDoctor = /the seat that checks the other seats/.test(prompt);
+    return { code: 0, finalText: isDoctor ? SENSOR_DOCTOR_REPORT : 'SEAT OUTPUT FOR THE SENSOR', lastError: null, sessionID: null, stderr: '', usage: { cost: 0, tokens: null } };
+  };
+
+  // Resolution is pure, so it is judged before any model is involved.
+  const byId = resolveCouncilStage('data_steward', 'external-health');
+  eq('a stage resolves by its seat id', [byId.ok, byId.phases.map((p) => p.id)], [true, ['data_steward']]);
+  eq('a stage resolves through a role alias', resolveCouncilStage('steward', 'external-health').phases.map((p) => p.id), ['data_steward']);
+  eq('a stage resolves by its number', resolveCouncilStage('2', 'external-health').phases.map((p) => p.id), ['health_analyst']);
+  eq('all six seats are a stage', resolveCouncilStage('all', 'external-health').phases.length, 6);
+  eq('the doctor is the last stage, by name and by number', [resolveCouncilStage('doctor', 'external-health').phases.map((p) => p.id), resolveCouncilStage('6', 'external-health').phases.map((p) => p.id)], [['doctor'], ['doctor']]);
+  eq('the doctor stage writes its own report file and declares its checker', [resolveCouncilStage('doctor', 'external-health').phases[0].file, resolveCouncilStage('doctor', 'external-health').phases[0].validator], [DOCTOR_FILE, 'doctor']);
+  const refusedStage = resolveCouncilStage('banana', 'external-health');
+  check('an unknown stage is refused, not run as the whole council', refusedStage.ok === false && /Unknown stage/.test(refusedStage.error), JSON.stringify(refusedStage).slice(0, 160));
+  check('the refusal names the real stages', /data_steward/.test(refusedStage.error) && /safety_reviewer/.test(refusedStage.error), refusedStage.error);
+  eq('external-health is not a case project', isCaseProject('external-health'), false);
+  eq('external-1 is a case project', isCaseProject('external-1'), true);
+
+  // The case checkpoints keep their exact phase sets and messages.
+  for (const [token, ids] of [['audit', ['accuracy_review']], ['defense', ['case_review', 'manager_simulation']], ['finalize', ['legal_policy', 'arbitrator', 'final_case_builder']]]) {
+    const r = resolveCouncilStage(token, 'external-1');
+    eq(`the ${token} checkpoint keeps its phases`, r.phases.map((p) => p.id), ids);
+    eq(`the ${token} checkpoint keeps its message`, r.nextStepMsg, LEGACY_CHECKPOINTS[token].nextStepMsg);
+    check(`the ${token} checkpoint says it is the legacy path`, r.legacy === true);
+  }
+
+  // A real stage run against a workspace, with the model faked: the file lands
+  // where the status reader looks, and the seat is handed the health context.
+  const health = KNOWN_PROJECTS['external-health'];
+  const originalHealth = health.workspace;
+  const healthWs = fs.mkdtempSync(path.join(os.tmpdir(), 'council-health-'));
+  fs.writeFileSync(path.join(healthWs, 'BRIEF.md'), '# Brief\n\nFour living documents.\n');
+  fs.mkdirSync(path.join(healthWs, 'result'), { recursive: true });
+  fs.writeFileSync(path.join(healthWs, 'result', 'health-verify.json'), JSON.stringify({ ...fixtureArtifact('open'), summary: { match: 2, missing: 1, appOnlyUnreviewed: 1, gap: 1 } }));
+  fs.writeFileSync(path.join(healthWs, 'result', 'health-fix-list.md'), '# Data fix list\n\n- [ ] **H-1 — mis-filed rows**\n');
+  health.workspace = healthWs;
+  try {
+    const one = await runCouncilStage('data_steward', 'external-health', () => {}, { runGemini: fakeModel });
+    const written = path.join(healthWs, 'result', '01_data_steward.md');
+    eq('a stage writes into result/, the directory the status reader reads', [fs.existsSync(written), one.outDir], [true, path.join(healthWs, 'result')]);
+    check('the seat was handed the verified data, not just the brief', /data gate: OPEN \(8: H-1/.test(captured.at(-1) || '') && /The fix list/.test(captured.at(-1) || ''), (captured.at(-1) || '').slice(0, 200));
+    check('the prompt carries the not-present finding', /not present: result\/health-analysis\.json/.test(captured.at(-1) || ''), 'the absence never reached the prompt');
+    check('nothing was written into output/', !fs.existsSync(path.join(healthWs, 'output')), 'a stage still writes to output/');
+    const status = getCouncilStatus('external-health');
+    eq('the stage the writer ran reads back as completed', status.phases.find((p) => p.phase === 'data_steward')?.completed, true);
+    eq('the project reports its own deliverables', status.deliverables.length, 6);
+    check('the doctor report is one of them', status.deliverables.includes(DOCTOR_FILE), status.deliverables.join(','));
+    check('the external-2 trio is never this project\'s deliverable', status.deliverables.every((d) => !d.startsWith('A_') && !d.startsWith('B_') && !d.startsWith('C_')), status.deliverables.join(','));
+    eq('deliverables are not ready after one seat', status.deliverablesReady, false);
+    eq('the status reply names the project pipeline', status.pipeline, 'roles');
+
+    const all = await runCouncilStage('all', 'external-health', () => {}, { runGemini: fakeModel });
+    // Seats run in the declared order — the manifest's, not the directory
+    // listing's — which is also the order `/council status` numbers them.
+    eq('all runs every seat in order', all.phases.map((p) => p.id), ['data_steward', 'health_analyst', 'test_planner', 'research_lead', 'safety_reviewer', 'doctor']);
+    eq('the doctor runs last and its file is its own report', all.phases.at(-1), { id: 'doctor', file: DOCTOR_FILE, path: path.join(healthWs, 'result', DOCTOR_FILE) });
+    eq('every deliverable exists after all', getCouncilStatus('external-health').deliverablesReady, true);
+    check('every deliverable points at a real file', all.deliverables.every((d) => fs.existsSync(d)), all.deliverables.join(','));
+
+    let threw = '';
+    try {
+      await runCouncilStage('banana', 'external-health', () => {}, { runGemini: fakeModel });
+    } catch (err) {
+      threw = err.message;
+    }
+    check('the command surface refuses an unknown stage', /Unknown stage/.test(threw) && /health_analyst/.test(threw), threw);
+
+    // The case pipeline, on the same code path, unchanged.
+    const caseOne = KNOWN_PROJECTS['external-1'];
+    const originalCase = caseOne.workspace;
+    const caseWs = fs.mkdtempSync(path.join(os.tmpdir(), 'council-case-'));
+    caseOne.workspace = caseWs;
+    try {
+      const audit = await runCouncilStage('audit', 'external-1', () => {}, { runGemini: fakeModel });
+      eq('the case checkpoint still writes to output/ (its reader)', [fs.existsSync(path.join(caseWs, 'output', '01_accuracy_audit.md')), audit.outDir], [true, path.join(caseWs, 'output')]);
+      eq('the case checkpoint still returns its own message', audit.nextStepMsg, LEGACY_CHECKPOINTS.audit.nextStepMsg);
+      const caseStatus = getCouncilStatus('external-1');
+      eq('the case project still reports the A/B/C trio', caseStatus.deliverables.length, 3);
+      check('the case deliverables are the executive documents', caseStatus.deliverables.every((d) => /_[A-Z]/.test(d) || /^[ABC]_/.test(d)), caseStatus.deliverables.join(','));
+      eq('the case project says so', caseStatus.pipeline, 'case');
+    } finally {
+      caseOne.workspace = originalCase;
+      fs.rmSync(caseWs, { recursive: true, force: true });
+    }
+  } finally {
+    health.workspace = originalHealth;
+    fs.rmSync(healthWs, { recursive: true, force: true });
+  }
+}
+
+// ------------------------------------------------- 12. the readiness self-check
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-ready-'));
+  fs.mkdirSync(path.join(dir, 'result'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'BRIEF.md'), '# Brief\n\nFour living documents.\n');
+  const paths = { workspace: dir, sources: path.join(dir, 'sources'), result: path.join(dir, 'result') };
+  const now = new Date('2026-10-01T09:00:00Z');
+
+  // No key, no host config: not ready, and the blocker says exactly what to add where.
+  const bare = checkHealthReadiness({ paths, env: {}, now });
+  eq('with no model credential the check is not ready', [bare.ready, bare.exit, bare.blockers], [false, 3, ['model']]);
+  const bareText = formatReadinessText(bare);
+  // The reply is Telegram Markdown, so an env var name arrives escaped — the
+  // literal name is asserted on the check itself, the escaped one on the reply.
+  check('the blocker names the key and the file it goes in', /GEMINI.{0,2}API.{0,2}KEY/.test(bareText) && /common\.env/.test(bareText), bareText.slice(0, 200));
+  check('the blocker carries the key verbatim', /GEMINI_API_KEY/.test(bare.checks.find((c) => c.key === 'model').detail), bare.checks.find((c) => c.key === 'model').detail);
+  check('the host env findings are reported, not skipped', bare.findings.includes('docs_folder') && bare.findings.includes('health_env_file'), JSON.stringify(bare.findings));
+  check('the missing env var finding says where to put it', /HEALTH_DOCS_FOLDER/.test(JSON.stringify(bare.checks)) && /HEALTH_ENV_FILE/.test(JSON.stringify(bare.checks)), JSON.stringify(bare.checks.map((c) => c.key)));
+  const contextCheck = bare.checks.find((c) => c.key === 'context');
+  eq('the context check reports the bytes a seat would see', [contextCheck.level, contextCheck.title.includes('bytes')], ['ok', true]);
+  // The literature lane's credential: a finding that names the variables, never a
+  // blocker — the other seats run without it; document 4 is what stays uncited.
+  const searchCheck = bare.checks.find((c) => c.key === 'search');
+  eq('no search credential is a finding, not a blocker', [searchCheck.level, bare.blockers.includes('search')], ['finding', false]);
+  check('the search finding carries the variables verbatim', /BRAVE_SEARCH_API_KEY/.test(searchCheck.detail) && /TAVILY_API_KEY/.test(searchCheck.detail) && /common\.env/.test(searchCheck.detail), searchCheck.detail);
+  check('and says the lane refuses instead of recording an empty result', /never records an empty result/.test(searchCheck.detail), searchCheck.detail);
+  eq('one search key of either Brave name turns it into an ok', [checkHealthReadiness({ paths, env: { BRAVE_API_KEY: 'x' }, now }).checks.find((c) => c.key === 'search').level, checkHealthReadiness({ paths, env: { BRAVE_SEARCH_API_KEY: 'x' }, now }).checks.find((c) => c.key === 'search').level], ['ok', 'ok']);
+  check('the readiness reply is renderable', formatReadinessText(bare).includes('Not ready for bots'), formatReadinessText(bare).slice(0, 120));
+
+  const withKey = checkHealthReadiness({ paths, env: { GEMINI_API_KEY: 'x', HEALTH_DOCS_FOLDER: 'folder', HEALTH_ENV_FILE: '/tmp/.env' }, now });
+  eq('with a credential and host config it is ready', [withKey.ready, withKey.exit, withKey.blockers], [true, 0, []]);
+  check('ready still reports the findings it has', withKey.findings.includes('verify') && withKey.findings.includes('analysis'), JSON.stringify(withKey.findings));
+  check('a host with no search credential is still ready — a finding, not a blocker', withKey.findings.includes('search'), JSON.stringify(withKey.findings));
+  check('the ready reply says so', /Ready for bots/.test(formatReadinessText(withKey)));
+
+  // A stale artifact is a finding that says how old; a fresh one is fine.
+  const staleAt = new Date(now.getTime() - (STALE_AFTER_DAYS + 10) * 86400000).toISOString();
+  fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify({ ...fixtureArtifact('open'), at: staleAt }));
+  const stale = checkHealthReadiness({ paths, env: {}, now });
+  check('a stale verify artifact is a finding naming its age', stale.findings.includes('verify') && /days old/.test(stale.checks.find((c) => c.key === 'verify').title), stale.checks.find((c) => c.key === 'verify').title);
+  check('the open gate is reported with its item ids', /H-1/.test(stale.checks.find((c) => c.key === 'gate').title), stale.checks.find((c) => c.key === 'gate').title);
+  fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify(fixtureArtifact('closed')));
+  const closed = checkHealthReadiness({ paths, env: {}, now });
+  eq('a closed gate reports ok', closed.checks.find((c) => c.key === 'gate').level, 'ok');
+
+  // Role drift between the repo's seats and a workspace mirror.
+  fs.mkdirSync(path.join(dir, 'roles'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'roles', 'data_steward.md'), '# Data Steward\n\nA workspace copy that has drifted.\n');
+  const drifted = checkHealthReadiness({ paths, env: {}, now });
+  eq('role drift is a finding', drifted.checks.find((c) => c.key === 'seats').level, 'finding');
+  check('the drift finding names the file', /data_steward\.md/.test(drifted.checks.find((c) => c.key === 'seats').detail), drifted.checks.find((c) => c.key === 'seats').detail);
+  fs.rmSync(path.join(dir, 'roles'), { recursive: true, force: true });
+  eq('no mirror is not drift', checkHealthReadiness({ paths, env: {}, now }).checks.find((c) => c.key === 'seats').level, 'ok');
+
+  // The real command surface: exit 3 when a seat could not run, 0 when it could.
+  const runner = path.join(ROOT, 'scripts', 'health-runner.mjs');
+  const noKeyEnv = { ...process.env, HEALTH_WORKSPACE: dir, GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '' };
+  let noKeyCode = 0;
+  let noKeyOut = '';
+  try {
+    noKeyOut = execFileSync(process.execPath, [runner, '--readiness', '--json'], { env: noKeyEnv, encoding: 'utf8' });
+  } catch (err) {
+    noKeyCode = err.status;
+    noKeyOut = err.stdout || '';
+  }
+  const parsed = JSON.parse(noKeyOut || '{}');
+  eq('the CLI exits 3 when the bot half cannot run', noKeyCode, 3);
+  eq('and its JSON says why', parsed.blockers, ['model']);
+  const keyOut = execFileSync(process.execPath, [runner, '--readiness', '--json'], { env: { ...noKeyEnv, GEMINI_API_KEY: 'x' }, encoding: 'utf8' });
+  eq('the CLI exits 0 when it can', JSON.parse(keyOut).exit, 0);
+  eq('and reports the workspace it read', JSON.parse(keyOut).workspace, dir);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ------------------------------------------------- 13. the Doctor seat and its checker
+{
+  // The checker first, on literal reports: every refusal names itself without a
+  // model in the loop, so a regression cannot hide behind one.
+  console.log('\n  — the doctor report checker —');
+  const OPEN = { allowed: false, open: ['H-4'] };
+  const report = ({ receipt = 'Receipt: ldl 2.1 mmol/L (2026-06-03) — result/health-analysis.json, analysis.conditions', status = 'Status: PASS' } = {}, {
+    date = '2026-10-01',
+    coverage = '1 claim(s) reviewed · sections seen: analysis.conditions',
+    notSeen = 'none',
+    gate = 'OPEN (H-4)',
+    payload = '2026-10-01T08:00:00Z',
+  } = {}) => [
+    `# Doctor's report — ${date}`,
+    '',
+    `Coverage: ${coverage}`,
+    `Not seen: ${notSeen}`,
+    `Gate: ${gate}`,
+    `Payload: ${payload}`,
+    '',
+    '## 1. The LDL fall',
+    'Claim: "LDL fell to 2.1 mmol/L on 2026-06-03."',
+    receipt,
+    status,
+    'Changes: the claim stands as written.',
+    'Recommendation: nothing',
+    'Who: health_analyst',
+  ].join('\n');
+  const checkRefusal = (name, text, opts, pattern) => {
+    const res = validateDoctorReport(text, opts);
+    check(name, res.ok === false && pattern.test(res.error || ''), res.ok ? 'accepted' : res.error);
+  };
+  const accepted = { analysis: 'accepted', gate: OPEN };
+  const good = validateDoctorReport(report(), accepted);
+  check('a well-formed report passes the checker', good.ok === true, good.error);
+  eq('the checker reads the verdict and the count', [good.report.counts.pass, good.report.coverage.reviewed], [1, 1]);
+  check('the checker keeps the receipt with the verdict', /ldl 2\.1 mmol\/L \(2026-06-03\)/.test(good.report.claims[0]?.receipt || ''), JSON.stringify(good.report.claims[0]));
+  checkRefusal('a report with no heading is refused', report().replace("# Doctor's report — 2026-10-01\n\n", ''), accepted, /heading/);
+  checkRefusal('a report with no coverage header is refused', report({}, { coverage: '' }), accepted, /coverage header/);
+  checkRefusal('a coverage line with no count is refused', report({}, { coverage: 'reviewed everything' }), accepted, /count/);
+  checkRefusal('a header without the gate line is refused', report({}, { gate: '' }), accepted, /Gate/);
+  checkRefusal('a header without the payload line is refused', report({}, { payload: '' }), accepted, /Payload/);
+  checkRefusal('a finding with no receipt is refused', report({ receipt: 'Changes: hidden by the rewrite' }), accepted, /Receipt/);
+  checkRefusal('a block missing any of the six labels is refused', report({ status: 'Recommendation: nothing' }), accepted, /Status/);
+  checkRefusal('a PASS on an absence is refused', report({ receipt: 'Receipt: not measured — nothing contradicted it' }), accepted, /absence/);
+  checkRefusal('a PASS with no date is refused', report({ receipt: 'Receipt: ldl 2.1 mmol/L — the sheet agrees' }), accepted, /date/);
+  checkRefusal('a PASS on an open item is refused', report({ status: 'Status: PASS (H-4)' }), accepted, /open item H-4/);
+  checkRefusal('a verdict that is not PASS/STRIKE/UNPROVEN is refused', report({ status: 'Status: MAYBE' }), accepted, /no verdict/);
+  checkRefusal('a report claiming claims with no payload is refused', report(), { analysis: 'absent', gate: OPEN }, /no readable payload/);
+  checkRefusal('a report over a present payload that reviews nothing is refused', report({}, { coverage: '0 claim(s) reviewed · sections seen: analysis.conditions' }), accepted, /checks nothing/);
+  checkRefusal('the count must match the blocks', report({}, { coverage: '2 claim(s) reviewed · sections seen: analysis.conditions' }), accepted, /2 claim\(s\) reviewed but the report carries 1 block/);
+  const zeroReport = (notSeen) => [
+    "# Doctor's report — 2026-10-01",
+    '',
+    'Coverage: 0 claim(s) reviewed · sections seen: verify, fix_list',
+    `Not seen: ${notSeen}`,
+    'Gate: OPEN (H-4)',
+    'Payload: not present',
+  ].join('\n');
+  checkRefusal('a 0-claim report must name the payload it could not read', zeroReport('none'), { analysis: 'absent', gate: OPEN }, /Not seen/);
+  checkRefusal('a 0-claim report with a claim block is refused', report({}, { coverage: '0 claim(s) reviewed · sections seen: verify' }), { analysis: 'absent', gate: OPEN }, /nothing to check/);
+  const empty = validateDoctorReport('', { analysis: 'absent' });
+  check('an empty report is refused', empty.ok === false && /empty/.test(empty.error), JSON.stringify(empty));
+  const honest = validateDoctorReport(report({ receipt: 'Receipt: not measured — the sheet has no weight since 2024-10-23', status: 'Status: UNPROVEN (H-4)' }), accepted);
+  check('the same absence is accepted as UNPROVEN', honest.ok === true && honest.report.counts.unproven === 1, honest.error);
+  const zero = validateDoctorReport(zeroReport('result/health-analysis.json — no payload has been written'), { analysis: 'absent', gate: OPEN });
+  check('the honest 0-claim report is accepted when there is no payload', zero.ok === true && zero.report.coverage.reviewed === 0, zero.error);
+
+  // The runner, on a copy of a real workspace: the report lands, the receipts
+  // land, and every other byte — the Docs registry included — is untouched.
+  console.log('\n  — the doctor run, end to end —');
+  const ACCEPTED_REPORT = [
+    "# Doctor's report — 2026-10-01",
+    '',
+    'Coverage: 3 claim(s) reviewed · sections seen: analysis.conditions, analysis.trends',
+    'Not seen: none',
+    'Gate: OPEN (H-4, H-6)',
+    'Payload: 2026-10-01T08:00:00Z',
+    '',
+    '## 1. The LDL fall',
+    'Claim: "LDL fell to 2.1 mmol/L on 2026-06-03."',
+    'Receipt: ldl 2.1 mmol/L (2026-06-03) — result/health-analysis.json, analysis.conditions',
+    'Status: PASS',
+    'Changes: the claim stands as written.',
+    'Recommendation: nothing',
+    'Who: health_analyst',
+    '',
+    '## 2. The HbA1c trend',
+    'Claim: "HbA1c is rising across 2025."',
+    'Receipt: hba1c 40 mmol/mol (2026-06-05) — one dated point in the sheet, and the payload names no earlier value',
+    'Status: STRIKE',
+    'Changes: a trend needs two dated points; the claim is struck until an earlier value is named.',
+    'Recommendation: take it to a GP with these numbers',
+    'Who: health_analyst',
+    '',
+    '## 3. The weight change since March',
+    'Claim: "Weight is unchanged since March 2025."',
+    'Receipt: not measured — the sheet holds body weight on 2024-10-23 only, and no 2025 value exists',
+    'Status: UNPROVEN (H-4)',
+    'Changes: the row is an open fix-list item; until it closes the claim cannot pass.',
+    'Recommendation: fix it in the app',
+    'Who: data_steward',
+  ].join('\n');
+  const makeWorkspace = ({ payload = true } = {}) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doctor-'));
+    fs.mkdirSync(path.join(dir, 'result'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'BRIEF.md'), '# Brief\n\nFour living documents.\n');
+    fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify({ ...fixtureArtifact('open'), summary: { match: 2, missing: 1, appOnlyUnreviewed: 1, gap: 1 } }));
+    fs.writeFileSync(path.join(dir, 'result', 'health-fix-list.md'), '# Data fix list\n\n- [ ] **H-1 — mis-filed rows**\n');
+    fs.writeFileSync(path.join(dir, 'result', 'health-docs.json'), JSON.stringify({ updatedAt: '2026-10-01T00:00:00Z', docs: { snapshot: { id: 'doc_snapshot', at: '2026-10-01T00:00:00Z' } }, history: [] }, null, 1));
+    if (payload) fs.writeFileSync(path.join(dir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: analysisPayload() }));
+    return dir;
+  };
+  const pathsFor = (dir) => ({ workspace: dir, sources: path.join(dir, 'sources'), result: path.join(dir, 'result') });
+  const tree = (dir) => {
+    const out = {};
+    const walk = (rel) => {
+      for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+        const r = rel === '.' ? e.name : path.join(rel, e.name);
+        if (e.isDirectory()) walk(r);
+        else out[r] = contentHash(fs.readFileSync(path.join(dir, r), 'utf8'));
+      }
+    };
+    walk('.');
+    return out;
+  };
+  const scratch = [];
+
+  // No credential: the refusal comes before the model, and it is actionable.
+  const noKeyDir = makeWorkspace();
+  scratch.push(noKeyDir);
+  const noKey = await runHealthDoctor({ paths: pathsFor(noKeyDir), env: {} });
+  check('with no credential the doctor refuses before the model', noKey.ok === false && noKey.stage === 'credential', JSON.stringify(noKey).slice(0, 200));
+  check('the refusal names the key and the file it goes in', /GEMINI_API_KEY/.test(noKey.error) && /common\.env/.test(noKey.error), noKey.error);
+  eq('a refused run writes nothing', Object.keys(tree(noKeyDir)).sort(), ['BRIEF.md', 'result/health-analysis.json', 'result/health-docs.json', 'result/health-fix-list.md', 'result/health-verify.json']);
+
+  const dir = noKeyDir;
+  const before = tree(dir);
+  const prompts = [];
+  const doctorModel = async ({ prompt }) => { prompts.push(prompt); return { finalText: ACCEPTED_REPORT, code: 0, lastError: null }; };
+  const run = await runHealthDoctor({ paths: pathsFor(dir), env: {}, runGemini: doctorModel });
+  check('the doctor run succeeds with the model seam', run.ok === true, run.error || '');
+  if (run.ok) {
+    eq('it counts the verdicts it read', run.artifact.counts, { pass: 1, strike: 1, unproven: 1 });
+    eq('it records the payload state and the open gate', [run.artifact.analysis.state, run.artifact.gate.open.length], ['accepted', 8]);
+    check('the report lands on the declared path', fs.existsSync(path.join(dir, 'result', DOCTOR_FILE)), fs.readdirSync(path.join(dir, 'result')).join(','));
+    check('the machine-readable receipt holds the claims', Array.isArray(run.artifact.claims) && run.artifact.claims.length === 3, JSON.stringify(run.artifact.claims).slice(0, 120));
+    const reply = formatDoctorText(run);
+    check('the reply names the verdicts, the gate and the report', /1 PASS/.test(reply) && /OPEN \(H-1/.test(reply) && reply.includes(DOCTOR_FILE), reply);
+    check('the reply says the documents were not touched', /not touched/.test(reply), reply);
+    check('the seat was handed the payload it reviews', /The analysis payload under review/.test(prompts.at(-1) || '') && /shape: accepted/.test(prompts.at(-1) || ''), (prompts.at(-1) || '').slice(0, 160));
+    check('the seat was told what to do with the claims', /STRIKE what does not hold/.test(prompts.at(-1) || ''), 'the mandate never reached the prompt');
+    const after = tree(dir);
+    const added = Object.keys(after).filter((f) => !(f in before)).sort();
+    eq('exactly two files were added, both the doctor\u2019s own', added, [`result/${DOCTOR_FILE}`, `result/${DOCTOR_ARTIFACT}`]);
+    check('every pre-existing byte is unchanged (the Docs registry included)', Object.keys(before).every((f) => after[f] === before[f]), Object.keys(before).filter((f) => after[f] !== before[f]).join(','));
+    check('the report on disk carries the coverage header the checker read', /^Coverage: 3 claim\(s\) reviewed/m.test(fs.readFileSync(path.join(dir, 'result', DOCTOR_FILE), 'utf8')), 'the report header is missing');
+  }
+
+  // A model that answers in the wrong shape writes nothing at all — the whole
+  // point of the checker is that a confident non-report cannot land.
+  const badDir = makeWorkspace();
+  scratch.push(badDir);
+  const badBefore = tree(badDir);
+  const bad = await runHealthDoctor({ paths: pathsFor(badDir), env: {}, runGemini: async () => ({ finalText: 'I reviewed the claims and they look fine to me.', code: 0, lastError: null }) });
+  check('a report the checker refuses is a refusal, not a write', bad.ok === false && bad.stage === 'report', JSON.stringify({ stage: bad.stage, error: bad.error }));
+  check('the refusal says which rule it broke', /heading/.test(bad.error || ''), bad.error);
+  eq('the refused run wrote nothing', Object.keys(tree(badDir)).sort(), Object.keys(badBefore).sort());
+  const modelFail = await runHealthDoctor({ paths: pathsFor(badDir), env: {}, runGemini: async () => { throw new Error('no lane'); } });
+  check('a failed model call writes nothing', modelFail.ok === false && modelFail.stage === 'model' && /model call failed/.test(modelFail.error), JSON.stringify(modelFail).slice(0, 200));
+
+  // No brief: the pack refuses, so there is no seat turn at all.
+  const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doctor-bare-'));
+  scratch.push(bareDir);
+  const bare = await runHealthDoctor({ paths: pathsFor(bareDir), env: {}, runGemini: doctorModel });
+  check('a workspace with no brief is refused before the model', bare.ok === false && bare.stage === 'context', JSON.stringify(bare).slice(0, 200));
+  eq('the context refusal wrote nothing', fs.readdirSync(bareDir), []);
+
+  // The CLI door: a refusal is an answer, so it exits 3 with the JSON saying why.
+  const runner = path.join(ROOT, 'scripts', 'health-runner.mjs');
+  const cliDir = makeWorkspace({ payload: false });
+  scratch.push(cliDir);
+  const cliEnv = { ...process.env, HEALTH_WORKSPACE: cliDir, GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '' };
+  let cliCode = 0;
+  let cliOut = '';
+  try {
+    cliOut = execFileSync(process.execPath, [runner, '--doctor', '--json'], { env: cliEnv, encoding: 'utf8' });
+  } catch (err) {
+    cliCode = err.status;
+    cliOut = err.stdout || '';
+  }
+  const cliJson = JSON.parse(cliOut || '{}');
+  eq('the CLI exits 3 when the doctor cannot run', cliCode, 3);
+  eq('and its JSON says why', cliJson.stage, 'credential');
+
+  // The other door: `/council doctor` runs the same seat and the same checker,
+  // and the file it writes is the one the status reader reads.
+  console.log('\n  — the doctor through the council stage door —');
+  const health = KNOWN_PROJECTS['external-health'];
+  const originalWs = health.workspace;
+  const ws = makeWorkspace();
+  scratch.push(ws);
+  health.workspace = ws;
+  try {
+    const staged = await runCouncilStage('doctor', 'external-health', () => {}, { runGemini: async () => ({ finalText: ACCEPTED_REPORT, code: 0, lastError: null }) });
+    const written = path.join(ws, 'result', DOCTOR_FILE);
+    check('the stage door writes the declared report, not a numbered transcript', fs.existsSync(written) && !fs.existsSync(path.join(ws, 'result', '06_doctor.md')), fs.readdirSync(path.join(ws, 'result')).join(','));
+    eq('the stage result names that file as its deliverable', staged.deliverables, [written]);
+    const status = getCouncilStatus('external-health');
+    eq('the doctor is the last phase and its report reads back as complete', [status.phases.at(-1).phase, status.phases.at(-1).completed, status.phases.at(-1).outputFile], ['doctor', true, written]);
+    eq('the project now reports six deliverables', status.deliverables.length, 6);
+    check('the doctor report is one of the deliverables', status.deliverables.includes(DOCTOR_FILE), status.deliverables.join(','));
+    eq('the phases are numbered in the declared order, doctor last', getCouncilPhases('external-health').map((p) => p.file), ['01_data_steward.md', '02_health_analyst.md', '03_test_planner.md', '04_research_lead.md', '05_safety_reviewer.md', DOCTOR_FILE]);
+    let refusedStage = '';
+    try {
+      await runCouncilStage('doctor', 'external-health', () => {}, { runGemini: async () => ({ finalText: 'looks good to me', code: 0, lastError: null }) });
+    } catch (err) { refusedStage = err.message; }
+    check('the stage door refuses a malformed report too', /checker refuses/.test(refusedStage), refusedStage);
+    check('and the refused re-run left the checked report in place', fs.readFileSync(written, 'utf8').includes('# Doctor'), 'the good report was overwritten');
+  } finally {
+    health.workspace = originalWs;
+  }
+  for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
+}
+
+// ------------------------------------------------- 14. the literature lane
+{
+  console.log('\n  — the literature lane —');
+  const scratch = [];
+  const templates = readTemplates();
+  const lanePaths = (dir) => ({ workspace: dir, sources: path.join(dir, 'sources'), result: path.join(dir, 'result') });
+  const logPath = (dir) => path.join(dir, 'result', 'health-research.json');
+  const PAGE = '<title>D and strength</title><p>body</p>';
+  const pageFetch = async () => ({ ok: true, status: 200, text: async () => PAGE });
+  const stubSearch = (hits) => async ({ query }) => ({ ok: true, provider: 'brave', query, hits, attempts: [] });
+  const CLEARED_SEARCH = { BRAVE_SEARCH_API_KEY: '', BRAVE_API_KEY: '', TAVILY_API_KEY: '', GOOGLE_SEARCH_API_KEY: '', GOOGLE_SEARCH_CX: '' };
+  const treeOf = (dir) => {
+    const out = {};
+    const walk = (rel) => {
+      for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+        const r = rel === '.' ? e.name : path.join(rel, e.name);
+        if (e.isDirectory()) walk(r);
+        else out[r] = contentHash(fs.readFileSync(path.join(dir, r), 'utf8'));
+      }
+    };
+    walk('.');
+    return out;
+  };
+
+  // The contract's scope is the document-4 template's own analysis sections, so
+  // a template edit that adds a section cannot quietly fall out of the contract.
+  eq('every document-4 analysis section is under the citation contract', sectionPlan(templates.insights).filter((s) => (s.source || '').startsWith('analysis.')).map((s) => s.source), CITATION_SOURCES);
+
+  // Who can search at all: every declared provider reports its own variables, so
+  // a missing credential is a named finding rather than an empty result.
+  const none = searchAvailability({});
+  check('a host with no search credential reports the chain as unusable', none.ok === false && none.ready.length === 0);
+  eq('and names every variable that would fix it, in declared order', none.missing, ['BRAVE_SEARCH_API_KEY', 'BRAVE_API_KEY', 'TAVILY_API_KEY', 'GOOGLE_SEARCH_API_KEY', 'GOOGLE_SEARCH_CX']);
+  check('one Brave key under either name is enough', searchAvailability({ BRAVE_API_KEY: 'k' }).ready.includes('brave') && searchAvailability({ BRAVE_SEARCH_API_KEY: 'k' }).ok === true);
+  check('a provider that needs two variables is not ready on one', searchAvailability({ GOOGLE_SEARCH_API_KEY: 'k' }).ready.includes('google-cse') === false);
+
+  // The provider chain: a provider that fails falls through, and a provider that
+  // answered nothing is a failure rather than a silent empty result.
+  const chainFetch = async (url) => {
+    if (String(url).includes('brave')) return { ok: false, status: 429, json: async () => ({}) };
+    return { ok: true, status: 200, json: async () => ({ results: [{ title: 'Vitamin D and strength', url: 'https://example.test/d-2024', description: 's' }] }) };
+  };
+  const chained = await webSearch({ query: 'vitamin D and strength', env: { BRAVE_SEARCH_API_KEY: 'b', TAVILY_API_KEY: 't' }, fetchImpl: chainFetch });
+  check('a provider that fails falls through to the next declared one', chained.ok === true && chained.provider === 'tavily' && chained.hits.length === 1, JSON.stringify(chained).slice(0, 200));
+  eq('and the failed attempt is reported, not hidden', chained.attempts, [{ provider: 'brave', error: 'HTTP 429' }]);
+  const nothing = await webSearch({ query: 'q', env: { BRAVE_SEARCH_API_KEY: 'b' }, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ results: [] }) }) });
+  check('a provider that answered nothing is a failure, not an empty result', nothing.ok === false && nothing.reason === 'failed' && /no results/.test(nothing.error), nothing.error);
+  const noCred = await webSearch({ query: 'q', env: {} });
+  check('no credential is refused before any request is made', noCred.ok === false && noCred.reason === 'no-credential' && /BRAVE_SEARCH_API_KEY/.test(noCred.error));
+
+  // fetchHit: the receipt a citation rests on.
+  const kept = await fetchHit({ url: 'https://example.test/d-2024', title: '', query: 'vitamin D and strength' }, { fetchImpl: pageFetch, now: new Date('2026-10-01T07:00:00Z') });
+  check('a fetched hit is recorded with its status, size, title and hash', kept.ok === true && kept.status === 200 && kept.bytes === Buffer.byteLength(PAGE) && /^[0-9a-f]{64}$/.test(kept.sha256) && kept.title === 'D and strength' && kept.fetchedAt === '2026-10-01T07:00:00.000Z', JSON.stringify(kept).slice(0, 200));
+  const gone = await fetchHit({ url: 'https://example.test/gone' }, { fetchImpl: async () => ({ ok: false, status: 404, text: async () => '' }) });
+  check('a 404 is a refusal, not a citation', gone.ok === false && gone.status === 404 && gone.sha256 === '', JSON.stringify(gone).slice(0, 160));
+  const blank = await fetchHit({ url: 'https://example.test/blank' }, { fetchImpl: async () => ({ ok: true, status: 200, text: async () => '' }) });
+  check('an empty body is a refusal too — there is nothing to hash', blank.ok === false && /empty body/.test(blank.error), blank.error);
+  const notHttp = await fetchHit({ url: 'javascript:alert(1)' }, { fetchImpl: async () => { throw new Error('the network was called for a non-http url'); } });
+  check('a non-http url never reaches the network', notHttp.ok === false && notHttp.status === 0, JSON.stringify(notHttp));
+
+  // The document-4 citation contract, on literal lines.
+  const liveLog = researchLog({ fetched: [CITATION], refused: ['https://example.test/refused-2024'] });
+  check('a line with a fetched, dated link passes', validateInsightCitations([`- HbA1c 40 — Khor 2024, 2024, ${CITATION}`], { log: liveLog }).ok === true);
+  const uncitedLine = validateInsightCitations(['- HbA1c is rising across 2025.'], { log: liveLog });
+  check('a line with no link is refused as uncited', uncitedLine.ok === false && uncitedLine.reason === 'uncited', JSON.stringify(uncitedLine).slice(0, 200));
+  const unverifiedLine = validateInsightCitations(['- HbA1c 40 — Khor 2024, 2024, https://example.test/never-fetched'], { log: liveLog });
+  check('a link the lane never fetched is refused as unverified', unverifiedLine.ok === false && unverifiedLine.reason === 'unverified' && unverifiedLine.unverified.includes('https://example.test/never-fetched'));
+  check('a link the lane fetched and refused is not citable either', validateInsightCitations(['- HbA1c 40 — Khor 2024, 2024, https://example.test/refused-2024'], { log: liveLog }).reason === 'unverified');
+  check('with no log at all, every link is unverifiable', validateInsightCitations([`- HbA1c 40 — Khor 2024, 2024, ${CITATION}`], { log: null }).reason === 'unverified');
+  check('a cited line with no year is refused as undated', validateInsightCitations([`- HbA1c 40 — see ${CITATION}`], { log: liveLog }).reason === 'undated');
+  check('a year inside the url is not the citation\u2019s own year', validateInsightCitations([`- HbA1c 40 — the study at ${CITATION}`], { log: liveLog }).reason === 'undated');
+  check('an empty section is the honest state, not a refusal', validateInsightCitations([], { log: liveLog }).ok === true);
+  check('the refusal says an unverified link is not a link', /unverified link is not a link/.test(citationRefusalText(unverifiedLine)));
+
+  // The lane itself: a refusal records nothing, a success writes the log.
+  const laneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-research-lane-'));
+  scratch.push(laneDir);
+  const refusedRun = await runHealthResearch({ paths: lanePaths(laneDir), env: {}, queries: ['vitamin D and strength'] });
+  check('the lane refuses when no provider can run', refusedRun.ok === false && refusedRun.stage === 'credential', JSON.stringify(refusedRun).slice(0, 200));
+  check('the refusal names the file the credential belongs in', /~\/\.config\/bot-host\/common\.env/.test(refusedRun.error), refusedRun.error);
+  eq('and records nothing at all', fs.readdirSync(laneDir), []);
+  check('the reply says nothing was searched and nothing recorded', /Nothing was searched and nothing was recorded/.test(formatResearchText(refusedRun)), formatResearchText(refusedRun).slice(0, 200));
+  check('a lane run with no query refuses too', (await runHealthResearch({ paths: lanePaths(laneDir), env: { BRAVE_API_KEY: 'k' } })).stage === 'query');
+
+  // The credential may sit in the file readiness names, not in the process env.
+  const laneEnvFile = path.join(laneDir, 'common.env');
+  fs.writeFileSync(laneEnvFile, 'BRAVE_API_KEY=from-the-file\n');
+  const laneRun = await runHealthResearch({
+    paths: lanePaths(laneDir),
+    env: {},
+    envFile: laneEnvFile,
+    queries: ['vitamin D and strength'],
+    search: stubSearch([{ title: 'Vitamin D and strength', url: 'https://example.test/d-2024', snippet: 's' }]),
+    fetchImpl: pageFetch,
+    now: new Date('2026-10-01T07:00:00Z'),
+  });
+  check('the lane runs on the credential in the file readiness names', laneRun.ok === true && laneRun.artifact.fetched === 1, laneRun.error || '');
+  const laneLog = JSON.parse(fs.readFileSync(logPath(laneDir), 'utf8'));
+  check('the log records the hit with the same hash fetchHit computed', laneLog.hits['https://example.test/d-2024'].sha256 === kept.sha256 && laneLog.hits['https://example.test/d-2024'].firstFetchedAt === '2026-10-01T07:00:00.000Z', JSON.stringify(laneLog.hits['https://example.test/d-2024']).slice(0, 200));
+  eq('the log keeps the query that produced it', laneLog.queries.map((q) => q.query), ['vitamin D and strength']);
+  check('the artifact names the provider and the file it wrote', laneRun.artifact.provider === 'brave' && laneRun.artifact.file === logPath(laneDir));
+
+  // A re-run is the union of the runs: a hit that now refuses is recorded as
+  // refused, and the citable hit keeps its first receipt.
+  const rerun = await runHealthResearch({
+    paths: lanePaths(laneDir),
+    env: {},
+    envFile: laneEnvFile,
+    queries: ['vitamin D and strength'],
+    search: stubSearch([{ title: 'Vitamin D and strength', url: 'https://example.test/d-2024', snippet: 's' }, { title: 'Gone', url: 'https://example.test/gone', snippet: '' }]),
+    fetchImpl: async (url) => (String(url).includes('gone') ? { ok: false, status: 500, text: async () => '' } : pageFetch(url)),
+    now: new Date('2026-11-02T07:00:00Z'),
+  });
+  const laneLog2 = JSON.parse(fs.readFileSync(logPath(laneDir), 'utf8'));
+  check('a hit that refused on the re-run is in the log, marked not citable', laneLog2.hits['https://example.test/gone'].ok === false);
+  check('the citable hit keeps its first receipt and gains a newer fetch', laneLog2.hits['https://example.test/d-2024'].firstFetchedAt === '2026-10-01T07:00:00.000Z' && laneLog2.hits['https://example.test/d-2024'].fetchedAt === '2026-11-02T07:00:00.000Z', JSON.stringify(laneLog2.hits['https://example.test/d-2024']).slice(0, 200));
+  check('the artifact reports what was fetched and what refused', rerun.artifact.fetched === 1 && rerun.artifact.refusedHits.length === 1 && rerun.artifact.recorded === 2, JSON.stringify({ fetched: rerun.artifact.fetched, refused: rerun.artifact.refusedHits.length }));
+  check('and the reply says which of the two cannot be cited', /not citable/.test(formatResearchText(rerun)), formatResearchText(rerun).slice(0, 300));
+
+  // A query no provider could answer is a refusal with nothing written.
+  const deadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-research-dead-'));
+  scratch.push(deadDir);
+  const dead = await runHealthResearch({ paths: lanePaths(deadDir), env: { BRAVE_API_KEY: 'k' }, queries: ['q'], search: async ({ query }) => ({ ok: false, reason: 'failed', error: 'every declared provider refused the query', query, hits: [], attempts: [] }) });
+  check('a query no provider could answer is a refusal, not an empty log', dead.ok === false && dead.stage === 'search', JSON.stringify(dead).slice(0, 200));
+  eq('and it wrote nothing', fs.readdirSync(deadDir), []);
+
+  // The publisher's own clock: a snapshot past the renewal window may not carry
+  // a claim about now, and the header says which of the two reasons withheld it.
+  const freshArtifact = fixtureArtifact('closed');
+  const atNow = new Date(freshArtifact.at);
+  const freshGate = gateFromArtifact(freshArtifact, { now: new Date(atNow.getTime() + 5 * 86400000) });
+  check('a snapshot inside the renewal window is current', freshGate.stale === false && freshGate.ageDays === 5 && freshGate.analysisAllowed === true, JSON.stringify(freshGate).slice(0, 200));
+  const staleArtifact = { ...fixtureArtifact('closed'), at: new Date(atNow.getTime() - (STALE_AFTER_DAYS + 30) * 86400000).toISOString() };
+  const staleGate = gateFromArtifact(staleArtifact, { now: atNow });
+  check('a snapshot past the renewal window is stale', staleGate.stale === true && staleGate.ageDays === STALE_AFTER_DAYS + 30 && staleGate.allowed === true && staleGate.analysisAllowed === false, JSON.stringify(staleGate).slice(0, 200));
+  const staleDoc = renderDoc({ spec: DOC_SPECS[1], templateText: templates.conditions, artifact: staleArtifact, analysis: analysisPayload({ cite: CITATION }), registry: {}, now: atNow });
+  check('a stale document says STALE in its header and names the window', /STALE SNAPSHOT/.test(staleDoc.text) && /renewal window 31/.test(staleDoc.text), staleDoc.text.split('\n').slice(0, 4).join(' | '));
+  check('every analysis section carries the stale refusal', staleDoc.refused.length === 4 && staleDoc.text.includes(staleRefusalText(staleGate)), JSON.stringify(staleDoc.refused));
+  check('and no analysis line reaches a stale document', !staleDoc.text.includes(ANALYSIS_MARKER), 'the analysis leaked into a stale snapshot');
+  eq('a stale run is a draft, not an analysis', planPublish({ artifact: staleArtifact, analysis: analysisPayload({ cite: CITATION }), templates, registry: {}, now: atNow }).mode, 'draft');
+  check('an undated artifact cannot claim to be current', gateFromArtifact({ fixList: { items: [] } }, { now: atNow }).stale === true);
+  check('without a clock the gate does not invent an age', gateFromArtifact(staleArtifact).stale === false && gateFromArtifact(staleArtifact).ageDays === null);
+
+  // The contract is document 4 only: the same uncited payload is refused there
+  // and published everywhere else.
+  const uncitedDoc = renderDoc({ spec: DOC_SPECS[3], templateText: templates.insights, artifact: freshArtifact, analysis: analysisPayload(), registry: {}, now: atNow });
+  eq('document 4 refuses a payload whose lines carry no link', [uncitedDoc.refused.length, uncitedDoc.citationRefused.map((c) => c.reason)], [4, ['uncited', 'uncited', 'uncited', 'uncited']]);
+  check('and the published bytes carry the contract\u2019s own sentence', uncitedDoc.text.includes('unverified link is not a link'));
+  check('no uncited claim reaches document 4', !uncitedDoc.text.includes(ANALYSIS_MARKER));
+  eq('documents 1\u20133 are not subject to the citation contract', renderDoc({ spec: DOC_SPECS[1], templateText: templates.conditions, artifact: freshArtifact, analysis: analysisPayload(), registry: {}, now: atNow }).citationRefused, []);
+  const citedDoc = renderDoc({ spec: DOC_SPECS[3], templateText: templates.insights, artifact: freshArtifact, analysis: analysisPayload({ cite: CITATION }), citations: liveLog, registry: {}, now: atNow });
+  check('the same document publishes when the log holds the link', citedDoc.refused.length === 0 && citedDoc.text.includes(CITATION), JSON.stringify(citedDoc.refused));
+  check('a link the log never recorded is still refused', renderDoc({ spec: DOC_SPECS[3], templateText: templates.insights, artifact: freshArtifact, analysis: analysisPayload({ cite: 'https://example.test/elsewhere' }), citations: liveLog, registry: {}, now: atNow }).citationRefused.every((c) => c.reason === 'unverified'));
+
+  // The real command surface: the CLI door exits 3 with the stage in its JSON.
+  const laneCliEnv = { ...process.env, HEALTH_WORKSPACE: laneDir, ...CLEARED_SEARCH, GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '' };
+  let laneCode = 0;
+  let laneOut = '';
+  try {
+    laneOut = execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'health-runner.mjs'), '--research', '--query=vitamin D and strength', '--json'], { env: laneCliEnv, encoding: 'utf8' });
+  } catch (err) {
+    laneCode = err.status;
+    laneOut = err.stdout || '';
+  }
+  eq('the CLI exits 3 when no provider can run', laneCode, 3);
+  eq('and its JSON names the stage that refused', JSON.parse(laneOut || '{}').stage, 'credential');
+
+  // The real workspace, copied: the lane runs there, a seat's pack lists the
+  // links it may cite, and every byte of the user's own folder is unchanged.
+  const REAL = KNOWN_PROJECTS['external-health'].workspace;
+  if (fs.existsSync(REAL)) {
+    const before = treeOf(REAL);
+    const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'health-research-live-'));
+    scratch.push(copy);
+    fs.cpSync(REAL, copy, { recursive: true });
+    const LIVE_LINK = 'https://example.test/hba1c-cvd-2025';
+    const live = await runHealthResearch({
+      paths: lanePaths(copy),
+      env: { BRAVE_API_KEY: 'seam' },
+      queries: ['HbA1c and cardiovascular risk'],
+      search: stubSearch([{ title: 'HbA1c and CVD', url: LIVE_LINK, snippet: 's' }, { title: 'Gone', url: 'https://example.test/gone', snippet: '' }]),
+      fetchImpl: async (url) => (String(url).includes('gone') ? { ok: false, status: 500, text: async () => '' } : { ok: true, status: 200, text: async () => '<title>HbA1c and CVD</title>body' }),
+      now: atNow,
+    });
+    check('the lane runs against a copy of the real workspace', live.ok === true && live.artifact.fetched === 1 && live.artifact.refusedHits.length === 1, live.error || '');
+    eq('and the user\u2019s own folder is byte-identical afterwards', treeOf(REAL), before);
+    const liveCtx = buildHealthContext(copy);
+    const researchSection = liveCtx.sections.find((s) => s.key === 'research');
+    check('the pack a seat is handed lists the recorded link', Boolean(researchSection) && researchSection.text.includes(LIVE_LINK), (researchSection?.text || '').slice(0, 300));
+    check('and marks the refused hit as not citable', /\(not citable\)/.test(researchSection?.text || ''), 'a refused hit was presented as citable');
+    check('the pack states the citation rule', /Cite only a url listed as ok/.test(researchSection?.text || ''));
+    const copyLog = loadResearchLog(logPath(copy));
+    check('the copy\u2019s own log accepts a citation of what it fetched', validateInsightCitations([`- HbA1c and CVD risk — Author 2025, 2025, ${LIVE_LINK}`], { log: copyLog }).ok === true);
+    check('and still refuses a link it never fetched', validateInsightCitations(['- HbA1c and CVD risk — Author 2025, 2025, https://example.test/elsewhere'], { log: copyLog }).reason === 'unverified');
+    check('document 4 publishes the live link and refuses the foreign one', renderDoc({ spec: DOC_SPECS[3], templateText: templates.insights, artifact: freshArtifact, analysis: { 'analysis.by_marker': [`- HbA1c and CVD risk — Author 2025, 2025, ${LIVE_LINK}`] }, citations: copyLog, registry: {}, now: atNow }).refused.length === 0);
+  }
+
+  for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
+}
+
+// ------------------------------------------------- 15. the vendor contracts
+{
+  console.log('\n  — the vendor contracts —');
+  // The three search APIs are vendor contracts: endpoint, method, where the
+  // credential goes, which response field carries a hit. This section drives the
+  // lane's real entry point against recorded responses for each of them — the
+  // documented envelope and the answers a real API gives when it says no.
+  const scratch = [];
+  const spec = loadSearchFixture(FIXTURE_FILE);
+  const SHIM_FILE = path.join(ROOT, 'scripts', 'fixtures', 'search-provider-shim.mjs');
+  const lanePaths = (dir) => ({ workspace: dir, sources: path.join(dir, 'sources'), result: path.join(dir, 'result') });
+  const laneDir = (tag) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `health-vendor-${tag}-`));
+    scratch.push(dir);
+    return dir;
+  };
+  const readLog = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'result', RESEARCH_LOG), 'utf8'));
+  const CLEARED_SEARCH = { BRAVE_SEARCH_API_KEY: '', BRAVE_API_KEY: '', TAVILY_API_KEY: '', GOOGLE_SEARCH_API_KEY: '', GOOGLE_SEARCH_CX: '' };
+  const laneRun = async (dir, env, cases = {}) => {
+    const calls = [];
+    const res = await runHealthResearch({
+      paths: lanePaths(dir),
+      env,
+      queries: [spec.query],
+      fetchImpl: recordedFetch(spec, { cases, onCall: (c) => calls.push(c) }),
+    });
+    return { res, calls };
+  };
+  const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
+  const pageOf = (url) => spec.pages.find((p) => p.url === url);
+
+  // 1. Each provider, alone: the request it must send, and the field its hits
+  //    actually live in. A wrong endpoint, a credential in the wrong place, or a
+  //    renamed field all show up here rather than on the user's host.
+  for (const provider of spec.providers) {
+    const dir = laneDir(provider.id);
+    const { res, calls } = await laneRun(dir, provider.env);
+    check(`[${provider.id}] the lane answers on this provider alone`, res.ok === true && res.artifact.provider === provider.id, res.error || '');
+    const sent = vendorCalls(calls, spec)[0] || {};
+    eq(`[${provider.id}] the request is the recorded contract, url and all`, { method: sent.method, url: sent.url, body: String(sent.body) }, { method: provider.request.method, url: provider.request.url, body: provider.request.body });
+    check(`[${provider.id}] the credential goes where the vendor documents it`, Object.entries(provider.request.headers).every(([name, value]) => String(sent.headers?.[name] || '').includes(value)), JSON.stringify(sent.headers));
+    check(`[${provider.id}] no credential travels in the request body`, Object.values(provider.env).every((v) => !String(sent.body).includes(v)) && !/"api_key"/.test(String(sent.body)), String(sent.body));
+    eq(`[${provider.id}] one request went out, and only to this provider`, vendorCalls(calls, spec).map((c) => providerOf(c, spec)), [provider.id]);
+
+    const log = readLog(dir);
+    const kept = provider.expectedHits[0];
+    const gone = provider.expectedHits[1];
+    eq(`[${provider.id}] the documented field becomes the hit's title`, log.hits[kept.url]?.title, kept.title);
+    eq(`[${provider.id}] the documented field becomes the snippet`, log.hits[kept.url]?.snippet, kept.snippet);
+    check(`[${provider.id}] the recorded page is what was hashed`, log.hits[kept.url]?.bytes === Buffer.byteLength(pageOf(kept.url).raw) && log.hits[kept.url]?.sha256 === sha256(pageOf(kept.url).raw), JSON.stringify({ bytes: log.hits[kept.url]?.bytes }));
+    check(`[${provider.id}] the second hit was fetched too and refused as a 404`, log.hits[gone.url]?.ok === false && /404/.test(log.hits[gone.url]?.error || ''), JSON.stringify(log.hits[gone.url]));
+    eq(`[${provider.id}] the query record counts what came back and what survived`, [log.queries.at(-1).provider, log.queries.at(-1).returned, log.queries.at(-1).fetched, log.queries.at(-1).refused], [provider.id, 2, 1, 1]);
+    eq(`[${provider.id}] the artifact counts the same`, [res.artifact.provider, res.artifact.fetched, res.artifact.refusedHits.length], [provider.id, 1, 1]);
+  }
+
+  // 2. Every way a provider can say no, and the fall-through that must follow: a
+  //    real API answers with a non-200, a bot check served as 200 HTML, a quietly
+  //    renamed field, or an empty result set — none of them may end the search.
+  const ATTEMPT = {
+    http: (p) => p.expectedHttpError,
+    // The verbatim rejection each vendor returned to the declared request sent unauthenticated (section 16).
+    rejected: (p) => 'HTTP ' + p.rejected.status,
+    html: () => 'the provider answered with a body that is not JSON (a bot check, or a redirect)',
+    wrongShape: () => 'the provider answered with a body that is not the documented shape',
+    zero: () => 'the provider answered with no results',
+    offline: (p) => p.offline.throws,
+  };
+  const chainCases = [
+    ['http', 0, 1],
+    ['rejected', 0, 1],
+    ['html', 0, 1],
+    ['wrongShape', 0, 1],
+    ['zero', 0, 1],
+    ['offline', 0, 1],
+    ['http', 1, 2],
+    ['html', 1, 2],
+    ['zero', 1, 2],
+    ['rejected', 1, 2],
+    ['offline', 1, 2],
+    ['rejected', 2, null],
+    ['wrongShape', 2, null],
+  ];
+  for (const [caseName, firstIndex, secondIndex] of chainCases) {
+    const first = spec.providers[firstIndex];
+    const second = secondIndex === null ? null : spec.providers[secondIndex];
+    const dir = laneDir(`${first.id}-${caseName}`);
+    const { res, calls } = await laneRun(dir, { ...first.env, ...(second?.env || {}) }, { [first.id]: caseName });
+    const named = `${first.id}: ${ATTEMPT[caseName](first)}`;
+    if (second) {
+      eq(`[${first.id} ${caseName}] the chain falls through to the next declared provider`, [res.ok, res.artifact.provider], [true, second.id]);
+      eq(`[${first.id} ${caseName}] and a request went out to each of them, in order`, vendorCalls(calls, spec).map((c) => providerOf(c, spec)), [first.id, second.id]);
+      eq(`[${first.id} ${caseName}] the hits are the second provider's, parsed from its own field`, readLog(dir).hits[second.expectedHits[0].url]?.title, second.expectedHits[0].title);
+      eq(`[${first.id} ${caseName}] the attempt is recorded against the provider that made it, in the vendor's terms`, readLog(dir).queries.at(-1).attempts.map((a) => `${a.provider}: ${a.error}`), [named]);
+    } else {
+      check(`[${first.id} ${caseName}] the lane refuses when the last provider cannot answer`, res.ok === false && res.stage === 'search', JSON.stringify({ stage: res.stage }).slice(0, 120));
+      check(`[${first.id} ${caseName}] and the refusal names the provider and the reason`, String(res.error).includes(named), res.error);
+      eq(`[${first.id} ${caseName}] and writes nothing at all`, fs.readdirSync(dir), []);
+    }
+  }
+
+  // 3. The whole chain: two failures, then the provider that answers — and every
+  //    failed attempt still visible, in order, next to the query it belongs to.
+  const deepDir = laneDir('deep-chain');
+  const { res: deep, calls: deepCalls } = await laneRun(deepDir, { ...spec.providers[0].env, ...spec.providers[1].env, ...spec.providers[2].env }, { brave: 'html', tavily: 'http' });
+  check('the chain walks past two failures to the provider that answers', deep.ok === true && deep.artifact.provider === 'google-cse', deep.error || '');
+  eq('a request went to each provider in the declared order', vendorCalls(deepCalls, spec).map((c) => providerOf(c, spec)), ['brave', 'tavily', 'google-cse']);
+  eq('both failures are recorded, named, in the order they happened', readLog(deepDir).queries.at(-1).attempts.map((a) => `${a.provider}: ${a.error}`), [
+    'brave: the provider answered with a body that is not JSON (a bot check, or a redirect)',
+    'tavily: HTTP 401',
+  ]);
+
+  // 3b. And the chain stops where it should: with every provider ready, the first
+  //     one that answers ends the search — a working lane does not spend the other
+  //     two vendors' quota.
+  const stopDir = laneDir('stops-early');
+  const { res: stopped, calls: stopCalls } = await laneRun(stopDir, { ...spec.providers[0].env, ...spec.providers[1].env, ...spec.providers[2].env }, {});
+  check('with every provider ready the first one answers', stopped.ok === true && stopped.artifact.provider === 'brave', stopped.error || '');
+  eq('and no request goes to the providers behind it', vendorCalls(stopCalls, spec).map((c) => providerOf(c, spec)), ['brave']);
+
+  // 4. The refusal a user reads: the vendor's terms, never the parser's — a raw
+  //    JavaScript internal or a fragment of the page is not an answer.
+  for (const provider of spec.providers) {
+    const offlineDir = laneDir(`${provider.id}-naked`);
+    const { res: naked } = await laneRun(offlineDir, provider.env, { [provider.id]: 'offline' });
+    check(`[${provider.id}] a host with no egress refuses rather than reporting nothing found`, naked.ok === false && naked.stage === 'search' && String(naked.error).includes(provider.offline.throws.slice(0, 20)), JSON.stringify(naked).slice(0, 160));
+    const dir = laneDir(`${provider.id}-dead`);
+    const { res } = await laneRun(dir, provider.env, { [provider.id]: 'wrongShape' });
+    check(`[${provider.id}] the lane refuses when its only provider cannot answer`, res.ok === false && res.stage === 'search', JSON.stringify(res).slice(0, 160));
+    eq(`[${provider.id}] and that refusal wrote nothing`, fs.readdirSync(dir), []);
+    const text = formatResearchText(res);
+    check(`[${provider.id}] the refusal names the provider and the reason`, text.includes(provider.id) && /not the documented shape/.test(text), text.slice(0, 200));
+    check(`[${provider.id}] no parser internal and no page content reaches the reply`, !/TypeError|is not a function|Unexpected token|doctype|Enable JavaScript/i.test(text), text.slice(0, 200));
+  }
+
+  // 5. The command surface, in its own process. `--import` swaps the global fetch
+  //    for the recording, so the CLI — the same code path `/health research` runs —
+  //    is driven for real: no module call, no credential, no network.
+  const cliDir = laneDir('cli');
+  const callsFile = path.join(cliDir, 'calls.jsonl');
+  const cliEnv = {
+    ...process.env,
+    HEALTH_WORKSPACE: cliDir,
+    HEALTH_ENV_FILE: '',
+    ...CLEARED_SEARCH,
+    ...spec.providers[0].env,
+    SEARCH_FIXTURE: FIXTURE_FILE,
+    SEARCH_CALLS: callsFile,
+    SEARCH_CASES: '{}',
+    GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '',
+  };
+  const runCli = (env, query) => {
+    let code = 0;
+    let out = '';
+    try {
+      out = execFileSync(process.execPath, ['--import', SHIM_FILE, path.join(ROOT, 'scripts', 'health-runner.mjs'), '--research', `--query=${query}`, '--json'], { env, encoding: 'utf8' });
+    } catch (err) {
+      code = err.status;
+      out = err.stdout || '';
+    }
+    return { code, json: JSON.parse(out || '{}') };
+  };
+  const cli = runCli(cliEnv, spec.query);
+  eq('the CLI runs the lane against the recorded vendor and exits 0', [cli.code, cli.json.provider, cli.json.fetched, cli.json.refusedHits.length], [0, 'brave', 1, 1]);
+  const cliCalls = fs.readFileSync(callsFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const cliSent = vendorCalls(cliCalls, spec)[0] || {};
+  eq('the request the command sent is the pinned contract', { method: cliSent.method, url: cliSent.url }, { method: spec.providers[0].request.method, url: spec.providers[0].request.url });
+  check('and the credential header it sent is the vendor\u2019s', String(cliSent.headers?.['X-Subscription-Token'] || '').includes(spec.providers[0].env.BRAVE_SEARCH_API_KEY), JSON.stringify(cliSent.headers));
+  eq('the log the command wrote holds the vendor field as the hit title', readLog(cliDir).hits[spec.providers[0].expectedHits[0].url]?.title, spec.providers[0].expectedHits[0].title);
+
+  const barrenDir = laneDir('cli-nocred');
+  const callsBefore = fs.readFileSync(callsFile, 'utf8');
+  const barren = runCli({ ...cliEnv, HEALTH_WORKSPACE: barrenDir, ...CLEARED_SEARCH }, spec.query);
+  eq('with no search credential the same command refuses and exits 3', [barren.code, barren.json.stage], [3, 'credential']);
+  eq('and that refusal records nothing at all', fs.readdirSync(barrenDir), []);
+  eq('and made no request to any vendor', fs.readFileSync(callsFile, 'utf8') === callsBefore, true);
+
+  for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
+}
+
+// ------------------------------- 16. the probe behind the vendor contracts
+{
+  console.log('\n  — the probe behind the vendor contracts —');
+  // `search-provider-probe.json` is evidence, not a sensor. It records one
+  // unauthenticated observation of each declared endpoint, taken by hand on the
+  // date it carries; no test in this suite ever replays it over the network.
+  // What this section checks, offline, is that the evidence still describes the
+  // request the lane builds today — change a `build` without re-probing and the
+  // record goes stale, and stale evidence about a vendor contract is worse than
+  // none.
+  const probeSpec = loadSearchFixture(FIXTURE_FILE);
+  const probeFile = path.join(ROOT, 'scripts', 'fixtures', 'search-provider-probe.json');
+  const probe = JSON.parse(fs.readFileSync(probeFile, 'utf8'));
+  check('the observation is dated', typeof probe.observedAt === 'string' && !Number.isNaN(Date.parse(probe.observedAt)), String(probe.observedAt));
+  check('it says in words what it is, and what it is not', /unauthenticated observation, not a captured successful response/i.test(probe.statement || ''), String(probe.statement || '').slice(0, 140));
+  check('the credential it used is declared as not being one', /not a credential/.test(probe.credentialNote || ''), String(probe.credentialNote));
+  eq('the evidence covers exactly the declared providers, by id', probe.providers.map((p) => p.id).sort(), probeSpec.providers.map((p) => p.id).sort());
+  const gateImports = fs
+    .readFileSync(fileURLToPath(import.meta.url), 'utf8')
+    .split('\n')
+    .filter((line) => /^\s*import\b/.test(line))
+    .join('\n');
+  check('the probe tool is a hand-run tool, imported by nothing in this gate', !/search-provider-probe/.test(gateImports), gateImports.slice(0, 120));
+
+  for (const provider of probeSpec.providers) {
+    const evidence = probe.providers.find((p) => p.id === provider.id);
+    const declared = evidence.probes.find((x) => x.sentBy === 'SEARCH_PROVIDERS.build');
+    check(`[${provider.id}] the evidence was built by the lane's own request builder`, Boolean(declared), JSON.stringify(evidence.probes.map((x) => x.sentBy)));
+    // The drift sensor: this is the request the lane would send today, and the
+    // evidence has to be exactly that request — same url, same headers, same body.
+    const { url, init } = SEARCH_PROVIDERS.find((p) => p.id === provider.id).build({ key: probe.credential, cx: probe.credential, query: probeSpec.query, limit: MAX_HITS_PER_QUERY });
+    eq(`[${provider.id}] the request on record is the one the lane builds today`, declared.request, { method: init.method || 'GET', url, headers: init.headers, body: String(init.body ?? '') });
+    check(`[${provider.id}] what came back is a refusal, not a search result`, declared.response.status >= 400, String(declared.response.status));
+    check(`[${provider.id}] the evidence says what it proves`, Array.isArray(evidence.proves) && evidence.proves.length > 0, JSON.stringify(evidence.proves));
+    check(`[${provider.id}] and it says what it does not prove`, Array.isArray(evidence.doesNotProve) && evidence.doesNotProve.length > 0, JSON.stringify(evidence.doesNotProve));
+    eq(`[${provider.id}] the fixture's rejected case is that observed reply, verbatim`, provider.rejected.raw, declared.response.body);
+    eq(`[${provider.id}] with the status the vendor returned`, provider.rejected.status, declared.response.status);
+  }
+
+  // The one thing the probe could not settle is written down rather than
+  // smoothed over: Brave checks auth before routing, so its wrong-path control
+  // answers exactly like the declared path does.
+  const braveEvidence = probe.providers.find((p) => p.id === 'brave');
+  check('the unknown the probe could not settle stays on the record', braveEvidence.doesNotProve.some((line) => /routed path/.test(line)), JSON.stringify(braveEvidence.doesNotProve));
+}
+
+// ------------------------------- 17. the analysis producer
+{
+  console.log('\n  — the analysis producer —');
+  // `/health analyze` used to name the inputs and stop there: nothing wrote the
+  // payload the publisher reads, so the citation contract and the Doctor's
+  // checker had no live input. This section drives the producer end to end with
+  // no credential and no network — the gate, the pack, the model seam, the
+  // answers it refuses — and then, through the publisher's own loader,
+  // `planPublish`, the seat pack and readiness, what the payload it writes
+  // actually does downstream.
+  const scratch = [];
+  const analysisWorkspace = ({ state = 'closed', brief = true, payload = false, log = null } = {}) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-analyst-'));
+    scratch.push(dir);
+    fs.mkdirSync(path.join(dir, 'result'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'sources'), { recursive: true });
+    if (brief) fs.writeFileSync(path.join(dir, 'BRIEF.md'), '# Brief\n\nFour living documents.\n');
+    fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify({ ...fixtureArtifact(state), summary: { match: 2, missing: 1, appOnlyUnreviewed: 1, gap: 1 } }));
+    if (payload) fs.writeFileSync(path.join(dir, 'result', ANALYSIS_FILE), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: analysisPayload() }));
+    if (log) fs.writeFileSync(path.join(dir, 'result', RESEARCH_LOG), JSON.stringify(log));
+    return dir;
+  };
+  const pathsIn = (dir) => ({ workspace: dir, sources: path.join(dir, 'sources'), result: path.join(dir, 'result') });
+  const tree = (dir) => {
+    const out = {};
+    const walk = (rel) => {
+      for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+        const r = rel === '.' ? e.name : path.join(rel, e.name);
+        if (e.isDirectory()) walk(r);
+        else out[r] = contentHash(fs.readFileSync(path.join(dir, r), 'utf8'));
+      }
+    };
+    walk('.');
+    return out;
+  };
+
+  // The gate first, with the shape the command surface already reports.
+  const openDir = analysisWorkspace({ state: 'open' });
+  const openBefore = tree(openDir);
+  const openRun = await runHealthAnalyze({ paths: pathsIn(openDir), env: {} });
+  check('with the gate open the producer is refused before the model', openRun.ok === false && openRun.stage === 'gate', JSON.stringify(openRun).slice(0, 160));
+  eq('and it names all eight open items, with their titles', [openRun.openItems.length, Boolean(openRun.openItems[0].title)], [8, true]);
+  eq('the gate refusal wrote nothing', Object.keys(tree(openDir)).sort(), Object.keys(openBefore).sort());
+
+  // No brief: the pack refuses, so there is no seat turn at all.
+  const bareDir = analysisWorkspace({ brief: false });
+  const bareBefore = tree(bareDir);
+  const bareRun = await runHealthAnalyze({ paths: pathsIn(bareDir), env: {} });
+  check('a workspace with no brief is refused before the model', bareRun.ok === false && bareRun.stage === 'context', JSON.stringify(bareRun).slice(0, 160));
+  eq('the context refusal wrote nothing', Object.keys(tree(bareDir)).sort(), Object.keys(bareBefore).sort());
+
+  // No credential: the refusal comes before the model call and names the file.
+  const dir = analysisWorkspace();
+  const before = tree(dir);
+  const noKey = await runHealthAnalyze({ paths: pathsIn(dir), env: {} });
+  check('with no credential the producer refuses before the model', noKey.ok === false && noKey.stage === 'credential', JSON.stringify(noKey).slice(0, 200));
+  check('the refusal names the key and the file it goes in', /GEMINI_API_KEY/.test(noKey.error) && /common\.env/.test(noKey.error), noKey.error);
+  eq('the credential refusal wrote nothing', Object.keys(tree(dir)).sort(), Object.keys(before).sort());
+
+  // The payload itself: a fenced JSON answer with prose around it, and every
+  // document-4 line citing a link the literature lane never fetched.
+  const prompts = [];
+  const analyst = async ({ prompt }) => {
+    prompts.push(prompt);
+    return {
+      finalText: [
+        'Here is the payload, one claim per row, and every document-4 line cites the lane.',
+        '```json',
+        JSON.stringify({ sections: analysisPayload({ cite: CITATION }) }),
+        '```',
+      ].join('\n'),
+      code: 0,
+      lastError: null,
+    };
+  };
+  const run = await runHealthAnalyze({ paths: pathsIn(dir), env: {}, runGemini: analyst, now: new Date('2026-10-01T11:00:00Z') });
+  check('the producer writes the payload with the model seam', run.ok === true, run.error || '');
+  if (run.ok) {
+    eq('the receipt counts the sections and the lines', [run.artifact.sections, run.artifact.lines], [11, 11]);
+    eq('the receipt names the seat that wrote it', run.artifact.role, 'health_analyst');
+    check('the payload lands on the declared path', fs.existsSync(path.join(dir, 'result', ANALYSIS_FILE)), fs.readdirSync(path.join(dir, 'result')).join(','));
+    // The publisher's own loader is the door the payload has to pass.
+    const loaded = loadAnalysisFile(path.join(dir, 'result', ANALYSIS_FILE));
+    check('the payload passes the publisher\u2019s loader', loaded.ok === true && Object.keys(loaded.sections).length === 11, JSON.stringify(loaded).slice(0, 200));
+    eq('the loader carries the payload date through', loaded.at, '2026-10-01T11:00:00.000Z');
+    eq('the payload records the closed gate it was written under', [run.payload.gate.allowed, run.payload.gate.closed, run.payload.gate.total], [true, 8, 8]);
+    // The citation contract: the lines cite a link nobody fetched, so the
+    // withholding is recorded and the sections are not dropped.
+    eq('the citation contract withholds the four document-4 sections', run.withheld.map((w) => w.source), ['analysis.profile', 'analysis.by_marker', 'analysis.contradictions', 'analysis.not_settled']);
+    check('and names the reason in the contract\u2019s own terms', run.withheld.every((w) => w.reason === 'unverified'), JSON.stringify(run.withheld));
+    check('the payload carries the withholding too', run.payload.citations.withheld.length === 4 && run.payload.citations.fetched === 0, JSON.stringify(run.payload.citations));
+    const reply = formatAnalyzeText(run);
+    check('the reply says the payload was written, with its counts', /Analysis payload written/.test(reply) && /11 section\(s\)/.test(reply), reply.slice(0, 200));
+    check('the reply says which sections document 4 will withhold', /analysis\.by_marker/.test(reply) && /withheld/.test(reply), reply.slice(0, 300));
+    check('the reply points at the publisher', /health refresh/.test(reply), reply.slice(0, 200));
+    check('the seat was handed the mandate and the pack', /one JSON object/.test(prompts.at(-1) || '') && /analysis\.not_settled/.test(prompts.at(-1) || '') && /data gate: CLOSED/.test(prompts.at(-1) || ''), (prompts.at(-1) || '').slice(0, 200));
+    const after = tree(dir);
+    eq('exactly one file was added, the payload', Object.keys(after).filter((f) => !(f in before)).sort(), [`result/${ANALYSIS_FILE}`]);
+    check('every pre-existing byte is unchanged', Object.keys(before).every((f) => after[f] === before[f]), Object.keys(before).filter((f) => after[f] !== before[f]).join(','));
+
+    // Downstream, on the very payload the producer wrote. The publisher refuses
+    // document 4's sections by name and publishes the rest; with the link in the
+    // fetch log, the same payload publishes it.
+    const templates = readTemplates();
+    const planDraft = planPublish({ artifact: fixtureArtifact('closed'), analysis: loaded.sections, templates, registry: {}, now: new Date('2026-10-01T11:00:00Z') });
+    const insights = planDraft.items.find((i) => i.key === 'insights');
+    eq('the publisher withholds the four uncitable sections', insights.citationRefused.map((c) => c.reason), ['unverified', 'unverified', 'unverified', 'unverified']);
+    check('and publishes the documents that need no literature', planDraft.items.filter((i) => i.key === 'conditions' || i.key === 'test_plan').every((i) => i.refused.length === 0 && i.citationRefused.length === 0), JSON.stringify(planDraft.items.map((i) => [i.key, i.refused.length, i.citationRefused.length])));
+    const planCited = planPublish({ artifact: fixtureArtifact('closed'), analysis: loaded.sections, templates, registry: {}, now: new Date('2026-10-01T11:00:00Z'), citations: researchLog({ fetched: [CITATION] }) });
+    const insightsCited = planCited.items.find((i) => i.key === 'insights');
+    eq('with the link fetched and recorded the same payload publishes', insightsCited.citationRefused.length, 0);
+    check('and the published bytes carry the link', insightsCited.text.includes(CITATION), 'the link is missing from document 4');
+
+    // The payload is live for the other two consumers: the seat pack the Doctor
+    // reads shows it as accepted, and readiness stops calling it missing.
+    const pack = buildHealthContext(dir);
+    const analysisSection = pack.sections.find((s) => s.key === 'analysis');
+    check('the seat pack shows the payload as accepted, not refused', /shape: accepted/.test(analysisSection?.text || ''), (analysisSection?.text || '').slice(0, 140));
+    const readiness = checkHealthReadiness({ projectId: 'external-health', paths: pathsIn(dir), now: new Date('2026-10-01T11:00:00Z') });
+    const analysisCheck = readiness.checks.find((c) => c.key === 'analysis');
+    check('readiness reports the payload present and well-shaped, not missing', analysisCheck?.level === 'ok', JSON.stringify(analysisCheck));
+  }
+
+  // A model that does not answer with a payload writes nothing at all.
+  const answers = [
+    ['prose alone', 'I reviewed the markers and they look fine to me.', /without a JSON object/],
+    ['broken JSON', '```json\n{ "sections": { "analysis.conditions": [ "x" }\n```', /does not parse/],
+    ['a misspelt key', JSON.stringify({ sections: { 'analysis.condition': ['x'] } }), /unknown analysis key/],
+    ['a claim that is not a string', JSON.stringify({ sections: { 'analysis.conditions': [{ marker: 'LDL' }] } }), /must be a string/],
+  ];
+  for (const [label, answer, wanted] of answers) {
+    const badDir = analysisWorkspace();
+    const badBefore = tree(badDir);
+    const res = await runHealthAnalyze({ paths: pathsIn(badDir), env: {}, runGemini: async () => ({ finalText: answer, code: 0, lastError: null }) });
+    check(`[${label}] the producer refuses an answer that is not a payload`, res.ok === false && res.stage === 'payload', JSON.stringify({ stage: res.stage, error: res.error }).slice(0, 200));
+    check(`[${label}] the refusal says which rule broke`, wanted.test(res.error || ''), res.error);
+    eq(`[${label}] the refused run wrote nothing`, Object.keys(tree(badDir)).sort(), Object.keys(badBefore).sort());
+  }
+  const modelFail = await runHealthAnalyze({ paths: pathsIn(dir), env: {}, runGemini: async () => { throw new Error('no lane'); } });
+  check('a failed model call writes nothing', modelFail.ok === false && modelFail.stage === 'model' && /model call failed/.test(modelFail.error), JSON.stringify(modelFail).slice(0, 200));
+
+  // The extractor's own contract, small and explicit.
+  eq('a bare map of analysis keys is accepted', extractAnalysisPayload('{"analysis.conditions": ["x"]}').ok, true);
+  eq('prose around the object is ignored', extractAnalysisPayload('notes: {"sections": {"analysis.conditions": ["x"]}} end').sections['analysis.conditions'], ['x']);
+  eq('an answer with no object at all is refused', extractAnalysisPayload('no payload here').ok, false);
+  check('the refusal quotes the shape it wanted', /expected \{"sections"/.test(extractAnalysisPayload('nope').error), extractAnalysisPayload('nope').error);
+
+  // The CLI door: a refusal is an answer, so it exits 3 with the JSON saying why.
+  const runner = path.join(ROOT, 'scripts', 'health-runner.mjs');
+  const cliDir = analysisWorkspace();
+  const cliEnv = { ...process.env, HEALTH_WORKSPACE: cliDir, GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '' };
+  let cliCode = 0;
+  let cliOut = '';
+  try {
+    cliOut = execFileSync(process.execPath, [runner, '--analyze', '--json'], { env: cliEnv, encoding: 'utf8' });
+  } catch (err) {
+    cliCode = err.status;
+    cliOut = err.stdout || '';
+  }
+  const cliJson = JSON.parse(cliOut || '{}');
+  eq('the CLI refuses without a credential and exits 3', [cliCode, cliJson.stage], [3, 'credential']);
+  eq('and the CLI refusal wrote nothing', Object.keys(tree(cliDir)).sort(), ['BRIEF.md', 'result/health-verify.json']);
+
+  for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
+}
+
+// ------------------------------- 18. the Doctor's strike gates publishing
+{
+  console.log("\n  — the Doctor's strike gates publishing —");
+  // The Doctor's report used to be an artifact: a STRIKE changed nothing about
+  // what /health refresh published. It is now the publisher's third refusal,
+  // next to the gate and the clock: while the receipt carries a strike, every
+  // analysis section is withheld with the struck claims named, and the data
+  // sections still publish as a draft. This section drives that through the
+  // publisher and the runner with no credential and no network, then closes the
+  // loop with the receipt the Doctor's own writer produces.
+  const closed = fixtureArtifact('closed');
+  const templates = readTemplates();
+  const payload = analysisPayload({ cite: CITATION });
+  const citations = researchLog({ fetched: [CITATION] });
+  const now = new Date('2026-10-01T11:00:00Z');
+  const claim = (index, status, title = `claim ${index}`) => ({ index, title, claim: `${title} — the sentence under review`, status, item: status === 'UNPROVEN' ? 'H-4' : '', receipt: 'HbA1c 40 (2026-06-05)' });
+  const receipt = (claims) => ({
+    at: '2026-10-01T10:00:00Z',
+    coverage: { reviewed: claims.length, seen: 'analysis.conditions', notSeen: 'none', gate: 'CLOSED', payload: '2026-10-01T08:00:00Z', raw: `Coverage: ${claims.length} claim(s) reviewed` },
+    counts: { pass: claims.filter((c) => c.status === 'PASS').length, strike: claims.filter((c) => c.status === 'STRIKE').length, unproven: claims.filter((c) => c.status === 'UNPROVEN').length },
+    claims,
+  });
+  const struck = receipt([claim(1, 'PASS', 'HbA1c trend'), claim(2, 'STRIKE', 'A date that belongs to another panel'), claim(3, 'UNPROVEN', 'LDL')]);
+  const clean = receipt([claim(1, 'PASS', 'HbA1c trend'), claim(2, 'UNPROVEN', 'LDL')]);
+
+  // The review reader on its own: three states, three different answers.
+  const absentReview = doctorReview(null);
+  check('an absent receipt is not a strike and does not block', absentReview.read === false && absentReview.blocked === false, JSON.stringify(absentReview));
+  const reviewed = doctorReview(struck);
+  eq('a struck receipt is read with its counts', [reviewed.read, reviewed.blocked, reviewed.counts.reviewed, reviewed.counts.pass, reviewed.counts.strike, reviewed.counts.unproven], [true, true, 3, 1, 1, 1]);
+  eq('and it names the struck claim', reviewed.strikes.map((s) => [s.index, s.title]), [[2, 'A date that belongs to another panel']]);
+  check('UNPROVEN alone is not a veto', doctorReview(clean).blocked === false, JSON.stringify(doctorReview(clean)));
+  const brokenReview = doctorReview({ unreadable: 'the receipt does not parse: x' });
+  check('a receipt that cannot be read blocks, by name', brokenReview.blocked === true && brokenReview.unreadable === 'the receipt does not parse: x', JSON.stringify(brokenReview));
+  check('a receipt with no claims list is unreadable, not absent', doctorReview({}).blocked === true && /claims list/.test(doctorReview({}).unreadable), JSON.stringify(doctorReview({})));
+  check('a receipt that is not an object is unreadable too', doctorReview([]).blocked === true, JSON.stringify(doctorReview([])));
+
+  // The publisher, pure: mode, refusals, banner, provenance.
+  const noDoctor = planPublish({ artifact: closed, analysis: payload, templates, registry: {}, now, citations });
+  eq('with no receipt the publisher is unchanged from before this gate existed', noDoctor.mode, 'analysis');
+  const withStrike = planPublish({ artifact: closed, analysis: payload, templates, registry: {}, now, citations, doctor: struck });
+  eq('a strike turns the publish into a draft', withStrike.mode, 'draft');
+  eq('and the plan carries the review it read', [withStrike.gate.doctor.blocked, withStrike.gate.doctor.strikes.length], [true, 1]);
+  const conditions = withStrike.items.find((i) => i.key === 'conditions');
+  check('the analysis section is withheld with the struck claim named', conditions.refused.length > 0 && conditions.text.includes("the Doctor's report carries 1 STRIKE(s): claim 2 (A date that belongs to another panel)"), conditions.text.slice(0, 400));
+  check('the refusal points at the repair loop', /analyst rewrites it/.test(conditions.text) && /health doctor/.test(conditions.text), conditions.text.slice(0, 400));
+  check('no analysis claim reaches the draft', !conditions.text.includes(ANALYSIS_MARKER));
+  const snapshot = withStrike.items.find((i) => i.key === 'snapshot');
+  eq('the data document still publishes, as a draft, with no section refused', [snapshot.action, snapshot.refused.length], ['create', 0]);
+  check('its header carries the strike banner', snapshot.text.includes("⚠ **DRAFT — the Doctor's report carries 1 STRIKE(s): claim 2 (A date that belongs to another panel).**"), snapshot.text.slice(0, 300));
+  check('and it does not claim the gate alone made the analysis current', !snapshot.text.includes('Data gate closed'), 'the closed-gate line stayed with a strike on the receipt');
+  check('the provenance records the review', snapshot.text.includes("| Doctor's review | 3 claim(s): 1 PASS · 1 STRIKE · 1 UNPROVEN (reviewed 2026-10-01 10:00) |"), snapshot.text.split('\n').filter((l) => l.includes("Doctor's review")).join(' | '));
+  const insightsStruck = withStrike.items.find((i) => i.key === 'insights');
+  check('document 4 is withheld by the review before the citation contract runs', insightsStruck.refused.length > 0 && insightsStruck.citationRefused.length === 0, JSON.stringify({ refused: insightsStruck.refused.length, citation: insightsStruck.citationRefused }));
+
+  const cleanPlan = planPublish({ artifact: closed, analysis: payload, templates, registry: {}, now, citations, doctor: clean });
+  eq('a receipt with no strike publishes exactly as before', cleanPlan.mode, 'analysis');
+  check('and the section carries its claim', cleanPlan.items.find((i) => i.key === 'conditions').text.includes(ANALYSIS_MARKER));
+  check('the review is on record in the drafts', cleanPlan.items.find((i) => i.key === 'snapshot').text.includes("| Doctor's review | 2 claim(s): 1 PASS · 0 STRIKE · 1 UNPROVEN"), 'the review row is missing');
+
+  const unreadablePlan = planPublish({ artifact: closed, analysis: payload, templates, registry: {}, now, citations, doctor: { unreadable: 'the receipt does not parse: Unexpected token' } });
+  eq('an unreadable receipt blocks the publish too', unreadablePlan.mode, 'draft');
+  check('and the refusal says which failure it is', unreadablePlan.items.find((i) => i.key === 'conditions').text.includes('cannot be read'), unreadablePlan.items.find((i) => i.key === 'conditions').text.slice(0, 300));
+
+  // Precedence: the gate and the clock are the more fundamental refusals, and
+  // the section text must say the reason the publisher acted on.
+  const openStruck = planPublish({ artifact: fixtureArtifact('open'), analysis: payload, templates, registry: {}, now, citations, doctor: struck });
+  check('with the gate open the gate refusal is the one that shows', openStruck.items.find((i) => i.key === 'conditions').text.includes('Not published while the data gate is open'), openStruck.items.find((i) => i.key === 'conditions').text.slice(0, 300));
+  const staleStruck = planPublish({ artifact: { ...closed, at: '2026-08-15T09:00:00.000Z' }, analysis: payload, templates, registry: {}, now, citations, doctor: struck });
+  check('on a stale snapshot the staleness refusal is the one that shows', staleStruck.items.find((i) => i.key === 'conditions').text.includes('Not published on a stale snapshot'), staleStruck.items.find((i) => i.key === 'conditions').text.slice(0, 300));
+
+  // End to end through /health refresh: a real workspace with the verify
+  // fixture, the payload, the fetch log — and a Doctor's receipt.
+  const cleanup = [];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doctor-gate-'));
+  cleanup.push(dir);
+  fs.mkdirSync(path.join(dir, 'sources'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'result'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'sources', 'sheet_2026-09-30.json'), JSON.stringify({
+    source: { title: 'Medical Test Results - Chiwah', fetchedAt: '2026-09-30T18:33:28.031Z' },
+    data: { 'Medical Test Results - Chiwah': sheetRows.map((r) => [`"${r.dateRaw}","${r.test}","${r.resultRaw}","${r.range}","${r.comment}"`]) },
+  }));
+  fs.writeFileSync(path.join(dir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: payload }));
+  fs.writeFileSync(path.join(dir, 'result', 'health-research.json'), JSON.stringify(citations));
+  const doctorFile = path.join(dir, 'result', DOCTOR_ARTIFACT);
+  fs.writeFileSync(doctorFile, JSON.stringify(struck));
+  const env = { CLOUDFLARE_API_TOKEN: 'tok', CLOUDFLARE_D1_DATABASE_ID: 'dbb', HEALTH_PROFILE_UID: 'real', HEALTH_DOCS_FOLDER: 'folder1' };
+  const rows = () => [
+    { id: 'row_ok', firebase_uid: 'real', date: '2026-06-05', biomarkers: JSON.stringify({ hba1c: 40, creatinine: 100, hemoglobin: 166 }), note: '' },
+    { id: 'row_lipids', firebase_uid: 'real', date: '2025-06-25', biomarkers: JSON.stringify({ total_cholesterol: 5.7 }), note: '' },
+    { id: 'row_w', firebase_uid: 'real', date: '2024-10-23', biomarkers: JSON.stringify({ weight: 62 }), note: '' },
+    { id: 'row_bp', firebase_uid: 'real', date: '2024-03-27', biomarkers: JSON.stringify({ blood_pressure: '109 / 53 mmHg' }), note: '' },
+  ];
+  const fetchImpl = async (url, init = {}) => {
+    const json = (body) => ({ ok: true, status: 200, json: async () => body });
+    if (String(url).includes('/accounts?per_page=1')) return json({ success: true, result: [{ id: 'acct' }] });
+    const body = JSON.parse(init.body || '{}');
+    if (/from biomarker_logs group by firebase_uid/.test(body.sql)) return json({ success: true, result: [{ results: [{ firebase_uid: 'real', rows: rows().length }] }] });
+    if (/from profiles/.test(body.sql)) return json({ success: true, result: [{ results: [{ id: 'p', firebase_uid: 'real', data: JSON.stringify({ profile: { age: 43, height: 163, weight: 62, dateOfBirth: '1983-06-15' } }) }] }] });
+    if (/from biomarker_logs/.test(body.sql)) return json({ success: true, result: [{ results: rows() }] });
+    return json({ success: false, errors: [{ message: `unexpected sql: ${body.sql}` }] });
+  };
+  const store = fakeStore();
+  const run = () => runHealthRefresh({ workspace: dir, env, fetchImpl, now, token: 't', store, templates });
+
+  const blocked = await run();
+  check('refresh runs end to end with a strike on the receipt', blocked.ok === true, blocked.error || '');
+  if (blocked.ok) {
+    eq('a struck payload publishes as a draft', blocked.artifact.mode, 'draft');
+    eq('the receipt is on the artifact, with the struck claim', [blocked.artifact.gate.doctor.strikes.length, blocked.artifact.gate.doctor.counts?.reviewed], [1, 3]);
+    eq('every analysis section is withheld', blocked.artifact.refused.length, ANALYSIS_SECTIONS.length);
+    const conditionsText = blocked.plan.items.find((i) => i.key === 'conditions').text;
+    check('the published draft names the struck claim', /claim 2 \(A date that belongs to another panel\)/.test(conditionsText), conditionsText.slice(0, 400));
+    check('and carries no analysis claim', !conditionsText.includes(ANALYSIS_MARKER));
+    const reply = formatRefreshText(blocked);
+    check('the reply says the Doctor blocks the publish', /the Doctor's report blocks the analysis/.test(reply), reply.slice(0, 240));
+    check('the reply names the struck claim, not just a count', /A date that belongs to another panel/.test(reply), reply.slice(0, 500));
+    check('the reply does not claim the gate closed the publish', !/data gate closed/.test(reply), reply.slice(0, 240));
+    const log = fs.readFileSync(path.join(dir, 'result', 'health-refresh.md'), 'utf8');
+    check('the run log records the review and the withholding', /Doctor's review: 3 claim\(s\)/.test(log) && /Analysis withheld: the Doctor's report strikes 1 claim/.test(log), log.slice(0, 400));
+  }
+
+  // The boundary this gate draws: a review that has not run changes nothing.
+  fs.rmSync(doctorFile);
+  const unreviewed = await run();
+  check('with no receipt the same workspace publishes the analysis', unreviewed.ok === true && unreviewed.artifact.mode === 'analysis', JSON.stringify(unreviewed).slice(0, 200));
+  if (unreviewed.ok) check('and the sections carry their claims again', unreviewed.plan.items.find((i) => i.key === 'conditions').text.includes(ANALYSIS_MARKER));
+
+  // A receipt that cannot be read is not "no strike".
+  fs.writeFileSync(doctorFile, '{ not json');
+  const corrupt = await run();
+  check('an unreadable receipt blocks the publish', corrupt.ok === true && corrupt.artifact.mode === 'draft', JSON.stringify(corrupt).slice(0, 200));
+  if (corrupt.ok) {
+    check('and the refusal names the parse failure', corrupt.plan.items.find((i) => i.key === 'conditions').text.includes('cannot be read'), corrupt.plan.items.find((i) => i.key === 'conditions').text.slice(0, 300));
+    check('the reply separates it from a strike', /the receipt does not read/.test(formatRefreshText(corrupt)), formatRefreshText(corrupt).slice(0, 300));
+  }
+
+  // The repair loop: a re-checked receipt with no strike publishes again.
+  fs.writeFileSync(doctorFile, JSON.stringify(clean));
+  const cleared = await run();
+  check('a strike-free receipt publishes again', cleared.ok === true && cleared.artifact.mode === 'analysis', JSON.stringify(cleared).slice(0, 200));
+  if (cleared.ok) {
+    check('and the review is recorded in the drafts', cleared.plan.items.find((i) => i.key === 'snapshot').text.includes("| Doctor's review | 2 claim(s): 1 PASS · 0 STRIKE · 1 UNPROVEN"), 'the review row is missing');
+    const readyClean = checkHealthReadiness({ projectId: 'external-health', paths: { workspace: dir, result: path.join(dir, 'result') }, now });
+    const cleanCheck = readyClean.checks.find((c) => c.key === 'doctor');
+    check('readiness reports a strike-free review as ok', cleanCheck?.level === 'ok' && /no strikes/.test(cleanCheck.title), JSON.stringify(cleanCheck));
+  }
+
+  // A strike blocks the publish, not the repair: the analyst must still be able
+  // to rewrite the struck claim, or the loop would deadlock.
+  const repairDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doctor-repair-'));
+  cleanup.push(repairDir);
+  fs.mkdirSync(path.join(repairDir, 'result'), { recursive: true });
+  fs.mkdirSync(path.join(repairDir, 'sources'), { recursive: true });
+  fs.writeFileSync(path.join(repairDir, 'BRIEF.md'), '# Brief\n');
+  fs.writeFileSync(path.join(repairDir, 'result', 'health-verify.json'), JSON.stringify(fixtureArtifact('closed')));
+  fs.writeFileSync(path.join(repairDir, 'result', DOCTOR_ARTIFACT), JSON.stringify(struck));
+  const repairPaths = { workspace: repairDir, sources: path.join(repairDir, 'sources'), result: path.join(repairDir, 'result') };
+  const repaired = await runHealthAnalyze({
+    paths: repairPaths,
+    env: {},
+    runGemini: async () => ({ finalText: JSON.stringify({ sections: payload }), code: 0, lastError: null }),
+    now,
+  });
+  check('the analyst can still rewrite while a strike is on the receipt', repaired.ok === true && fs.existsSync(path.join(repairDir, 'result', ANALYSIS_FILE)), JSON.stringify(repaired).slice(0, 240));
+
+  // The loop closes: the receipt the Doctor's own writer produces is the receipt
+  // the publisher reads — one reader, one meaning of a strike.
+  const reportText = [
+    "# Doctor's report — 2026-10-01",
+    '',
+    'Coverage: 1 claim(s) reviewed · sections seen: analysis.conditions',
+    'Not seen: none',
+    'Gate: CLOSED',
+    'Payload: 2026-10-01T11:00:00.000Z',
+    '',
+    '## 1. HbA1c trend',
+    'Claim: "HbA1c rose from 39 to 40 across two panels."',
+    'Receipt: HbA1c 40 (2026-06-05)',
+    'Status: STRIKE',
+    'Changes: the two values do not come from the same panel.',
+    'Recommendation: re-test',
+    'Who: user',
+  ].join('\n');
+  const doctorRun = await runHealthDoctor({
+    paths: repairPaths,
+    runGemini: async () => ({ finalText: reportText, code: 0, lastError: null }),
+    now,
+  });
+  check('the Doctor writes a receipt over that payload', doctorRun.ok === true, doctorRun.error || '');
+  if (doctorRun.ok) {
+    const written = doctorReview(doctorRun.artifact);
+    check('and the publisher reads exactly that receipt: blocked, by claim', written.blocked === true && written.strikes[0]?.title === 'HbA1c trend', JSON.stringify(written).slice(0, 300));
+    check('the report is on disk with the strike', fs.readFileSync(path.join(repairDir, 'result', DOCTOR_FILE), 'utf8').includes('Status: STRIKE'));
+    const readyStruck = checkHealthReadiness({ projectId: 'external-health', paths: repairPaths, now });
+    const struckCheck = readyStruck.checks.find((c) => c.key === 'doctor');
+    check('readiness reports the strike as a finding', struckCheck?.level === 'finding' && /strikes 1 claim/.test(struckCheck.title), JSON.stringify(struckCheck));
+  }
+
+  const noneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doctor-none-'));
+  cleanup.push(noneDir);
+  const readyNone = checkHealthReadiness({ projectId: 'external-health', paths: { workspace: noneDir, result: path.join(noneDir, 'result') }, now });
+  const noneCheck = readyNone.checks.find((c) => c.key === 'doctor');
+  check('readiness names a missing review instead of staying silent', noneCheck?.level === 'finding' && /No doctor report/.test(noneCheck.title), JSON.stringify(noneCheck));
+
+  for (const d of cleanup) fs.rmSync(d, { recursive: true, force: true });
 }
 
 console.log(`\n${passed} pass, ${failed} fail\n`);

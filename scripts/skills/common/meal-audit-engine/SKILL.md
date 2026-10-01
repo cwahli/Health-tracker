@@ -124,6 +124,37 @@ Do not reimplement any of this by hand. If a meal needs auditing, the loop repor
 it as `needs_audit` and the correct action is to audit that bundle — not to
 hand-file a card for a meal nobody has checked.
 
+### Workflow 4b — Answering a hand-off request
+
+The loop queues unaudited meals for you. Check what is waiting:
+
+```bash
+node scripts/meal-audit-handoff.mjs status
+```
+
+For each `pending` request, take it, then finish it:
+
+```bash
+node scripts/meal-audit-handoff.mjs claim    --meal-id=<id> --by=meal_audit
+# ... audit the photos named in the request, write the bundle ...
+node scripts/meal-audit-handoff.mjs complete --meal-id=<id> --bundle=<abs bundle dir> --verdict=audited
+```
+
+Rules for the answer:
+- **The request inlines the contract** (bbox required, 32 nutrients, catalog or
+  scale for weight). It carries no chat history — follow the file.
+- `complete` is refused if the bundle does not exist, so do not report a bundle
+  you did not write.
+- If the catalog cannot source a nutrient, the audit is **incomplete**: say so.
+  `scripts/meal-audit-assist.mjs` refuses to emit a bundle that would zero-fill
+  one, because a zero scores as 100% drift against a real value and would file
+  bug cards against the audit instead of the product. Use `declaredNutrients`
+  with a citable reference, or report the gap.
+- A `photo_only` request has no edit history: never file `turn_mismatch` or
+  `edit_not_applied` against it.
+- Once `complete` lands, the next sweep adopts your bundle and compares it — you
+  do not file a ticket yourself.
+
 Runbook: `plan/MEAL_QA_LOOP.md`.
 
 ---

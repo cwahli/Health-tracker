@@ -41,7 +41,9 @@ import {
   rungFor,
   runComparison,
   postPlan,
+  auditIsDispatchable,
 } from './meal-audit-loop.mjs';
+import { actualFromMealBuild } from './meal-audit-capture-actual.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
@@ -332,6 +334,111 @@ check('CLI rejects a non-numeric --max-attempts', () => {
   const r = spawnSync('node', [path.join(REPO_ROOT, 'scripts', 'meal-audit-loop.mjs'),
     '--latest=1', '--max-attempts=zero', '--dry-run'], { encoding: 'utf8', timeout: 60000 });
   assert.equal(r.status, 3, `expected usage exit 3, got ${r.status}`);
+});
+
+// An audit may be partial — refusing to guess a weight is the whole point — but a
+// partial audit must never start a coder. Driving meal_1790784308630 produced 14
+// "failures" that were mostly the audit's own incompleteness (the salad had no
+// sourceable weight, so it was omitted), and the loop was about to hand them to a
+// coder as product defects. Re-verify could never go green against ground truth
+// missing the keys it is scored on, so the attempt cap would burn on cards the
+// audit invented itself.
+check('an audit missing a CORE nutrient refuses dispatch', () => {
+  const dir = path.join(tmp, 'incomplete-bundle');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'audit_payload.json'), JSON.stringify({
+    schemaVersion: 2.1,
+    unsourcedNutrients: ['addedSugar'],
+    passes: [{ dishes: [{ dishName: 'Ham', unsourcedNutrients: ['addedSugar', 'zinc'] }] }],
+  }), 'utf8');
+
+  const j = auditIsDispatchable(dir);
+  assert.equal(j.ok, false, 'a core gap must block dispatch');
+  assert.ok(j.coreGaps.includes('addedSugar'), `coreGaps should name addedSugar, got ${JSON.stringify(j.coreGaps)}`);
+  assert.match(j.reason, /incomplete/i);
+});
+
+check('micronutrient gaps alone do NOT block dispatch', () => {
+  // The catalog is thin; a missing vitamin is normal and must not stop the loop.
+  // Only the keys the comparator actually scores as core are required, or the
+  // guard would refuse every bundle ever built and dispatch would be dead code.
+  const dir = path.join(tmp, 'micro-gap-bundle');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'audit_payload.json'), JSON.stringify({
+    schemaVersion: 2.1,
+    unsourcedNutrients: ['zinc', 'selenium', 'vitaminC'],
+    passes: [{ dishes: [{ dishName: 'Salad', unsourcedNutrients: ['zinc'] }] }],
+  }), 'utf8');
+
+  const j = auditIsDispatchable(dir);
+  assert.equal(j.ok, true, `micronutrient gaps must not block dispatch, got ${j.reason}`);
+});
+
+check('a bundle with no audit payload at all refuses dispatch', () => {
+  const dir = path.join(tmp, 'empty-bundle');
+  fs.mkdirSync(dir, { recursive: true });
+  const j = auditIsDispatchable(dir);
+  assert.equal(j.ok, false, 'nothing to judge means nothing may be dispatched');
+  assert.match(j.reason, /no audit_payload|unreadable|no bundle/i);
+});
+
+// The last mile of compare: nothing used to produce an actual payload, so every
+// sweep stopped at NO_ACTUAL and the comparison could only be walked by hand.
+// Two properties matter and both are load-bearing:
+//
+//   1. A payload with no result.mealBuild.items must FAIL. Emitting an empty or
+//      half-filled actual would compare as 100% drift on every key and file cards
+//      against the audit rather than the product — the exact failure the audit
+//      chain exists to prevent.
+//   2. A dish with no nutrients must FAIL for the same reason. A dish present but
+//      nutritionally empty scores worse than a dish that is simply absent, because
+//      absence can be seen as a missing dish and emptiness cannot.
+check('actualFromMealBuild refuses a payload the app never computed', () => {
+  assert.throws(() => actualFromMealBuild({}), /no result\.mealBuild\.items/);
+  assert.throws(() => actualFromMealBuild({ result: {} }), /no result\.mealBuild\.items/);
+  assert.throws(() => actualFromMealBuild({ result: { mealBuild: { items: [] } } }), /no result\.mealBuild\.items/);
+});
+
+check('actualFromMealBuild refuses a dish with no nutrients', () => {
+  assert.throws(
+    () => actualFromMealBuild({ result: { mealBuild: { items: [{ name: 'Rice', weightGrams: 200, nutrients: {} }] } } }),
+    /carries no nutrients/,
+    'a nutritionally empty dish compares as 100% drift on every key',
+  );
+});
+
+check('actualFromMealBuild reshapes the app ledger into the comparator form', () => {
+  const a = actualFromMealBuild({
+    jobId: 'job_1',
+    result: {
+      mealBuild: {
+        title: 'Oats and Grapes',
+        weightGrams: 320,
+        quantity: '1 serving',
+        nutrients: { calories: 313 },
+        items: [
+          { name: 'Oats', canonicalDbName: 'Oats', weightGrams: 220, boundingBox2D: [250, 100, 955, 990], nutrients: { calories: 220, protein: 8 } },
+          { name: 'Grapes', canonicalDbName: 'Grapes', weightGrams: 100, boundingBox2D: [390, 110, 875, 880], nutrients: { calories: 93, protein: 1 } },
+        ],
+      },
+    },
+  });
+  // The shape normalizeActualAudit() already accepts: { dishes: [...] }.
+  assert.equal(a.dishes.length, 2);
+  assert.equal(a.dishes[0].dishName, 'Oats');
+  assert.deepEqual(a.dishes[0].boundingBox2D, [250, 100, 955, 990]);
+  assert.deepEqual(a.dishes[1].boundingBox2D, [390, 110, 875, 880]);
+  assert.equal(a.dishes[1].estimatedWeightGrams, 100);
+  assert.deepEqual(a.mealTotals, { calories: 313 });
+  assert.match(a.source, /app mealBuild/);
+});
+
+check('a dish with no box is captured as null, never a fabricated full frame', () => {
+  const a = actualFromMealBuild({
+    result: { mealBuild: { items: [{ name: 'Mystery', weightGrams: 80, nutrients: { calories: 10 } }] } },
+  });
+  assert.equal(a.dishes[0].boundingBox2D, null,
+    'inventing [0,0,1000,1000] would be a fabricated annotation');
 });
 
 console.log(`\n${pass} pass, ${fail} fail`);

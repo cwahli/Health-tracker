@@ -1,0 +1,233 @@
+{
+  "note": "Recorded vendor shapes for the literature lane's search providers. Each entry pins the request the lane must send (endpoint, method, where the credential goes, and that the key is never in a body) and one recorded response per shape a real API returns: the documented envelope, a zero-result answer, a non-200, a bot check served as 200 HTML, and a quiet field rename. Trimmed to the documented fields the lane reads; extra envelope keys are kept so a parse that depends on the whole body would notice. Read by scripts/fixtures/search-providers.mjs, driven by scripts/assert-external-health.test.mjs section 15 and by scripts/fixtures/search-provider-shim.mjs for the command surface. The rejected case in each provider is different in kind from the rest: it is the verbatim body that vendor actually returned to the declared request, sent with a well-formed but invalid credential (2026-10-01, unauthenticated observation — not a captured successful response; see scripts/fixtures/search-provider-probe.json). The ok/zero/http/html/wrongShape envelopes remain transcriptions of the vendors' documentation.",
+  "query": "vitamin D and muscle strength",
+  "pages": [
+    {
+      "url": "https://example.test/brave-d-1",
+      "status": 200,
+      "raw": "<!doctype html><html><body><h1>Vitamin D supplementation and muscle strength</h1><p>A randomised trial. No title element, so the lane's own title has to survive.</p></body></html>"
+    },
+    { "url": "https://example.test/brave-d-2", "status": 404, "raw": "" },
+    {
+      "url": "https://example.test/tavily-d-1",
+      "status": 200,
+      "raw": "<!doctype html><html><body><h1>Vitamin D and muscle strength: an umbrella review</h1><p>Full text.</p></body></html>"
+    },
+    { "url": "https://example.test/tavily-d-2", "status": 404, "raw": "" },
+    {
+      "url": "https://example.test/google-d-1",
+      "status": 200,
+      "raw": "<!doctype html><html><body><h1>Vitamin D and muscle strength — a guideline view</h1><p>Full text.</p></body></html>"
+    },
+    { "url": "https://example.test/google-d-2", "status": 404, "raw": "" }
+  ],
+  "providers": [
+    {
+      "id": "brave",
+      "doc": "https://api-dashboard.search.brave.com/documentation/services/web-search",
+      "host": "api.search.brave.com",
+      "env": { "BRAVE_SEARCH_API_KEY": "fixture-brave-key" },
+      "request": {
+        "method": "GET",
+        "url": "https://api.search.brave.com/res/v1/web/search?q=vitamin%20D%20and%20muscle%20strength&count=10",
+        "headers": { "X-Subscription-Token": "fixture-brave-key", "Accept": "application/json" },
+        "body": ""
+      },
+      "expectedHits": [
+        {
+          "url": "https://example.test/brave-d-1",
+          "title": "Vitamin D supplementation and muscle strength in adults",
+          "snippet": "A randomised trial of vitamin D and grip strength."
+        },
+        {
+          "url": "https://example.test/brave-d-2",
+          "title": "Vitamin D and falls: a second look",
+          "snippet": "Another summary."
+        }
+      ],
+      "ok": {
+        "status": 200,
+        "body": {
+          "type": "search",
+          "web": {
+            "type": "search",
+            "results": [
+              {
+                "title": "Vitamin D supplementation and muscle strength in adults",
+                "url": "https://example.test/brave-d-1",
+                "description": "A randomised trial of vitamin D and grip strength.",
+                "age": "2024-03-01",
+                "meta_url": { "hostname": "example.test", "scheme": "https" }
+              },
+              {
+                "title": "Vitamin D and falls: a second look",
+                "url": "https://example.test/brave-d-2",
+                "description": "Another summary.",
+                "age": "2023-11-02",
+                "meta_url": { "hostname": "example.test", "scheme": "https" }
+              }
+            ]
+          }
+        }
+      },
+      "zero": { "status": 200, "body": { "type": "search", "web": { "type": "search", "results": [] } } },
+      "http": { "status": 429, "body": { "error": { "code": "RATE_LIMITED", "detail": "Rate limit exceeded", "status": 429 } } },
+      "html": {
+        "status": 200,
+        "raw": "<!doctype html><html><head><title>Just a moment...</title></head><body>Enable JavaScript and cookies to continue.</body></html>"
+      },
+      "wrongShape": { "status": 200, "body": { "type": "search", "web": { "type": "search", "results": "nope" } } },
+      "offline": { "throws": "getaddrinfo ENOTFOUND api.search.brave.com" },
+      "rejected": {
+        "status": 422,
+        "raw": "{\"error\":{\"code\":\"SUBSCRIPTION_TOKEN_INVALID\",\"detail\":\"The provided subscription token is invalid.\",\"meta\":{\"component\":\"authentication\"},\"status\":422},\"type\":\"ErrorResponse\"}"
+      },
+      "expectedHttpError": "HTTP 429"
+    },
+    {
+      "id": "tavily",
+      "doc": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
+      "host": "api.tavily.com",
+      "env": { "TAVILY_API_KEY": "fixture-tavily-key" },
+      "request": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "headers": {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer fixture-tavily-key",
+          "Accept": "application/json"
+        },
+        "body": "{\"query\":\"vitamin D and muscle strength\",\"max_results\":10,\"search_depth\":\"basic\"}"
+      },
+      "expectedHits": [
+        {
+          "url": "https://example.test/tavily-d-1",
+          "title": "Vitamin D and muscle strength: an umbrella review",
+          "snippet": "An umbrella review of vitamin D and strength outcomes."
+        },
+        {
+          "url": "https://example.test/tavily-d-2",
+          "title": "Vitamin D status in older adults",
+          "snippet": "Another summary."
+        }
+      ],
+      "ok": {
+        "status": 200,
+        "body": {
+          "query": "vitamin D and muscle strength",
+          "response_time": 0.51,
+          "results": [
+            {
+              "title": "Vitamin D and muscle strength: an umbrella review",
+              "url": "https://example.test/tavily-d-1",
+              "content": "An umbrella review of vitamin D and strength outcomes.",
+              "score": 0.98,
+              "raw_content": null
+            },
+            {
+              "title": "Vitamin D status in older adults",
+              "url": "https://example.test/tavily-d-2",
+              "content": "Another summary.",
+              "score": 0.71,
+              "raw_content": null
+            }
+          ]
+        }
+      },
+      "zero": { "status": 200, "body": { "query": "vitamin D and muscle strength", "response_time": 0.31, "results": [] } },
+      "http": { "status": 401, "body": { "detail": { "error": "Unauthorized: missing or invalid API key." } } },
+      "html": {
+        "status": 200,
+        "raw": "<!doctype html><html><head><title>502 Bad Gateway</title></head><body>nginx</body></html>"
+      },
+      "wrongShape": { "status": 200, "body": { "query": "vitamin D and muscle strength", "results": "nope" } },
+      "offline": { "throws": "getaddrinfo ENOTFOUND api.tavily.com" },
+      "rejected": {
+        "status": 401,
+        "raw": "{\n    \"detail\": {\n        \"error\": \"Unauthorized: missing or invalid API key.\"\n    }\n}\n"
+      },
+      "expectedHttpError": "HTTP 401"
+    },
+    {
+      "id": "google-cse",
+      "doc": "https://developers.google.com/custom-search/v1/reference/rest/v1/cse/list",
+      "host": "www.googleapis.com",
+      "env": { "GOOGLE_SEARCH_API_KEY": "fixture-google-key", "GOOGLE_SEARCH_CX": "fixture-cx" },
+      "request": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/customsearch/v1?key=fixture-google-key&cx=fixture-cx&num=10&q=vitamin%20D%20and%20muscle%20strength",
+        "headers": { "Accept": "application/json" },
+        "body": ""
+      },
+      "expectedHits": [
+        {
+          "url": "https://example.test/google-d-1",
+          "title": "Vitamin D and muscle strength — a guideline view",
+          "snippet": "Guideline summary of vitamin D and muscle strength."
+        },
+        {
+          "url": "https://example.test/google-d-2",
+          "title": "Vitamin D and physical performance",
+          "snippet": "Another summary."
+        }
+      ],
+      "ok": {
+        "status": 200,
+        "body": {
+          "kind": "customsearch#search",
+          "url": { "type": "application/json", "template": "https://www.googleapis.com/customsearch/v1?q={searchTerms}&num={count?}&cx={cx?}&key={key}" },
+          "queries": {
+            "request": [
+              {
+                "title": "Google Custom Search - vitamin D and muscle strength",
+                "totalResults": "1234",
+                "searchTerms": "vitamin D and muscle strength",
+                "count": 10
+              }
+            ]
+          },
+          "searchInformation": { "searchTime": 0.31, "formattedSearchTime": "0.31", "totalResults": "1234", "formattedTotalResults": "1,234" },
+          "items": [
+            {
+              "kind": "customsearch#result",
+              "title": "Vitamin D and muscle strength — a guideline view",
+              "link": "https://example.test/google-d-1",
+              "snippet": "Guideline summary of vitamin D and muscle strength.",
+              "displayLink": "example.test"
+            },
+            {
+              "kind": "customsearch#result",
+              "title": "Vitamin D and physical performance",
+              "link": "https://example.test/google-d-2",
+              "snippet": "Another summary.",
+              "displayLink": "example.test"
+            }
+          ]
+        }
+      },
+      "zero": { "status": 200, "body": { "kind": "customsearch#search", "searchInformation": { "totalResults": "0" } } },
+      "http": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "The request is missing a valid API key.",
+            "errors": [{ "message": "The request is missing a valid API key.", "domain": "global", "reason": "forbidden" }],
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      },
+      "html": {
+        "status": 200,
+        "raw": "<!doctype html><html><head><title>Sign in - Google Accounts</title></head><body>Sign in to continue.</body></html>"
+      },
+      "wrongShape": { "status": 200, "body": { "kind": "customsearch#search", "items": "nope" } },
+      "offline": { "throws": "getaddrinfo ENOTFOUND www.googleapis.com" },
+      "rejected": {
+        "status": 400,
+        "raw": "{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"errors\": [\n      {\n        \"message\": \"API key not valid. Please pass a valid API key.\",\n        \"domain\": \"global\",\n        \"reason\": \"badRequest\"\n      }\n    ],\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\",\n        \"reason\": \"API_KEY_INVALID\",\n        \"domain\": \"googleapis.com\",\n        \"metadata\": {\n          \"service\": \"customsearch.googleapis.com\"\n        }\n      },\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.LocalizedMessage\",\n        \"locale\": \"en-US\",\n        \"message\": \"API key not valid. Please pass a valid API key.\"\n      }\n    ]\n  }\n}\n"
+      },
+      "expectedHttpError": "HTTP 403"
+    }
+  ]
+}

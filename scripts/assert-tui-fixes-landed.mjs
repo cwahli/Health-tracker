@@ -22,9 +22,30 @@
  * the exceptions file is skipped, and the file prints how old each exception
  * is, so a bypass cannot quietly become permanent.
  *
+ * ## Two senses this gate was missing (both paid for on 2026-10-01)
+ *
+ * **Squash-merge residue is unreachable, forever.** A PR merged with a squash
+ * puts a NEW commit on the base; the branch keeps its original sha, which is
+ * then not an ancestor of the base and never will be. `git log base..branch`
+ * reports it forever, so reachability alone condemns landed work. The
+ * byte-identical escape hatch only holds while the base has not moved past the
+ * change — on 2026-10-01 `scripts/tui-gateway.mjs` advanced to eca9ed2c and
+ * stopped matching, and two agents each spent a waiver on the same branch
+ * (1ea00d23). `git cherry` answers the question reachability cannot: it compares
+ * PATCHES, and prints `-` for a commit whose change is already upstream.
+ *
+ * **Work in review is not stranded.** A branch with an open PR is visibly being
+ * worked; that is the opposite of "an unlanded fix reads as a done fix". The
+ * branch names are supplied by the caller in `--open-pr-branches=` (or the
+ * `TUI_OPEN_PR_BRANCHES` env var) so this module stays pure — it makes no
+ * network call and its own sensor can drive it without a token. If the caller
+ * supplies nothing, no branch is exempt and the gate behaves exactly as before:
+ * the API being unreachable must not silently pass anything.
+ *
  * Usage:
  *   node scripts/assert-tui-fixes-landed.mjs [--max-age-hours=24] [--base=main]
  *                                               [--exceptions=<path>]
+ *                                               [--open-pr-branches=a,b,c]
  */
 
 import { execFileSync } from 'node:child_process';
@@ -69,6 +90,26 @@ const BASE = args.get('base')
   || (gitQuiet('rev-parse', '--verify', '--quiet', 'refs/heads/main') ? 'main' : 'origin/main');
 const MAX_AGE_HOURS = Number(args.get('max-age-hours') || 24);
 const EXCEPTIONS_FILE = resolve(REPO, args.get('exceptions') || 'scripts/tui-stranded-exceptions.txt');
+
+// Branches with an open PR, supplied by the caller so this module makes no
+// network call. Comma or newline separated. Empty (the default, and what CI
+// gets if its `gh pr list` fails) means "exempt nobody" — the pre-existing
+// behaviour — so an API outage cannot quietly pass stranded work.
+//
+// `origin/` is stripped on both sides for NAME comparison: CI enumerates
+// remote-tracking refs (`origin/agent/x`) while a developer runs this locally
+// against `agent/x`, and `gh pr list` reports the bare name.
+//
+// The refs themselves are resolved further down, next to the patch comparison
+// that needs them — a bare name from `gh` often does not exist in this
+// checkout (a CI clone has only `origin/agent/x`), and an unresolved ref makes
+// `git cherry` fail, return nothing, and report reviewed work as stranded.
+const OPEN_PR_BRANCHES = new Set();
+for (const raw of (args.get('open-pr-branches') ?? process.env.TUI_OPEN_PR_BRANCHES ?? '')
+  .split(/[\s,]+/)) {
+  const name = raw.trim();
+  if (name) OPEN_PR_BRANCHES.add(name);
+}
 
 // The files a /tui regression hides in. A new one added here must also be
 // covered by a sensor in scripts/assert-tui-gateway.test.mjs or
@@ -172,8 +213,72 @@ const waivedFor = (hash) => {
 
 let waived = 0;
 const blockers = [];
+
+// `git cherry <upstream> <branch>` compares PATCHES, not shas: it prints `-` for
+// a commit whose change is already upstream even when the sha is unreachable —
+// which is the squash-merge case reachability can never satisfy, and also the
+// case of work rebuilt onto a fresh branch. Cached per (upstream, branch).
+const cherryCache = new Map();
+const cherryLanded = (upstream, branch) => {
+  const key = `${upstream} ${branch}`;
+  if (!cherryCache.has(key)) {
+    const out = git('cherry', upstream, branch) || '';
+    const landed = new Set();
+    for (const line of out.split('\n')) {
+      const [mark, sha] = line.trim().split(/\s+/);
+      if (mark === '-' && sha) landed.add(sha);
+    }
+    cherryCache.set(key, landed);
+  }
+  return cherryCache.get(key);
+};
+
+// A branch is named locally (`agent/x`) or as a remote-tracking ref
+// (`origin/agent/x`); CI only ever sees the latter.
+const bareName = (branch) => branch.replace(/^origin\//, '');
+
+// Resolve each open-PR name to a ref that EXISTS here, for the patch
+// comparison below. Name-only matching still works when nothing resolves; this
+// only makes the patch check possible.
+const OPEN_PR_REFS = [];
+const OPEN_PR_UNRESOLVED = [];
+for (const name of OPEN_PR_BRANCHES) {
+  const found = [name, `origin/${name}`].find((c) => git('rev-parse', '--verify', '--quiet', `${c}^{commit}`));
+  if (found) OPEN_PR_REFS.push(found);
+  else OPEN_PR_UNRESOLVED.push(name);
+}
+
+const patchIsUpstream = (branch, hash) => cherryLanded(BASE, branch).has(hash);
+
+// In review: either the branch itself is under review, or this exact patch is.
+// Work rebuilt onto a fresh `agent/` branch with an open PR is the same work,
+// and 2026-10-01 had exactly that — cf8f68f7 sat on the leftover
+// `fix/tui-scroll-multiclient` while the reviewed `agent/tui-scroll-multiclient`
+// carried the same change as 593433f8. Judging by branch name alone would have
+// reported reviewed work as stranded.
+const isUnderOpenPr = (branch, hash) => {
+  const bare = bareName(branch);
+  for (const pr of OPEN_PR_BRANCHES) {
+    if (bareName(pr) === bare) return true;
+  }
+  for (const pr of OPEN_PR_REFS) {
+    if (pr !== branch && cherryLanded(pr, branch).has(hash)) return true;
+  }
+  return false;
+};
+
 for (const s of stranded) {
   if (waivedFor(s.hash)) {
+    waived += 1;
+    continue;
+  }
+  // Landed by another route, squash-merged: the patch is upstream, the sha is not.
+  if (patchIsUpstream(s.branch, s.hash)) {
+    waived += 1;
+    continue;
+  }
+  // In review: an open PR means the work is visibly being worked, not sitting.
+  if (isUnderOpenPr(s.branch, s.hash)) {
     waived += 1;
     continue;
   }
@@ -193,6 +298,13 @@ for (const s of stranded) {
 }
 
 blockers.sort((a, b) => b.ageHours - a.ageHours);
+
+// Said out loud, because a branch the caller named as "under review" that this
+// checkout cannot see is exactly the case where the exemption quietly stops
+// working. Silence there would be a gate that reports less than it checked.
+if (OPEN_PR_UNRESOLVED.length) {
+  log(`  note: ${OPEN_PR_UNRESOLVED.length} open-PR branch(es) are not in this checkout and can only be matched by name: ${OPEN_PR_UNRESOLVED.join(', ')}`);
+}
 
 if (blockers.length === 0) {
   pass(`no TUI fix older than ${MAX_AGE_HOURS}h is stranded on a branch (${considered} commit(s) scanned, ${waived} already landed or waived)`);

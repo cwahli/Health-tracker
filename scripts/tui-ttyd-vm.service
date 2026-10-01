@@ -35,8 +35,13 @@ Environment=TUI_TMUX_NAME=VM-tui
 EnvironmentFile=-/home/ubuntu/.config/bot-host/tui-ttyd.env
 # Loopback only. The gateway admits a request; nothing else can reach this
 # socket, and it must never be reachable from the internet directly.
+# --max-clients 0 (no cap): one ttyd process serves ONE shell, but several
+# browser clients may watch it — desktop + phone on the SAME tmux session is
+# the point. Capping at 1 is what produced the "tap Enter, never reconnects"
+# loop: the desktop held the only slot, the phone got no PTY, and ttyd showed
+# its reconnect overlay forever.
 ExecStart=/usr/bin/ttyd --port 8896 --interface 127.0.0.1 --base-path /tty \
-  --writable --max-clients 1 --once=false \
+  --writable --max-clients 0 --once=false \
   -c ${TUI_TTYD_USER}:${TUI_TTYD_PASSWORD} \
   --check-origin --terminal-type xterm-256color \
   --client-option fontSize=13 \

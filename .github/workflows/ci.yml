@@ -297,6 +297,15 @@ jobs:
       - name: Token sync gate (assert-sync-tokens)
         run: node scripts/assert-sync-tokens.test.mjs
 
+      # The coder build gate must never be fooled by the npm `tsc` decoy: when a
+      # worktree has no local compiler, `npx tsc` resolves version 2.0.4 of the
+      # package named `tsc`, whose only output is "This is not the tsc command
+      # you are looking for". The gate read that as a build failure and blamed
+      # the agent (card #19, four identical nudges against an environment that
+      # no retry could fix). Executed here so the sensor is a gate, not decor.
+      - name: Dispatch toolchain gate (assert-dispatch-toolchain)
+        run: node scripts/assert-dispatch-toolchain.mjs
+
       # The merge gate that protects this branch. `auto-merge` used to merge PRs
       # whose required checks had FAILED (#340 raced ahead of CI; #346 landed with
       # `tsc + named gates` red in both runs). The sensor drives the decision
@@ -347,12 +356,15 @@ jobs:
       #   mechanical criteria and idempotent idem-keys.
       # loop:    the driver stays bounded, per-card capped, author != verifier.
       # assist:  refuses to invent nutrients rather than emit false findings.
-      - name: Meal audit loop gates (resolve, ticket, loop, assist)
+      # handoff:  the loop actually queues work for the meal-audit agent, and a
+      #   completed hand-off is adopted rather than re-fetched.
+      - name: Meal audit loop gates (resolve, ticket, loop, assist, handoff)
         run: |
           node scripts/assert-meal-audit-resolve.mjs
           node scripts/assert-meal-audit-ticket.mjs
           node scripts/assert-meal-audit-loop.mjs
           node scripts/assert-meal-audit-assist.mjs
+          node scripts/assert-meal-audit-handoff.mjs
 
       # The audit-only nutrient route the meal-audit agent reads from. Pins that it
       # serves active rows only, returns per-100g values unscaled, clamps its limit,
@@ -437,9 +449,18 @@ jobs:
       # but never merged. Both halves of that gate are proven in its own sensor
       # against throwaway repos — a gate never seen red is a gate nobody trusts.
       - name: TUI fixes-landed ratchet (unlanded branch is a regression)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           node scripts/assert-tui-fixes-landed.test.mjs
+          # A branch with an open PR is being worked, not stranded — that is the
+          # opposite of an unlanded fix reading as a done fix. The gate makes no
+          # network call, so the names are supplied here. If `gh` fails the list
+          # is empty and NOBODY is exempt: an API outage must not pass work.
+          OPEN_PRS="$(gh pr list --state open --limit 100 --json headRefName \
+            --jq '.[].headRefName' 2>/dev/null | paste -sd, - || true)"
           # The base is the branch under test, not a name this file hardcodes:
           # a PR's own head must not be judged against itself.
           node scripts/assert-tui-fixes-landed.mjs \
+            --open-pr-branches="$OPEN_PRS" \
             --base="origin/${{ github.event.repository.default_branch }}"

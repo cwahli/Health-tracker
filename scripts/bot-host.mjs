@@ -118,6 +118,9 @@ import {
   parseCommand,
   resolveCommandName,
   isAddressedToUs,
+  resolveGroupAddressing,
+  recordActiveThread,
+  clearActiveThread,
   chatKind,
   BOT_COMMANDS,
   toTelegramCommands,
@@ -166,7 +169,11 @@ import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-run
 // The Personal Health Coach's data loop. `/health` is deliberately not gated on
 // the chat's active project: the command names its own project, so a verify can
 // be run from any chat, and the reply says which one it read.
-import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText } from './health-runner.mjs';
+import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText } from './health-runner.mjs';
+// "Can a seat actually run?" — the readiness check reads the context a seat
+// would be handed plus this host's credentials, and reports what is missing
+// instead of letting a turn start on an empty context.
+import { checkHealthReadiness, formatReadinessText } from './lib/health/readiness.mjs';
 import { runTaxCommand, runTaxSweep, runTaxStatus, runTaxVerify, TAX_SUBS } from './tax-runner.mjs';
 
 const HOME = os.homedir();
@@ -2062,6 +2069,52 @@ function rolesFileInUse() {
   return path.join(path.dirname(registryFileInUse()), 'roles.json');
 }
 
+/**
+ * Deterministic /bugs body: the live card list, read from the store in the
+ * command handler — never composed by the model.
+ *
+ * Why this exists (measured 2026-09-30): the ticket bot answered "what's the
+ * list" with 4 cards from its own chat history while the store held 15,
+ * because the read is a tool call the model may skip and a stale session may
+ * never re-issue. The /bugs reply is code, so its number cannot be bypassed:
+ * it quotes the live read's `count` and `generated_at`, then one line per
+ * card in public_n order. A stale session can be wrong about phrasing, but
+ * not about this number.
+ */
+export function formatBugsListText(parsed) {
+  const rows = Array.isArray(parsed?.rows) ? parsed.rows : null;
+  if (!rows) {
+    const err = String(parsed?.error || '').slice(0, 160);
+    return `Bug store unreachable (bug API down or not local to this host). /bugs needs the store — retry later.${err ? ` ${err}` : ''}`;
+  }
+  const count = Number(parsed?.count ?? rows.length);
+  const at = String(parsed?.generated_at || '').trim();
+  const head = `🐛 *Bug queue* — ${count} card${count === 1 ? '' : 's'}${at ? ` (live read ${at})` : ''}.`;
+  if (!rows.length) return `${head}\nThe queue is empty — no tickets on the store.`;
+  const sorted = [...rows].sort((a, b) => Number(a?.public_n ?? 0) - Number(b?.public_n ?? 0));
+  // Telegram caps a message at 4096 chars; ~40 cards fit, the rest live behind
+  // the board button in the same message.
+  const MAX_ROWS = 40;
+  const lines = sorted.slice(0, MAX_ROWS).map((r) => {
+    const n = r?.public_n ?? '?';
+    const title = String(r?.title || '(untitled)').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const st = [r?.state, r?.queue].filter(Boolean).join('/');
+    return `#${n} ${title}${st ? ` (${st})` : ''}`;
+  });
+  if (sorted.length > MAX_ROWS) lines.push(`… +${sorted.length - MAX_ROWS} more (open the board for the full list).`);
+  return `${head}\n${lines.join('\n')}`;
+}
+
+async function bugsListText() {
+  let parsed;
+  try {
+    parsed = JSON.parse(await runBugctl(['list', '--json']));
+  } catch (e) {
+    return `Bug store unreachable (bug API down or not local to this host). /bugs needs the store — retry later. ${String(e?.message || '').slice(0, 120)}`;
+  }
+  return formatBugsListText(parsed);
+}
+
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId = 0, kind = 'direct' }) {
   const eff = effective(config, prefs, chatId);
 
@@ -2069,6 +2122,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
   const route = resolveCommandName(cmd);
   switch (route) {
     case 'start':
+      clearActiveThread(chatId);
     case 'help':
       await api.sendMessage(chatId, helpText(config, eff));
       return;
@@ -2102,6 +2156,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const statusProject = getChatProject(chatId);
       const statusWorkspace = statusProject.type === 'external' ? statusProject.workspace : config.agent.workspace;
       const activeStatusSession = sessionForWorkspace(sessions, chatId, statusWorkspace);
+      // The seat this chat runs in, so /status answers which role the agent is
+      // using — the PM seat included (`/role pm take`). Unknown or unset means
+      // general mode, never a guessed name.
+      const statusRole = checkRoleDetails(statusProject.id, getChatRole(chatId) || '')?.name || null;
       const tuiLine = tuiStatusLine(config.id, activeStatusSession);
       const snap = buildStatusSnapshot({
         bot: { id: config.id, name: config.name },
@@ -2109,6 +2167,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         capabilities: { compact: true, costTracking: true, backends: false },
         effective: eff,
         session: activeStatusSession ? { id: activeStatusSession, workspace: statusWorkspace } : null,
+        role: statusRole,
         handoff: Boolean((prefFor(prefs, chatId)).handoff),
         usage: lastUsage?.get(chatId) || null,
         totals: totals?.get(chatId) || null,
@@ -2146,6 +2205,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       sessions.delete(chatId);
       saveSessions(config.id, sessions);
       clearFollowups(chatId);
+      clearActiveThread(chatId);
       await api.sendMessage(chatId, 'Started a fresh session.');
       return;
 
@@ -2663,9 +2723,14 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const boardUrl = `${bugsGatewayUrl}/bugs/?bot=${config.id}`;
       const moved = lastBugsUrl && lastBugsUrl !== boardUrl;
       lastBugsUrl = boardUrl;
+      // The card list below is read live from the store by this handler, not
+      // composed by the model — so its count is the same number the board
+      // shows, even for a stale session that would otherwise answer from chat
+      // history.
+      const liveList = await bugsListText();
       await api.sendMessage(chatId, [
         moved ? '⚠️ *The tunnel was reconnected*, so any earlier /bugs button is dead — use this one.' : null,
-        '🐛 *Bug queue* — the same board as the Health Tracker site (Ready now, Stuck, Bugs open), auto-refreshing.',
+        liveList,
         'What changes here lands in the same list the site shows.',
       ].filter(Boolean).join('\n'), {
         reply_markup: { inline_keyboard: [[{ text: '🐛 Open bug board', web_app: { url: boardUrl } }]] },
@@ -2783,7 +2848,12 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         return;
       }
       const sub = (cmd.args || '').trim().toLowerCase();
-      if (sub === 'audit' || sub === 'defense' || sub === 'finalize') {
+      // Any token that is not `run` is a stage for this project: the runner
+      // resolves it against the project's own seats (by id, alias or number) or
+      // refuses with the list. It used to accept only the three case
+      // checkpoints and answer anything else by running the **whole** council —
+      // the one thing a stage command must never do silently.
+      if (sub && sub !== 'run' && sub !== 'status') {
         if (running.get(chatId)) {
           await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish first.');
           return;
@@ -2813,7 +2883,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         );
         try {
           const res = await runFullCouncil(activeProj.id);
-          const reply = `✅ *Council Review Completed!*\n• *Workspace:* \`${res.workspace}\`\n• *Artifacts Generated:* 6 phases\n• *Executive Deliverables:* Ready in Google Drive mirror.\n\nType \`/role builder\` to inspect the final talking points or \`/status\` to review.`;
+          const reply = `✅ *Council Review Completed!*\n• *Workspace:* \`${res.workspace}\`\n• *Seats run:* ${res.phases.length}\n• *Deliverables:* ${res.deliverables.map((d) => `\`${path.basename(d)}\``).join(' · ')}\n\nType \`/council status\` to see which stages have run.`;
           await api.sendMessage(chatId, reply, { parse_mode: 'Markdown' });
         } catch (err) {
           await api.sendMessage(chatId, `❌ Council run failed: ${err.message}`);
@@ -2822,8 +2892,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
 
       const status = getCouncilStatus(activeProj.id);
-      const phasesText = (status.phases || []).map((p) => `• ${p.title}: ${p.completed ? '✅ Done' : '⏳ Pending'}`).join('\n');
-      const reply = `🏛️ *[Council Status — ${status.name}]*\n• *Workspace:* \`${status.workspace}\`\n• *Google Drive:* \`${status.gdriveFolder}\`\n• *Evidence Ledger:* ${status.hasEvidenceLedger ? '✅ Attached' : '⚠️ Missing'}\n\n*Review Phases:*\n${phasesText}\n\n*Staged Checkpoints (Human-in-the-Loop):*\n• \`/council audit\` — Phase 1: Audit facts & flag missing receipts\n• \`/council defense\` — Phases 2 & 3: Defense arguments & Manager simulation\n• \`/council finalize\` — Phases 4-6: Legal review, arbitrator ruling & final dossier\n• \`/council run\` — Unattended full pipeline`;
+      const phasesText = (status.phases || []).map((p) => `• ${p.index}. ${p.title}: ${p.completed ? '✅ Done' : '⏳ Pending'}`).join('\n');
+      // The case councils keep their three checkpoints; every other project is
+      // told its own stages, because those are the tokens that resolve.
+      const stageHelp = status.pipeline === 'case'
+        ? '*Staged Checkpoints (Human-in-the-Loop):*\n• \`/council audit\` — Phase 1: Audit facts & flag missing receipts\n• \`/council defense\` — Phases 2 & 3: Defense arguments & Manager simulation\n• \`/council finalize\` — Phases 4-6: Legal review, arbitrator ruling & final dossier\n• \`/council run\` — Unattended full pipeline'
+        : `*Stages:*\n• \`/council <stage>\` — one seat, by id, alias or number (1-${status.phases.length})\n• \`/council all\` — every seat, in order\n• \`/council run\` — every seat, unattended`;
+      const ledger = status.pipeline === 'case' ? `\n• *Evidence Ledger:* ${status.hasEvidenceLedger ? '✅ Attached' : '⚠️ Missing'}` : '';
+      const ready = status.deliverablesReady ? `✅ ${status.deliverables.length} deliverable(s)` : `⏳ ${status.deliverables.length} expected`;
+      const reply = `🏛️ *[Council Status — ${status.name}]*\n• *Workspace:* \`${status.workspace}\`\n• *Google Drive:* \`${status.gdriveFolder}\`${ledger}\n• *Deliverables:* ${ready}\n\n*Review Phases:*\n${phasesText}\n\n${stageHelp}`;
       await api.sendMessage(chatId, reply, { parse_mode: 'Markdown' });
       return;
     }
@@ -2859,9 +2936,32 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           botRoles = ['• (role catalog unreadable — bot-identity roles unavailable)'];
         }
         const rolesList = (currentRoles || []).map((r) => `• \`/role ${r.id.split('_')[0]}\` — *${r.name}*`).join('\n');
+        // The whole explanation lives here: this listing is the one place every
+        // role surface is named together, so a chat never has to guess how the
+        // PM seat or a persona is taken, inspected, or left.
+        const listedRole = checkRoleDetails(activeProj.id, getChatRole(chatId) || '')?.name || null;
         await api.sendMessage(
           chatId,
-          `🎭 *[Bot Identity Roles]*\n\n${botRoles.join('\n')}\n\n👥 *[Project Personas — ${activeProj.name}]*\n\n${rolesList || '• None declared.'}\n\n• \`/role check <name>\` — Inspect role mandate & instructions\n• \`/role add <id> <name> : <instructions>\` — Add a new dynamic persona\n• \`/role remove <id>\` — Delete a persona\n• \`/role reset\` — Return to general collaborative mode`,
+          [
+            `🎭 *[Bot Identity Roles]*`,
+            '',
+            ...botRoles,
+            '',
+            `👥 *[Active Project Roles — ${activeProj.name}]*`,
+            '',
+            rolesList || '• None declared.',
+            '',
+            '*How roles work:*',
+            `• This chat runs as: ${listedRole ? `*${listedRole}*` : '_general mode_'} (also on \`/status\` as \`role:\`)`,
+            '• `/role accountant` — Rewire this bot into a role (bot restarts); `/role general` — back to a thin clone',
+            '• `/role <name>` — Assume a persona; later turns run under its mandate',
+            '• `/role pm take` — Take the Project Manager seat (fleet, ladder, sheet, nudges)',
+            '• `/role pm` — Fleet projection · `/role pm status` — read-only plus adopted role',
+            '• `/role pm run` — One PM cycle: project, nudge, record · `/role pm sheet` — record rows now',
+            '• `/role check <name>` — Inspect role mandate & instructions',
+            '• `/role add <id> <name> : <instructions>` — Add a new dynamic role',
+            '• `/role remove <id>` — Delete a role · `/role reset` — back to general mode',
+          ].join('\n'),
           { parse_mode: 'Markdown' }
         );
         return;
@@ -3007,7 +3107,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'health': {
       const projectId = 'external-health';
-      const sub = (cmd.args || '').trim().toLowerCase();
+      // `sub` is the lowercased head for matching; the raw text is kept because
+      // the literature lane's query is a sentence, not a keyword.
+      const rawArgs = String(cmd.args || '').trim();
+      const sub = rawArgs.toLowerCase();
       if (sub === 'verify') {
         if (running.get(chatId)) {
           await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before verifying the health data.');
@@ -3077,11 +3180,165 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         }
         return;
       }
+      if (sub === 'dashboard' || sub === 'dash') {
+        const ws = healthWorkspace(projectId);
+        const dashPath = path.join(ws, 'result', 'HEALTH_DASHBOARD.md');
+        let text = '';
+        try {
+          if (fs.existsSync(dashPath)) {
+            text = fs.readFileSync(dashPath, 'utf8');
+          } else {
+            const status = getHealthStatus({ projectId });
+            text = formatStatusText(status);
+          }
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Failed to read health dashboard: ${err.message}`);
+          return;
+        }
+        await sendChunked(api, chatId, text);
+        return;
+      }
+      if (sub === 'triage' || sub.startsWith('triage')) {
+        const target = rawArgs.replace(/^triage\s*/i, '').trim().toUpperCase();
+        const ws = healthWorkspace(projectId);
+        const verifyPath = path.join(ws, 'result', 'health-verify.json');
+        let artifact = null;
+        try {
+          if (fs.existsSync(verifyPath)) {
+            artifact = JSON.parse(fs.readFileSync(verifyPath, 'utf8'));
+          }
+        } catch { artifact = null; }
+
+        if (target === 'H-1' || target === '1') {
+          const lines = [
+            '🛠️ *[Triage H-1: Profile Demographics Mismatch]*',
+            '• *Brief Fact:* Male, Born 15 June 1983 (Age 43), Chinese ethnicity.',
+            '• *Authoritative Sheet:* Height 163 cm, Weight 62 kg, BMI 23.49.',
+            '• *Current D1 App Profile:* Age 28, Height 178 cm, Weight 74 kg (defaults).',
+            '',
+            '*Actionable Resolution Path:*',
+            '1. Reconcile Cloudflare D1 app profile (`hiJun2hTdDTk2igwerun2LKvwb42`):',
+            '   `UPDATE profiles SET date_of_birth = "1983-06-15", height = 163, weight = 62, gender = "male", ethnicity = "chinese" WHERE uid = "hiJun2hTdDTk2igwerun2LKvwb42";`',
+            '2. Run `/health verify` to re-check. H-1 will flip to closed (✅).'
+          ];
+          await api.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown' });
+          return;
+        }
+
+        if (target === 'H-4' || target === '4') {
+          const lines = [
+            '🛠️ *[Triage H-4: Misfiled Biomarker Test Dates]*',
+            '• *Issue:* 4 app rows carry lab values that belong to a different blood draw date.',
+            '',
+            '*Identified Misalignments:*',
+            '• `2020-04-10` ➔ Belongs to `2020-11-04` draw.',
+            '• `2024-04-01` ➔ Belongs to `2024-04-02` draw.',
+            '• `2026-03-06` ➔ Belongs to `2024-04-03` / `2026-06-03` draw.',
+            '• `2026-05-05` ➔ Belongs to `2026-06-03` / multiple draw dates.',
+            '',
+            '*Actionable Resolution Path:*',
+            '1. In D1 database or via app edit, align row timestamps with the exact lab draw dates above.',
+            '2. Run `/health verify` to verify clusters have cleared.'
+          ];
+          await api.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown' });
+          return;
+        }
+
+        if (target.startsWith('WAIVE') || target.startsWith('H-8')) {
+          const lines = [
+            '🛠️ *[Triage H-8 / Waiver Management]*',
+            '• *H-8:* App holds telemetry newer than sheet (July–Sept 2026).',
+            '• *Resolution:* Waive via `HEALTH_WAIVED_ITEMS=H-8` in context env or environment.',
+            '• Once waived, the item state becomes `waived` (☑) and no longer blocks `/health analyze`.'
+          ];
+          await api.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown' });
+          return;
+        }
+
+        // General triage summary
+        if (!artifact) {
+          await api.sendMessage(chatId, '⚠️ No verify artifact found. Please run `/health verify` first to generate the triage backlog.');
+          return;
+        }
+        const openItems = (artifact.fixList?.items || []).filter((i) => i.state === 'open');
+        const lines = [
+          '🩺 *[Data Gate Triage Overview]*',
+          `Gate Status: *${openItems.length ? `🔴 OPEN (${openItems.length} items)` : '🟢 CLOSED'}*`,
+          '',
+          ...openItems.map((i) => `• *${i.id}:* ${i.title}\n  _${i.detail}_`),
+          '',
+          '💡 *Next Steps:*',
+          '• Type `/health triage H-1` for demographics fix instructions.',
+          '• Type `/health triage H-4` for misfiled date realignment instructions.',
+          '• Type `/health dashboard` to view the comprehensive 5-section status board.'
+        ];
+        await sendChunked(api, chatId, lines.join('\n'));
+        return;
+      }
       if (sub === 'analyze') {
-        // The gate refusal is the answer this command exists to give, so it is
-        // reported as a plain refusal (no crash path, no markdown parse risk).
-        const res = runHealthAnalyze({ projectId });
-        await api.sendMessage(chatId, formatAnalyzeText(res), res.ok ? { parse_mode: 'Markdown' } : undefined);
+        // The producer takes a model turn, so it holds the running-guard the
+        // other seat commands hold. A refusal — the gate open, no credential, a
+        // payload the publisher would refuse — writes nothing and is reported
+        // as the answer it is.
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before the analysis pass.');
+          return;
+        }
+        await api.sendMessage(chatId, '📊 *Running /health analyze — one analyst turn, judged before it lands...*', { parse_mode: 'Markdown' });
+        try {
+          const res = await runHealthAnalyze({ projectId });
+          await api.sendMessage(chatId, formatAnalyzeText(res), res.ok ? { parse_mode: 'Markdown' } : undefined);
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Analysis failed: ${err.message}`);
+        }
+        return;
+      }
+      if (sub === 'readiness') {
+        // Read-only and cheap: no running-guard, because this answers a question
+        // about the host rather than starting work in the workspace.
+        const res = checkHealthReadiness({ projectId });
+        await api.sendMessage(chatId, formatReadinessText(res), { parse_mode: 'Markdown' });
+        return;
+      }
+      if (sub === 'research' || sub.startsWith('research ')) {
+        // The literature lane's reach. It searches the declared provider chain,
+        // fetches every hit, and records them in the workspace. A refusal — no
+        // credential, or nothing returned — records nothing and is the answer,
+        // because an empty log the seat could read as "no literature" is the
+        // failure this lane exists to prevent.
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before running the research lane.');
+          return;
+        }
+        await api.sendMessage(chatId, '🔎 *Running /health research — searching the declared provider chain and fetching every hit...*', { parse_mode: 'Markdown' });
+        try {
+          const query = rawArgs.replace(/^research\s*/i, '').trim();
+          const res = await runHealthResearch({ projectId, queries: query ? [query] : [] });
+          await api.sendMessage(chatId, formatResearchText(res), res.ok ? { parse_mode: 'Markdown' } : undefined);
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Research failed: ${err.message}`);
+        }
+        return;
+      }
+      if (sub === 'doctor') {
+        // The seat that checks the other seats. It writes only its own report;
+        // a refusal (no credential, a report the checker refuses) writes
+        // nothing and is reported as the answer it is.
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before the doctor review.');
+          return;
+        }
+        await api.sendMessage(
+          chatId,
+          '🩺 *Running /health doctor — re-checking the analyst\u2019s claims against their receipts...*',
+          { parse_mode: 'Markdown' },
+        );
+        try {
+          const res = await runHealthDoctor({ projectId });
+          await api.sendMessage(chatId, formatDoctorText(res), res.ok ? { parse_mode: 'Markdown' } : undefined);
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Doctor failed: ${err.message}`);
+        }
         return;
       }
       // Anything else (including no argument) is the status answer.
@@ -3783,10 +4040,20 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   }
   // Five bots can share one group only if each answers solely when addressed.
   // Direct chats skip this entirely: everything there is for this bot.
-  if (chatKind(message) === 'group' && !isAddressedToUs(message, config.me)) {
+  const isMasterBot = config.id === 'vm' || Boolean(config.isMaster);
+  const addr = resolveGroupAddressing(message, config.me, {
+    role: config.role || config.agent?.role || null,
+    name: config.name,
+    isMaster: isMasterBot,
+    allowGroupBroadcast: true,
+  });
+  if (chatKind(message) === 'group' && !addr.addressed) {
     return;
   }
-  const text = (message.text || message.caption || '').trim();
+  if (addr.delayMs && addr.delayMs > 0) {
+    await new Promise((r) => setTimeout(r, addr.delayMs));
+  }
+  const text = (addr.cleanText || message.text || message.caption || '').trim();
   const hasMedia = selectInboundMedia(message).length > 0;
   if (!text && !hasMedia) return;
 
@@ -3903,8 +4170,13 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // One shared working headline (provider + model + elapsed + usage) for
     // every bot-host agent — same line shape as the Grok TG router. The
     // provider follows the chat's effective model, not the registry default.
+    const roleHeadlineLabel = addr?.roleId
+      ? `${addr.roleId.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())} (${providerLabelForModel(eff.model)})`
+      : addr?.isBroadcast
+        ? `Council Coordinator (${providerLabelForModel(eff.model)})`
+        : providerLabelForModel(eff.model);
     renderer.setHeadline({
-      providerLabel: providerLabelForModel(eff.model),
+      providerLabel: roleHeadlineLabel,
       modelLabel: eff.model || '',
     });
     // Paint the headline now (starting… 0s) so the chat sees the turn begin
@@ -3942,8 +4214,21 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const media = await collectInboundMedia(api, message, config);
     const promptWithMedia = media.length ? buildInboundPrompt(prompt, media) : prompt;
 
-    const activeProject = getChatProject(chatId);
-    const activeRole = getChatRole(chatId);
+    let activeProject = getChatProject(chatId);
+    let activeRole = getChatRole(chatId);
+
+    if (addr?.roleId) {
+      activeRole = addr.roleId;
+      if (['data_steward', 'health_analyst', 'test_planner', 'research_lead', 'safety_reviewer', 'doctor', 'lifestyle'].includes(addr.roleId)) {
+        activeProject = KNOWN_PROJECTS['external-health'];
+      }
+    } else if (addr?.isBroadcast) {
+      if (activeProject.id === 'health-tracker' || activeProject.id === 'external-health') {
+        activeProject = KNOWN_PROJECTS['external-health'];
+      }
+      activeRole = null;
+    }
+
     const isExternalTurn = activeProject.type === 'external';
     const effectiveWorkspace = isExternalTurn ? activeProject.workspace : config.agent.workspace;
     // An external folder's child is built from a list, so it never holds the
@@ -4505,6 +4790,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     busy.delete(chatId);
     releaseFiles(claimed, claimId);
     recordRunFinish(config.id, chatId);
+    if (storeFacts.outcome === 'answered') {
+      recordActiveThread(chatId, {
+        roleId: activeRole || addr?.roleId || null,
+        botId: config.id,
+        isCouncil: Boolean(addr?.isBroadcast),
+        jointRoles: addr?.jointRoles || [],
+        timestamp: Date.now(),
+      });
+    }
     // G-1: a real finished turn is what the store exists to record. This is the
     // only place it is written, it runs on every outcome (answered, empty, failed,
     // aborted), and it cannot throw or await: a Google outage must not cost the

@@ -54,6 +54,15 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// The hand-off to the meal-audit agent. Imported (not shelled out) so the
+// loop's own gate can assert the handshake without a subprocess, and so a
+// queued request is visible in the loop's summary.
+import {
+  enqueue as handoffEnqueue,
+  status as handoffStatus,
+  notifyAgent as handoffNotify,
+} from './meal-audit-handoff.mjs';
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
 const STATE_DIR = path.join(REPO_ROOT, 'specs', 'meal-qa-loop');
@@ -77,12 +86,13 @@ export function parseArgs(argv) {
   const o = {
     latest: null, bundle: null, dryRun: false, noDispatch: false,
     status: false, json: false, help: false, maxAttempts: MAX_ATTEMPTS,
-    deployWait: DEPLOY_WAIT_SECONDS, actual: null, reset: false,
+    deployWait: DEPLOY_WAIT_SECONDS, actual: null, reset: false, notifyAgent: false,
   };
   for (const a of argv) {
     if (a === '--help' || a === '-h') o.help = true;
     else if (a === '--dry-run') o.dryRun = true;
     else if (a === '--no-dispatch') o.noDispatch = true;
+    else if (a === '--notify-agent') o.notifyAgent = true;
     else if (a === '--status') o.status = true;
     else if (a === '--json') o.json = true;
     else if (a === '--reset') o.reset = true;
@@ -220,6 +230,39 @@ export function selectMeals({ latest, bundle, dryRun }) {
   }));
 }
 
+/** Every image the fetcher/resolve wrote into a bundle, as absolute paths. */
+export function listBundlePhotos(bundleDir) {
+  const photosDir = path.join(bundleDir, 'photos');
+  if (!fs.existsSync(photosDir)) return [];
+  try {
+    return fs.readdirSync(photosDir)
+      .filter((f) => /\.(jpe?g|png|webp)$/i.test(f))
+      .map((f) => path.join(photosDir, f));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Photo references from a skeleton, resolved to absolute paths when they are
+ * server-relative (`/photos/x.jpg`), and passed through when already absolute.
+ * A photo_only request with no resolvable image is an action the agent cannot
+ * take, so the route's answer is what the agent will have to work from.
+ */
+export function readSkeletonPhotos(skeletonPath) {
+  const out = [];
+  let skel = null;
+  try { skel = JSON.parse(fs.readFileSync(skeletonPath, 'utf8')); } catch { return out; }
+  const base = (process.env.API_BASE_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+  for (const pass of (skel.passes || [])) {
+    for (const p of (pass.addedPhotos || [])) {
+      if (typeof p !== 'string' || !p.trim()) continue;
+      out.push(p.startsWith('http') ? p : `${base}${p.startsWith('/') ? '' : '/'}${p}`);
+    }
+  }
+  return out;
+}
+
 /**
  * Stage 2 — obtain an auditable bundle for a meal. Full multi-turn bundles are
  * delegated to the existing fetcher (it owns debug-payload retrieval and photo
@@ -230,6 +273,21 @@ export function selectMeals({ latest, bundle, dryRun }) {
 export function obtainBundle(meal, { outputDir, dryRun }) {
   if (meal.bundleDir) return { ok: true, bundleDir: meal.bundleDir, note: 'prebuilt bundle' };
 
+  // An audited bundle the agent already produced wins over re-fetching. Without
+  // this the loop rebuilt an empty skeleton every sweep, so the agent's work was
+  // never compared and the meal stayed needs_audit forever — the hand-off
+  // completed and the loop ignored it.
+  const done = handoffStatus().rows.find((r) => r.mealId === meal.mealId);
+  if (done && done.state === 'done' && done.bundle && fs.existsSync(done.bundle)) {
+    return {
+      ok: true,
+      bundleDir: done.bundle,
+      audited: true,
+      photos: listBundlePhotos(done.bundle),
+      note: 'audited bundle from the meal-audit agent (handoff complete)',
+    };
+  }
+
   if (meal.provenance === 'debug_payload' && meal.jobId) {
     const dir = path.join(outputDir, `${meal.mealId}`);
     const r = runNode('meal-audit-fetch.mjs', [`--job-id=${meal.jobId}`, `--output-dir=${dir}`], { timeout: 300000 });
@@ -238,6 +296,10 @@ export function obtainBundle(meal, { outputDir, dryRun }) {
         ok: true,
         bundleDir: dir,
         needsAudit: true, // the audit agent must fill dishes[] before compare
+        // The fetcher downloads the turn photos locally. The hand-off must carry
+        // those paths, or the audit agent gets a request naming a skeleton and no
+        // images — a request it cannot possibly act on.
+        photos: listBundlePhotos(dir),
         note: 'skeleton fetched; awaiting meal-audit-engine analysis',
       };
     }
@@ -267,6 +329,10 @@ export function obtainBundle(meal, { outputDir, dryRun }) {
           bundleDir: path.dirname(found),
           skeleton: found,
           needsAudit: true,
+          // A photo_only meal's photos are referenced by the skeleton's
+          // addedPhotos, which may be server-relative rather than downloaded.
+          // Pass both so the agent can resolve either form.
+          photos: readSkeletonPhotos(found),
           note: 'photo_only skeleton emitted; single-turn ground truth, no edit history',
         };
       }
@@ -378,6 +444,137 @@ export function postPlan(publicN, { bundleDir, actualPath, taxonomy, key, dryRun
   return { ok: r.status === 0, status: r.status, gate, stderr: r.stderr, stdout: r.stdout };
 }
 
+/**
+ * Hand a meal the loop cannot audit itself to the meal-audit agent.
+ *
+ * This is the hand-off the user asked for and the one that was missing. The loop
+ * can resolve, compare, file and re-verify, but it cannot look at a photo and
+ * declare the dishes — that is the meal-audit agent's job. So the loop's duty
+ * stops at making the work legible to that agent: a durable request it can claim,
+ * and (optionally) a Telegram ping so nobody has to poll.
+ *
+ * It reports what the queue already knows, so a second sweep does not re-ask:
+ *   created         this sweep queued new work
+ *   already_pending someone else's sweep already queued it
+ *   already_done    the agent already audited it; the next sweep proceeds
+ *   claimed         an agent has it in progress
+ */
+export function handOffToAuditAgent(meal, bundle, { dryRun = false, notify = false } = {}) {
+  if (dryRun) {
+    return { action: 'dry_run', state: 'would_enqueue', mealId: meal.mealId, notify: false };
+  }
+  // A completed audit is the unblock: prefer the bundle the agent recorded over
+  // re-resolving, so the loop moves on to compare instead of re-queueing.
+  const done = handoffStatus().rows.find((r) => r.mealId === meal.mealId);
+  if (done && done.state === 'done' && done.bundle && fs.existsSync(done.bundle)) {
+    return { action: 'already_done', state: 'done', mealId: meal.mealId, bundle: done.bundle };
+  }
+  if (done && (done.state === 'pending' || done.state === 'claimed')) {
+    return { action: 'already_pending', state: done.state, mealId: meal.mealId, by: done.by || null };
+  }
+
+  const photos = [
+    ...(Array.isArray(bundle.photos) ? bundle.photos : []),
+    ...(Array.isArray(meal.photos) ? meal.photos : []),
+  ].filter((p, i, a) => typeof p === 'string' && p && a.indexOf(p) === i);
+  const res = handoffEnqueue({
+    mealId: meal.mealId,
+    name: meal.name || meal.mealId,
+    provenance: meal.provenance || 'unknown',
+    photos,
+    skeleton: bundle.skeleton || (bundle.bundleDir ? path.join(bundle.bundleDir, 'flow_skeleton.json') : null),
+    by: 'meal-audit-loop',
+  });
+  if (!res.ok) return { action: 'error', error: res.error };
+
+  let ping = null;
+  if (notify && res.action === 'created') ping = handoffNotify(res.request);
+  return {
+    action: res.action,
+    state: res.request?.status || 'pending',
+    mealId: meal.mealId,
+    request: path.relative(REPO_ROOT, res.path || ''),
+    notify: ping || null,
+  };
+}
+
+/** The keys the comparator scores as CORE drift. If one of these has no source in
+ *  the ground-truth bundle, the comparison is measuring the audit's gaps rather
+ *  than the product, and any card filed from it describes the audit, not a bug. */
+const CORE_NUTRIENT_KEYS = [
+  'calories', 'protein', 'carbohydrates', 'totalFat', 'saturatedFat',
+  'sugar', 'addedSugar', 'totalFibre', 'sodium',
+];
+
+/**
+ * May this bundle be used to dispatch a coder?
+ *
+ * The audit is allowed to be partial — that is the point of refusing to guess a
+ * weight. But a partial audit must not start a coder. Driving a real meal
+ * (meal_1790784308630) produced 14 "failures" of which most were the audit's own
+ * incompleteness: the salad had no sourceable weight so it was left out, and
+ * `addedSugar` was unsourced, yet the loop would have handed all of it to a coder
+ * as product defects. A fix verified against a knowingly-incomplete ground truth
+ * is not a fix, and re-verifying it can never go green, so the loop would burn
+ * its whole attempt cap on cards it invented.
+ *
+ * Micronutrients are NOT required: the catalog is thin and a missing vitamin is
+ * normal. Only the core keys are, because only they are scored.
+ */
+/**
+ * Capture the app's own ledger for this meal, so compare has an actual to score.
+ *
+ * Nothing produced one before. `qa-runner.mjs` has no actual-capture, so a sweep
+ * reached runComparison with `actualPath` unset and stopped at NO_ACTUAL — the
+ * last mile of compare could only be walked by hand, which is exactly what an
+ * unattended sweep cannot do. The meal id is right here, and
+ * meal-audit-capture-actual.mjs turns it into the payload from the live store.
+ *
+ * Best effort by design: a meal with no debug payload simply has no actual yet,
+ * and that must read as NO_ACTUAL rather than as a hard failure.
+ */
+export function captureActualForMeal(mealId, { apiBase = null, outDir = null } = {}) {
+  if (!mealId) return { ok: false, reason: 'no meal id' };
+  const out = outDir
+    ? path.join(outDir, `actual_${mealId}.json`)
+    : path.join(REPO_ROOT, 'qa-evidence', `actual_${mealId}.json`);
+  const args = [`--meal-id=${mealId}`, `--out=${out}`];
+  if (apiBase) args.push(`--api-base=${apiBase}`);
+  const r = runNode('meal-audit-capture-actual.mjs', args, { timeout: 120000 });
+  if (r.status !== 0 || !fs.existsSync(out)) {
+    return { ok: false, reason: (r.stderr || r.stdout || `exit ${r.status}`).trim().split('\n').pop() || 'capture produced nothing' };
+  }
+  return { ok: true, path: out };
+}
+
+export function auditIsDispatchable(bundleDir) {
+  if (!bundleDir) return { ok: false, reason: 'no bundle to judge' };
+  const payload = path.join(bundleDir, 'audit_payload.json');
+  const result = path.join(bundleDir, 'meal_result.json');
+  const src = fs.existsSync(payload) ? payload : (fs.existsSync(result) ? result : null);
+  if (!src) return { ok: false, reason: 'bundle has no audit_payload.json or meal_result.json' };
+
+  let doc;
+  try { doc = JSON.parse(fs.readFileSync(src, 'utf8')); } catch (e) {
+    return { ok: false, reason: `bundle json unreadable: ${e.message}` };
+  }
+
+  const unsourced = new Set(doc.unsourcedNutrients || []);
+  for (const p of doc.passes || []) for (const d of p.dishes || []) {
+    for (const k of d.unsourcedNutrients || []) unsourced.add(k);
+  }
+  const coreGaps = CORE_NUTRIENT_KEYS.filter((k) => unsourced.has(k));
+  if (coreGaps.length) {
+    return {
+      ok: false,
+      coreGaps,
+      reason: `ground truth is incomplete for core nutrient(s) ${coreGaps.join(', ')} — `
+        + 'a coder would be fixing the audit, not the product',
+    };
+  }
+  return { ok: true, unsourcedCount: unsourced.size };
+}
+
 /** Stage 5 — dispatch a coder. The AUTHOR. Never verifies its own work. */
 export function dispatchCard(publicN, { attempt, dryRun }) {
   if (!publicN) return { ok: false, error: 'no public card number to dispatch' };
@@ -459,7 +656,16 @@ async function main() {
     console.error(`[Loop] ${meal.mealId} -> ${bundle.note}`);
 
     // --- compare (or, in dry-run, read whatever comparison exists)
-    const cmp = runComparison(bundle.bundleDir, { actualPath: o.actual, skip: o.dryRun });
+    // An explicit --actual wins. Otherwise capture the app's own ledger for this
+    // meal, which is what lets an unattended sweep reach a real verdict instead of
+    // stopping at NO_ACTUAL on every meal.
+    let actualPath = o.actual || null;
+    if (!actualPath && !o.dryRun) {
+      const cap = captureActualForMeal(meal.mealId, { apiBase: process.env.API_BASE_URL || null });
+      rec.stages.captureActual = cap.ok ? { path: cap.path } : { skipped: true, reason: cap.reason };
+      if (cap.ok) actualPath = cap.path;
+    }
+    const cmp = runComparison(bundle.bundleDir, { actualPath, skip: o.dryRun });
     rec.stages.compare = { verdict: cmp.verdict, skipped: !!cmp.skipped, failures: (cmp.failures || []).length, error: cmp.error || null };
 
     if (cmp.verdict === 'PASS') {
@@ -479,6 +685,24 @@ async function main() {
         NOT_COMPARED: 'needs_compare',
       }[cmp.verdict];
       console.error(`[Loop] ${meal.mealId} -> ${rec.outcome} (${cmp.error})`);
+
+      // The hand-off. A meal with no ground truth is a job for the meal-audit
+      // agent, and the loop's job is to put it in front of that agent rather
+      // than log a line and wait for a human to notice. This is the step that
+      // was missing: without it the loop reported needs_audit forever and no
+      // work was ever queued for the agent that does the auditing.
+      if (rec.outcome === 'needs_audit') {
+        const hand = handOffToAuditAgent(meal, bundle, { dryRun: o.dryRun, notify: o.notifyAgent });
+        rec.stages.handoff = hand;
+        if (hand.error) {
+          // A failed hand-off is a real failure, not a quiet no-op: the meal is
+          // stuck with nobody auditing it and the loop would look healthy.
+          rec.error = `handoff: ${hand.error}`;
+          hardFailure = true;
+        } else {
+          console.error(`[Loop] ${meal.mealId} -> hand-off ${hand.action} (${hand.state || 'pending'})`);
+        }
+      }
       results.push(rec);
       continue;
     }
@@ -556,6 +780,16 @@ async function main() {
       continue;
     }
     const attempt = attemptsFor(state, primary.idemKey) + 1;
+    // An incomplete audit must not start a coder: its cards would describe the
+    // audit's own gaps, and re-verify could never go green against ground truth
+    // that is missing the very keys it is scored on.
+    const judge = auditIsDispatchable(bundle.bundleDir);
+    if (!judge.ok) {
+      rec.stages.dispatch = { card: primary.publicN, attempt, refused: true, reason: judge.reason };
+      rec.error = `dispatch refused: ${judge.reason}`;
+      results.push(rec);
+      continue;
+    }
     const d = dispatchCard(primary.publicN, { attempt, dryRun: false });
     rec.stages.dispatch = { card: primary.publicN, attempt, rung: d.rung, ok: d.ok, dryRun: !!d.dryRun };
     if (!d.ok) {

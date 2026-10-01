@@ -64,6 +64,11 @@ export const SHEET_COLUMNS = [
   'agent_note',
   'worktree',
   'live',
+  // The original ask, so the PM can check each implementation against what was
+  // asked before signing off: the packet's goal for specs, the ticket title
+  // for cards, the lane summary for lanes. Populated from the item title the
+  // projection already carries — never invented here.
+  'source_brief',
 ];
 
 /** The spreadsheet id, configured not discovered. */
@@ -101,6 +106,7 @@ export function sheetRow(item, { at = new Date().toISOString(), rung = '', attem
     cell(item.note),
     cell(item.worktree),
     item.live === true ? 'live' : item.live === false ? 'stale' : '',
+    cell(item.title),
   ];
 }
 
@@ -150,15 +156,28 @@ export function spoolSheetRow(botId, values, { home = os.homedir(), at = Date.no
  * between costs one duplicate header line, which is cheaper than a sheet with no
  * header at all.
  */
+/** The columns a header marker vouches for ('' for markers from before versioning). */
+export function markerColumns(marker) {
+  try {
+    return String(JSON.parse(fs.readFileSync(marker, 'utf8')).columns || '');
+  } catch {
+    return '';
+  }
+}
+
 export function spoolFleetRows(botId, fleet, { home = os.homedir(), at = Date.now(), ladderOf } = {}) {
   const rows = sheetRows(fleet, { at: new Date(at).toISOString(), ladderOf });
   const marker = headerMarkerPath(botId, { home });
+  const wantColumns = SHEET_COLUMNS.join(',');
   let header = false;
-  if (!fs.existsSync(marker)) {
+  // The marker vouches for a column set, not just "a header went out": when the
+  // columns grow (e.g. source_brief), the next cycle re-seeds the header so new
+  // rows line up under it instead of silently gaining a cell past the header.
+  if (!fs.existsSync(marker) || markerColumns(marker) !== wantColumns) {
     spoolSheetRow(botId, headerRow(), { home, at });
     try {
       fs.mkdirSync(path.dirname(marker), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(marker, JSON.stringify({ writtenAt: new Date(at).toISOString() }) + '\n', { mode: 0o600 });
+      fs.writeFileSync(marker, JSON.stringify({ writtenAt: new Date(at).toISOString(), columns: wantColumns }) + '\n', { mode: 0o600 });
     } catch {
       // A marker we cannot write means a possible duplicate header next cycle.
     }
