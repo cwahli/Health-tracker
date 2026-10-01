@@ -49,10 +49,16 @@ import {
 import { checkRoleDetails, getChatProject, getChatRole, switchChatRole } from './project-registry.mjs';
 import { attemptFor, forgetCounters, ladderFile, readLadder, recordAttempts, rungMessage } from './pm-ladder.mjs';
 import { flushSheet, renderFlush, spoolFleetRows } from './pm-sheet.mjs';
+import {
+  buildFleetTableHtml,
+  fleetTableModel,
+  renderFleetTableCaption,
+  renderRollupTable,
+} from './pm-table.mjs';
 import { sendAsUser, userbotState } from './tg-userbot.mjs';
 
 /** The subcommands `/role pm …` answers to. */
-export const PM_SUBCOMMANDS = ['', 'status', 'run', 'sheet', 'help', 'reset', 'take'];
+export const PM_SUBCOMMANDS = ['', 'status', 'run', 'sheet', 'table', 'help', 'reset', 'take'];
 
 /**
  * Deliver one nudge as the operator, through the session the forge already
@@ -306,6 +312,42 @@ async function runPmCommandInner({
       resetRole: false,
     };
   }
+  if (verb === 'table') {
+    // "Show the progress so far as a table" was answered with hand-wrote pipe
+    // tables, which Telegram cannot align. The telegram-tables skill has two
+    // paths and the fleet needs the wide one: the rollup fits a phone fence, the
+    // per-item table (id/kind/state/blocked/agent/goal) is 6 columns and must be
+    // the JSON -> build-table.py -> HTML grid delivered as a file.
+    const st = await runStatus({ env, home, now, reader, chatId, tmuxRunner: null });
+    const narrow = renderRollupTable(st.fleet);
+    const built = buildFleetTableHtml(
+      fleetTableModel(st.fleet, { sources: st.sources, tmux: st.tmux }),
+      { label: `pm-fleet-${botId}` },
+    );
+    return {
+      ok: true,
+      text: [
+        '🎭 *Project Manager — progress so far*',
+        adoptedRoleLine(chatId),
+        '',
+        '*Fleet rollup*',
+        narrow,
+        '',
+        renderFleetTableCaption({
+          htmlPath: built.htmlPath,
+          renderer: built.renderer,
+          itemCount: st.fleet.counts.total,
+        }),
+        built.pyError && built.renderer !== 'qa-evidence/build-table.py' ? `_(grid fallback: ${mdSafe(built.pyError)})_` : null,
+        '',
+        `• \`/role pm status\` is the same projection as bullets · \`/role pm run\` cycles the ladder`,
+      ]
+        .filter((l) => l !== null)
+        .join('\n'),
+      resetRole: false,
+    };
+  }
+
   // Bare `/role pm`: the standing answer, plus what `/role pm run` would do.
   const bare = await runStatus({ env, home, now, reader, chatId, tmuxRunner: null });
   const tail = bare.fleet.stalled.length
@@ -321,6 +363,8 @@ export function pmHelpText() {
     '• `/role pm` — fleet status (packets, tickets, ledger, heartbeats, tmux)',
     '• `/role pm run` — one cycle: project, climb the ladder, nudge, record',
     '• `/role pm sheet` — spool and flush the ongoing-projects sheet (carries source_brief, the original ask)',
+    '• `/role pm table` — progress as a real table: rollup fence + sortable HTML grid (telegram-tables)',
+    '• `/role pm help` — the whole PM surface',
     '• `/role pm status` — the projection only (no writes), plus this chat\'s adopted role',
     '• `/role pm reset` — leave the role (counters are kept)',
   ].join('\n');
