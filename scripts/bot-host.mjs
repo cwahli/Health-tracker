@@ -4657,6 +4657,19 @@ config.me = { id: Number(me.id) || 0, username: String(me.username || '') };
   } catch (err) {
     console.error(`[${config.id}] setMyCommands failed (non-fatal): ${err.message}`);
   }
+  // Narrow Telegram scopes override the default menu in matching chats, so a
+  // stale per-scope list silently hides commands (vm lost /forge in every
+  // private chat to a leftover `all_private_chats` list holding abort/watch).
+  // No code publishes per-scope menus — the default scope is the single
+  // source — so every boot deletes the narrow overrides, keeping one menu
+  // everywhere without a manual Bot API call. Non-fatal, like the publish.
+  for (const scope of ['all_private_chats', 'all_group_chats', 'all_chat_administrators']) {
+    try {
+      await api.call('deleteMyCommands', { scope: { type: scope } });
+    } catch (err) {
+      console.error(`[${config.id}] deleteMyCommands(${scope}) failed (non-fatal): ${err.message}`);
+    }
+  }
   await sweepOrphanedLeases({ api, config });
   await runLoop({ api, config });
 }

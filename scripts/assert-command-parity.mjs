@@ -21,11 +21,14 @@
  *   3. every BOT_COMMANDS entry has a HELP_USAGE line (no description fallback)
  *   4. helpText() output contains every /command and no removed one
  *   5. BOT_COMMANDS passes assertValidCommands (shape Telegram accepts)
+ *   6. bot-host.mjs reconciles narrow scopes on boot (deleteMyCommands for
+ *      all_private_chats / all_group_chats / all_chat_administrators), so no
+ *      stale per-scope list can shadow the default menu again
  *
- * Scope shadowing (stale per-scope menus) is a live-Telegram condition, not a
- * repo condition — repair it with deleteMyCommands for the stale scope (one
- * call; the default scope then applies everywhere) rather than a second
- * published copy that can drift again.
+ * Scope shadowing (stale per-scope menus overriding default) is repaired
+ * dynamically: bot-host.mjs deletes the narrow scopes on every boot, so the
+ * default scope — the single published source — applies in all chats. Check 6
+ * below pins that reconciliation in place.
  *
  * Usage: node scripts/assert-command-parity.mjs [--json]
  */
@@ -122,6 +125,18 @@ const failures = (() => {
   const published = toTelegramCommands().map((c) => c.command).sort();
   if (published.join(',') !== [...COMMAND_NAMES].sort().join(',')) {
     extra.push({ kind: 'popup-drift', command: '', detail: 'toTelegramCommands() drifted from BOT_COMMANDS — the popup is no longer the menu list.' });
+  }
+  // Boot must reconcile narrow scopes — a stale per-scope list shadows the
+  // default menu in matching chats (/forge vanished from vm private chats
+  // this way). Deleting them every boot is what makes one menu dynamic.
+  const hostSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'bot-host.mjs'), 'utf8');
+  for (const scope of ['all_private_chats', 'all_group_chats', 'all_chat_administrators']) {
+    if (!hostSrc.includes(scope)) {
+      extra.push({ kind: 'scope-reconcile-missing', command: '', detail: `bot-host.mjs no longer reconciles the ${scope} scope — a stale per-scope menu could shadow the default again.` });
+    }
+  }
+  if (!hostSrc.includes('deleteMyCommands')) {
+    extra.push({ kind: 'scope-reconcile-missing', command: '', detail: 'bot-host.mjs no longer calls deleteMyCommands on boot — narrow-scope shadowing is unrepaired.' });
   }
   return [...extra, ...audit({
     canonical: [...COMMAND_NAMES],
