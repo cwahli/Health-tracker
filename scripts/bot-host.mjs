@@ -2087,6 +2087,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const statusProject = getChatProject(chatId);
       const statusWorkspace = statusProject.type === 'external' ? statusProject.workspace : config.agent.workspace;
       const activeStatusSession = sessionForWorkspace(sessions, chatId, statusWorkspace);
+      // The seat this chat runs in, so /status answers which role the agent is
+      // using — the PM seat included (`/role pm take`). Unknown or unset means
+      // general mode, never a guessed name.
+      const statusRole = checkRoleDetails(statusProject.id, getChatRole(chatId) || '')?.name || null;
       const tuiLine = tuiStatusLine(config.id, activeStatusSession);
       const snap = buildStatusSnapshot({
         bot: { id: config.id, name: config.name },
@@ -2094,6 +2098,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         capabilities: { compact: true, costTracking: true, backends: false },
         effective: eff,
         session: activeStatusSession ? { id: activeStatusSession, workspace: statusWorkspace } : null,
+        role: statusRole,
         handoff: Boolean((prefFor(prefs, chatId)).handoff),
         usage: lastUsage?.get(chatId) || null,
         totals: totals?.get(chatId) || null,

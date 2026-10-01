@@ -84,6 +84,7 @@ export function buildStatusSnapshot({
   capabilities = {},
   effective = {},
   session = null,
+  role = null,
   handoff = false,
   usage = null,
   totals = null,
@@ -106,6 +107,7 @@ export function buildStatusSnapshot({
     agent: effective.agent || null,
     thinking: effective.variant || null,
     session: shortSession(session?.id),
+    role: role || null,
     handoff: Boolean(handoff),
     lastRun,
     totals: runs > 0 || totalTokens > 0 || totalCost > 0 ? { runs, tokens: totalTokens, cost: totalCost } : null,
@@ -130,6 +132,7 @@ export function formatStatusPlain(snap) {
     .join(' · ');
   if (mode) lines.push(mode);
   lines.push(`session: ${snap.session}${snap.handoff ? ' · handoff saved' : ''}`);
+  lines.push(`role: ${snap.role || 'general mode'}`);
   if (snap.lastRun) lines.push(`last run: ${snap.lastRun}`);
   if (snap.totals) {
     const cost = formatCost(snap.totals.cost);
