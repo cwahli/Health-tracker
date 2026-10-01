@@ -106,7 +106,10 @@ test('REGRESSION: a hand-copied agent block fails as hand-copied-block', () => {
   const r = auditRaw(raw);
   assert.equal(r.ok, false);
   assert.deepEqual(kinds(r), ['hand-copied-block']);
-  assert.ok(r.failures.some((f) => f.path === 'agent.model'));
+  // `agent.kind` pins the regression, not `agent.model`: model is a deliberate
+  // per-bot key (PER_BOT_KEYS justification — checker independence), so a
+  // copied model is allowed on purpose while the copied block still fails.
+  assert.ok(r.failures.some((f) => f.path === 'agent.kind'));
 });
 
 test('a master change reaches every thin clone (the reason cloning is safe)', () => {
@@ -201,10 +204,17 @@ test('a missing master is reported, not thrown', () => {
 
 // --- the allowlist itself is the reviewed surface --------------------------
 
-test('the per-bot allowlist stays small and explicit', () => {
+test('the per-bot allowlist stays small and explicit', async () => {
   // A grown allowlist is how "the master supplies it" quietly stops being true.
-  assert.ok(PER_BOT_KEYS.size <= 14, `allowlist grew to ${PER_BOT_KEYS.size} keys — justify it in review`);
+  assert.ok(PER_BOT_KEYS.size <= 15, `allowlist grew to ${PER_BOT_KEYS.size} keys — justify it in review`);
   assert.ok(PER_BOT_KEYS.has('telegram'));
   assert.ok(!PER_BOT_KEYS.has('progress.maxChars'), 'flood control must stay inherited');
-  assert.ok(!PER_BOT_KEYS.has('agent.model'), 'the model is fleet policy, not a per-bot fact');
+  // `agent.model` is the single documented exception: checker independence
+  // (chiwah-tax BOT_GROUP.md) requires the verifier on a different provider
+  // than the maker. The exception stays reviewed by pinning its justification
+  // in the gate source — remove the justification and this fails.
+  assert.ok(PER_BOT_KEYS.has('agent.model'), 'model exception removed — the verifier architecture depends on it');
+  const { readFileSync } = await import('node:fs');
+  const gateSrc = readFileSync(new URL('./assert-bot-clone.mjs', import.meta.url), 'utf8');
+  assert.ok(gateSrc.includes('agent.model') && /independence/i.test(gateSrc), 'model exception must carry its justification in the gate source');
 });
