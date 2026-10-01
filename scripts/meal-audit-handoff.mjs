@@ -50,9 +50,18 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
-const QUEUE_DIR = path.join(REPO_ROOT, 'specs', 'meal-qa-loop', 'requests');
 
 export const QUEUE_REL = 'specs/meal-qa-loop/requests';
+
+// Overridable so a test can point the queue at a scratch directory. This exists
+// because the queue IS production state — it holds real meals waiting on a real
+// audit — and a hard-coded constant meant the gate's own fixtures were written
+// into it and then cleared. Running the test suite therefore deleted whatever
+// was genuinely queued. A test has no business choosing where live state lives.
+const QUEUE_DIR = process.env.MEAL_QA_QUEUE_DIR
+  ? path.resolve(process.env.MEAL_QA_QUEUE_DIR)
+  : path.join(REPO_ROOT, QUEUE_REL);
+
 /** A claim older than this is treated as abandoned, so a crashed agent does not
  *  strand a meal forever. Chosen to be far longer than one audit turn. */
 export const CLAIM_TTL_MS = 6 * 60 * 60 * 1000;

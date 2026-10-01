@@ -30,12 +30,6 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import {
-  enqueue, claim, complete, status,
-  QUEUE_REL, CLAIM_TTL_MS,
-} from './meal-audit-handoff.mjs';
-import { handOffToAuditAgent, listBundlePhotos, readSkeletonPhotos, obtainBundle } from './meal-audit-loop.mjs';
-
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
 
@@ -43,6 +37,23 @@ let pass = 0;
 let fail = 0;
 const failures = [];
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meal-handoff-'));
+
+// Point the queue at scratch space BEFORE the module is loaded, hence the
+// dynamic import. The queue under specs/ is live state: real meals, waiting on a
+// real audit. These fixtures used to be written straight into it and then cleared
+// wholesale, so running this file deleted whatever was genuinely queued — which
+// is how three pending meals disappeared from an otherwise healthy run and looked
+// like a queue defect. QUEUE_REL is still exported and asserted below, so the
+// scratch directory proves nothing about where the real queue lives.
+let SCRATCH_QUEUE = path.join(tmp, 'queue');
+fs.mkdirSync(SCRATCH_QUEUE, { recursive: true });
+process.env.MEAL_QA_QUEUE_DIR = SCRATCH_QUEUE;
+
+const {
+  enqueue, claim, complete, status,
+  QUEUE_REL, CLAIM_TTL_MS,
+} = await import('./meal-audit-handoff.mjs');
+const { handOffToAuditAgent, listBundlePhotos, readSkeletonPhotos, obtainBundle } = await import('./meal-audit-loop.mjs');
 
 function check(name, fn) {
   try {
@@ -57,9 +68,15 @@ function check(name, fn) {
 }
 
 function clearQueue() {
-  const dir = path.join(REPO_ROOT, QUEUE_REL);
-  if (!fs.existsSync(dir)) return;
-  for (const f of fs.readdirSync(dir)) fs.unlinkSync(path.join(dir, f));
+  // Scratch only, and it refuses to run against the real queue even if the env
+  // override is ever dropped. A test that silently empties production state is
+  // worse than no test, so this is the one place allowed to delete anything.
+  const real = path.join(REPO_ROOT, QUEUE_REL);
+  if (path.resolve(SCRATCH_QUEUE) === path.resolve(real)) {
+    throw new Error(`refusing to clear the real queue at ${real} — set MEAL_QA_QUEUE_DIR`);
+  }
+  if (!fs.existsSync(SCRATCH_QUEUE)) return;
+  for (const f of fs.readdirSync(SCRATCH_QUEUE)) fs.unlinkSync(path.join(SCRATCH_QUEUE, f));
 }
 
 console.log('assert-meal-audit-handoff — the loop hands off to the audit agent\n');
@@ -142,7 +159,7 @@ check('an abandoned claim is reclaimable (a crashed agent must not strand a meal
   enqueue({ mealId: 'meal_gate_5', name: 'X', provenance: 'debug_payload' });
   claim({ mealId: 'meal_gate_5', by: 'crashed' });
   // Backdate the claim past the TTL rather than waiting six hours.
-  const p = path.join(REPO_ROOT, QUEUE_REL, 'meal_gate_5.claimed.json');
+  const p = path.join(SCRATCH_QUEUE, 'meal_gate_5.claimed.json');
   const c = JSON.parse(fs.readFileSync(p, 'utf8'));
   c.claimedAt = new Date(Date.now() - CLAIM_TTL_MS - 60000).toISOString();
   fs.writeFileSync(p, JSON.stringify(c, null, 2));
@@ -181,7 +198,7 @@ check('complete records the bundle and spends the claim', () => {
   assert.equal(row.state, 'done');
   assert.equal(row.bundle, dir);
   // The claim file must be gone, or status would look busy forever.
-  assert.ok(!fs.existsSync(path.join(REPO_ROOT, QUEUE_REL, 'meal_gate_7.claimed.json')),
+  assert.ok(!fs.existsSync(path.join(SCRATCH_QUEUE, 'meal_gate_7.claimed.json')),
     'a spent claim must be cleared');
 });
 
@@ -309,6 +326,57 @@ check('the loop script exposes the hand-off (it is wired, not orphaned)', () => 
   const between = src.slice(needsIdx, callIdx);
   assert.match(between, /if \(rec\.outcome === 'needs_audit'\)/,
     'the hand-off must be guarded by the needs_audit outcome');
+});
+
+// The test suite must not be able to destroy live queue state. This is the
+// regression that made three pending meals vanish mid-run: the gate wrote its
+// fixtures into the real queue and clearQueue() unlinked every file in it,
+// including .gitkeep, so the directory stopped existing in git at all.
+check('the gate runs against a SCRATCH queue, never the live one', () => {
+  const real = path.join(REPO_ROOT, QUEUE_REL);
+  assert.notEqual(path.resolve(SCRATCH_QUEUE), path.resolve(real),
+    'the fixtures must not share the production queue directory');
+  assert.equal(process.env.MEAL_QA_QUEUE_DIR, SCRATCH_QUEUE,
+    'MEAL_QA_QUEUE_DIR must be set before the handoff module is imported');
+  assert.ok(!SCRATCH_QUEUE.startsWith(real + path.sep),
+    'scratch queue must live outside the real queue entirely');
+});
+
+check('clearQueue refuses to run against the real queue', () => {
+  const real = path.join(REPO_ROOT, QUEUE_REL);
+  const original = process.env.MEAL_QA_QUEUE_DIR;
+  // Prove the guard is live by pointing the scratch dir at the real queue and
+  // calling the helper: it must throw rather than empty it.
+  const prevScratch = SCRATCH_QUEUE;
+  try {
+    // eslint-disable-next-line no-global-assign
+    SCRATCH_QUEUE = real;
+    assert.throws(() => clearQueue(), /refusing to clear the real queue/,
+      'clearQueue must refuse the production queue');
+  } finally {
+    SCRATCH_QUEUE = prevScratch;
+    process.env.MEAL_QA_QUEUE_DIR = original;
+  }
+});
+
+// The durability claim, checked against git rather than against intent.
+//
+// The queue lives under specs/ precisely because artifacts/ is gitignored: a
+// request written there is lost on the next deploy and the loop re-asks for the
+// same meal forever. That is only true while specs/meal-qa-loop/requests/ is
+// itself TRACKED. It was not — state.json was committed, but the requests
+// directory held no tracked file, so a fresh checkout had no queue at all and a
+// `git clean` erased live requests in place. Three queued meals vanished that way
+// mid-run on 2026-09-30, which looked exactly like a queue bug.
+check('the queue DIRECTORY is tracked by git, so the durability claim is real', () => {
+  const out = spawnSync('git', ['ls-files', 'specs/meal-qa-loop/requests/'], {
+    cwd: REPO_ROOT, encoding: 'utf8',
+  });
+  const tracked = (out.stdout || '').trim();
+  assert.equal(out.status, 0, 'git ls-files must run');
+  assert.ok(tracked.length > 0,
+    'specs/meal-qa-loop/requests/ has no tracked file, so a fresh checkout has no queue '
+    + 'and a git clean deletes live requests — the reason it lives under specs/');
 });
 
 clearQueue();

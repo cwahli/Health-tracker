@@ -2,14 +2,17 @@
 /**
  * scripts/meal-qa-proof.mjs
  *
- * L18 live proof for the meal QA loop: drive the real chain on real data and
- * render one screenshot per proof point.
+ * Per-stage DIAGRAMS for the meal QA loop: one panel per stage, each generated
+ * from the files the run actually wrote, so a panel cannot claim something the
+ * chain did not do.
  *
- * "It loads" is not done. This walks the actual pipeline against the live
- * server — resolve, hand off, audit, compare, ticket — and writes a PNG per
- * stage showing the real bytes that stage produced. Every panel is generated
- * from the files the run actually wrote, so a screenshot cannot claim
- * something the chain did not do.
+ * These are NOT L18 evidence. L18 asks for screenshots of the app's final
+ * screens, and a rendered box describing a stage is a summary of the work, not
+ * a picture of it — uploading these as "proof" is exactly the substitution a
+ * reviewer cannot catch unless the filenames say so. The real screenshots are
+ * scripts/meal-qa-l18.mjs, which drives the browser and photographs the app.
+ * The output directory is therefore named stage-diagrams/ rather than
+ * qa-evidence/, so a diagram is never mistaken for evidence at a glance.
  *
  * Stages (each skipped honestly if the chain did not reach it):
  *   1 resolve    the saved-meal window and its provenance tiers
@@ -21,11 +24,19 @@
  *
  * Usage:
  *   node scripts/meal-qa-proof.mjs                       # all reachable stages
- *   node scripts/meal-qa-proof.mjs --out=qa-evidence/meal-qa-proof
+ *   node scripts/meal-qa-proof.mjs --out=stage-diagrams/meal-qa
  *   node scripts/meal-qa-proof.mjs --meal-id=meal_123    # one meal
+ *
+ * For L18 evidence run scripts/meal-qa-l18.mjs and upload its frames to the
+ * Drive folder AGENTS.md L18 names (see L18_DRIVE_FOLDER below).
  *
  * Exit 0 = at least one stage rendered. 1 = nothing reachable.
  */
+
+// L18 proof lands in Drive, not in the repo: the frames are screenshots of a
+// live run, and a checkout cannot reproduce them. Printed at the end of every
+// run so the next person does not have to remember where the evidence goes.
+const L18_DRIVE_FOLDER = '1G7dhvqRy7iOmRg7AfN9a6g8cbIhz14yS'; // "Work done"
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -79,7 +90,9 @@ function badge(x, y, text, colour) {
 }
 
 function write(name, svg) {
-  const dir = process.env.PROOF_OUT || path.join(REPO_ROOT, 'qa-evidence', 'meal-qa-proof');
+  // stage-diagrams/, not qa-evidence/: the name is the warning. Anything a
+  // reviewer should trust as a picture of the app comes from meal-qa-l18.mjs.
+  const dir = process.env.PROOF_OUT || path.join(REPO_ROOT, 'stage-diagrams', 'meal-qa');
   fs.mkdirSync(dir, { recursive: true });
   const p = path.join(dir, name);
   fs.writeFileSync(p, svg, 'utf8');
@@ -369,6 +382,10 @@ function main() {
     process.exit(1);
   }
   for (const p of written) console.log(p);
+  console.log('');
+  console.log('[proof] DIAGRAMS, not L18 evidence — no app screen was photographed.');
+  console.log('[proof] For evidence: node scripts/meal-qa-l18.mjs, then upload those frames to');
+  console.log(`[proof] Drive folder "Work done" (${L18_DRIVE_FOLDER}) — the rule AGENTS.md L18 adds.`);
   process.exit(0);
 }
 

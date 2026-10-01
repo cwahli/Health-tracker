@@ -282,19 +282,25 @@ export function buildDish(dish) {
     if (missingIn.has(k) && !(total.nutrients[k] > 0)) unresolved.add(k);
   }
 
-  // Second pass: fill what the catalog could not, from a citable declared value.
+  // Second pass: apply every declared value that carries a citable source.
   // Done after the components so a dish-level declaration is compared against the
-  // summed total and only the genuine remainder is overridden.
+  // summed total and the declared value REPLACES rather than adds.
+  //
+  // It replaces UNCONDITIONALLY, for keys the catalog already supplied too, not
+  // just the unresolved ones. A declared value is the product's OWN label; a
+  // catalog row is a generic entry for the same word. Tesco cooked ham slices are
+  // 94 kcal / 17.6 g protein per 100 g on the pack, while the catalog's generic
+  // `ham` is 263 kcal / ~22 g protein. Restricting a declaration to gaps let the
+  // catalog silently win every disagreement — which is precisely the case the
+  // mechanism exists to resolve, and why a brand product could never be audited
+  // against its own label no matter what the auditor declared.
   const declared = dish.declaredNutrients;
-  for (const k of [...unresolved]) {
+  for (const k of NUTRIENT_KEYS) {
     const fix = resolveDeclared(k, declared, 1);
-    if (fix) {
-      // The dish total already holds the component sum; the declared value is the
-      // authoritative figure for the whole dish, so it REPLACES rather than adds.
-      total.nutrients[k] = fix.value;
-      declaredSources[k] = fix.source;
-      unresolved.delete(k);
-    }
+    if (!fix) continue;
+    total.nutrients[k] = fix.value;
+    declaredSources[k] = fix.source;
+    unresolved.delete(k);
   }
   // Recorded on the dish so a reader can see which nutrients are unsourced and
   // which came from a named reference rather than the catalog.
@@ -305,7 +311,15 @@ export function buildDish(dish) {
   for (const k of NUTRIENT_KEYS) out.nutrients[k] = total.nutrients[k] || 0;
   // Derive the total AFTER summing: reading macros out of out.nutrients before
   // the copy above yields NaN, and the generator rejects a non-finite calorie.
-  out.nutrients.calories = 4 * out.nutrients.protein + 4 * out.nutrients.carbohydrates + 9 * out.nutrients.totalFat;
+  //
+  // ...but only when calories were NOT themselves declared. A sourced label
+  // calorie is the authority: the pack says 94 kcal/100 g and the Atwater sum of
+  // the same label's macros is a rounding exercise, not a better number. Letting
+  // the derivation run unconditionally re-introduced the very disagreement the
+  // declared pass above had just resolved, so the override never survived.
+  if (!declaredSources.calories) {
+    out.nutrients.calories = 4 * out.nutrients.protein + 4 * out.nutrients.carbohydrates + 9 * out.nutrients.totalFat;
+  }
 
   if (Array.isArray(dish.boundingBox2D) && dish.boundingBox2D.length === 4) {
     out.boundingBox2D = dish.boundingBox2D.map(Number);
@@ -387,7 +401,13 @@ async function main() {
     console.error(`[Assist] WARNING: emitting with ${unsourced.length} unsourced nutrient(s) (--allow-unsourced).`);
   }
 
-  const outDir = o.outputDir || path.join(REPO_ROOT, 'artifacts', 'meal_audits', o.bundle);
+  // An ABSOLUTE --bundle is used as given. The hand-off request and
+  // `meal-audit-handoff.mjs complete` both carry absolute bundle paths, and
+  // path.join(REPO_ROOT, 'artifacts/meal_audits', '/home/...') does not discard
+  // the earlier segments: it produced artifacts/meal_audits/home/ubuntu/... and
+  // wrote the payload somewhere `complete` would never look.
+  const outDir = o.outputDir
+    || (path.isAbsolute(o.bundle) ? o.bundle : path.join(REPO_ROOT, 'artifacts', 'meal_audits', o.bundle));
   fs.mkdirSync(outDir, { recursive: true });
   const payloadPath = path.join(outDir, 'audit_payload.json');
   const payload = {
