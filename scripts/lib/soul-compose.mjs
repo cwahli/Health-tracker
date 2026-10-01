@@ -29,6 +29,8 @@ export const PROFILES = [
   'orchestrator',
   'qa_biomarker',
   'qa_onboarding',
+  'accountant',
+  'tax_verifier',
 ];
 
 export const BUDGETS = { base: 12, capabilities: 4, override: 16, total: 34 };

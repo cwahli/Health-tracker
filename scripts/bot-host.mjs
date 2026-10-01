@@ -158,6 +158,7 @@ import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-run
 // the chat's active project: the command names its own project, so a verify can
 // be run from any chat, and the reply says which one it read.
 import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText } from './health-runner.mjs';
+import { runTaxCommand, runTaxSweep, runTaxStatus, runTaxVerify, TAX_SUBS } from './tax-runner.mjs';
 
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -2949,6 +2950,63 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'tax': {
+      // Chiwah LTD tax (chiwah-tax/docs/BOT_PLAN.md). Thin dispatch: the bot
+      // parses, calls the runner, formats the reply. Numbers are quoted from
+      // engine artefacts — never computed here.
+      const sub = (cmd.args || '').trim().toLowerCase().split(/\s+/)[0] || 'snapshot';
+      if (!TAX_SUBS.includes(sub)) {
+        await api.sendMessage(chatId, `Unknown /tax subcommand. Try: ${TAX_SUBS.join(' | ')}`);
+        return;
+      }
+      if (running.get(chatId)) {
+        await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before the tax pass.');
+        return;
+      }
+      if (['snapshot', 'reconcile', 'losses', 'deadlines', 'saving', 'doc', 'gaps'].includes(sub)) {
+        await api.sendMessage(chatId, `🧾 *Running /tax ${sub} — quoting engine results...*`, { parse_mode: 'Markdown' });
+        try {
+          const res = runTaxCommand({ sub });
+          if (!res.ok) {
+            await api.sendMessage(chatId, `❌ Tax ${sub} could not run (${res.stage}): ${res.error}`);
+            return;
+          }
+          await api.sendMessage(chatId, res.text, { parse_mode: 'Markdown' });
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Tax ${sub} failed: ${err.message}`);
+        }
+        return;
+      }
+      if (sub === 'status') {
+        try {
+          const res = runTaxStatus({});
+          await api.sendMessage(chatId, res.text, { parse_mode: 'Markdown' });
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Tax status failed: ${err.message}`);
+        }
+        return;
+      }
+      if (sub === 'sweep') {
+        await api.sendMessage(chatId, '🧾 *Running /tax sweep (lite: gates + variance on current artefacts)...*', { parse_mode: 'Markdown' });
+        try {
+          const res = runTaxSweep({ lite: true });
+          if (!res.ok) {
+            await api.sendMessage(chatId, `❌ Sweep stopped (${res.stage}): ${res.error}`);
+            return;
+          }
+          await api.sendMessage(chatId, res.text.slice(-3500), { parse_mode: 'Markdown' });
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Sweep failed: ${err.message}`);
+        }
+        return;
+      }
+      if (sub === 'verify') {
+        const res = runTaxVerify();
+        await api.sendMessage(chatId, `❌ Verify not available (${res.stage}): ${res.error}`);
+        return;
+      }
+      return;
+    }
     case 'location': {
       const loc = workLocation();
       if (!cmd.args) {

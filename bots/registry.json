@@ -1,295 +1,332 @@
 {
-  "master": "vm",
-  "bots": [
-    {
-      "id": "tg_provider_router",
-      "name": "TG Provider Router",
-      "runtime": "tg-provider-router",
-      "enabled": true,
-      "path": "tools/telegram-provider-router",
-      "notes": "Unified Telegram long-poller → OpenCode/Cline/TokenHarbor/Cloudflare/Freebuff. See tools/telegram-provider-router/README.md. Live box: ~/.config/telegram-opencode/router/",
-      "telegram": {
-        "tokenEnv": "TELEGRAM_BOT_TOKEN",
-        "onePollerOnly": true
-      }
-    },
-    {
-      "id": "vm",
-      "name": "VM Bot",
-      "runtime": "bot-host",
-      "enabled": true,
-      "telegram": {
-        "tokenEnv": "VM_BOT_TOKEN",
-        "allowedUserIds": [
-          6218257274
-        ]
-      },
-      "agent": {
-        "kind": "opencode",
-        "model": "opencode/nemotron-3.5-lightning-free",
-        "variant": null,
-        "smallModel": "opencode/space-bunny-free",
-        "defaultAgent": "build",
-        "workspace": "/home/ubuntu/src/Health-tracker",
-        "timeoutMs": 900000,
-        "thinking": true,
-        "allowExternalDirectory": true,
-        "playwrightOutputDir": "/tmp/bot-host-shots-vm",
-        "sharedSkills": [
-          ".agents/skills",
-          "/home/ubuntu/bot-host/scripts/skills/common"
-        ]
-      },
-      "progress": {
-        "mode": "concise",
-        "editIntervalMs": 2500,
-        "maxEdits": 40,
-        "maxChars": 220
-      },
-      "session": {
-        "mode": "per-chat"
-      }
-    },
-    {
-      "id": "mobile",
-      "name": "Mobile Bot 8768",
-      "runtime": "device",
-      "enabled": true,
-      "telegram": {
-        "tokenEnv": "MOBILE_BOT_TOKEN",
-        "allowedUserIds": [
-          6218257274
-        ]
-      },
-      "agent": {
-        "kind": "opencode",
-        "workspace": "/root/Health-tracker",
-        "opencodeBin": "/root/.opencode/bin/opencode",
-        "playwrightOutputDir": null,
-        "sharedSkills": [
-          ".agents/skills",
-          "/root/Health-tracker/scripts/skills/common"
-        ],
-        "model": "opencode/nemotron-3.5-lightning-free",
-        "variant": null,
-        "smallModel": "opencode/space-bunny-free",
-        "defaultAgent": "build",
-        "timeoutMs": 900000,
-        "thinking": true,
-        "allowExternalDirectory": false
-      },
-      "progress": {
-        "mode": "concise",
-        "editIntervalMs": 2500,
-        "maxEdits": 40,
-        "maxChars": 220
-      },
-      "session": {
-        "mode": "per-chat"
-      }
-    },
-    {
-      "id": "vm2",
-      "name": "VM2 Bot",
-      "runtime": "bot-host",
-      "enabled": true,
-      "extends": "vm",
-      "notes": "Clone of the vm master: agent/progress/session are inherited, only the screenshot dir is per-bot. Add a bot with scripts/add-bot.mjs; do not restate the inherited block.",
-      "telegram": {
-        "tokenEnv": "VM2_BOT_TOKEN"
-      },
-      "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-vm2"
-      }
-    },
-    {
-      "id": "collab",
-      "name": "Collab Bot",
-      "runtime": "collab",
-      "enabled": true,
-      "telegram": {
-        "tokenEnv": "COLLAB_BOT_TOKEN",
-        "allowedUserIds": [
-          6218257274
-        ]
-      },
-      "agent": {
-        "kind": "collab",
-        "workspace": "/root/Health-tracker",
-        "opencodeBin": "/root/.opencode/bin/opencode",
-        "model": "opencode/nemotron-3.5-lightning-free",
-        "variant": null,
-        "smallModel": "opencode/space-bunny-free"
-      }
-    },
-    {
-      "id": "hermes_default",
-      "name": "Health Tracker Bot",
-      "runtime": "hermes",
-      "enabled": false,
-      "telegram": {
-        "tokenEnv": "HERMES_DEFAULT_TOKEN"
-      },
-      "hermes": {
-        "profile": "default",
-        "username": "@Health_tracker_159bot"
-      },
-      "agent": {
-        "kind": "hermes"
-      }
-    },
-    {
-      "id": "hermes_qa_meal",
-      "name": "Meal Journey QA Bot",
-      "runtime": "hermes",
-      "enabled": false,
-      "telegram": {
-        "tokenEnv": "HERMES_QA_MEAL_TOKEN"
-      },
-      "hermes": {
-        "profile": "qa_meal",
-        "username": "@Meal_journey_QA_bot"
-      },
-      "agent": {
-        "kind": "hermes"
-      }
-    },
-    {
-      "id": "hermes_orchestrator",
-      "name": "Orchestrator Health Tracker Bot",
-      "runtime": "hermes",
-      "enabled": false,
-      "telegram": {
-        "tokenEnv": "HERMES_ORCHESTRATOR_TOKEN"
-      },
-      "hermes": {
-        "profile": "orchestrator",
-        "username": "@Orchestrator_health_tracker_bot"
-      },
-      "agent": {
-        "kind": "hermes"
-      }
-    },
-    {
-      "id": "hermes_meal_audit",
-      "name": "Meal Audit Bot",
-      "runtime": "hermes",
-      "enabled": false,
-      "telegram": {
-        "tokenEnv": "HERMES_MEAL_AUDIT_TOKEN"
-      },
-      "hermes": {
-        "profile": "meal_audit",
-        "username": "@Meal_audit_bot"
-      },
-      "agent": {
-        "kind": "hermes"
-      }
-    },
-    {
-      "id": "hermes_qa_biomarker",
-      "name": "Biomarker QA Bot",
-      "runtime": "hermes",
-      "enabled": false,
-      "telegram": {
-        "tokenEnv": "HERMES_QA_BIOMARKER_TOKEN"
-      },
-      "hermes": {
-        "profile": "qa_biomarker",
-        "username": null
-      },
-      "agent": {
-        "kind": "hermes"
-      }
-    },
-    {
-      "id": "hermes_qa_onboarding",
-      "name": "Onboarding QA Bot",
-      "runtime": "hermes",
-      "enabled": false,
-      "telegram": {
-        "tokenEnv": "HERMES_QA_ONBOARDING_TOKEN"
-      },
-      "hermes": {
-        "profile": "qa_onboarding",
-        "username": null
-      },
-      "agent": {
-        "kind": "hermes"
-      }
-    },
-    {
-      "id": "hermes_bug_ticket",
-      "name": "Bug Ticket Bot",
-      "runtime": "hermes",
-      "enabled": true,
-      "notes": "V-30.2 steward/packer, enabled after one live E2E reply (session 20260924_162828_f191298f, TG msgs 8/12/14/16, packed card #2). Owns the canonical server-backed list, reviews/edits cards with revision receipts, and hands off to orchestrator; never links orchestrator-dispatcher.",
-      "telegram": {
-        "tokenEnv": "HERMES_BUG_TICKET_TOKEN",
-        "allowedUserIds": [
-          6218257274
-        ]
-      },
-      "hermes": {
-        "profile": "bug_ticket",
-        "username": "@Bug_ticket_bot"
-      },
-      "agent": {
-        "kind": "hermes"
-      }
-    },
-    {
-      "id": "opencode",
-      "name": "OpenCode Bot",
-      "runtime": "bot-host",
-      "enabled": true,
-      "extends": "vm",
-      "notes": "Clone of the vm master: agent/progress/session are inherited, only the screenshot dir is per-bot. Add a bot with scripts/add-bot.mjs; do not restate the inherited block.",
-      "telegram": {
-        "tokenEnv": "OPENCODE_BOT_TOKEN"
-      },
-      "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-opencode"
-      }
-    },
-    {
-      "id": "android",
-      "name": "Android Bot",
-      "runtime": "bot-host",
-      "enabled": true,
-      "extends": "vm",
-      "notes": "Clone of the vm master: agent/progress/session are inherited, only the screenshot dir is per-bot. Add a bot with scripts/add-bot.mjs; do not restate the inherited block.",
-      "telegram": {
-        "tokenEnv": "ANDROID_OPENCODE_BOT_TOKEN"
-      },
-      "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-android"
-      }
-    },
-    {
-      "id": "pm",
-      "name": "PM Bot",
-      "runtime": "bot-host",
-      "enabled": false,
-      "extends": "vm",
-      "notes": "Thin clone of the registry master (scripts/add-bot.mjs): agent/progress/session are inherited. Add a per-bot difference only by allowlisting the key in scripts/assert-bot-clone.mjs.",
-      "telegram": {
-        "tokenEnv": "PM_BOT_TOKEN"
-      }
-    },
-    {
-      "id": "vm3",
-      "name": "Vm3 bot",
-      "runtime": "bot-host",
-      "enabled": true,
-      "extends": "vm",
-      "notes": "Thin clone of the registry master (scripts/add-bot.mjs): agent/progress/session are inherited. Add a per-bot difference only by allowlisting the key in scripts/assert-bot-clone.mjs.",
-      "telegram": {
-        "tokenEnv": "VM3_BOT_TOKEN"
-      },
-      "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-vm3"
-      }
-    }
-  ]
+ "master": "vm",
+ "bots": [
+  {
+   "id": "tg_provider_router",
+   "name": "TG Provider Router",
+   "runtime": "tg-provider-router",
+   "enabled": true,
+   "path": "tools/telegram-provider-router",
+   "notes": "Unified Telegram long-poller \u2192 OpenCode/Cline/TokenHarbor/Cloudflare/Freebuff. See tools/telegram-provider-router/README.md. Live box: ~/.config/telegram-opencode/router/",
+   "telegram": {
+    "tokenEnv": "TELEGRAM_BOT_TOKEN",
+    "onePollerOnly": true
+   }
+  },
+  {
+   "id": "vm",
+   "name": "VM Bot",
+   "runtime": "bot-host",
+   "enabled": true,
+   "telegram": {
+    "tokenEnv": "VM_BOT_TOKEN",
+    "allowedUserIds": [
+     6218257274
+    ]
+   },
+   "agent": {
+    "kind": "opencode",
+    "model": "opencode/nemotron-3.5-lightning-free",
+    "variant": null,
+    "smallModel": "opencode/space-bunny-free",
+    "defaultAgent": "build",
+    "workspace": "/home/ubuntu/src/Health-tracker",
+    "timeoutMs": 900000,
+    "thinking": true,
+    "allowExternalDirectory": true,
+    "playwrightOutputDir": "/tmp/bot-host-shots-vm",
+    "sharedSkills": [
+     ".agents/skills",
+     "/home/ubuntu/bot-host/scripts/skills/common"
+    ]
+   },
+   "progress": {
+    "mode": "concise",
+    "editIntervalMs": 2500,
+    "maxEdits": 40,
+    "maxChars": 220
+   },
+   "session": {
+    "mode": "per-chat"
+   }
+  },
+  {
+   "id": "mobile",
+   "name": "Mobile Bot 8768",
+   "runtime": "device",
+   "enabled": true,
+   "telegram": {
+    "tokenEnv": "MOBILE_BOT_TOKEN",
+    "allowedUserIds": [
+     6218257274
+    ]
+   },
+   "agent": {
+    "kind": "opencode",
+    "workspace": "/root/Health-tracker",
+    "opencodeBin": "/root/.opencode/bin/opencode",
+    "playwrightOutputDir": null,
+    "sharedSkills": [
+     ".agents/skills",
+     "/root/Health-tracker/scripts/skills/common"
+    ],
+    "model": "opencode/nemotron-3.5-lightning-free",
+    "variant": null,
+    "smallModel": "opencode/space-bunny-free",
+    "defaultAgent": "build",
+    "timeoutMs": 900000,
+    "thinking": true,
+    "allowExternalDirectory": false
+   },
+   "progress": {
+    "mode": "concise",
+    "editIntervalMs": 2500,
+    "maxEdits": 40,
+    "maxChars": 220
+   },
+   "session": {
+    "mode": "per-chat"
+   }
+  },
+  {
+   "id": "vm2",
+   "name": "VM2 Bot",
+   "runtime": "bot-host",
+   "enabled": true,
+   "extends": "vm",
+   "notes": "Clone of the vm master: agent/progress/session are inherited, only the screenshot dir is per-bot. Add a bot with scripts/add-bot.mjs; do not restate the inherited block.",
+   "telegram": {
+    "tokenEnv": "VM2_BOT_TOKEN"
+   },
+   "agent": {
+    "playwrightOutputDir": "/tmp/bot-host-shots-vm2"
+   }
+  },
+  {
+   "id": "collab",
+   "name": "Collab Bot",
+   "runtime": "collab",
+   "enabled": true,
+   "telegram": {
+    "tokenEnv": "COLLAB_BOT_TOKEN",
+    "allowedUserIds": [
+     6218257274
+    ]
+   },
+   "agent": {
+    "kind": "collab",
+    "workspace": "/root/Health-tracker",
+    "opencodeBin": "/root/.opencode/bin/opencode",
+    "model": "opencode/nemotron-3.5-lightning-free",
+    "variant": null,
+    "smallModel": "opencode/space-bunny-free"
+   }
+  },
+  {
+   "id": "hermes_default",
+   "name": "Health Tracker Bot",
+   "runtime": "hermes",
+   "enabled": false,
+   "telegram": {
+    "tokenEnv": "HERMES_DEFAULT_TOKEN"
+   },
+   "hermes": {
+    "profile": "default",
+    "username": "@Health_tracker_159bot"
+   },
+   "agent": {
+    "kind": "hermes"
+   }
+  },
+  {
+   "id": "hermes_qa_meal",
+   "name": "Meal Journey QA Bot",
+   "runtime": "hermes",
+   "enabled": false,
+   "telegram": {
+    "tokenEnv": "HERMES_QA_MEAL_TOKEN"
+   },
+   "hermes": {
+    "profile": "qa_meal",
+    "username": "@Meal_journey_QA_bot"
+   },
+   "agent": {
+    "kind": "hermes"
+   }
+  },
+  {
+   "id": "hermes_orchestrator",
+   "name": "Orchestrator Health Tracker Bot",
+   "runtime": "hermes",
+   "enabled": false,
+   "telegram": {
+    "tokenEnv": "HERMES_ORCHESTRATOR_TOKEN"
+   },
+   "hermes": {
+    "profile": "orchestrator",
+    "username": "@Orchestrator_health_tracker_bot"
+   },
+   "agent": {
+    "kind": "hermes"
+   }
+  },
+  {
+   "id": "hermes_meal_audit",
+   "name": "Meal Audit Bot",
+   "runtime": "hermes",
+   "enabled": false,
+   "telegram": {
+    "tokenEnv": "HERMES_MEAL_AUDIT_TOKEN"
+   },
+   "hermes": {
+    "profile": "meal_audit",
+    "username": "@Meal_audit_bot"
+   },
+   "agent": {
+    "kind": "hermes"
+   }
+  },
+  {
+   "id": "hermes_qa_biomarker",
+   "name": "Biomarker QA Bot",
+   "runtime": "hermes",
+   "enabled": false,
+   "telegram": {
+    "tokenEnv": "HERMES_QA_BIOMARKER_TOKEN"
+   },
+   "hermes": {
+    "profile": "qa_biomarker",
+    "username": null
+   },
+   "agent": {
+    "kind": "hermes"
+   }
+  },
+  {
+   "id": "hermes_qa_onboarding",
+   "name": "Onboarding QA Bot",
+   "runtime": "hermes",
+   "enabled": false,
+   "telegram": {
+    "tokenEnv": "HERMES_QA_ONBOARDING_TOKEN"
+   },
+   "hermes": {
+    "profile": "qa_onboarding",
+    "username": null
+   },
+   "agent": {
+    "kind": "hermes"
+   }
+  },
+  {
+   "id": "hermes_bug_ticket",
+   "name": "Bug Ticket Bot",
+   "runtime": "hermes",
+   "enabled": true,
+   "notes": "V-30.2 steward/packer, enabled after one live E2E reply (session 20260924_162828_f191298f, TG msgs 8/12/14/16, packed card #2). Owns the canonical server-backed list, reviews/edits cards with revision receipts, and hands off to orchestrator; never links orchestrator-dispatcher.",
+   "telegram": {
+    "tokenEnv": "HERMES_BUG_TICKET_TOKEN",
+    "allowedUserIds": [
+     6218257274
+    ]
+   },
+   "hermes": {
+    "profile": "bug_ticket",
+    "username": "@Bug_ticket_bot"
+   },
+   "agent": {
+    "kind": "hermes"
+   }
+  },
+  {
+   "id": "opencode",
+   "name": "OpenCode Bot",
+   "runtime": "bot-host",
+   "enabled": true,
+   "extends": "vm",
+   "notes": "Clone of the vm master: agent/progress/session are inherited, only the screenshot dir is per-bot. Add a bot with scripts/add-bot.mjs; do not restate the inherited block.",
+   "telegram": {
+    "tokenEnv": "OPENCODE_BOT_TOKEN"
+   },
+   "agent": {
+    "playwrightOutputDir": "/tmp/bot-host-shots-opencode"
+   }
+  },
+  {
+   "id": "android",
+   "name": "Android Bot",
+   "runtime": "bot-host",
+   "enabled": true,
+   "extends": "vm",
+   "notes": "Clone of the vm master: agent/progress/session are inherited, only the screenshot dir is per-bot. Add a bot with scripts/add-bot.mjs; do not restate the inherited block.",
+   "telegram": {
+    "tokenEnv": "ANDROID_OPENCODE_BOT_TOKEN"
+   },
+   "agent": {
+    "playwrightOutputDir": "/tmp/bot-host-shots-android"
+   }
+  },
+  {
+   "id": "pm",
+   "name": "PM Bot",
+   "runtime": "bot-host",
+   "enabled": false,
+   "extends": "vm",
+   "notes": "Thin clone of the registry master (scripts/add-bot.mjs): agent/progress/session are inherited. Add a per-bot difference only by allowlisting the key in scripts/assert-bot-clone.mjs.",
+   "telegram": {
+    "tokenEnv": "PM_BOT_TOKEN"
+   }
+  },
+  {
+   "id": "vm3",
+   "name": "Vm3 bot",
+   "runtime": "bot-host",
+   "enabled": true,
+   "extends": "vm",
+   "notes": "Thin clone of the registry master (scripts/add-bot.mjs): agent/progress/session are inherited. Add a per-bot difference only by allowlisting the key in scripts/assert-bot-clone.mjs.",
+   "telegram": {
+    "tokenEnv": "VM3_BOT_TOKEN"
+   },
+   "agent": {
+    "playwrightOutputDir": "/tmp/bot-host-shots-vm3"
+   }
+  },
+  {
+   "id": "tax_accountant",
+   "name": "Tax Accountant",
+   "runtime": "bot-host",
+   "enabled": false,
+   "extends": "vm",
+   "notes": "Tax maker + sweep runner (chiwah-tax/docs/BOT_PLAN.md). Workspace chiwah-tax (separate repo; never Health-tracker). Desk function folded in. C1/C2 override recorded in BOT_PLAN \u00a71.",
+   "telegram": {
+    "tokenEnv": "TAX_ACCOUNTANT_BOT_TOKEN"
+   },
+   "agent": {
+    "playwrightOutputDir": "/tmp/bot-host-shots-tax-accountant",
+    "workspace": "/home/ubuntu/chiwah-tax",
+    "skills": [
+     ".agents/skills/tax-sweep"
+    ]
+   }
+  },
+  {
+   "id": "tax_verifier",
+   "name": "Tax Verifier",
+   "runtime": "bot-host",
+   "enabled": false,
+   "extends": "vm",
+   "notes": "Tax checker (chiwah-tax/docs/BOT_PLAN.md). Read-only: no write credentials; files findings, fixes nothing. Different model from maker (see agent.model allowlist justification).",
+   "telegram": {
+    "tokenEnv": "TAX_VERIFIER_BOT_TOKEN"
+   },
+   "agent": {
+    "playwrightOutputDir": "/tmp/bot-host-shots-tax-verifier",
+    "workspace": "/home/ubuntu/chiwah-tax",
+    "skills": [
+     ".agents/skills/tax-verify"
+    ],
+    "model": "opencode/muse-spark-1.3-contributor"
+   }
+  }
+ ]
 }

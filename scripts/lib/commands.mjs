@@ -34,6 +34,7 @@ export const BOT_COMMANDS = [
   { command: 'council', description: 'Run multi-agent council (/council run or /council status)' },
   { command: 'role', description: 'Switch active agent role (/role legal, /role sim, etc.)' },
   { command: 'health', description: 'Personal Health Coach: /health status | verify | ingest | refresh | analyze' },
+  { command: 'tax', description: 'Chiwah LTD tax: /tax snapshot | sweep | status | deadlines | saving | doc' },
   { command: 'location', description: 'Show or switch active compute location / pool' },
 ];
 
