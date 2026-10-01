@@ -498,6 +498,57 @@ export function handOffToAuditAgent(meal, bundle, { dryRun = false, notify = fal
   };
 }
 
+/** The keys the comparator scores as CORE drift. If one of these has no source in
+ *  the ground-truth bundle, the comparison is measuring the audit's gaps rather
+ *  than the product, and any card filed from it describes the audit, not a bug. */
+const CORE_NUTRIENT_KEYS = [
+  'calories', 'protein', 'carbohydrates', 'totalFat', 'saturatedFat',
+  'sugar', 'addedSugar', 'totalFibre', 'sodium',
+];
+
+/**
+ * May this bundle be used to dispatch a coder?
+ *
+ * The audit is allowed to be partial — that is the point of refusing to guess a
+ * weight. But a partial audit must not start a coder. Driving a real meal
+ * (meal_1790784308630) produced 14 "failures" of which most were the audit's own
+ * incompleteness: the salad had no sourceable weight so it was left out, and
+ * `addedSugar` was unsourced, yet the loop would have handed all of it to a coder
+ * as product defects. A fix verified against a knowingly-incomplete ground truth
+ * is not a fix, and re-verifying it can never go green, so the loop would burn
+ * its whole attempt cap on cards it invented.
+ *
+ * Micronutrients are NOT required: the catalog is thin and a missing vitamin is
+ * normal. Only the core keys are, because only they are scored.
+ */
+export function auditIsDispatchable(bundleDir) {
+  if (!bundleDir) return { ok: false, reason: 'no bundle to judge' };
+  const payload = path.join(bundleDir, 'audit_payload.json');
+  const result = path.join(bundleDir, 'meal_result.json');
+  const src = fs.existsSync(payload) ? payload : (fs.existsSync(result) ? result : null);
+  if (!src) return { ok: false, reason: 'bundle has no audit_payload.json or meal_result.json' };
+
+  let doc;
+  try { doc = JSON.parse(fs.readFileSync(src, 'utf8')); } catch (e) {
+    return { ok: false, reason: `bundle json unreadable: ${e.message}` };
+  }
+
+  const unsourced = new Set(doc.unsourcedNutrients || []);
+  for (const p of doc.passes || []) for (const d of p.dishes || []) {
+    for (const k of d.unsourcedNutrients || []) unsourced.add(k);
+  }
+  const coreGaps = CORE_NUTRIENT_KEYS.filter((k) => unsourced.has(k));
+  if (coreGaps.length) {
+    return {
+      ok: false,
+      coreGaps,
+      reason: `ground truth is incomplete for core nutrient(s) ${coreGaps.join(', ')} — `
+        + 'a coder would be fixing the audit, not the product',
+    };
+  }
+  return { ok: true, unsourcedCount: unsourced.size };
+}
+
 /** Stage 5 — dispatch a coder. The AUTHOR. Never verifies its own work. */
 export function dispatchCard(publicN, { attempt, dryRun }) {
   if (!publicN) return { ok: false, error: 'no public card number to dispatch' };
@@ -694,6 +745,16 @@ async function main() {
       continue;
     }
     const attempt = attemptsFor(state, primary.idemKey) + 1;
+    // An incomplete audit must not start a coder: its cards would describe the
+    // audit's own gaps, and re-verify could never go green against ground truth
+    // that is missing the very keys it is scored on.
+    const judge = auditIsDispatchable(bundle.bundleDir);
+    if (!judge.ok) {
+      rec.stages.dispatch = { card: primary.publicN, attempt, refused: true, reason: judge.reason };
+      rec.error = `dispatch refused: ${judge.reason}`;
+      results.push(rec);
+      continue;
+    }
     const d = dispatchCard(primary.publicN, { attempt, dryRun: false });
     rec.stages.dispatch = { card: primary.publicN, attempt, rung: d.rung, ok: d.ok, dryRun: !!d.dryRun };
     if (!d.ok) {

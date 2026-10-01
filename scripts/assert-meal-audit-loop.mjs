@@ -41,6 +41,7 @@ import {
   rungFor,
   runComparison,
   postPlan,
+  auditIsDispatchable,
 } from './meal-audit-loop.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -332,6 +333,52 @@ check('CLI rejects a non-numeric --max-attempts', () => {
   const r = spawnSync('node', [path.join(REPO_ROOT, 'scripts', 'meal-audit-loop.mjs'),
     '--latest=1', '--max-attempts=zero', '--dry-run'], { encoding: 'utf8', timeout: 60000 });
   assert.equal(r.status, 3, `expected usage exit 3, got ${r.status}`);
+});
+
+// An audit may be partial — refusing to guess a weight is the whole point — but a
+// partial audit must never start a coder. Driving meal_1790784308630 produced 14
+// "failures" that were mostly the audit's own incompleteness (the salad had no
+// sourceable weight, so it was omitted), and the loop was about to hand them to a
+// coder as product defects. Re-verify could never go green against ground truth
+// missing the keys it is scored on, so the attempt cap would burn on cards the
+// audit invented itself.
+check('an audit missing a CORE nutrient refuses dispatch', () => {
+  const dir = path.join(tmp, 'incomplete-bundle');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'audit_payload.json'), JSON.stringify({
+    schemaVersion: 2.1,
+    unsourcedNutrients: ['addedSugar'],
+    passes: [{ dishes: [{ dishName: 'Ham', unsourcedNutrients: ['addedSugar', 'zinc'] }] }],
+  }), 'utf8');
+
+  const j = auditIsDispatchable(dir);
+  assert.equal(j.ok, false, 'a core gap must block dispatch');
+  assert.ok(j.coreGaps.includes('addedSugar'), `coreGaps should name addedSugar, got ${JSON.stringify(j.coreGaps)}`);
+  assert.match(j.reason, /incomplete/i);
+});
+
+check('micronutrient gaps alone do NOT block dispatch', () => {
+  // The catalog is thin; a missing vitamin is normal and must not stop the loop.
+  // Only the keys the comparator actually scores as core are required, or the
+  // guard would refuse every bundle ever built and dispatch would be dead code.
+  const dir = path.join(tmp, 'micro-gap-bundle');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'audit_payload.json'), JSON.stringify({
+    schemaVersion: 2.1,
+    unsourcedNutrients: ['zinc', 'selenium', 'vitaminC'],
+    passes: [{ dishes: [{ dishName: 'Salad', unsourcedNutrients: ['zinc'] }] }],
+  }), 'utf8');
+
+  const j = auditIsDispatchable(dir);
+  assert.equal(j.ok, true, `micronutrient gaps must not block dispatch, got ${j.reason}`);
+});
+
+check('a bundle with no audit payload at all refuses dispatch', () => {
+  const dir = path.join(tmp, 'empty-bundle');
+  fs.mkdirSync(dir, { recursive: true });
+  const j = auditIsDispatchable(dir);
+  assert.equal(j.ok, false, 'nothing to judge means nothing may be dispatched');
+  assert.match(j.reason, /no audit_payload|unreadable|no bundle/i);
 });
 
 console.log(`\n${pass} pass, ${fail} fail`);
