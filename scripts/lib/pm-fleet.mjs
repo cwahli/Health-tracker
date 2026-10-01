@@ -265,6 +265,44 @@ export function beatIndex(beats = {}, { liveFn = isLive, now = Date.now() } = {}
 }
 
 /**
+ * Deployed agents, from tmux itself.
+ *
+ * Heartbeats say who is *alive*; tmux says what *exists*: a session with no
+ * live heartbeat behind it is an idle resource (or a dead agent's leftover),
+ * and a live heartbeat with no tmux session is a headless worker. The PM reads
+ * both lists side by side when it judges whether agent resources are allocated
+ * intelligently — this function only lists, never judges.
+ *
+ * The runner is injectable (`(args) => stdout`) so the sensor drives parsing
+ * without a tmux server. A missing server is `{ ok: false }`, never an empty
+ * list: "could not look" and "nothing deployed" are different facts.
+ */
+export function listTmuxSessions({ runner = null, now = Date.now() } = {}) {
+  const run = runner || ((args) => nodeExecFileSync('tmux', args, { encoding: 'utf8', timeout: 8000 }));
+  let out = '';
+  try {
+    out = String(run(['ls', '-F', '#{session_name}\t#{session_created}\t#{session_attached}']) || '');
+  } catch {
+    return { ok: false, error: 'no tmux server on this host', sessions: [] };
+  }
+  const text = out.trim();
+  if (!text) return { ok: true, error: '', sessions: [] };
+  const sessions = [];
+  for (const line of text.split(/\r?\n/)) {
+    const [name, created, attached] = line.split('\t');
+    if (!name || !name.trim()) continue;
+    const createdMs = Number(created) * 1000;
+    sessions.push({
+      name: name.trim(),
+      age: Number.isFinite(createdMs) && createdMs > 0 ? humanAge(now - createdMs) : 'unknown',
+      attached: String(attached || '').trim() === '1',
+    });
+  }
+  sessions.sort((a, b) => a.name.localeCompare(b.name));
+  return { ok: true, error: '', sessions };
+};
+
+/**
  * The projection. Pure given its inputs: hand it already-read sources and it
  * cannot touch the disk, which is what lets the sensor drive every rule.
  */
@@ -415,7 +453,7 @@ export function mdSafe(value) {
 }
 
 /** The fleet answer, as one Telegram message. */
-export function renderFleet(fleet, { limit = 12, sources = null } = {}) {
+export function renderFleet(fleet, { limit = 12, sources = null, tmux = null } = {}) {
   const lines = [];
   const c = fleet.counts;
   lines.push(`📋 *Fleet — ${c.total} item(s), ${c.stalled} stalled*`);
@@ -423,6 +461,16 @@ export function renderFleet(fleet, { limit = 12, sources = null } = {}) {
   const live = fleet.liveness.live.length;
   const stale = fleet.liveness.stale.length;
   lines.push(`• agents: ${live} live, ${stale} stale${live ? ` (${fleet.liveness.live.map((b) => mdSafe(b.branch)).join(', ')})` : ''}`);
+  if (tmux) {
+    if (tmux.ok) {
+      const names = tmux.sessions.map((t) => `${mdSafe(t.name)}${t.attached ? ' (viewed)' : ''}, ${t.age}`).join('; ');
+      lines.push(`• deployed (tmux): ${tmux.sessions.length} session(s)${names ? `: ${names}` : ''}`);
+      const dark = tmux.sessions.filter((t) => !t.attached);
+      if (dark.length) lines.push(`• ${dark.length} terminal(s) with no viewer attached (${dark.map((t) => mdSafe(t.name)).join(', ')}) — compare with the live agents above before calling them free`);
+    } else {
+      lines.push(`• deployed (tmux): unavailable (${mdSafe(tmux.error || 'unknown')})`);
+    }
+  }
   if (fleet.stalled.length) {
     lines.push('');
     lines.push('*Stalled:*');
