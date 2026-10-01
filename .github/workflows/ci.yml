@@ -297,6 +297,15 @@ jobs:
       - name: Token sync gate (assert-sync-tokens)
         run: node scripts/assert-sync-tokens.test.mjs
 
+      # The coder build gate must never be fooled by the npm `tsc` decoy: when a
+      # worktree has no local compiler, `npx tsc` resolves version 2.0.4 of the
+      # package named `tsc`, whose only output is "This is not the tsc command
+      # you are looking for". The gate read that as a build failure and blamed
+      # the agent (card #19, four identical nudges against an environment that
+      # no retry could fix). Executed here so the sensor is a gate, not decor.
+      - name: Dispatch toolchain gate (assert-dispatch-toolchain)
+        run: node scripts/assert-dispatch-toolchain.mjs
+
       # The merge gate that protects this branch. `auto-merge` used to merge PRs
       # whose required checks had FAILED (#340 raced ahead of CI; #346 landed with
       # `tsc + named gates` red in both runs). The sensor drives the decision
