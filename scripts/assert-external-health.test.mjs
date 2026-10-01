@@ -11,7 +11,7 @@ import { KNOWN_PROJECTS, resolveProjectId, resolveRoleId, getProjectRoles, getRo
 import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText, RESEARCH_LOG, DOCTOR_FILE, DOCTOR_ARTIFACT } from './health-runner.mjs';
 import { loadSearchFixture, recordedFetch, vendorCalls, providerOf, FIXTURE_FILE } from './fixtures/search-providers.mjs';
 import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, sectionPlan, unknownSections, renderDoc, renderSection, refusalText, staleRefusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore, validateAnalysisSections, ANALYSIS_SECTIONS } from './lib/health/docs.mjs';
-import { searchAvailability, webSearch, fetchHit, validateInsightCitations, citationRefusalText, loadResearchLog, CITATION_SOURCES } from './lib/health/research.mjs';
+import { searchAvailability, webSearch, fetchHit, validateInsightCitations, citationRefusalText, loadResearchLog, CITATION_SOURCES, SEARCH_PROVIDERS, MAX_HITS_PER_QUERY } from './lib/health/research.mjs';
 import { buildHealthContext, renderContextBlock, clipToBudget, CONTEXT_CANDIDATES, CONTEXT_BUDGET } from './lib/health/context.mjs';
 import { readWorkspaceContext, contextProviderFor, runCouncilStage, getCouncilStatus, getCouncilPhases, resolveCouncilStage, isCaseProject, LEGACY_CHECKPOINTS } from './council-runner.mjs';
 import { validateDoctorReport } from './lib/health/doctor.mjs';
@@ -1562,6 +1562,8 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   //    renamed field, or an empty result set — none of them may end the search.
   const ATTEMPT = {
     http: (p) => p.expectedHttpError,
+    // The verbatim rejection each vendor returned to the declared request sent unauthenticated (section 16).
+    rejected: (p) => 'HTTP ' + p.rejected.status,
     html: () => 'the provider answered with a body that is not JSON (a bot check, or a redirect)',
     wrongShape: () => 'the provider answered with a body that is not the documented shape',
     zero: () => 'the provider answered with no results',
@@ -1569,6 +1571,7 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   };
   const chainCases = [
     ['http', 0, 1],
+    ['rejected', 0, 1],
     ['html', 0, 1],
     ['wrongShape', 0, 1],
     ['zero', 0, 1],
@@ -1576,7 +1579,9 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
     ['http', 1, 2],
     ['html', 1, 2],
     ['zero', 1, 2],
+    ['rejected', 1, 2],
     ['offline', 1, 2],
+    ['rejected', 2, null],
     ['wrongShape', 2, null],
   ];
   for (const [caseName, firstIndex, secondIndex] of chainCases) {
@@ -1674,6 +1679,52 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   eq('and made no request to any vendor', fs.readFileSync(callsFile, 'utf8') === callsBefore, true);
 
   for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
+}
+
+// ------------------------------- 16. the probe behind the vendor contracts
+{
+  console.log('\n  — the probe behind the vendor contracts —');
+  // `search-provider-probe.json` is evidence, not a sensor. It records one
+  // unauthenticated observation of each declared endpoint, taken by hand on the
+  // date it carries; no test in this suite ever replays it over the network.
+  // What this section checks, offline, is that the evidence still describes the
+  // request the lane builds today — change a `build` without re-probing and the
+  // record goes stale, and stale evidence about a vendor contract is worse than
+  // none.
+  const probeSpec = loadSearchFixture(FIXTURE_FILE);
+  const probeFile = path.join(ROOT, 'scripts', 'fixtures', 'search-provider-probe.json');
+  const probe = JSON.parse(fs.readFileSync(probeFile, 'utf8'));
+  check('the observation is dated', typeof probe.observedAt === 'string' && !Number.isNaN(Date.parse(probe.observedAt)), String(probe.observedAt));
+  check('it says in words what it is, and what it is not', /unauthenticated observation, not a captured successful response/i.test(probe.statement || ''), String(probe.statement || '').slice(0, 140));
+  check('the credential it used is declared as not being one', /not a credential/.test(probe.credentialNote || ''), String(probe.credentialNote));
+  eq('the evidence covers exactly the declared providers, by id', probe.providers.map((p) => p.id).sort(), probeSpec.providers.map((p) => p.id).sort());
+  const gateImports = fs
+    .readFileSync(fileURLToPath(import.meta.url), 'utf8')
+    .split('\n')
+    .filter((line) => /^\s*import\b/.test(line))
+    .join('\n');
+  check('the probe tool is a hand-run tool, imported by nothing in this gate', !/search-provider-probe/.test(gateImports), gateImports.slice(0, 120));
+
+  for (const provider of probeSpec.providers) {
+    const evidence = probe.providers.find((p) => p.id === provider.id);
+    const declared = evidence.probes.find((x) => x.sentBy === 'SEARCH_PROVIDERS.build');
+    check(`[${provider.id}] the evidence was built by the lane's own request builder`, Boolean(declared), JSON.stringify(evidence.probes.map((x) => x.sentBy)));
+    // The drift sensor: this is the request the lane would send today, and the
+    // evidence has to be exactly that request — same url, same headers, same body.
+    const { url, init } = SEARCH_PROVIDERS.find((p) => p.id === provider.id).build({ key: probe.credential, cx: probe.credential, query: probeSpec.query, limit: MAX_HITS_PER_QUERY });
+    eq(`[${provider.id}] the request on record is the one the lane builds today`, declared.request, { method: init.method || 'GET', url, headers: init.headers, body: String(init.body ?? '') });
+    check(`[${provider.id}] what came back is a refusal, not a search result`, declared.response.status >= 400, String(declared.response.status));
+    check(`[${provider.id}] the evidence says what it proves`, Array.isArray(evidence.proves) && evidence.proves.length > 0, JSON.stringify(evidence.proves));
+    check(`[${provider.id}] and it says what it does not prove`, Array.isArray(evidence.doesNotProve) && evidence.doesNotProve.length > 0, JSON.stringify(evidence.doesNotProve));
+    eq(`[${provider.id}] the fixture's rejected case is that observed reply, verbatim`, provider.rejected.raw, declared.response.body);
+    eq(`[${provider.id}] with the status the vendor returned`, provider.rejected.status, declared.response.status);
+  }
+
+  // The one thing the probe could not settle is written down rather than
+  // smoothed over: Brave checks auth before routing, so its wrong-path control
+  // answers exactly like the declared path does.
+  const braveEvidence = probe.providers.find((p) => p.id === 'brave');
+  check('the unknown the probe could not settle stays on the record', braveEvidence.doesNotProve.some((line) => /routed path/.test(line)), JSON.stringify(braveEvidence.doesNotProve));
 }
 
 console.log(`\n${passed} pass, ${failed} fail\n`);
