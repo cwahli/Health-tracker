@@ -1,5 +1,5 @@
 {
-  "note": "Recorded vendor shapes for the literature lane's search providers. Each entry pins the request the lane must send (endpoint, method, where the credential goes, and that the key is never in a body) and one recorded response per shape a real API returns: the documented envelope, a zero-result answer, a non-200, a bot check served as 200 HTML, and a quiet field rename. Trimmed to the documented fields the lane reads; extra envelope keys are kept so a parse that depends on the whole body would notice. Read by scripts/fixtures/search-providers.mjs, driven by scripts/assert-external-health.test.mjs section 15 and by scripts/fixtures/search-provider-shim.mjs for the command surface.",
+  "note": "Recorded vendor shapes for the literature lane's search providers. Each entry pins the request the lane must send (endpoint, method, where the credential goes, and that the key is never in a body) and one recorded response per shape a real API returns: the documented envelope, a zero-result answer, a non-200, a bot check served as 200 HTML, and a quiet field rename. Trimmed to the documented fields the lane reads; extra envelope keys are kept so a parse that depends on the whole body would notice. Read by scripts/fixtures/search-providers.mjs, driven by scripts/assert-external-health.test.mjs section 15 and by scripts/fixtures/search-provider-shim.mjs for the command surface. The rejected case in each provider is different in kind from the rest: it is the verbatim body that vendor actually returned to the declared request, sent with a well-formed but invalid credential (2026-10-01, unauthenticated observation — not a captured successful response; see scripts/fixtures/search-provider-probe.json). The ok/zero/http/html/wrongShape envelopes remain transcriptions of the vendors' documentation.",
   "query": "vitamin D and muscle strength",
   "pages": [
     {
@@ -78,6 +78,10 @@
       },
       "wrongShape": { "status": 200, "body": { "type": "search", "web": { "type": "search", "results": "nope" } } },
       "offline": { "throws": "getaddrinfo ENOTFOUND api.search.brave.com" },
+      "rejected": {
+        "status": 422,
+        "raw": "{\"error\":{\"code\":\"SUBSCRIPTION_TOKEN_INVALID\",\"detail\":\"The provided subscription token is invalid.\",\"meta\":{\"component\":\"authentication\"},\"status\":422},\"type\":\"ErrorResponse\"}"
+      },
       "expectedHttpError": "HTTP 429"
     },
     {
@@ -138,6 +142,10 @@
       },
       "wrongShape": { "status": 200, "body": { "query": "vitamin D and muscle strength", "results": "nope" } },
       "offline": { "throws": "getaddrinfo ENOTFOUND api.tavily.com" },
+      "rejected": {
+        "status": 401,
+        "raw": "{\n    \"detail\": {\n        \"error\": \"Unauthorized: missing or invalid API key.\"\n    }\n}\n"
+      },
       "expectedHttpError": "HTTP 401"
     },
     {
@@ -215,6 +223,10 @@
       },
       "wrongShape": { "status": 200, "body": { "kind": "customsearch#search", "items": "nope" } },
       "offline": { "throws": "getaddrinfo ENOTFOUND www.googleapis.com" },
+      "rejected": {
+        "status": 400,
+        "raw": "{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"errors\": [\n      {\n        \"message\": \"API key not valid. Please pass a valid API key.\",\n        \"domain\": \"global\",\n        \"reason\": \"badRequest\"\n      }\n    ],\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\",\n        \"reason\": \"API_KEY_INVALID\",\n        \"domain\": \"googleapis.com\",\n        \"metadata\": {\n          \"service\": \"customsearch.googleapis.com\"\n        }\n      },\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.LocalizedMessage\",\n        \"locale\": \"en-US\",\n        \"message\": \"API key not valid. Please pass a valid API key.\"\n      }\n    ]\n  }\n}\n"
+      },
       "expectedHttpError": "HTTP 403"
     }
   ]
