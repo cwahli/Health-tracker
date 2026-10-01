@@ -26,14 +26,25 @@ e29a4896  origin/agent/tui-s1: the tui-open.json resolution it added is on main 
 e0859056  origin/agent/tui-s1: its chatId normalisation is on main via the one-step RESOLVED resolver, waived 2026-09-29
 05ee1759  origin/agent/tui-s1: main has the same TUI capabilities by another route, waived 2026-09-29
 
-# Same class, later date. origin/agent/forge-one-click's "one click to create a bot"
-# landed as the #373 squash (a9c6ad72), which IS an ancestor of origin/main. The
-# branch's pre-squash commit 1ea00d23 is therefore not an ancestor either, and its
-# watched files no longer match main byte for byte because main has since moved PAST
-# it: scripts/tui-gateway.mjs is now at eca9ed2c ("serve the registry as of the
-# request"), which replaced the code 1ea00d23 introduced. The gate's
-# landed-by-another-route check compares blobs and cannot see that, so without this
-# line it blocks every PR from the moment the commit crosses 24h — which is exactly
-# what it did on 2026-10-01. The branch still exists, so the waiver is live; delete
-# this line in the same change that deletes the branch.
-1ea00d23  origin/agent/forge-one-click: landed as the #373 squash a9c6ad72, which is in origin/main; main has since superseded it at eca9ed2c, so the blobs no longer match and the byte-identical check cannot fire, waived 2026-10-01
+# 1ea00d23 / origin/agent/forge-one-click needs no waiver, and no longer has a
+# branch. It landed as the #373 squash a9c6ad72; the branch was deleted
+# 2026-10-01 once `git cherry` reported `-` for it (patch upstream) and PR #373
+# was confirmed merged. Its own waiver carried the instruction "delete this line
+# in the same change that deletes the branch" — that change is ab1a45e2's
+# subject matter, and this line is the deletion.
+#
+# What made the waiver necessary is also gone: ab1a45e2 taught the ratchet that
+# a squash-merged branch's sha is unreachable forever while its PATCH is
+# upstream. The gate now names 1ea00d23 under "exception(s) match no stranded
+# commit this run" — it is not stranded, so nothing needs suppressing. The old
+# rationale below is kept only to say what the class was, and why the fix is no
+# longer a waiver.
+#
+#   # landed as the #373 squash (a9c6ad72), which IS an ancestor of origin/main.
+#   # The branch's pre-squash commit is therefore not an ancestor either, and its
+#   # watched files stopped matching main byte for byte once main moved PAST it:
+#   # scripts/tui-gateway.mjs advanced to eca9ed2c ("serve the registry as of
+#   # the request"), replacing the code 1ea00d23 introduced. The old
+#   # landed-by-another-route check compared blobs and could not see that, so the
+#   # commit was condemned from the moment it crossed 24h — which is what
+#   # happened on 2026-10-01, twice, to two different agents.
