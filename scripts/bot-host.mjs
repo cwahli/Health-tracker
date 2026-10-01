@@ -109,6 +109,9 @@ import {
   parseCommand,
   resolveCommandName,
   isAddressedToUs,
+  resolveGroupAddressing,
+  recordActiveThread,
+  clearActiveThread,
   chatKind,
   BOT_COMMANDS,
   toTelegramCommands,
@@ -2058,6 +2061,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
   const route = resolveCommandName(cmd);
   switch (route) {
     case 'start':
+      clearActiveThread(chatId);
     case 'help':
       await api.sendMessage(chatId, helpText(config, eff));
       return;
@@ -2140,6 +2144,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       sessions.delete(chatId);
       saveSessions(config.id, sessions);
       clearFollowups(chatId);
+      clearActiveThread(chatId);
       await api.sendMessage(chatId, 'Started a fresh session.');
       return;
 
@@ -3029,6 +3034,101 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         }
         return;
       }
+      if (sub === 'dashboard' || sub === 'dash') {
+        const ws = healthWorkspace(projectId);
+        const dashPath = path.join(ws, 'result', 'HEALTH_DASHBOARD.md');
+        let text = '';
+        try {
+          if (fs.existsSync(dashPath)) {
+            text = fs.readFileSync(dashPath, 'utf8');
+          } else {
+            const status = getHealthStatus({ projectId });
+            text = formatStatusText(status);
+          }
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Failed to read health dashboard: ${err.message}`);
+          return;
+        }
+        await sendChunked(api, chatId, text);
+        return;
+      }
+      if (sub === 'triage' || sub.startsWith('triage')) {
+        const target = rawArgs.replace(/^triage\s*/i, '').trim().toUpperCase();
+        const ws = healthWorkspace(projectId);
+        const verifyPath = path.join(ws, 'result', 'health-verify.json');
+        let artifact = null;
+        try {
+          if (fs.existsSync(verifyPath)) {
+            artifact = JSON.parse(fs.readFileSync(verifyPath, 'utf8'));
+          }
+        } catch { artifact = null; }
+
+        if (target === 'H-1' || target === '1') {
+          const lines = [
+            '🛠️ *[Triage H-1: Profile Demographics Mismatch]*',
+            '• *Brief Fact:* Male, Born 15 June 1983 (Age 43), Chinese ethnicity.',
+            '• *Authoritative Sheet:* Height 163 cm, Weight 62 kg, BMI 23.49.',
+            '• *Current D1 App Profile:* Age 28, Height 178 cm, Weight 74 kg (defaults).',
+            '',
+            '*Actionable Resolution Path:*',
+            '1. Reconcile Cloudflare D1 app profile (`hiJun2hTdDTk2igwerun2LKvwb42`):',
+            '   `UPDATE profiles SET date_of_birth = "1983-06-15", height = 163, weight = 62, gender = "male", ethnicity = "chinese" WHERE uid = "hiJun2hTdDTk2igwerun2LKvwb42";`',
+            '2. Run `/health verify` to re-check. H-1 will flip to closed (✅).'
+          ];
+          await api.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown' });
+          return;
+        }
+
+        if (target === 'H-4' || target === '4') {
+          const lines = [
+            '🛠️ *[Triage H-4: Misfiled Biomarker Test Dates]*',
+            '• *Issue:* 4 app rows carry lab values that belong to a different blood draw date.',
+            '',
+            '*Identified Misalignments:*',
+            '• `2020-04-10` ➔ Belongs to `2020-11-04` draw.',
+            '• `2024-04-01` ➔ Belongs to `2024-04-02` draw.',
+            '• `2026-03-06` ➔ Belongs to `2024-04-03` / `2026-06-03` draw.',
+            '• `2026-05-05` ➔ Belongs to `2026-06-03` / multiple draw dates.',
+            '',
+            '*Actionable Resolution Path:*',
+            '1. In D1 database or via app edit, align row timestamps with the exact lab draw dates above.',
+            '2. Run `/health verify` to verify clusters have cleared.'
+          ];
+          await api.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown' });
+          return;
+        }
+
+        if (target.startsWith('WAIVE') || target.startsWith('H-8')) {
+          const lines = [
+            '🛠️ *[Triage H-8 / Waiver Management]*',
+            '• *H-8:* App holds telemetry newer than sheet (July–Sept 2026).',
+            '• *Resolution:* Waive via `HEALTH_WAIVED_ITEMS=H-8` in context env or environment.',
+            '• Once waived, the item state becomes `waived` (☑) and no longer blocks `/health analyze`.'
+          ];
+          await api.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown' });
+          return;
+        }
+
+        // General triage summary
+        if (!artifact) {
+          await api.sendMessage(chatId, '⚠️ No verify artifact found. Please run `/health verify` first to generate the triage backlog.');
+          return;
+        }
+        const openItems = (artifact.fixList?.items || []).filter((i) => i.state === 'open');
+        const lines = [
+          '🩺 *[Data Gate Triage Overview]*',
+          `Gate Status: *${openItems.length ? `🔴 OPEN (${openItems.length} items)` : '🟢 CLOSED'}*`,
+          '',
+          ...openItems.map((i) => `• *${i.id}:* ${i.title}\n  _${i.detail}_`),
+          '',
+          '💡 *Next Steps:*',
+          '• Type `/health triage H-1` for demographics fix instructions.',
+          '• Type `/health triage H-4` for misfiled date realignment instructions.',
+          '• Type `/health dashboard` to view the comprehensive 5-section status board.'
+        ];
+        await sendChunked(api, chatId, lines.join('\n'));
+        return;
+      }
       if (sub === 'analyze') {
         // The producer takes a model turn, so it holds the running-guard the
         // other seat commands hold. A refusal — the gate open, no credential, a
@@ -3737,10 +3837,20 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   }
   // Five bots can share one group only if each answers solely when addressed.
   // Direct chats skip this entirely: everything there is for this bot.
-  if (chatKind(message) === 'group' && !isAddressedToUs(message, config.me)) {
+  const isMasterBot = config.id === 'vm' || Boolean(config.isMaster);
+  const addr = resolveGroupAddressing(message, config.me, {
+    role: config.role || config.agent?.role || null,
+    name: config.name,
+    isMaster: isMasterBot,
+    allowGroupBroadcast: true,
+  });
+  if (chatKind(message) === 'group' && !addr.addressed) {
     return;
   }
-  const text = (message.text || message.caption || '').trim();
+  if (addr.delayMs && addr.delayMs > 0) {
+    await new Promise((r) => setTimeout(r, addr.delayMs));
+  }
+  const text = (addr.cleanText || message.text || message.caption || '').trim();
   const hasMedia = selectInboundMedia(message).length > 0;
   if (!text && !hasMedia) return;
 
@@ -3857,8 +3967,13 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // One shared working headline (provider + model + elapsed + usage) for
     // every bot-host agent — same line shape as the Grok TG router. The
     // provider follows the chat's effective model, not the registry default.
+    const roleHeadlineLabel = addr?.roleId
+      ? `${addr.roleId.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())} (${providerLabelForModel(eff.model)})`
+      : addr?.isBroadcast
+        ? `Council Coordinator (${providerLabelForModel(eff.model)})`
+        : providerLabelForModel(eff.model);
     renderer.setHeadline({
-      providerLabel: providerLabelForModel(eff.model),
+      providerLabel: roleHeadlineLabel,
       modelLabel: eff.model || '',
     });
     // Paint the headline now (starting… 0s) so the chat sees the turn begin
@@ -3896,8 +4011,21 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const media = await collectInboundMedia(api, message, config);
     const promptWithMedia = media.length ? buildInboundPrompt(prompt, media) : prompt;
 
-    const activeProject = getChatProject(chatId);
-    const activeRole = getChatRole(chatId);
+    let activeProject = getChatProject(chatId);
+    let activeRole = getChatRole(chatId);
+
+    if (addr?.roleId) {
+      activeRole = addr.roleId;
+      if (['data_steward', 'health_analyst', 'test_planner', 'research_lead', 'safety_reviewer', 'doctor', 'lifestyle'].includes(addr.roleId)) {
+        activeProject = KNOWN_PROJECTS['external-health'];
+      }
+    } else if (addr?.isBroadcast) {
+      if (activeProject.id === 'health-tracker' || activeProject.id === 'external-health') {
+        activeProject = KNOWN_PROJECTS['external-health'];
+      }
+      activeRole = null;
+    }
+
     const isExternalTurn = activeProject.type === 'external';
     const effectiveWorkspace = isExternalTurn ? activeProject.workspace : config.agent.workspace;
     // An external folder's child is built from a list, so it never holds the
@@ -4459,6 +4587,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     busy.delete(chatId);
     releaseFiles(claimed, claimId);
     recordRunFinish(config.id, chatId);
+    if (storeFacts.outcome === 'answered') {
+      recordActiveThread(chatId, {
+        roleId: activeRole || addr?.roleId || null,
+        botId: config.id,
+        isCouncil: Boolean(addr?.isBroadcast),
+        jointRoles: addr?.jointRoles || [],
+        timestamp: Date.now(),
+      });
+    }
     // G-1: a real finished turn is what the store exists to record. This is the
     // only place it is written, it runs on every outcome (answered, empty, failed,
     // aborted), and it cannot throw or await: a Google outage must not cost the
