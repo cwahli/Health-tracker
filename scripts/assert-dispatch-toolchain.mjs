@@ -218,5 +218,16 @@ process.stdout.write('assert-dispatch-toolchain: the coder build gate cannot be 
   check('it exits 3', result.exitCode === ENV_BROKEN_EXIT);
 }
 
+// The change-detection sensor is a bash script because the logic under test is
+// bash inside run-coding-dispatch.sh. It is run from here rather than from a new
+// ci.yml step so the gate list does not grow another contested-file edit.
+{
+  const sensor = path.join(HERE, 'assert-dispatch-change-detection.sh');
+  const r = spawnSync('bash', [sensor], { encoding: 'utf8', cwd: ROOT });
+  const out = `${r.stdout || ''}${r.stderr || ''}`;
+  check('the dispatcher sees an edit to an already-dirty file (card-19 regression)',
+    r.status === 0, out.trim().split('\n').filter(Boolean).slice(-4).join(' | '));
+}
+
 process.stdout.write(`assert-dispatch-toolchain: ${pass} pass, ${fail} fail\n`);
 process.exit(fail === 0 ? 0 : 1);

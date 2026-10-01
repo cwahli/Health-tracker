@@ -43,6 +43,7 @@ import {
   postPlan,
   auditIsDispatchable,
 } from './meal-audit-loop.mjs';
+import { actualFromMealBuild } from './meal-audit-capture-actual.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
@@ -379,6 +380,65 @@ check('a bundle with no audit payload at all refuses dispatch', () => {
   const j = auditIsDispatchable(dir);
   assert.equal(j.ok, false, 'nothing to judge means nothing may be dispatched');
   assert.match(j.reason, /no audit_payload|unreadable|no bundle/i);
+});
+
+// The last mile of compare: nothing used to produce an actual payload, so every
+// sweep stopped at NO_ACTUAL and the comparison could only be walked by hand.
+// Two properties matter and both are load-bearing:
+//
+//   1. A payload with no result.mealBuild.items must FAIL. Emitting an empty or
+//      half-filled actual would compare as 100% drift on every key and file cards
+//      against the audit rather than the product — the exact failure the audit
+//      chain exists to prevent.
+//   2. A dish with no nutrients must FAIL for the same reason. A dish present but
+//      nutritionally empty scores worse than a dish that is simply absent, because
+//      absence can be seen as a missing dish and emptiness cannot.
+check('actualFromMealBuild refuses a payload the app never computed', () => {
+  assert.throws(() => actualFromMealBuild({}), /no result\.mealBuild\.items/);
+  assert.throws(() => actualFromMealBuild({ result: {} }), /no result\.mealBuild\.items/);
+  assert.throws(() => actualFromMealBuild({ result: { mealBuild: { items: [] } } }), /no result\.mealBuild\.items/);
+});
+
+check('actualFromMealBuild refuses a dish with no nutrients', () => {
+  assert.throws(
+    () => actualFromMealBuild({ result: { mealBuild: { items: [{ name: 'Rice', weightGrams: 200, nutrients: {} }] } } }),
+    /carries no nutrients/,
+    'a nutritionally empty dish compares as 100% drift on every key',
+  );
+});
+
+check('actualFromMealBuild reshapes the app ledger into the comparator form', () => {
+  const a = actualFromMealBuild({
+    jobId: 'job_1',
+    result: {
+      mealBuild: {
+        title: 'Oats and Grapes',
+        weightGrams: 320,
+        quantity: '1 serving',
+        nutrients: { calories: 313 },
+        items: [
+          { name: 'Oats', canonicalDbName: 'Oats', weightGrams: 220, boundingBox2D: [250, 100, 955, 990], nutrients: { calories: 220, protein: 8 } },
+          { name: 'Grapes', canonicalDbName: 'Grapes', weightGrams: 100, boundingBox2D: [390, 110, 875, 880], nutrients: { calories: 93, protein: 1 } },
+        ],
+      },
+    },
+  });
+  // The shape normalizeActualAudit() already accepts: { dishes: [...] }.
+  assert.equal(a.dishes.length, 2);
+  assert.equal(a.dishes[0].dishName, 'Oats');
+  assert.deepEqual(a.dishes[0].boundingBox2D, [250, 100, 955, 990]);
+  assert.deepEqual(a.dishes[1].boundingBox2D, [390, 110, 875, 880]);
+  assert.equal(a.dishes[1].estimatedWeightGrams, 100);
+  assert.deepEqual(a.mealTotals, { calories: 313 });
+  assert.match(a.source, /app mealBuild/);
+});
+
+check('a dish with no box is captured as null, never a fabricated full frame', () => {
+  const a = actualFromMealBuild({
+    result: { mealBuild: { items: [{ name: 'Mystery', weightGrams: 80, nutrients: { calories: 10 } }] } },
+  });
+  assert.equal(a.dishes[0].boundingBox2D, null,
+    'inventing [0,0,1000,1000] would be a fabricated annotation');
 });
 
 console.log(`\n${pass} pass, ${fail} fail`);

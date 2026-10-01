@@ -967,22 +967,56 @@ record_audit() {
 # ---------------------------------------------------------------
 SNAP_FILE=""
 BASE_HEAD=""
+# One line per dirty path: "<porcelain status>\t<path>\t<content hash>".
+#
+# The content hash is the whole point. `git status --porcelain` reports path and
+# status letter, NOT what is in the file, so an agent that edits a file which was
+# ALREADY modified produces a byte-identical porcelain line. Diffing porcelain
+# lines therefore reports zero changes for real work — proven with a throwaway
+# repo: modify f.txt, snapshot, modify it again, and `comm -13` returns nothing but
+# the temp file it made.
+#
+# That is not hypothetical. A reused dispatch worktree carries dirt from an earlier
+# aborted attempt, so card #19's coder produced a real fix and the dispatcher
+# reported "No code changes produced", blocked the card, and charged a
+# tool-allowance failure against the agent for work it had actually done.
+workspace_fingerprint() {
+  git -C "$CODER_DIR" status --porcelain -uall 2>/dev/null \
+    | grep -v 'src/git-version.generated.ts' \
+    | while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        path=${line:3}
+        # A rename/copy line is "R  old -> new"; the path that exists is the new one.
+        case "$path" in *' -> '*) path=${path##*' -> '} ;; esac
+        if [ -f "$CODER_DIR/$path" ]; then
+          h=$(git hash-object -- "$CODER_DIR/$path" 2>/dev/null || echo "-")
+        elif [ -d "$CODER_DIR/$path" ]; then
+          h="dir"
+        else
+          h="absent"
+        fi
+        printf '%s\t%s\t%s\n' "${line:0:2}" "$path" "$h"
+      done
+}
+
 snapshot_workspace() {
   rm -f "${SNAP_FILE:-}"
   SNAP_FILE=$(mktemp)
   BASE_HEAD=$(git -C "$CODER_DIR" rev-parse HEAD 2>/dev/null || true)
-  git -C "$CODER_DIR" status --porcelain | grep -v 'src/git-version.generated.ts' > "$SNAP_FILE" || true
+  workspace_fingerprint > "$SNAP_FILE" || true
 }
 
-# Lines that appeared after snapshot_workspace. Pre-existing dirt does not count.
+# Paths that appeared OR CHANGED after snapshot_workspace. Pre-existing dirt that
+# the agent did not touch does not count — but dirt the agent did touch does, even
+# when it was already dirty before the run.
 new_changes() {
   local now
   now=$(mktemp)
-  git -C "$CODER_DIR" status --porcelain | grep -v 'src/git-version.generated.ts' > "$now" || true
-  if [ -n "$SNAP_FILE" ] && [ -f "$SNAP_FILE" ]; then
-    comm -13 <(sort "$SNAP_FILE") <(sort "$now") || true
+  workspace_fingerprint > "$now" || true
+  if [ -n "${SNAP_FILE:-}" ] && [ -f "$SNAP_FILE" ]; then
+    comm -13 <(sort "$SNAP_FILE") <(sort "$now") | cut -f2 | sort -u || true
   else
-    cat "$now" || true
+    cut -f2 "$now" | sort -u || true
   fi
   rm -f "$now"
 }
