@@ -70,6 +70,12 @@ export const CITATION_SOURCES = [
  * `also` are the ones a provider needs *in addition* (Google's key and its
  * search-engine id). Getting this wrong reports a usable host as unusable.
  * Nothing here reads a credential from anywhere but the `env` map it is handed.
+ *
+ * Each `build` is a vendor contract, not a preference: the endpoint, the method,
+ * where the credential goes, and which body field the hits come back in are all
+ * pinned against recorded vendor responses in
+ * `scripts/fixtures/search-providers.json` — a real host is the worst place to
+ * discover that a provider moved its auth from the body to a header.
  */
 export const SEARCH_PROVIDERS = [
   {
@@ -90,12 +96,17 @@ export const SEARCH_PROVIDERS = [
     keys: ['TAVILY_API_KEY'],
     also: [],
     hint: 'TAVILY_API_KEY',
+    // Tavily's credential is a Bearer header. An earlier shape of this entry
+    // sent it as `api_key` in the body, which is what the vendor's *old* SDK did;
+    // today's docs and today's SDK send `Authorization: Bearer` and no `api_key`
+    // at all. A body credential also ends up in places a header does not (proxy
+    // logs, error reports), so this is both the working shape and the safer one.
     build: ({ key, query, limit }) => ({
       url: 'https://api.tavily.com/search',
       init: {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': USER_AGENT },
-        body: JSON.stringify({ api_key: key, query, max_results: limit, search_depth: 'basic' }),
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${key}`, 'User-Agent': USER_AGENT },
+        body: JSON.stringify({ query, max_results: limit, search_depth: 'basic' }),
       },
     }),
     parse: (json) => (json?.results || []).map((r) => ({ title: r?.title || '', url: r?.url || '', snippet: r?.content || '' })),
@@ -142,6 +153,12 @@ export function searchAvailability(env = process.env) {
  * falls through to the next one; the attempts are returned so a partial answer
  * still says what was tried. Zero hits from a provider that answered is a
  * failure, not an empty result.
+ *
+ * A 200 is not a promise that the body is the documented one: a bot check, a
+ * redirect to a login page, and a quiet field rename all arrive as 200s. Those
+ * are named as what they are — the JSON parse error is a JavaScript internal and
+ * the raw message can quote the page — so the refusal a user reads says which
+ * provider failed and why, in the vendor's terms rather than the parser's.
  */
 export async function webSearch({ query, env = process.env, fetchImpl = fetch, limit = MAX_HITS_PER_QUERY, providers = SEARCH_PROVIDERS } = {}) {
   const q = String(query || '').trim();
@@ -182,7 +199,21 @@ export async function webSearch({ query, env = process.env, fetchImpl = fetch, l
         attempts.push({ provider: c.provider.id, error: `HTTP ${res?.status ?? 'no response'}` });
         continue;
       }
-      const hits = c.provider.parse(await res.json()).filter((h) => /^https?:\/\//i.test(h.url)).slice(0, limit);
+      let body;
+      try {
+        body = await res.json();
+      } catch {
+        attempts.push({ provider: c.provider.id, error: 'the provider answered with a body that is not JSON (a bot check, or a redirect)' });
+        continue;
+      }
+      let parsed;
+      try {
+        parsed = c.provider.parse(body);
+      } catch {
+        attempts.push({ provider: c.provider.id, error: 'the provider answered with a body that is not the documented shape' });
+        continue;
+      }
+      const hits = (Array.isArray(parsed) ? parsed : []).filter((h) => /^https?:\/\//i.test(h?.url)).slice(0, limit);
       if (!hits.length) {
         attempts.push({ provider: c.provider.id, error: 'the provider answered with no results' });
         continue;
