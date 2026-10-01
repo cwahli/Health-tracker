@@ -29,6 +29,7 @@ import {
   seedProjectWorkspace,
 } from './lib/project-registry.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
+import { buildHealthContext, renderContextBlock } from './lib/health/context.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
@@ -86,32 +87,79 @@ export function findInWorkspace(workspace, ...candidates) {
   return '';
 }
 
-export function readWorkspaceContext(workspace) {
-  const context = {};
-  if (!fs.existsSync(workspace)) return context;
-  // Root files (old layout) plus the current layout's case/ and working/ trees,
-  // keyed by relative path so same-named files cannot collide silently.
-  const readFile = (rel) => {
-    try {
-      context[rel] = fs.readFileSync(path.join(workspace, rel), 'utf8');
-    } catch { /* listed but unreadable: skip, do not fail the turn */ }
-  };
-  for (const f of fs.readdirSync(workspace)) {
-    if (f.endsWith('.md')) {
+/**
+ * Which context reader a project declares, if any.
+ *
+ * A project names a `contextProvider` in the registry when its workspace is not
+ * a case/ workspace. external-health is one: its data lives in `result/` and
+ * `sources/`, and the case/ reader below — root `*.md` plus `case/` and
+ * `working/` — found exactly one file there (`BRIEF.md`), so every seat reasoned
+ * from the brief and none of the verified numbers.
+ */
+export function contextProviderFor(workspace, projectId = '') {
+  const proj = projectId
+    ? KNOWN_PROJECTS[projectId]
+    : Object.values(KNOWN_PROJECTS).find((p) => p.workspace === workspace);
+  return proj?.contextProvider || '';
+}
+
+/**
+ * The context block a seat turn is given.
+ *
+ * `context` is the legacy file map for case/ projects and the structured pack
+ * for a provider project; `text` is what goes into the prompt. The legacy path
+ * renders byte-for-byte what it always did (`### File:` headers, 1000-character
+ * slice) so external-1 and external-2 prompts do not change.
+ *
+ * A provider that refuses (no brief, no such folder) answers `ok:false` with its
+ * reasons, and the caller must refuse the turn rather than send an empty block:
+ * a seat reasoning from nothing produces exactly the confident claims this
+ * project exists to prevent.
+ */
+export function readWorkspaceContext(workspace, { projectId = '' } = {}) {
+  if (contextProviderFor(workspace, projectId) === 'health') {
+    const context = buildHealthContext(workspace);
+    return { ok: context.ok, provider: 'health', refuses: context.refuses, context, text: renderContextBlock(context) };
+  }
+
+  const files = {};
+  if (fs.existsSync(workspace)) {
+    // Root files (old layout) plus the current layout's case/ and working/ trees,
+    // keyed by relative path so same-named files cannot collide silently.
+    const readFile = (rel) => {
       try {
-        if (fs.statSync(path.join(workspace, f)).isFile()) readFile(f);
-      } catch { /* ignore */ }
+        files[rel] = fs.readFileSync(path.join(workspace, rel), 'utf8');
+      } catch { /* listed but unreadable: skip, do not fail the turn */ }
+    };
+    for (const f of fs.readdirSync(workspace)) {
+      if (f.endsWith('.md')) {
+        try {
+          if (fs.statSync(path.join(workspace, f)).isFile()) readFile(f);
+        } catch { /* ignore */ }
+      }
+    }
+    for (const dir of ['case', 'working']) {
+      const abs = path.join(workspace, dir);
+      let entries = [];
+      try {
+        entries = fs.statSync(abs).isDirectory() ? fs.readdirSync(abs) : [];
+      } catch { /* absent dir: nothing to add */ }
+      for (const f of entries) if (f.endsWith('.md')) readFile(path.join(dir, f));
     }
   }
-  for (const dir of ['case', 'working']) {
-    const abs = path.join(workspace, dir);
-    let entries = [];
-    try {
-      entries = fs.statSync(abs).isDirectory() ? fs.readdirSync(abs) : [];
-    } catch { /* absent dir: nothing to add */ }
-    for (const f of entries) if (f.endsWith('.md')) readFile(path.join(dir, f));
+  const text = Object.entries(files)
+    .map(([f, c]) => `### File: ${f}\n${c.slice(0, 1000)}...\n`)
+    .join('\n');
+  return { ok: true, provider: 'legacy', refuses: [], context: files, text };
+}
+
+/** The seat context for a turn, or a thrown refusal naming what is missing. */
+function seatContextText(projectId, workspace) {
+  const ctx = readWorkspaceContext(workspace, { projectId });
+  if (!ctx.ok) {
+    throw new Error(`workspace context refused for ${projectId}: ${ctx.refuses.join('; ')}`);
   }
-  return context;
+  return ctx.text;
 }
 
 export function getCouncilStatus(projectId = 'external-1') {
@@ -197,10 +245,7 @@ export async function runFullCouncil(projectId = 'external-1', onProgress = cons
   const outDir = resultDir(workspace);
   fs.mkdirSync(outDir, { recursive: true });
 
-  const context = readWorkspaceContext(workspace);
-  const contextText = Object.entries(context)
-    .map(([f, c]) => `### File: ${f}\n${c.slice(0, 1000)}...\n`)
-    .join('\n');
+  const contextText = seatContextText(projectId, workspace);
 
   onProgress(`🚀 Starting Multi-Agent Council for project: "${proj.name}"`);
 
@@ -248,10 +293,7 @@ export async function runCouncilStage(stage = 'audit', projectId = 'external-1',
   const outDir = path.join(workspace, 'output');
   fs.mkdirSync(outDir, { recursive: true });
 
-  const context = readWorkspaceContext(workspace);
-  const contextText = Object.entries(context)
-    .map(([f, c]) => `### File: ${f}\n${c.slice(0, 1000)}...\n`)
-    .join('\n');
+  const contextText = seatContextText(projectId, workspace);
 
   let targetPhases = [];
   let nextStepMsg = '';
