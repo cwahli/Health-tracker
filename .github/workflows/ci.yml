@@ -449,9 +449,18 @@ jobs:
       # but never merged. Both halves of that gate are proven in its own sensor
       # against throwaway repos — a gate never seen red is a gate nobody trusts.
       - name: TUI fixes-landed ratchet (unlanded branch is a regression)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           node scripts/assert-tui-fixes-landed.test.mjs
+          # A branch with an open PR is being worked, not stranded — that is the
+          # opposite of an unlanded fix reading as a done fix. The gate makes no
+          # network call, so the names are supplied here. If `gh` fails the list
+          # is empty and NOBODY is exempt: an API outage must not pass work.
+          OPEN_PRS="$(gh pr list --state open --limit 100 --json headRefName \
+            --jq '.[].headRefName' 2>/dev/null | paste -sd, - || true)"
           # The base is the branch under test, not a name this file hardcodes:
           # a PR's own head must not be judged against itself.
           node scripts/assert-tui-fixes-landed.mjs \
+            --open-pr-branches="$OPEN_PRS" \
             --base="origin/${{ github.event.repository.default_branch }}"
