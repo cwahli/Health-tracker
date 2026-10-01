@@ -148,6 +148,9 @@ export const KNOWN_PROJECTS = {
     allowGit: false,
     gdriveFolder: '[External-1-PIP-Defense]',
     description: 'Multi-agent legal, accuracy, and defense case council for performance rating and PIP navigation',
+    // The case checkpoints (audit/defense/finalize) and the A/B/C deliverables
+    // belong to this pipeline alone; every other project runs its own roles.
+    councilPipeline: 'case',
     roles: COUNCIL_ROLES,
   },
   'external-2': {
@@ -160,6 +163,7 @@ export const KNOWN_PROJECTS = {
     allowGit: false,
     gdriveFolder: '[External-2-PIP-Defense]',
     description: 'Multi-agent legal, accuracy, and defense case council for performance rating and PIP navigation',
+    councilPipeline: 'case',
     roles: COUNCIL_ROLES,
   },
 };

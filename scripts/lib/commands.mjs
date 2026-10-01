@@ -31,9 +31,9 @@ export const BOT_COMMANDS = [
   { command: 'resume', description: 'Print the current bug-ticket packet' },
   { command: 'tx', description: 'Shared work view on|off|status|debug for this chat' },
   { command: 'project', description: 'View or switch project (e.g. /project external 1)' },
-  { command: 'council', description: 'Run multi-agent council (/council run or /council status)' },
+  { command: 'council', description: 'Run a council stage by name or number (/council <stage>, /council all, /council status)' },
   { command: 'role', description: 'Switch active agent role (/role legal, /role sim, etc.)' },
-  { command: 'health', description: 'Personal Health Coach: /health status | verify | ingest | refresh | analyze' },
+  { command: 'health', description: 'Personal Health Coach: /health status | verify | ingest | refresh | analyze | readiness' },
   { command: 'location', description: 'Show or switch active compute location / pool' },
 ];
 
@@ -303,9 +303,9 @@ export function helpText(config, { model, agent, variant } = {}) {
     '/bugs             open the shared bug board (Mini App button)',
     '/forge            create a new bot in one click (Mini App forge)',
     '/project [name]   view or switch project (/project external 1)',
-    '/council [stage]  run council stage (audit, defense, finalize, run)',
+    '/council [stage]  run a council stage (this project\u2019s seats, by name or number; all | run)',
     '/role [name]      switch role within project (/role legal, /role sim)',
-    '/health [sub]     health coach data loop: verify · ingest · refresh · analyze · status',
+    '/health [sub]     health coach: verify · ingest · refresh · analyze · readiness · status',
     '/location [name]  show or switch compute location / quota pool',
     '/help             this message',
   ].join('\n');

@@ -10,7 +10,9 @@ import { KNOWN_PROJECTS, resolveProjectId, resolveRoleId, getProjectRoles, getRo
 import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile } from './health-runner.mjs';
 import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, sectionPlan, unknownSections, renderDoc, renderSection, refusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore, validateAnalysisSections, ANALYSIS_SECTIONS } from './lib/health/docs.mjs';
 import { buildHealthContext, renderContextBlock, clipToBudget, CONTEXT_CANDIDATES, CONTEXT_BUDGET } from './lib/health/context.mjs';
-import { readWorkspaceContext, contextProviderFor } from './council-runner.mjs';
+import { readWorkspaceContext, contextProviderFor, runCouncilStage, getCouncilStatus, resolveCouncilStage, isCaseProject, LEGACY_CHECKPOINTS } from './council-runner.mjs';
+import { checkHealthReadiness, formatReadinessText, STALE_AFTER_DAYS } from './lib/health/readiness.mjs';
+import { execFileSync } from 'node:child_process';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -834,6 +836,162 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   check('the legacy reader ignores non-markdown files', !legacy.text.includes('not markdown'), legacy.text.slice(0, 200));
   eq('a legacy project is never served health context', contextProviderFor(caseDir), '');
   fs.rmSync(caseDir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ------------------------------------------------- 11. council stages resolve from the project's own seats
+{
+  const captured = [];
+  const fakeModel = async ({ prompt }) => {
+    captured.push(prompt);
+    return { code: 0, finalText: 'SEAT OUTPUT FOR THE SENSOR', lastError: null, sessionID: null, stderr: '', usage: { cost: 0, tokens: null } };
+  };
+
+  // Resolution is pure, so it is judged before any model is involved.
+  const byId = resolveCouncilStage('data_steward', 'external-health');
+  eq('a stage resolves by its seat id', [byId.ok, byId.phases.map((p) => p.id)], [true, ['data_steward']]);
+  eq('a stage resolves through a role alias', resolveCouncilStage('steward', 'external-health').phases.map((p) => p.id), ['data_steward']);
+  eq('a stage resolves by its number', resolveCouncilStage('2', 'external-health').phases.map((p) => p.id), ['health_analyst']);
+  eq('all five seats are a stage', resolveCouncilStage('all', 'external-health').phases.length, 5);
+  const refusedStage = resolveCouncilStage('banana', 'external-health');
+  check('an unknown stage is refused, not run as the whole council', refusedStage.ok === false && /Unknown stage/.test(refusedStage.error), JSON.stringify(refusedStage).slice(0, 160));
+  check('the refusal names the real stages', /data_steward/.test(refusedStage.error) && /safety_reviewer/.test(refusedStage.error), refusedStage.error);
+  eq('external-health is not a case project', isCaseProject('external-health'), false);
+  eq('external-1 is a case project', isCaseProject('external-1'), true);
+
+  // The case checkpoints keep their exact phase sets and messages.
+  for (const [token, ids] of [['audit', ['accuracy_review']], ['defense', ['case_review', 'manager_simulation']], ['finalize', ['legal_policy', 'arbitrator', 'final_case_builder']]]) {
+    const r = resolveCouncilStage(token, 'external-1');
+    eq(`the ${token} checkpoint keeps its phases`, r.phases.map((p) => p.id), ids);
+    eq(`the ${token} checkpoint keeps its message`, r.nextStepMsg, LEGACY_CHECKPOINTS[token].nextStepMsg);
+    check(`the ${token} checkpoint says it is the legacy path`, r.legacy === true);
+  }
+
+  // A real stage run against a workspace, with the model faked: the file lands
+  // where the status reader looks, and the seat is handed the health context.
+  const health = KNOWN_PROJECTS['external-health'];
+  const originalHealth = health.workspace;
+  const healthWs = fs.mkdtempSync(path.join(os.tmpdir(), 'council-health-'));
+  fs.writeFileSync(path.join(healthWs, 'BRIEF.md'), '# Brief\n\nFour living documents.\n');
+  fs.mkdirSync(path.join(healthWs, 'result'), { recursive: true });
+  fs.writeFileSync(path.join(healthWs, 'result', 'health-verify.json'), JSON.stringify({ ...fixtureArtifact('open'), summary: { match: 2, missing: 1, appOnlyUnreviewed: 1, gap: 1 } }));
+  fs.writeFileSync(path.join(healthWs, 'result', 'health-fix-list.md'), '# Data fix list\n\n- [ ] **H-1 — mis-filed rows**\n');
+  health.workspace = healthWs;
+  try {
+    const one = await runCouncilStage('data_steward', 'external-health', () => {}, { runGemini: fakeModel });
+    const written = path.join(healthWs, 'result', '01_data_steward.md');
+    eq('a stage writes into result/, the directory the status reader reads', [fs.existsSync(written), one.outDir], [true, path.join(healthWs, 'result')]);
+    check('the seat was handed the verified data, not just the brief', /data gate: OPEN \(8: H-1/.test(captured.at(-1) || '') && /The fix list/.test(captured.at(-1) || ''), (captured.at(-1) || '').slice(0, 200));
+    check('the prompt carries the not-present finding', /not present: result\/health-analysis\.json/.test(captured.at(-1) || ''), 'the absence never reached the prompt');
+    check('nothing was written into output/', !fs.existsSync(path.join(healthWs, 'output')), 'a stage still writes to output/');
+    const status = getCouncilStatus('external-health');
+    eq('the stage the writer ran reads back as completed', status.phases.find((p) => p.phase === 'data_steward')?.completed, true);
+    eq('the project reports its own deliverables', status.deliverables.length, 5);
+    check('the external-2 trio is never this project\'s deliverable', status.deliverables.every((d) => !d.startsWith('A_') && !d.startsWith('B_') && !d.startsWith('C_')), status.deliverables.join(','));
+    eq('deliverables are not ready after one seat', status.deliverablesReady, false);
+    eq('the status reply names the project pipeline', status.pipeline, 'roles');
+
+    const all = await runCouncilStage('all', 'external-health', () => {}, { runGemini: fakeModel });
+    // Seats run in the loader's order (role file name), which is also the order
+    // `/council status` numbers them.
+    eq('all runs every seat in order', all.phases.map((p) => p.id), ['data_steward', 'health_analyst', 'research_lead', 'safety_reviewer', 'test_planner']);
+    eq('five files exist after all', getCouncilStatus('external-health').deliverablesReady, true);
+    check('every deliverable points at a real file', all.deliverables.every((d) => fs.existsSync(d)), all.deliverables.join(','));
+
+    let threw = '';
+    try {
+      await runCouncilStage('banana', 'external-health', () => {}, { runGemini: fakeModel });
+    } catch (err) {
+      threw = err.message;
+    }
+    check('the command surface refuses an unknown stage', /Unknown stage/.test(threw) && /health_analyst/.test(threw), threw);
+
+    // The case pipeline, on the same code path, unchanged.
+    const caseOne = KNOWN_PROJECTS['external-1'];
+    const originalCase = caseOne.workspace;
+    const caseWs = fs.mkdtempSync(path.join(os.tmpdir(), 'council-case-'));
+    caseOne.workspace = caseWs;
+    try {
+      const audit = await runCouncilStage('audit', 'external-1', () => {}, { runGemini: fakeModel });
+      eq('the case checkpoint still writes to output/ (its reader)', [fs.existsSync(path.join(caseWs, 'output', '01_accuracy_audit.md')), audit.outDir], [true, path.join(caseWs, 'output')]);
+      eq('the case checkpoint still returns its own message', audit.nextStepMsg, LEGACY_CHECKPOINTS.audit.nextStepMsg);
+      const caseStatus = getCouncilStatus('external-1');
+      eq('the case project still reports the A/B/C trio', caseStatus.deliverables.length, 3);
+      check('the case deliverables are the executive documents', caseStatus.deliverables.every((d) => /_[A-Z]/.test(d) || /^[ABC]_/.test(d)), caseStatus.deliverables.join(','));
+      eq('the case project says so', caseStatus.pipeline, 'case');
+    } finally {
+      caseOne.workspace = originalCase;
+      fs.rmSync(caseWs, { recursive: true, force: true });
+    }
+  } finally {
+    health.workspace = originalHealth;
+    fs.rmSync(healthWs, { recursive: true, force: true });
+  }
+}
+
+// ------------------------------------------------- 12. the readiness self-check
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-ready-'));
+  fs.mkdirSync(path.join(dir, 'result'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'BRIEF.md'), '# Brief\n\nFour living documents.\n');
+  const paths = { workspace: dir, sources: path.join(dir, 'sources'), result: path.join(dir, 'result') };
+  const now = new Date('2026-10-01T09:00:00Z');
+
+  // No key, no host config: not ready, and the blocker says exactly what to add where.
+  const bare = checkHealthReadiness({ paths, env: {}, now });
+  eq('with no model credential the check is not ready', [bare.ready, bare.exit, bare.blockers], [false, 3, ['model']]);
+  const bareText = formatReadinessText(bare);
+  // The reply is Telegram Markdown, so an env var name arrives escaped — the
+  // literal name is asserted on the check itself, the escaped one on the reply.
+  check('the blocker names the key and the file it goes in', /GEMINI.{0,2}API.{0,2}KEY/.test(bareText) && /common\.env/.test(bareText), bareText.slice(0, 200));
+  check('the blocker carries the key verbatim', /GEMINI_API_KEY/.test(bare.checks.find((c) => c.key === 'model').detail), bare.checks.find((c) => c.key === 'model').detail);
+  check('the host env findings are reported, not skipped', bare.findings.includes('docs_folder') && bare.findings.includes('health_env_file'), JSON.stringify(bare.findings));
+  check('the missing env var finding says where to put it', /HEALTH_DOCS_FOLDER/.test(JSON.stringify(bare.checks)) && /HEALTH_ENV_FILE/.test(JSON.stringify(bare.checks)), JSON.stringify(bare.checks.map((c) => c.key)));
+  const contextCheck = bare.checks.find((c) => c.key === 'context');
+  eq('the context check reports the bytes a seat would see', [contextCheck.level, contextCheck.title.includes('bytes')], ['ok', true]);
+  check('the readiness reply is renderable', formatReadinessText(bare).includes('Not ready for bots'), formatReadinessText(bare).slice(0, 120));
+
+  const withKey = checkHealthReadiness({ paths, env: { GEMINI_API_KEY: 'x', HEALTH_DOCS_FOLDER: 'folder', HEALTH_ENV_FILE: '/tmp/.env' }, now });
+  eq('with a credential and host config it is ready', [withKey.ready, withKey.exit, withKey.blockers], [true, 0, []]);
+  check('ready still reports the findings it has', withKey.findings.includes('verify') && withKey.findings.includes('analysis'), JSON.stringify(withKey.findings));
+  check('the ready reply says so', /Ready for bots/.test(formatReadinessText(withKey)));
+
+  // A stale artifact is a finding that says how old; a fresh one is fine.
+  const staleAt = new Date(now.getTime() - (STALE_AFTER_DAYS + 10) * 86400000).toISOString();
+  fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify({ ...fixtureArtifact('open'), at: staleAt }));
+  const stale = checkHealthReadiness({ paths, env: {}, now });
+  check('a stale verify artifact is a finding naming its age', stale.findings.includes('verify') && /days old/.test(stale.checks.find((c) => c.key === 'verify').title), stale.checks.find((c) => c.key === 'verify').title);
+  check('the open gate is reported with its item ids', /H-1/.test(stale.checks.find((c) => c.key === 'gate').title), stale.checks.find((c) => c.key === 'gate').title);
+  fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify(fixtureArtifact('closed')));
+  const closed = checkHealthReadiness({ paths, env: {}, now });
+  eq('a closed gate reports ok', closed.checks.find((c) => c.key === 'gate').level, 'ok');
+
+  // Role drift between the repo's seats and a workspace mirror.
+  fs.mkdirSync(path.join(dir, 'roles'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'roles', 'data_steward.md'), '# Data Steward\n\nA workspace copy that has drifted.\n');
+  const drifted = checkHealthReadiness({ paths, env: {}, now });
+  eq('role drift is a finding', drifted.checks.find((c) => c.key === 'seats').level, 'finding');
+  check('the drift finding names the file', /data_steward\.md/.test(drifted.checks.find((c) => c.key === 'seats').detail), drifted.checks.find((c) => c.key === 'seats').detail);
+  fs.rmSync(path.join(dir, 'roles'), { recursive: true, force: true });
+  eq('no mirror is not drift', checkHealthReadiness({ paths, env: {}, now }).checks.find((c) => c.key === 'seats').level, 'ok');
+
+  // The real command surface: exit 3 when a seat could not run, 0 when it could.
+  const runner = path.join(ROOT, 'scripts', 'health-runner.mjs');
+  const noKeyEnv = { ...process.env, HEALTH_WORKSPACE: dir, GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '' };
+  let noKeyCode = 0;
+  let noKeyOut = '';
+  try {
+    noKeyOut = execFileSync(process.execPath, [runner, '--readiness', '--json'], { env: noKeyEnv, encoding: 'utf8' });
+  } catch (err) {
+    noKeyCode = err.status;
+    noKeyOut = err.stdout || '';
+  }
+  const parsed = JSON.parse(noKeyOut || '{}');
+  eq('the CLI exits 3 when the bot half cannot run', noKeyCode, 3);
+  eq('and its JSON says why', parsed.blockers, ['model']);
+  const keyOut = execFileSync(process.execPath, [runner, '--readiness', '--json'], { env: { ...noKeyEnv, GEMINI_API_KEY: 'x' }, encoding: 'utf8' });
+  eq('the CLI exits 0 when it can', JSON.parse(keyOut).exit, 0);
+  eq('and reports the workspace it read', JSON.parse(keyOut).workspace, dir);
   fs.rmSync(dir, { recursive: true, force: true });
 }
 

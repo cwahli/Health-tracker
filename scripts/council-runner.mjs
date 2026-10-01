@@ -26,6 +26,7 @@ import {
   getProjectSoul,
   getRoleInstructions,
   getProjectRoles,
+  resolveRoleId,
   seedProjectWorkspace,
 } from './lib/project-registry.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
@@ -48,6 +49,113 @@ export const COUNCIL_PHASES = [
   { id: 'arbitrator', title: 'Phase 5: Strategic Arbitration & Ruling', file: '05_arbitration_directive.md' },
   { id: 'final_case_builder', title: 'Phase 6: Final Executive Dossier Compilation', file: '06_final_dossier.md' },
 ];
+
+/**
+ * The case pipeline's checkpoints, declared rather than inferred.
+ *
+ * external-1 and external-2 were the council's first tenants and their three
+ * checkpoints are part of a working routine: the messages and the phase sets
+ * below are what those chats have always received. They live here, in one map,
+ * so that a second project's stages can be its own roles without this file
+ * having to guess which pipeline a call belongs to.
+ */
+export const LEGACY_CHECKPOINTS = {
+  audit: {
+    phases: ['accuracy_review'],
+    nextStepMsg: '🛑 *Stage 1 Checkpoint:* Accuracy Audit complete.\nReview `01_accuracy_audit.md` in Drive. Add any missing exhibits/receipts to the folder, then send `/council defense` to run the defense and manager simulation.',
+  },
+  defense: {
+    phases: ['case_review', 'manager_simulation'],
+    nextStepMsg: '🛑 *Stage 2 Checkpoint:* Defense & Manager Red-Team simulation complete.\nReview `02_defense_rebuttal.md` and `03_manager_critique.md`. Address any high-vulnerability points, then send `/council finalize` to generate the legal memo and final deliverables.',
+  },
+  finalize: {
+    phases: ['legal_policy', 'arbitrator', 'final_case_builder'],
+    nextStepMsg: '🎉 *Stage 3 Complete:* Legal review, arbitration, and final deliverables compiled.\nCheck `A_Executive_1-on-1_Talking_Points.md` and `B_Formal_Performance_Rating_Rebuttal.md` in your project folder.',
+  },
+};
+
+/** The three executive documents the case pipeline reports. */
+export const LEGACY_DELIVERABLES = [
+  'A_Executive_1-on-1_Talking_Points.md',
+  'B_Formal_Performance_Rating_Rebuttal.md',
+  'C_30_60_90_Performance_Alignment_Plan.md',
+];
+
+/**
+ * Which pipeline a project runs: the declared legacy case map, or its own roles.
+ *
+ * The registry says so (`councilPipeline: 'case'`); a project that does not say
+ * is a roles project, because every project but the two case councils is.
+ */
+export function isCaseProject(projectId) {
+  return KNOWN_PROJECTS[projectId]?.councilPipeline === 'case';
+}
+
+/** The stages a project can run, numbered as the chat numbers them. */
+export function councilStages(projectId) {
+  return getCouncilPhases(projectId).map((p, i) => ({ ...p, index: i + 1 }));
+}
+
+/**
+ * Resolve a `/council <stage>` token against the project's own phases.
+ *
+ * Accepted for a roles project: a phase id (`data_steward`), a role alias
+ * (`steward` → `data_steward`, through the same alias table `/role` uses), a
+ * 1-based number (`2`), or `all`/`run`/`` for every phase. A case project gets
+ * its three checkpoints first, so `/council audit` keeps meaning what it means.
+ *
+ * Anything else is a refusal naming the real stages — the previous fallback ran
+ * the **entire** council for an unknown token, which is the one thing a stage
+ * command must never silently do.
+ */
+export function resolveCouncilStage(stage, projectId = 'external-1') {
+  const proj = KNOWN_PROJECTS[projectId];
+  if (!proj) return { ok: false, error: `Unknown project: ${projectId}`, stages: [] };
+
+  const phases = councilStages(projectId);
+  const byId = (id) => phases.find((p) => p.id === id);
+  const stageList = phases.map((p) => `${p.index} ${p.id}`).join(', ');
+  const token = String(stage ?? '').trim().toLowerCase();
+
+  if (isCaseProject(projectId) && LEGACY_CHECKPOINTS[token]) {
+    const checkpoint = LEGACY_CHECKPOINTS[token];
+    return {
+      ok: true,
+      label: token,
+      legacy: true,
+      phases: checkpoint.phases.map((id) => byId(id)).filter(Boolean),
+      nextStepMsg: checkpoint.nextStepMsg,
+    };
+  }
+
+  if (token === '' || token === 'all' || token === 'run' || token === 'full') {
+    return {
+      ok: true,
+      label: 'all',
+      legacy: false,
+      phases,
+      nextStepMsg: `✅ *Council complete* — ${phases.length} seat(s): ${phases.map((p) => p.title).join(' · ')}\nArtifacts: \`${resultDir(proj.workspace)}/\` — one file per seat.\nNext: review them, then \`/council <stage>\` to re-run one seat.`,
+    };
+  }
+
+  const index = /^\d+$/.test(token) ? Number(token) : NaN;
+  const phase = byId(token) || byId(resolveRoleId(token, projectId) || '') || (Number.isInteger(index) ? phases[index - 1] : null);
+  if (!phase) {
+    return {
+      ok: false,
+      error: `Unknown stage "${stage}" for ${proj.name} — stages: ${stageList}${isCaseProject(projectId) ? `, or the checkpoints ${Object.keys(LEGACY_CHECKPOINTS).join(' / ')}` : ''}`,
+      stages: phases,
+    };
+  }
+  const next = phases[phase.index];
+  return {
+    ok: true,
+    label: phase.id,
+    legacy: false,
+    phases: [phase],
+    nextStepMsg: `✅ *Stage ${phase.index}/${phases.length} complete* — ${phase.title}\nArtifact: \`${phase.file}\` in the workspace's result folder.\n${next ? `Next: \`/council ${next.id}\`` : 'That was the last stage.'}${next ? ', or ' : ' '}\`/council status\` lists every stage and which have run.`,
+  };
+}
 
 export function getCouncilPhases(projectId = 'external-1') {
   const roles = getProjectRoles(projectId);
@@ -173,32 +281,41 @@ export function getCouncilStatus(projectId = 'external-1') {
   const has = (...rels) => rels.some((r) => files.includes(r) || Boolean(findInWorkspace(workspace, r)));
 
   const phasesList = getCouncilPhases(projectId);
-  const phases = phasesList.map((p) => {
+  const phases = phasesList.map((p, i) => {
+    // The same directory the stage writer uses: a run that reported success and
+    // a status page that says "pending" is one bug, not two opinions.
     const done = outputs.includes(p.file);
     return {
       phase: p.id,
+      index: i + 1,
       title: p.title,
       completed: done,
       outputFile: done ? path.join(outDir, p.file) : null,
     };
   });
 
+  // A project's deliverables are its own phase files; the case pipeline keeps
+  // the A/B/C trio it has always checked.
+  const casePipeline = isCaseProject(projectId);
+  const deliverables = casePipeline ? LEGACY_DELIVERABLES : phasesList.map((p) => p.file);
+  const deliverablesReady = deliverables.every((rel) => outputs.includes(rel) || Boolean(findInWorkspace(workspace, rel)));
+
   return {
     projectId,
     name: proj.name,
     workspace,
+    outDir,
     gdriveFolder: proj.gdriveFolder,
+    pipeline: casePipeline ? 'case' : 'roles',
     hasInputFacts: has('01_Case_Facts_and_Timeline.md', 'case/01_Case_Facts_and_Timeline.md'),
     hasEvidenceLedger: has('02_Evidence_and_Metric_Ledger.md', 'case/02_Evidence_and_Metric_Ledger.md'),
     phases,
-    deliverablesReady:
-      has('A_Executive_1-on-1_Talking_Points.md', 'working/A_Executive_1-on-1_Talking_Points.md') &&
-      has('B_Formal_Performance_Rating_Rebuttal.md', 'working/B_Formal_Performance_Rating_Rebuttal.md') &&
-      has('C_30_60_90_Performance_Alignment_Plan.md', 'working/C_30_60_90_Performance_Alignment_Plan.md'),
+    deliverables,
+    deliverablesReady,
   };
 }
 
-export async function executeRoleTurn({ projectId = 'external-1', roleId, prompt, contextText = '' }) {
+export async function executeRoleTurn({ projectId = 'external-1', roleId, prompt, contextText = '', runGemini: runModel = runGemini }) {
   const soul = getProjectSoul(projectId) || '';
   const roleInst = getRoleInstructions(projectId, roleId) || '';
 
@@ -219,7 +336,7 @@ ${prompt}`;
   // the reader and invents case facts nobody supplied.
   let res;
   try {
-    res = await runGemini({
+    res = await runModel({
       prompt: fullPrompt,
       model: COUNCIL_MODEL,
       timeoutMs: 120000,
@@ -236,7 +353,7 @@ ${prompt}`;
 }
 
 
-export async function runFullCouncil(projectId = 'external-1', onProgress = console.log) {
+export async function runFullCouncil(projectId = 'external-1', onProgress = console.log, { runGemini: runModel = runGemini } = {}) {
   const proj = KNOWN_PROJECTS[projectId];
   if (!proj) throw new Error(`Unknown project: ${projectId}`);
 
@@ -258,6 +375,7 @@ export async function runFullCouncil(projectId = 'external-1', onProgress = cons
       roleId: phase.id,
       prompt: `Execute ${phase.title} based on active workspace facts and evidence ledger.`,
       contextText,
+      runGemini: runModel,
     });
     const outFile = path.join(outDir, phase.file);
     fs.writeFileSync(outFile, output, 'utf8');
@@ -271,57 +389,52 @@ export async function runFullCouncil(projectId = 'external-1', onProgress = cons
     const hit = findInWorkspace(workspace, path.join('working', name), name);
     return hit ? path.join(workspace, hit) : path.join(workspace, 'working', name);
   };
-  const talkingPoints = at('A_Executive_1-on-1_Talking_Points.md');
-  const rebuttal = at('B_Formal_Performance_Rating_Rebuttal.md');
-  const plan = at('C_30_60_90_Performance_Alignment_Plan.md');
+  const deliverables = isCaseProject(projectId)
+    ? [
+        at('A_Executive_1-on-1_Talking_Points.md'),
+        at('B_Formal_Performance_Rating_Rebuttal.md'),
+        at('C_30_60_90_Performance_Alignment_Plan.md'),
+      ]
+    : phases.map((p) => path.join(outDir, p.file));
 
   onProgress(`📦 Final deliverables verified in workspace: ${workspace}`);
   return {
     success: true,
     results,
     workspace,
-    deliverables: [talkingPoints, rebuttal, plan],
+    outDir,
+    phases: phases.map((p) => p.id),
+    deliverables,
   };
 }
 
-export async function runCouncilStage(stage = 'audit', projectId = 'external-1', onProgress = console.log) {
+export async function runCouncilStage(stage = 'audit', projectId = 'external-1', onProgress = console.log, { runGemini: runModel = runGemini } = {}) {
   const proj = KNOWN_PROJECTS[projectId];
   if (!proj) throw new Error(`Unknown project: ${projectId}`);
 
   seedProjectWorkspace(projectId);
   const workspace = proj.workspace;
-  const outDir = path.join(workspace, 'output');
+  // One agreed directory, and it is the one getCouncilStatus reads. This used to
+  // be a hardcoded `output/` while the reader looked in `result/`, so every
+  // completed stage read back as pending.
+  const outDir = resultDir(workspace);
   fs.mkdirSync(outDir, { recursive: true });
+
+  const resolved = resolveCouncilStage(stage, projectId);
+  if (!resolved.ok) throw new Error(resolved.error);
 
   const contextText = seatContextText(projectId, workspace);
 
-  let targetPhases = [];
-  let nextStepMsg = '';
-
-  if (stage === 'audit') {
-    targetPhases = COUNCIL_PHASES.filter((p) => p.id === 'accuracy_review');
-    nextStepMsg = '🛑 *Stage 1 Checkpoint:* Accuracy Audit complete.\nReview `01_accuracy_audit.md` in Drive. Add any missing exhibits/receipts to the folder, then send `/council defense` to run the defense and manager simulation.';
-  } else if (stage === 'defense') {
-    targetPhases = COUNCIL_PHASES.filter((p) => p.id === 'case_review' || p.id === 'manager_simulation');
-    nextStepMsg = '🛑 *Stage 2 Checkpoint:* Defense & Manager Red-Team simulation complete.\nReview `02_defense_rebuttal.md` and `03_manager_critique.md`. Address any high-vulnerability points, then send `/council finalize` to generate the legal memo and final deliverables.';
-  } else if (stage === 'finalize') {
-    targetPhases = COUNCIL_PHASES.filter(
-      (p) => p.id === 'legal_policy' || p.id === 'arbitrator' || p.id === 'final_case_builder'
-    );
-    nextStepMsg = '🎉 *Stage 3 Complete:* Legal review, arbitration, and final deliverables compiled.\nCheck `A_Executive_1-on-1_Talking_Points.md` and `B_Formal_Performance_Rating_Rebuttal.md` in your project folder.';
-  } else {
-    return runFullCouncil(projectId, onProgress);
-  }
-
-  onProgress(`🚀 Running Council Stage: "${stage.toUpperCase()}" for ${proj.name}`);
+  onProgress(`🚀 Running Council Stage: "${resolved.label.toUpperCase()}" for ${proj.name}`);
   const results = {};
-  for (const phase of targetPhases) {
+  for (const phase of resolved.phases) {
     onProgress(`🔄 [Running] ${phase.title}...`);
     const output = await executeRoleTurn({
       projectId,
       roleId: phase.id,
       prompt: `Execute ${phase.title} based on active workspace facts and evidence ledger.`,
       contextText,
+      runGemini: runModel,
     });
     const outFile = path.join(outDir, phase.file);
     fs.writeFileSync(outFile, output, 'utf8');
@@ -330,11 +443,14 @@ export async function runCouncilStage(stage = 'audit', projectId = 'external-1',
   }
 
   return {
-    stage,
+    stage: resolved.label,
     success: true,
     results,
     workspace,
-    nextStepMsg,
+    outDir,
+    phases: resolved.phases.map((p) => ({ id: p.id, file: p.file, path: path.join(outDir, p.file) })),
+    deliverables: resolved.phases.map((p) => path.join(outDir, p.file)),
+    nextStepMsg: resolved.nextStepMsg,
   };
 }
 

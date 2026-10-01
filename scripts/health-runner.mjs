@@ -9,6 +9,8 @@
  *                   into the project folder — idempotent by doc id
  *   /health analyze the analysis entry point: refuses while the data gate is
  *                   open, otherwise names the inputs the analysis pass needs
+ *   /health readiness  can a seat run at all: workspace, brief, gate, artifact
+ *                   age, context bytes, model credential, role drift
  *   /health status  what is still wrong, how fresh the data is, what is next
  *
  * WHY IT IS A RUNNER, NOT A COMMAND HANDLER
@@ -40,6 +42,7 @@ import {
   validateAnalysisSections, ANALYSIS_SECTIONS,
 } from './lib/health/docs.mjs';
 import { foldersFromEnv } from './lib/google-store.mjs';
+import { checkHealthReadiness, formatReadinessText } from './lib/health/readiness.mjs';
 
 export const DEFAULT_PROJECT = 'external-health';
 export const VERIFY_FILE = 'health-verify.json';
@@ -704,7 +707,7 @@ export function formatStatusText(status) {
 function parseArgs(argv) {
   const args = { mode: '', project: DEFAULT_PROJECT, uid: '', envFile: '', json: false, folder: '', docsFolder: '', analysis: '', docs: [], force: false, dryRun: false };
   for (const raw of argv) {
-    if (raw === '--verify' || raw === '--status' || raw === '--ingest' || raw === '--refresh' || raw === '--analyze') { args.mode = raw.slice(2); continue; }
+    if (raw === '--verify' || raw === '--status' || raw === '--ingest' || raw === '--refresh' || raw === '--analyze' || raw === '--readiness') { args.mode = raw.slice(2); continue; }
     if (raw === '--json') { args.json = true; continue; }
     if (raw === '--force') { args.force = true; continue; }
     if (raw === '--dry-run') { args.dryRun = true; continue; }
@@ -746,6 +749,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       if (!res.ok) { console.error(`refresh failed at ${res.stage}: ${res.error}`); process.exit(1); }
       console.log(args.json ? JSON.stringify(res.artifact, null, 1) : formatRefreshText(res));
       return;
+    }
+    if (mode === 'readiness') {
+      // Exit 3 when a seat could not run — the same "refused on purpose" code
+      // --analyze uses, so a caller can tell "not ready" from "crashed".
+      const res = checkHealthReadiness({ projectId: args.project, paths: healthPaths(args.project) });
+      console.log(args.json ? JSON.stringify(res, null, 1) : formatReadinessText(res));
+      process.exit(res.exit);
     }
     if (mode === 'analyze') {
       const res = runHealthAnalyze({ projectId: args.project });
