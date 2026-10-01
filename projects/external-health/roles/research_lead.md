@@ -17,6 +17,11 @@ band once recorded, and a fasting/steps picture that is mostly sedentary.
 - Every insight carries: the claim, the citation (title, year, link), and which
   marker in this profile it is about. An insight that could be about anyone is
   not an insight for this project.
+- Cite only what the lane fetched. `/health research "<what to look up>"` searches
+  the declared providers, fetches every hit, and records them in
+  `result/health-research.json`; a link that log does not hold as fetched is
+  refused by the publisher, and the section carries the refusal instead of your
+  claim. Run it before you write a citation, not after.
 - Guidelines before papers. If a national or specialty guideline covers the
   marker, that is the baseline; papers refine it.
 - Ethnicity-, age- and sex-specific findings come first, and say why they apply.

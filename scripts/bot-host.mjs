@@ -157,7 +157,7 @@ import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-run
 // The Personal Health Coach's data loop. `/health` is deliberately not gated on
 // the chat's active project: the command names its own project, so a verify can
 // be run from any chat, and the reply says which one it read.
-import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, runHealthDoctor, formatDoctorText } from './health-runner.mjs';
+import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText } from './health-runner.mjs';
 // "Can a seat actually run?" — the readiness check reads the context a seat
 // would be handed plus this host's credentials, and reports what is missing
 // instead of letting a turn start on an empty context.
@@ -2938,7 +2938,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'health': {
       const projectId = 'external-health';
-      const sub = (cmd.args || '').trim().toLowerCase();
+      // `sub` is the lowercased head for matching; the raw text is kept because
+      // the literature lane's query is a sentence, not a keyword.
+      const rawArgs = String(cmd.args || '').trim();
+      const sub = rawArgs.toLowerCase();
       if (sub === 'verify') {
         if (running.get(chatId)) {
           await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before verifying the health data.');
@@ -3020,6 +3023,26 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         // about the host rather than starting work in the workspace.
         const res = checkHealthReadiness({ projectId });
         await api.sendMessage(chatId, formatReadinessText(res), { parse_mode: 'Markdown' });
+        return;
+      }
+      if (sub === 'research' || sub.startsWith('research ')) {
+        // The literature lane's reach. It searches the declared provider chain,
+        // fetches every hit, and records them in the workspace. A refusal — no
+        // credential, or nothing returned — records nothing and is the answer,
+        // because an empty log the seat could read as "no literature" is the
+        // failure this lane exists to prevent.
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before running the research lane.');
+          return;
+        }
+        await api.sendMessage(chatId, '🔎 *Running /health research — searching the declared provider chain and fetching every hit...*', { parse_mode: 'Markdown' });
+        try {
+          const query = rawArgs.replace(/^research\s*/i, '').trim();
+          const res = await runHealthResearch({ projectId, queries: query ? [query] : [] });
+          await api.sendMessage(chatId, formatResearchText(res), res.ok ? { parse_mode: 'Markdown' } : undefined);
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Research failed: ${err.message}`);
+        }
         return;
       }
       if (sub === 'doctor') {

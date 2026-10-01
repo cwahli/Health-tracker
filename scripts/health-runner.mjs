@@ -15,6 +15,10 @@
  *                   claims, trace each to a receipt, strike what does not hold,
  *                   and write result/doctor-report.md — refused, having written
  *                   nothing, unless the report passes the checker
+ *   /health research the literature lane's reach: search through the declared
+ *                   provider chain, fetch every hit for real, and record it in
+ *                   result/health-research.json — the only links document 4 may
+ *                   cite. No credential is a named refusal, never an empty result
  *   /health status  what is still wrong, how fresh the data is, what is next
  *
  * WHY IT IS A RUNNER, NOT A COMMAND HANDLER
@@ -36,19 +40,22 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { KNOWN_PROJECTS } from './lib/project-registry.mjs';
-import { loadD1Config, discoverAccountId, createD1Reader, QUERIES, resolveProfileUid, parseProfile } from './lib/health/d1.mjs';
+import { loadD1Config, discoverAccountId, createD1Reader, QUERIES, resolveProfileUid, parseProfile, parseEnvFile } from './lib/health/d1.mjs';
 import { newestSourceFile, readBankedSheet, ingestBriefFolder, briefCredential } from './lib/health/sheet.mjs';
 import { extractAppState, reconcile, evaluateFixList, verdictsOf, unreviewedAppRows, markerLabel } from './lib/health/reconcile.mjs';
 import {
   DOC_SPECS, SECTION_SOURCES, DOCS_FILE, REFRESH_FILE, REFRESH_LOG,
   gateFromArtifact, sectionPlan, planPublish, publishDocs, googleDocsStore,
   loadDocsRegistry, applyReceipts, adoptFromListing,
-  validateAnalysisSections, ANALYSIS_SECTIONS,
+  validateAnalysisSections, ANALYSIS_SECTIONS, STALE_AFTER_DAYS,
 } from './lib/health/docs.mjs';
 import { foldersFromEnv } from './lib/google-store.mjs';
 import { checkHealthReadiness, formatReadinessText, CONTEXT_ENV_FILE } from './lib/health/readiness.mjs';
 import { buildHealthContext, renderContextBlock } from './lib/health/context.mjs';
 import { validateDoctorReport, renderDoctorReport } from './lib/health/doctor.mjs';
+import {
+  MAX_HITS_PER_QUERY, RESEARCH_LOG, applyResearch, fetchHit, loadResearchLog, searchAvailability, webSearch,
+} from './lib/health/research.mjs';
 import { geminiKeyIn } from './lib/agent-gemini.mjs';
 import { executeRoleTurn } from './council-runner.mjs';
 
@@ -58,6 +65,8 @@ export const FIX_LIST_FILE = 'health-fix-list.md';
 /** The Doctor's own output, and the machine-readable copy of its verdicts. */
 export const DOCTOR_FILE = 'doctor-report.md';
 export const DOCTOR_ARTIFACT = 'health-doctor.json';
+/** The literature lane's ledger: every fetched url, and every one that refused. */
+export { RESEARCH_LOG };
 
 /** Where this project keeps its sources and its results. */
 export function healthWorkspace(projectId = DEFAULT_PROJECT, { env = process.env } = {}) {
@@ -300,6 +309,7 @@ export async function runHealthRefresh({
   botId = '',
   templates = null,
   analysis = null,
+  citations: citationLog = null,
   only = [],
   force = false,
   dryRun = false,
@@ -344,12 +354,19 @@ export async function runHealthRefresh({
     if (!loadedAnalysis.ok) return { ok: false, stage: 'analysis', error: loadedAnalysis.error, verify: verify.artifact };
   }
 
+  // The literature lane's fetch log is the only place a citable link can come
+  // from — document 4's sections are checked against it at render time. A log
+  // that is not there yet is normal (the lane has not run here): the refusal
+  // then belongs to the section, and the document says so.
+  const citations = citationLog ?? loadResearchLog(path.join(paths.result, RESEARCH_LOG));
+
   const plan = planPublish({
     artifact: verify.artifact,
     analysis: loadedAnalysis.sections,
     templates: loaded.templates,
     registry,
     now,
+    citations,
     only,
     force,
   });
@@ -392,6 +409,8 @@ export async function runHealthRefresh({
     dryRun: Boolean(dryRun),
     gate,
     refused: [...new Set(plan.items.flatMap((i) => i.refused || []))],
+    citationRefusals: plan.items.flatMap((i) => (i.citationRefused || []).map((c) => ({ key: i.key, heading: c.heading, reason: c.reason }))),
+    citedLinks: Object.values(citations.hits || {}).filter((h) => h?.ok).length,
     analysisFile: loadedAnalysis.file || '',
     counts: { created: executed.created, updated: executed.updated, skipped: executed.skipped, failed: executed.failed },
     receipts: executed.receipts.map((r) => ({
@@ -472,6 +491,152 @@ export function runHealthAnalyze({ projectId = DEFAULT_PROJECT, env = process.en
   };
 }
 
+/**
+ * `/health research` — the literature lane.
+ *
+ * One query in, a recorded list of fetched hits out. It never writes a claim:
+ * it searches through the declared provider chain, fetches every hit over the
+ * network, and records status, size and sha256 in `result/health-research.json`.
+ * The Research Lead then cites from that file, and the publisher checks the
+ * citations against the same file — so "verified" has exactly one meaning.
+ *
+ * Refusals are answers here: no credential names the variables to set and
+ * records nothing (never an empty result the seat could mistake for "no
+ * literature"), and a provider that answers with an error falls through the
+ * chain, with every attempt reported.
+ *
+ * Everything network-facing is injectable (`search`, `fetchImpl`) so the lane
+ * runs end to end in a sensor with no credential and no network.
+ *
+ * The credential is read the way D1 config is read — `envFile`, else
+ * `HEALTH_ENV_FILE`, else the process env alone, process env winning over the
+ * file — because that file is the one `readiness` names when it reports the
+ * credential missing.
+ */
+export async function runHealthResearch({
+  projectId = DEFAULT_PROJECT,
+  env = process.env,
+  envFile = '',
+  paths = null,
+  workspace = '',
+  queries = [],
+  fetchImpl = fetch,
+  search = webSearch,
+  now = new Date(),
+} = {}) {
+  const dirs = paths || (workspace
+    ? { workspace, sources: path.join(workspace, 'sources'), result: path.join(workspace, 'result') }
+    : healthPaths(projectId, { env }));
+  const at = (now instanceof Date ? now : new Date(now)).toISOString();
+  const list = (Array.isArray(queries) ? queries : [queries]).map((q) => String(q || '').trim()).filter(Boolean);
+  const file = String(envFile || env.HEALTH_ENV_FILE || '').trim();
+  let fileEnv = {};
+  if (file) {
+    try {
+      fileEnv = parseEnvFile(fs.readFileSync(file, 'utf8'));
+    } catch {
+      // A credential file that does not read is not a credential: the search
+      // check below reports what is missing rather than inventing a provider.
+    }
+  }
+  const credentialEnv = { ...fileEnv, ...env };
+  const availability = searchAvailability(credentialEnv);
+
+  if (!list.length) {
+    return { ok: false, stage: 'query', error: 'no query — `/health research "<what to look up>"`', availability, paths: dirs };
+  }
+  if (!availability.ok) {
+    return {
+      ok: false,
+      stage: 'credential',
+      error: `no search credential on this host — set one of ${availability.missing.join(', ')} in ${CONTEXT_ENV_FILE}; nothing was searched and no empty result was recorded`,
+      availability,
+      paths: dirs,
+    };
+  }
+
+  const logFile = path.join(dirs.result, RESEARCH_LOG);
+  const log = loadResearchLog(logFile);
+  const queriesRun = [];
+  const records = [];
+  const failures = [];
+  for (const query of list) {
+    const found = await search({ query, env: credentialEnv, fetchImpl, limit: MAX_HITS_PER_QUERY });
+    if (!found.ok) {
+      failures.push({ query, reason: found.reason, error: found.error });
+      continue;
+    }
+    let fetched = 0;
+    let refused = 0;
+    for (const hit of found.hits) {
+      const record = await fetchHit({ ...hit, query }, { fetchImpl, now });
+      records.push(record);
+      if (record.ok) fetched += 1;
+      else refused += 1;
+    }
+    queriesRun.push({ query, provider: found.provider, returned: found.hits.length, fetched, refused, attempts: found.attempts });
+  }
+
+  if (!queriesRun.length) {
+    return {
+      ok: false,
+      stage: 'search',
+      error: failures.map((f) => `"${f.query}": ${f.error}`).join('; ') || 'the declared chain returned nothing usable',
+      availability,
+      failures,
+      paths: dirs,
+    };
+  }
+
+  const next = applyResearch(log, { queries: queriesRun, records, now });
+  const artifact = {
+    at,
+    projectId,
+    workspace: dirs.workspace,
+    file: logFile,
+    provider: queriesRun[0].provider,
+    queries: queriesRun.map((q) => ({ query: q.query, provider: q.provider, returned: q.returned, fetched: q.fetched, refused: q.refused })),
+    fetched: records.filter((r) => r.ok).length,
+    refusedHits: records.filter((r) => !r.ok).map((r) => ({ url: r.url, error: r.error })),
+    recorded: Object.keys(next.hits).length,
+    hits: records.filter((r) => r.ok).map((r) => ({ url: r.url, title: r.title, bytes: r.bytes, sha256: r.sha256, fetchedAt: r.fetchedAt })),
+    failedQueries: failures.map((f) => ({ query: f.query, error: f.error })),
+  };
+  try {
+    fs.mkdirSync(dirs.result, { recursive: true });
+    fs.writeFileSync(logFile, JSON.stringify(next, null, 1));
+  } catch (err) {
+    return { ok: false, stage: 'write', error: err.message, paths: dirs };
+  }
+  return { ok: true, artifact, log: next, paths: dirs };
+}
+
+/** The Telegram reply for a research run: what was fetched, what refused, and the one rule. */
+export function formatResearchText(result) {
+  if (!result.ok) {
+    const lines = [`🔎 *The research lane did not run (${escapeMd(result.stage)})*`];
+    lines.push(escapeMd(result.error));
+    if (result.stage === 'credential') {
+      lines.push('');
+      lines.push('Nothing was searched and nothing was recorded. A seat cannot cite a link this lane has not fetched.');
+    }
+    return lines.join('\n');
+  }
+  const a = result.artifact;
+  const lines = [`🔎 *Research — ${a.fetched} hit(s) fetched and recorded*`];
+  for (const q of a.queries) {
+    lines.push(`• "${escapeMd(q.query)}" via ${escapeMd(q.provider)} — ${q.returned} returned · ${q.fetched} fetched · ${q.refused} refused`);
+  }
+  for (const h of a.refusedHits.slice(0, 5)) lines.push(`❌ ${escapeMd(h.url)} — ${escapeMd(h.error)} _(not citable)_`);
+  if (a.failedQueries.length) {
+    for (const f of a.failedQueries) lines.push(`⛔ "${escapeMd(f.query)}" — ${escapeMd(f.error)}`);
+  }
+  lines.push(`• log: \`${a.file}\` (${a.recorded} url(s) recorded)`);
+  lines.push('');
+  lines.push('Document 4 may cite only the urls this log recorded as fetched — the publisher refuses the rest.');
+  return lines.join('\n');
+}
+
 /** The human log written next to the refresh artifact. */
 export function renderRefreshLog(artifact) {
   const a = artifact;
@@ -508,10 +673,21 @@ export function formatRefreshText(result) {
     const mark = r.action === 'failed' ? '❌' : r.action === 'skip' ? '➖' : r.action === 'update' || r.action === 'recreate' ? '♻️' : '🆕';
     lines.push(`${mark} ${escapeMd(r.title)} — ${r.action}${r.docId ? ` \`${r.docId}\`` : ''}`);
   }
-  if (a.refused.length) {
+  // Three different reasons a section can be withheld, and the reply must not
+  // confuse them: an open gate, a stale snapshot, an uncitable citation.
+  if (a.refused.length && !a.gate.allowed) {
     lines.push('');
     lines.push(`*Withheld while the gate is open:* ${a.refused.map((h) => escapeMd(h)).join('; ')}`);
     lines.push('Fix the open items in the app, then `/health refresh` — the documents update in place.');
+  } else if (a.refused.length && a.gate.stale) {
+    lines.push('');
+    lines.push(`*Withheld on a stale snapshot:* ${a.refused.map((h) => escapeMd(h)).join('; ')}`);
+    lines.push(`The verify artifact is past the ${STALE_AFTER_DAYS}-day renewal window — run \`/health verify\`, then \`/health refresh\`.`);
+  }
+  if (a.citationRefusals?.length) {
+    lines.push('');
+    lines.push(`*Document 4 refused uncitable claims:* ${a.citationRefusals.map((c) => `${escapeMd(c.heading)} (${escapeMd(c.reason)})`).join('; ')}`);
+    lines.push('A link may enter document 4 only after `/health research` fetched and recorded it — an unverified link is a refusal, not a link.');
   }
   lines.push(`Artifacts: \`${result.paths.result}/${REFRESH_FILE}\`, \`${REFRESH_LOG}\`, \`${DOCS_FILE}\`.`);
   return lines.join('\n');
@@ -866,9 +1042,9 @@ export function formatStatusText(status) {
 // ---------------------------------------------------------------- CLI
 
 function parseArgs(argv) {
-  const args = { mode: '', project: DEFAULT_PROJECT, uid: '', envFile: '', json: false, folder: '', docsFolder: '', analysis: '', docs: [], force: false, dryRun: false };
+  const args = { mode: '', project: DEFAULT_PROJECT, uid: '', envFile: '', json: false, folder: '', docsFolder: '', analysis: '', query: '', docs: [], force: false, dryRun: false };
   for (const raw of argv) {
-    if (raw === '--verify' || raw === '--status' || raw === '--ingest' || raw === '--refresh' || raw === '--analyze' || raw === '--readiness' || raw === '--doctor') { args.mode = raw.slice(2); continue; }
+    if (raw === '--verify' || raw === '--status' || raw === '--ingest' || raw === '--refresh' || raw === '--analyze' || raw === '--readiness' || raw === '--doctor' || raw === '--research') { args.mode = raw.slice(2); continue; }
     if (raw === '--json') { args.json = true; continue; }
     if (raw === '--force') { args.force = true; continue; }
     if (raw === '--dry-run') { args.dryRun = true; continue; }
@@ -876,6 +1052,7 @@ function parseArgs(argv) {
     if (!m) continue;
     const value = m[2];
     if (m[1] === 'project') args.project = value;
+    if (m[1] === 'query') args.query = value;
     if (m[1] === 'uid') args.uid = value;
     if (m[1] === 'env-file') args.envFile = value;
     if (m[1] === 'brief-folder') args.folder = value;
@@ -917,6 +1094,23 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const res = checkHealthReadiness({ projectId: args.project, paths: healthPaths(args.project) });
       console.log(args.json ? JSON.stringify(res, null, 1) : formatReadinessText(res));
       process.exit(res.exit);
+    }
+    if (mode === 'research') {
+      // A refusal is the answer here too: no query, no search credential, or a
+      // provider that answered nothing are all exit 3 — the same "refused on
+      // purpose" code --readiness, --doctor and --analyze use — never a silent
+      // success with an empty result.
+      const res = await runHealthResearch({
+        projectId: args.project,
+        envFile: args.envFile,
+        queries: args.query ? [args.query] : [],
+      });
+      if (!res.ok) {
+        console.log(args.json ? JSON.stringify(res, null, 1) : formatResearchText(res));
+        process.exit(3);
+      }
+      console.log(args.json ? JSON.stringify(res.artifact, null, 1) : formatResearchText(res));
+      return;
     }
     if (mode === 'doctor') {
       const res = await runHealthDoctor({ projectId: args.project });

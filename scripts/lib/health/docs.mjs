@@ -11,6 +11,14 @@
  *     A draft may exist — the header says DRAFT and names the open items — but no
  *     derived claim is ever presented as current.
  *
+ *     **The staleness rule is the same rule, on the clock.** A verify artifact
+ *     older than the renewal window (`STALE_AFTER_DAYS`, the monthly cadence the
+ *     charter names) is a snapshot of a person who has moved on a month or more;
+ *     analysis rendered on it reads as current when it is not. So the analysis
+ *     sections are withheld with a refusal that names the age, the header says
+ *     STALE, and the data sections — dated facts with provenance — still publish
+ *     as a draft. Not one derived claim leaves a stale snapshot.
+ *
  *  2. **Idempotent by doc id, not by name.** The registry in
  *     `result/health-docs.json` holds one Drive id per document. A refresh
  *     updates that id in place (`replaceDocContent`); it never creates a second
@@ -22,6 +30,13 @@
  *     and which fix-list items were open at the time. A document cannot go stale
  *     quietly: the header carries the date.
  *
+ *  4. **An unverified link is not a link.** Document 4 is the cited digest, and
+ *     its sections are checked against the research lane's fetch log before they
+ *     render: every line carries a citation, every link was fetched and hashed,
+ *     and every citation line carries a year. A section that fails is withheld
+ *     with the offending links named — never published with a citation nobody
+ *     opened.
+ *
  * The section skeleton comes from the committed templates under
  * `projects/external-health/templates/`. `sectionPlan` reads their headings and
  * `renderDoc` fails closed on a heading this module does not know, so a template
@@ -32,10 +47,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { createDocWithContent, replaceDocContent, getFile, listChildren, USER_AGENT } from '../google-store.mjs';
+import { CITATION_SOURCES, citationRefusalText, validateInsightCitations } from './research.mjs';
 
 export const DOCS_FILE = 'health-docs.json';
 export const REFRESH_FILE = 'health-refresh.json';
 export const REFRESH_LOG = 'health-refresh.md';
+
+/**
+ * The renewal window the charter names, plus a day of slack.
+ *
+ * It is the publisher's number: an artifact older than this may not carry
+ * analysis into a document. `readiness.mjs` re-exports it so the self-check and
+ * the publisher cannot disagree about what "stale" means.
+ */
+export const STALE_AFTER_DAYS = 31;
 
 /** The four documents, in the order the charter lists them. */
 export const DOC_SPECS = [
@@ -155,23 +180,44 @@ export function unknownSections(templateText) {
 const shortStamp = (iso) => String(iso || '').slice(0, 16).replace('T', ' ');
 
 /**
- * The data gate, as the documents must speak about it.
+ * The data gate and the clock, as the documents must speak about both.
  *
  * `allowed` is true only when nothing is open: waived items are the user saying
- * "I know, publish anyway", and they stay visible in the header.
+ * "I know, publish anyway", and they stay visible in the header. `stale` is the
+ * publisher's staleness rule — the artifact is older than the renewal window —
+ * and `analysisAllowed` is the one question `renderSection` and `planPublish`
+ * actually ask, so "may analysis publish?" has a single answer.
+ *
+ * An artifact with no readable date is treated as stale when a clock is supplied
+ * (an undated snapshot cannot be shown to be current); a caller that passes no
+ * `now` keeps the old behaviour, because context and readiness compute the age
+ * themselves.
  */
-export function gateFromArtifact(artifact) {
+export function gateFromArtifact(artifact, { now = null, staleAfterDays = STALE_AFTER_DAYS } = {}) {
   const items = artifact?.fixList?.items || [];
   const open = items.filter((i) => i.state === 'open').map((i) => i.id);
   const waived = items.filter((i) => i.state === 'waived').map((i) => i.id);
   const closed = items.filter((i) => i.state === 'closed').map((i) => i.id);
+  const allowed = open.length === 0;
+  const asOf = artifact?.at || '';
+  let ageDays = null;
+  let stale = false;
+  if (now) {
+    const at = Date.parse(asOf);
+    ageDays = Number.isFinite(at) ? Math.floor(((now instanceof Date ? now : new Date(now)).getTime() - at) / 86400000) : null;
+    stale = ageDays === null || ageDays > staleAfterDays;
+  }
   return {
-    allowed: open.length === 0,
+    allowed,
     open,
     waived,
     closed,
     total: items.length,
-    asOf: artifact?.at || '',
+    asOf,
+    ageDays,
+    stale,
+    staleAfterDays,
+    analysisAllowed: allowed && !stale,
   };
 }
 
@@ -181,7 +227,10 @@ export function renderHeader({ spec, artifact, gate, now, action }) {
   const date = (now || new Date()).toISOString().slice(0, 10);
   L.push(`# ${spec.title} — ${date}`);
   L.push('');
-  if (gate.allowed) {
+  if (gate.stale) {
+    L.push(`⚠ **STALE SNAPSHOT — the verify artifact is ${gate.ageDays === null ? 'undated' : `${gate.ageDays} day(s) old`} (renewal window ${gate.staleAfterDays}).**`);
+    L.push('The sections below are dated facts from that snapshot; the analysis sections are withheld until `/health verify` runs again, because a claim about now cannot rest on a month-old snapshot.');
+  } else if (gate.allowed) {
     L.push(`✅ **Data gate closed** — every fix-list item is closed or waived${gate.waived.length ? ` (waived: ${gate.waived.join(', ')})` : ''}. Analysis current as of ${shortStamp(artifact?.at) || date}.`);
   } else {
     L.push(`⚠ **DRAFT — the data gate is OPEN (${gate.open.length} item${gate.open.length === 1 ? '' : 's'}: ${gate.open.join(', ')}).**`);
@@ -287,17 +336,28 @@ export function refusalText(gate) {
   return `_Not published while the data gate is open: ${gate.open.join(', ')}. Analysis on unverified rows is how a wrong date becomes a wrong risk score — fix the items in the app, then run \`/health refresh\`._`;
 }
 
+/** The sentence an analysis section carries when the snapshot is past the renewal window. */
+export function staleRefusalText(gate) {
+  return `_Not published on a stale snapshot: the verify artifact is ${gate.ageDays === null ? 'undated' : `${gate.ageDays} day(s) old`} and the renewal window is ${gate.staleAfterDays}. A claim about now cannot rest on a month-old snapshot — run \`/health verify\`, then \`/health refresh\`._`;
+}
+
 /**
  * One section's body.
  *
  * `analysis` is the analysis pass's payload, keyed by source (`analysis.conditions`
- * etc.). Passing it while the gate is open is a refusal, not a silent drop: the
- * section comes back marked `refused` so `/health refresh` can say how many were
- * held back, and the document carries the reason.
+ * etc.). Passing it while the gate is open, or on a stale snapshot, is a refusal,
+ * not a silent drop: the section comes back marked `refused` so `/health refresh`
+ * can say how many were held back, and the document carries the reason.
+ *
+ * Document 4's sections are additionally checked against the research lane's
+ * fetch log (`citations`) — that is the citation contract, and it is applied to
+ * the rendered lines rather than to the payload, so it cannot be skipped by
+ * handing the publisher a payload of another shape.
  */
-export function renderSection({ heading, source, artifact, gate, analysis = {}, registry, spec, now }) {
+export function renderSection({ heading, source, artifact, gate, analysis = {}, registry, spec, now, citations = null }) {
   if (isAnalysisSource(source)) {
     if (!gate.allowed) return { heading, refused: true, body: [refusalText(gate)] };
+    if (gate.stale) return { heading, refused: true, body: [staleRefusalText(gate)] };
     const text = analysis?.[source];
     // Defence in depth: `loadAnalysisFile` already refuses a malformed payload,
     // but a caller that renders straight from an unvalidated object must not be
@@ -307,6 +367,10 @@ export function renderSection({ heading, source, artifact, gate, analysis = {}, 
     else if (typeof text === 'string') body = text.split('\n').filter((l) => l.trim() !== '');
     else if (text === undefined || text === null) body = [];
     else return { heading, refused: true, body: [`_Malformed analysis payload for this section (${typeof text}) — nothing was published._`] };
+    if (body.length && spec?.key === 'insights' && CITATION_SOURCES.includes(source)) {
+      const verdict = validateInsightCitations(body, { log: citations });
+      if (!verdict.ok) return { heading, refused: true, body: [citationRefusalText(verdict)], citationRefused: verdict.reason };
+    }
     return {
       heading,
       refused: false,
@@ -322,8 +386,8 @@ export function renderSection({ heading, source, artifact, gate, analysis = {}, 
 }
 
 /** One document's whole body: header, then every template section in order. */
-export function renderDoc({ spec, templateText, artifact, analysis, registry, now, action = '' }) {
-  const gate = gateFromArtifact(artifact);
+export function renderDoc({ spec, templateText, artifact, analysis, registry, now, action = '', citations = null }) {
+  const gate = gateFromArtifact(artifact, { now });
   const unknown = unknownSections(templateText);
   if (unknown.length) return { ok: false, error: `template ${spec.template} has sections with no source: ${unknown.join(', ')}` };
   // A template with no sections at all would publish a header-only document:
@@ -332,7 +396,7 @@ export function renderDoc({ spec, templateText, artifact, analysis, registry, no
   const L = renderHeader({ spec, artifact, gate, now, action });
   const sections = [];
   for (const section of sectionPlan(templateText)) {
-    const rendered = renderSection({ ...section, artifact, gate, analysis, registry, spec, now });
+    const rendered = renderSection({ ...section, artifact, gate, analysis, registry, spec, now, citations });
     sections.push(rendered);
     L.push(`## ${rendered.heading}`);
     L.push('');
@@ -347,6 +411,7 @@ export function renderDoc({ spec, templateText, artifact, analysis, registry, no
     text,
     gate,
     refused: sections.filter((s) => s.refused).map((s) => s.heading),
+    citationRefused: sections.filter((s) => s.citationRefused).map((s) => ({ heading: s.heading, reason: s.citationRefused })),
     hash: contentHash(text),
   };
 }
@@ -365,12 +430,12 @@ export function contentHash(text) {
  * Drive calls happen in `publishDocs`, so the decision is testable with no
  * credential and no network.
  */
-export function planPublish({ artifact, analysis, templates, registry, now = new Date(), only = [], force = false }) {
-  const gate = gateFromArtifact(artifact);
+export function planPublish({ artifact, analysis, templates, registry, now = new Date(), only = [], force = false, citations = null }) {
+  const gate = gateFromArtifact(artifact, { now });
   const wanted = only.length ? DOC_SPECS.filter((s) => only.includes(s.key) || only.includes(s.title)) : DOC_SPECS;
   const items = [];
   for (const spec of wanted) {
-    const rendered = renderDoc({ spec, templateText: templates[spec.key] || '', artifact, analysis, registry, now });
+    const rendered = renderDoc({ spec, templateText: templates[spec.key] || '', artifact, analysis, registry, now, citations });
     if (!rendered.ok) {
       items.push({ key: spec.key, title: spec.title, action: 'error', error: rendered.error, gate });
       continue;
@@ -385,10 +450,11 @@ export function planPublish({ artifact, analysis, templates, registry, now = new
       hash: rendered.hash,
       text: rendered.text,
       refused: rendered.refused,
+      citationRefused: rendered.citationRefused || [],
       gate,
     });
   }
-  return { items, gate, mode: gate.allowed ? 'analysis' : 'draft' };
+  return { items, gate, mode: gate.analysisAllowed ? 'analysis' : 'draft' };
 }
 
 /* ------------------------------------------------------------------ the store */
