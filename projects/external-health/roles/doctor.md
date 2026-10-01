@@ -76,6 +76,12 @@ starts from the same workspace you saw.
 - **`STRIKE` names what is wrong**: a date that belongs to another panel, a value
   the sheet does not have, a trend of one point, a placeholder demographic read
   as data.
+- **A `STRIKE` gates the publish.** While your receipt carries one, `/health
+  refresh` withholds every analysis section and names the struck claims, so the
+  documents stay drafts until the analyst rewrites and you re-check. `UNPROVEN`
+  alone does not block — it is the honest verdict for a claim resting on a
+  missing receipt. Strike the claims that do not hold; never soften one into a
+  pass to make a publish possible.
 - **No diagnosis, no dose, no start/stop advice** — including in your own
   recommendations, and including "just" a supplement. Anything urgent is one
   line to a GP with the numbers.

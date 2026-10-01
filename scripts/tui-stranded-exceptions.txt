@@ -25,3 +25,4 @@ c56e9527  origin/agent/tui-review: main has the same TUI capabilities by another
 e29a4896  origin/agent/tui-s1: the tui-open.json resolution it added is on main (tui-attach.sh resolves 2 sites, bot-host writes the file), re-derived rather than merged, waived 2026-09-29
 e0859056  origin/agent/tui-s1: its chatId normalisation is on main via the one-step RESOLVED resolver, waived 2026-09-29
 05ee1759  origin/agent/tui-s1: main has the same TUI capabilities by another route, waived 2026-09-29
+1ea00d23  origin/agent/forge-one-click: its PR #373 is on main (a9c6ad72); main's TUI files moved on since, waived 2026-10-01

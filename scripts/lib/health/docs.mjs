@@ -19,6 +19,12 @@
  *     STALE, and the data sections — dated facts with provenance — still publish
  *     as a draft. Not one derived claim leaves a stale snapshot.
  *
+ *     **And so is the reviewer's veto.** While `result/health-doctor.json`
+ *     carries a `STRIKE`, the claim it names was found not to hold — publishing
+ *     it is publishing something known wrong. Every analysis section is withheld
+ *     with the struck claims named, and the data sections still publish as a
+ *     draft, exactly as they do while the gate is open.
+ *
  *  2. **Idempotent by doc id, not by name.** The registry in
  *     `result/health-docs.json` holds one Drive id per document. A refresh
  *     updates that id in place (`replaceDocContent`); it never creates a second
@@ -52,6 +58,16 @@ import { CITATION_SOURCES, citationRefusalText, validateInsightCitations } from 
 export const DOCS_FILE = 'health-docs.json';
 export const REFRESH_FILE = 'health-refresh.json';
 export const REFRESH_LOG = 'health-refresh.md';
+
+/**
+ * The Doctor's receipt, `result/health-doctor.json`, written by `/health doctor`.
+ *
+ * It lives in the publisher's module because it is now a publisher input: its
+ * verdicts decide whether the analysis may publish, and both the refresh path
+ * and `/health readiness` read it through `doctorReview` below. One reader, one
+ * meaning of a strike.
+ */
+export const DOCTOR_ARTIFACT = 'health-doctor.json';
 
 /**
  * The renewal window the charter names, plus a day of slack.
@@ -221,6 +237,73 @@ export function gateFromArtifact(artifact, { now = null, staleAfterDays = STALE_
   };
 }
 
+/**
+ * The Doctor's receipt, read the way the publisher must read it.
+ *
+ * A `STRIKE` is a claim the reviewer could not let stand, and the publisher does
+ * not weigh it: one is enough to withhold every analysis section and name the
+ * claims, the same way an open gate or a stale snapshot withholds them. Three
+ * states, and they are three different answers:
+ *
+ *   - **no receipt** — the review has not run. That is a boundary, not a strike:
+ *     nothing changes from before this gate existed, and the packet says so.
+ *   - **a receipt that reads** — any strike blocks; zero strikes does not. An
+ *     `UNPROVEN` verdict is the honest answer for a claim resting on a missing
+ *     receipt, not a veto, so it does not block publishing on its own.
+ *   - **a receipt that cannot be read** — fail closed, because a review that
+ *     cannot be shown to be clean is not a clean review; the refusal names the
+ *     parse failure instead of pretending the receipt is absent.
+ */
+export function doctorReview(report) {
+  const unreadable = (why) => ({ read: false, at: '', strikes: [], counts: null, blocked: true, unreadable: why });
+  if (report === undefined || report === null) return { read: false, at: '', strikes: [], counts: null, blocked: false, unreadable: '' };
+  if (typeof report !== 'object' || Array.isArray(report)) return unreadable('the receipt is not an object');
+  if (typeof report.unreadable === 'string' && report.unreadable) return unreadable(report.unreadable);
+  if (!Array.isArray(report.claims)) return unreadable('the receipt carries no claims list');
+  const claims = report.claims.filter((c) => c && typeof c === 'object');
+  const status = (c) => String(c.status || '').toUpperCase();
+  const strikes = claims.filter((c) => status(c) === 'STRIKE')
+    .map((c) => ({ index: c.index, title: String(c.title || ''), claim: String(c.claim || ''), item: String(c.item || '') }));
+  return {
+    read: true,
+    at: String(report.at || ''),
+    strikes,
+    counts: {
+      reviewed: claims.length,
+      pass: claims.filter((c) => status(c) === 'PASS').length,
+      strike: strikes.length,
+      unproven: claims.filter((c) => status(c) === 'UNPROVEN').length,
+    },
+    blocked: strikes.length > 0,
+    unreadable: '',
+  };
+}
+
+/** The names a refusal and a banner use for the struck claims. */
+function strikeNames(review) {
+  return review.strikes.map((s) => `claim ${s.index}${s.title ? ` (${s.title})` : ''}`).join(', ');
+}
+
+/**
+ * The gate plus the reviewer's veto, as one object.
+ *
+ * `analysisAllowed` stays the single answer to "may analysis publish?", now with
+ * the Doctor's strike in it, so the header, the sections and the plan's mode
+ * cannot disagree about the same payload.
+ */
+function withDoctor(gate, doctor) {
+  const review = doctorReview(doctor);
+  return { ...gate, doctor: review, analysisAllowed: gate.analysisAllowed && !review.blocked };
+}
+
+/** The sentence an analysis section carries while the Doctor's receipt blocks. */
+export function doctorRefusalText(review) {
+  if (review.unreadable) {
+    return `_Not published — the Doctor's receipt cannot be read (${review.unreadable}), so no review can be shown to stand behind these claims. Run \`/health doctor\`, then \`/health refresh\`._`;
+  }
+  return `_Not published while the Doctor's report carries ${review.strikes.length} STRIKE(s): ${strikeNames(review)}. A struck claim is one the review could not let stand — the analyst rewrites it (\`/health analyze\`), the Doctor re-checks (\`/health doctor\`), and only then does \`/health refresh\` publish._`;
+}
+
 /** The header every document carries: banner first, then provenance. */
 export function renderHeader({ spec, artifact, gate, now, action }) {
   const L = [];
@@ -230,11 +313,19 @@ export function renderHeader({ spec, artifact, gate, now, action }) {
   if (gate.stale) {
     L.push(`⚠ **STALE SNAPSHOT — the verify artifact is ${gate.ageDays === null ? 'undated' : `${gate.ageDays} day(s) old`} (renewal window ${gate.staleAfterDays}).**`);
     L.push('The sections below are dated facts from that snapshot; the analysis sections are withheld until `/health verify` runs again, because a claim about now cannot rest on a month-old snapshot.');
-  } else if (gate.allowed) {
-    L.push(`✅ **Data gate closed** — every fix-list item is closed or waived${gate.waived.length ? ` (waived: ${gate.waived.join(', ')})` : ''}. Analysis current as of ${shortStamp(artifact?.at) || date}.`);
-  } else {
+  } else if (!gate.allowed) {
     L.push(`⚠ **DRAFT — the data gate is OPEN (${gate.open.length} item${gate.open.length === 1 ? '' : 's'}: ${gate.open.join(', ')}).**`);
     L.push('Nothing below is a current analysis. The analysis sections say so in place — the refusal is deliberate, not missing.');
+  } else if (gate.doctor?.blocked) {
+    if (gate.doctor.unreadable) {
+      L.push("⚠ **DRAFT — the Doctor's receipt does not read, so no review can be shown to stand behind the analysis.**");
+      L.push(`The analysis sections are withheld in place until \`/health doctor\` writes a receipt the publisher can read (${gate.doctor.unreadable}).`);
+    } else {
+      L.push(`⚠ **DRAFT — the Doctor's report carries ${gate.doctor.strikes.length} STRIKE(s): ${strikeNames(gate.doctor)}.**`);
+      L.push('The analysis sections are withheld in place: a struck claim is rewritten by the analyst (`/health analyze`), re-checked by the Doctor (`/health doctor`), and only then published.');
+    }
+  } else {
+    L.push(`✅ **Data gate closed** — every fix-list item is closed or waived${gate.waived.length ? ` (waived: ${gate.waived.join(', ')})` : ''}. Analysis current as of ${shortStamp(artifact?.at) || date}.`);
   }
   L.push('');
   L.push('| Provenance | |');
@@ -244,6 +335,9 @@ export function renderHeader({ spec, artifact, gate, now, action }) {
   L.push(`| Profile | \`${artifact?.profile?.uid || 'n/a'}\` · ${artifact?.profile?.rows ?? 0} lab rows in the app copy |`);
   L.push(`| App copy read | newest row ${artifact?.app?.newestDate || 'n/a'} |`);
   L.push(`| Fix list | ${gate.closed.length} closed · ${gate.open.length} open · ${gate.waived.length} waived of ${gate.total}${gate.open.length || gate.waived.length ? ` (${[...gate.open, ...gate.waived].join(', ')})` : ''} |`);
+  if (gate.doctor?.read) {
+    L.push(`| Doctor's review | ${gate.doctor.counts.reviewed} claim(s): ${gate.doctor.counts.pass} PASS · ${gate.doctor.counts.strike} STRIKE · ${gate.doctor.counts.unproven} UNPROVEN${gate.doctor.at ? ` (reviewed ${shortStamp(gate.doctor.at)})` : ''} |`);
+  }
   L.push(`| Generated | ${date} by \`/health refresh\`${action ? ` (${action})` : ''} |`);
   L.push('');
   return L;
@@ -345,9 +439,10 @@ export function staleRefusalText(gate) {
  * One section's body.
  *
  * `analysis` is the analysis pass's payload, keyed by source (`analysis.conditions`
- * etc.). Passing it while the gate is open, or on a stale snapshot, is a refusal,
- * not a silent drop: the section comes back marked `refused` so `/health refresh`
- * can say how many were held back, and the document carries the reason.
+ * etc.). Passing it while the gate is open, on a stale snapshot, or while the
+ * Doctor's receipt carries a strike, is a refusal, not a silent drop: the section
+ * comes back marked `refused` so `/health refresh` can say how many were held
+ * back, and the document carries the reason.
  *
  * Document 4's sections are additionally checked against the research lane's
  * fetch log (`citations`) — that is the citation contract, and it is applied to
@@ -358,6 +453,7 @@ export function renderSection({ heading, source, artifact, gate, analysis = {}, 
   if (isAnalysisSource(source)) {
     if (!gate.allowed) return { heading, refused: true, body: [refusalText(gate)] };
     if (gate.stale) return { heading, refused: true, body: [staleRefusalText(gate)] };
+    if (gate.doctor?.blocked) return { heading, refused: true, body: [doctorRefusalText(gate.doctor)] };
     const text = analysis?.[source];
     // Defence in depth: `loadAnalysisFile` already refuses a malformed payload,
     // but a caller that renders straight from an unvalidated object must not be
@@ -386,8 +482,8 @@ export function renderSection({ heading, source, artifact, gate, analysis = {}, 
 }
 
 /** One document's whole body: header, then every template section in order. */
-export function renderDoc({ spec, templateText, artifact, analysis, registry, now, action = '', citations = null }) {
-  const gate = gateFromArtifact(artifact, { now });
+export function renderDoc({ spec, templateText, artifact, analysis, registry, now, action = '', citations = null, doctor = null }) {
+  const gate = withDoctor(gateFromArtifact(artifact, { now }), doctor);
   const unknown = unknownSections(templateText);
   if (unknown.length) return { ok: false, error: `template ${spec.template} has sections with no source: ${unknown.join(', ')}` };
   // A template with no sections at all would publish a header-only document:
@@ -430,12 +526,12 @@ export function contentHash(text) {
  * Drive calls happen in `publishDocs`, so the decision is testable with no
  * credential and no network.
  */
-export function planPublish({ artifact, analysis, templates, registry, now = new Date(), only = [], force = false, citations = null }) {
-  const gate = gateFromArtifact(artifact, { now });
+export function planPublish({ artifact, analysis, templates, registry, now = new Date(), only = [], force = false, citations = null, doctor = null }) {
+  const gate = withDoctor(gateFromArtifact(artifact, { now }), doctor);
   const wanted = only.length ? DOC_SPECS.filter((s) => only.includes(s.key) || only.includes(s.title)) : DOC_SPECS;
   const items = [];
   for (const spec of wanted) {
-    const rendered = renderDoc({ spec, templateText: templates[spec.key] || '', artifact, analysis, registry, now, citations });
+    const rendered = renderDoc({ spec, templateText: templates[spec.key] || '', artifact, analysis, registry, now, citations, doctor });
     if (!rendered.ok) {
       items.push({ key: spec.key, title: spec.title, action: 'error', error: rendered.error, gate });
       continue;

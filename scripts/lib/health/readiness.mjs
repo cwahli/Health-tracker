@@ -34,7 +34,7 @@ import path from 'node:path';
 import { KNOWN_PROJECTS } from '../project-registry.mjs';
 import { geminiKeyIn } from '../agent-gemini.mjs';
 import { ANALYSIS_FILE, BRIEF_FILES, VERIFY_FILE, buildHealthContext } from './context.mjs';
-import { DOCS_FILE, STALE_AFTER_DAYS, loadDocsRegistry } from './docs.mjs';
+import { DOCS_FILE, DOCTOR_ARTIFACT, STALE_AFTER_DAYS, doctorReview, loadDocsRegistry } from './docs.mjs';
 import { searchAvailability } from './research.mjs';
 
 /** The publisher's renewal window, re-exported so the self-check and the writer cannot drift. */
@@ -180,6 +180,33 @@ export function checkHealthReadiness({
       checks.push(refused
         ? line('analysis', 'finding', 'The analysis payload would be refused by the publisher', 'The shape check names the offending key; /health refresh writes nothing while it is malformed.')
         : line('analysis', 'ok', 'The analysis payload is present and well-shaped', `Written ${shape.at || '(undated)'}.`));
+    }
+  }
+
+  // The Doctor's half: whether a review exists, and whether it blocks. A missing
+  // report is a finding — nobody has re-checked the analyst's claims yet — and a
+  // strike is a finding with teeth, because /health refresh withholds every
+  // analysis section while the receipt carries one.
+  const doctorPath = path.join(result, DOCTOR_ARTIFACT);
+  if (!fs.existsSync(doctorPath)) {
+    checks.push(line('doctor', 'finding', 'No doctor report',
+      `Nothing has re-checked the analyst's claims yet — run /health doctor over ${ANALYSIS_FILE}; while its receipt carries a strike, /health refresh withholds every analysis section.`));
+  } else {
+    let raw = null;
+    try {
+      raw = JSON.parse(fs.readFileSync(doctorPath, 'utf8'));
+    } catch (err) {
+      raw = { unreadable: `the receipt does not parse: ${err.message}` };
+    }
+    const review = doctorReview(raw);
+    if (review.unreadable) {
+      checks.push(line('doctor', 'finding', 'The doctor receipt cannot be read', `${review.unreadable} — /health refresh treats an unreadable receipt as a block, so no analysis section publishes until /health doctor writes a readable one.`));
+    } else if (review.strikes.length) {
+      checks.push(line('doctor', 'finding', `The Doctor's report strikes ${review.strikes.length} claim(s)`,
+        `${review.strikes.map((s) => s.title || s.claim || `claim ${s.index}`).join('; ')} — every analysis section is withheld from /health refresh until the analyst rewrites them and /health doctor re-checks.`));
+    } else {
+      checks.push(line('doctor', 'ok', `The Doctor's review stands \u2014 no strikes`,
+        `${review.counts.reviewed} claim(s): ${review.counts.pass} PASS \u00b7 ${review.counts.unproven} UNPROVEN${review.at ? `, reviewed ${review.at}` : ''}.`));
     }
   }
 
