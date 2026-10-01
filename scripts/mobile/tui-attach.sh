@@ -195,12 +195,42 @@ RESOLVED=$(node --input-type=module -e '
 
   const isCline = out.SURFACE === "cline";
   const map = readJson(path.join(stateDir, isCline ? "cline-sessions.json" : "sessions.json")) || {};
-  const matches = (v) => tui.sessionIdMatchesSurface(v, out.SURFACE);
-  if (chatId && matches(map[chatId])) {
-    out.SID = String(map[chatId]);
+  // sessions.json rows are workspace-scoped since #365 (`<workspace>\0<id>`);
+  // older rows (and cline-sessions.json) are bare ids. The scope is split
+  // here, never matched: matching the packed string against `^ses_` is how
+  // vm3 TUI ended up on a fresh session while Telegram answered from the
+  // chat real one (2026-10-01: SID empty, SOURCE legacy-first, live).
+  const SEP = "\u0000";
+  const unscope = (v) => {
+    const s = String(v ?? "");
+    const cut = s.indexOf(SEP);
+    return cut === -1
+      ? { workspace: "", sessionId: s.trim() }
+      : { workspace: s.slice(0, cut), sessionId: s.slice(cut + 1).trim() };
+  };
+  // A row belongs to this attach when its session fits the lane AND it is
+  // this workspace row (or a legacy bare row from before scoping, which
+  // carries no workspace to check). Another workspace row is never
+  // borrowed: that is the cross-project drift scoping was built to stop.
+  const rowForThisAttach = (v) => {
+    const { workspace: ws, sessionId } = unscope(v);
+    if (!tui.sessionIdMatchesSurface(sessionId, out.SURFACE)) return "";
+    if (!ws) return sessionId;
+    return ws === String(workspace || "") ? sessionId : "";
+  };
+  const chatSid = chatId ? rowForThisAttach(map[chatId]) : "";
+  if (chatSid) {
+    out.SID = chatSid;
     out.SOURCE = fromEnvHit ? "explicit-hit" : "tui-open-hit";
+  } else if (!isCline && chatId && String(tuiOpen.chatId || "") === chatId && tui.sessionIdMatchesSurface(tuiOpen.sessionId, out.SURFACE)) {
+    // The map lost the chat row (a pre-scope restart, a wiped map) but /tui
+    // recorded the session for THIS workspace seconds ago. The snapshot is the
+    // chat own conversation, and only when this attach is for the chat that
+    // opened it; another chat row (legacy-first) is not.
+    out.SID = String(tuiOpen.sessionId).trim();
+    out.SOURCE = "tui-open-snapshot";
   } else {
-    out.SID = Object.values(map).map((v) => String(v || "").trim()).filter(matches)[0] || "";
+    out.SID = Object.values(map).map(rowForThisAttach).filter(Boolean)[0] || "";
   }
   // A Cline chat whose turn has not written its map yet still has a thread on
   // disk. Resuming the newest one for this checkout shows the conversation the

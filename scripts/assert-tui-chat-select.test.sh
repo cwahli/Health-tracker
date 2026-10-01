@@ -323,6 +323,36 @@ else
   echo "  FAIL  the turn session id is computed after the work session exists (workSession@${ws_line:-missing}, turnSessionId@${ts_line:-missing})"; FAIL=$((FAIL + 1));
 fi
 
+# 15. Workspace-scoped rows (bot-host #365 writes `<workspace>\\u0000<id>`).
+#     The resolver must split the scope, never match the packed string: live
+#     2026-10-01 vm3 TUI opened a fresh session (SID empty, legacy-first)
+#     while Telegram answered from the chat real session.
+SCOPED="$ROOT/scoped"
+mkdir -p "$SCOPED/vm3" "$SCOPED/w"
+WS="$SCOPED/w"
+scoped_run() { # scoped_run outputs the dry-run decision line
+  TUI_STATE_ROOT="$SCOPED" TUI_BOT_ID=vm3 TUI_WORKTREE="$WS" \
+    OPENCODE_BIN=/oc CLINE_BIN=/cl \
+    TUI_DRY_RUN=1 bash "$ATTACH" 2>/dev/null | grep '^SURFACE='
+}
+printf '{"6218257274": "%s\\u0000ses_live123"}' "$WS" > "$SCOPED/vm3/sessions.json"
+printf '{"chatId":"6218257274","surface":"opencode","model":"opencode/nemotron-3.5-lightning-free","sessionId":"ses_live123","workspace":"%s"}' "$WS" > "$SCOPED/vm3/tui-open.json"
+check "a scoped row resolves through tui-open" "$(scoped_run)" "SURFACE=opencode SID=ses_live123 SOURCE=tui-open-hit"
+check "a scoped row resolves explicit" "$(TUI_CHAT_ID=6218257274 scoped_run)" "SURFACE=opencode SID=ses_live123 SOURCE=explicit-hit"
+# Another workspace row is never borrowed: the cross-project drift scoping
+# was built to stop.
+printf '{"6218257274": "/other/proj\\u0000ses_other999"}' > "$SCOPED/vm3/sessions.json"
+rm "$SCOPED/vm3/tui-open.json"
+check "a foreign-workspace row is refused, not attached" "$(TUI_CHAT_ID=6218257274 scoped_run)" "SURFACE=opencode SID= SOURCE=legacy-first"
+# The map lost the row but /tui recorded this workspace session seconds ago.
+printf '{}' > "$SCOPED/vm3/sessions.json"
+printf '{"chatId":"6218257274","surface":"opencode","model":"opencode/nemotron-3.5-lightning-free","sessionId":"ses_snap999","workspace":"%s"}' "$WS" > "$SCOPED/vm3/tui-open.json"
+check "a lost map row falls back to the opening-chat snapshot" "$(TUI_CHAT_ID=6218257274 scoped_run)" "SURFACE=opencode SID=ses_snap999 SOURCE=tui-open-snapshot"
+# ...but the snapshot never serves a different explicit chat.
+printf '{"111": "ses_A111"}' > "$SCOPED/vm3/sessions.json"
+check "the snapshot does not hijack another chat" "$(TUI_CHAT_ID=111 scoped_run)" "SURFACE=opencode SID=ses_A111 SOURCE=explicit-hit"
+
+rm -rf "$SCOPED"
 rm -rf "$LEASE_FIX" "$ROOT" "$LANE"
 echo
 echo "$PASS pass, $FAIL fail"
