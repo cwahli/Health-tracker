@@ -33,8 +33,10 @@ EnvironmentFile=-/home/ubuntu/.config/bot-host/tui-ttyd.env
 # Loopback only, like the vm instance. Base-path /tty2 keeps this socket's page
 # and websocket under /tty2/, so Caddy can route each bot's socket to its own
 # ttyd and the client's relative links keep working.
+# --max-clients 0 (no cap): same reason as the vm twin — desktop + phone share
+# one tmux session, and a cap of 1 is the "tap Enter, never reconnects" loop.
 ExecStart=/usr/bin/ttyd --port 8899 --interface 127.0.0.1 --base-path /tty2 \
-  --writable --max-clients 1 --once=false \
+  --writable --max-clients 0 --once=false \
   -c ${TUI_TTYD_USER}:${TUI_TTYD_PASSWORD} \
   --check-origin --terminal-type xterm-256color \
   --client-option fontSize=13 \
