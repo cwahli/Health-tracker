@@ -12,6 +12,7 @@ allowed_files:
   - scripts/tui-stranded-exceptions.txt
   - scripts/assert-external-health.test.mjs
   - projects/external-health/roles/doctor.md
+  - projects/external-health/charter.md
   - AI_HANDOVER.md
 frozen_files:
   - scripts/lib/health/doctor.mjs
@@ -83,6 +84,12 @@ draft — exactly the rule the open gate and the stale snapshot already follow.
   has teeth.** While the receipt carries a strike, `/health refresh` withholds
   the analysis; `UNPROVEN` alone does not block. So strike honestly, and never
   soften one into a pass to make a publish possible.
+- **`projects/external-health/charter.md` — the contract catches up with the
+  code.** The charter's own publish paragraph said an analysis publishes when
+  the last gate item closes; it now names the other three withholding rules the
+  publisher actually applies (a STALE snapshot, the Doctor's strike, document
+  4's uncitable links), and the command list gains the seats it never listed
+  (`/health research`, `/health doctor`, `/health readiness`).
 - **`scripts/assert-external-health.test.mjs` — section 18 (49 checks):** the
   review reader's three states; the publisher pure (mode, refusal text naming
   the claim, banner, provenance row, no leaked claim, data document still a

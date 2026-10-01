@@ -31,6 +31,16 @@ item ids, the data sections carry the dated facts, and every analysis section
 carries a refusal naming the items instead of a claim. `/health analyze` refuses
 outright. When the last item closes, the same command publishes the analysis.
 
+**Three more ways an analysis section is withheld, and they are not the gate.**
+The publisher also checks the clock, the reviewer and the literature. A verify
+artifact past the monthly renewal window withholds every analysis section (the
+header says STALE). A `STRIKE` in the Doctor's report (`/health doctor`) withholds
+them too, naming the struck claims until the analyst rewrites them and the Doctor
+re-checks. And document 4 refuses any line citing a link the literature lane
+never fetched (`/health research`) — an unverified link is not a link. In every
+case the data sections still publish as a draft, and the refusal says which rule
+acted.
+
 **Idempotence.** The documents are updated in place, by doc id, recorded in
 `result/health-docs.json`. A refresh that changes nothing writes nothing, and a
 document is never duplicated — a rerun on a new machine adopts the document
@@ -53,7 +63,9 @@ that already exists.
 - **Drive**: `External-Personal-Health-Coach` — the four documents live beside
   the `Brief` folder, which holds the brief and the source spreadsheet
 - **Commands**: `/health verify` (the gate) · `/health ingest` (the Brief folder) ·
-  `/health refresh` (publish or update the four documents) · `/health analyze`
-  (the analysis entry point) · `/health status`
+  `/health refresh` (publish or update the four documents) · `/health research
+  "<query>"` (fetch and record citations) · `/health analyze` (write the analysis
+  payload) · `/health doctor` (re-check its claims) · `/health readiness` (what a
+  seat still needs) · `/health status`
 - **Data**: the app's Cloudflare D1, read-only, via `scripts/lib/health/d1.mjs`
 - **Cadence**: verify on demand; the Insights document renews monthly
