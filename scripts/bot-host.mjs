@@ -2860,9 +2860,27 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const currentRoles = getProjectRoles(activeProj.id);
       if (!cmd.args) {
         const rolesList = (currentRoles || []).map((r) => `• \`/role ${r.id.split('_')[0]}\` — *${r.name}*`).join('\n');
+        // The whole explanation lives here: this listing is the one place every
+        // role surface is named together, so a chat never has to guess how the
+        // PM seat or a persona is taken, inspected, or left.
+        const listedRole = checkRoleDetails(activeProj.id, getChatRole(chatId) || '')?.name || null;
         await api.sendMessage(
           chatId,
-          `👥 *[Active Project Roles — ${activeProj.name}]*\n\n${rolesList || '• None declared.'}\n\n• \`/role check <name>\` — Inspect role mandate & instructions\n• \`/role add <id> <name> : <instructions>\` — Add a new dynamic role\n• \`/role remove <id>\` — Delete a role\n• \`/role reset\` — Return to general collaborative mode`,
+          [
+            `👥 *[Active Project Roles — ${activeProj.name}]*`,
+            '',
+            rolesList || '• None declared.',
+            '',
+            '*How roles work:*',
+            `• This chat runs as: ${listedRole ? `*${listedRole}*` : '_general mode_'} (also on \`/status\` as \`role:\`)`,
+            '• `/role <name>` — Assume a role; later turns run under its mandate',
+            '• `/role pm take` — Take the Project Manager seat (fleet, ladder, sheet, nudges)',
+            '• `/role pm` — Fleet projection · `/role pm status` — read-only plus adopted role',
+            '• `/role pm run` — One PM cycle: project, nudge, record · `/role pm sheet` — record rows now',
+            '• `/role check <name>` — Inspect role mandate & instructions',
+            '• `/role add <id> <name> : <instructions>` — Add a new dynamic role',
+            '• `/role remove <id>` — Delete a role · `/role reset` — back to general mode',
+          ].join('\n'),
           { parse_mode: 'Markdown' }
         );
         return;

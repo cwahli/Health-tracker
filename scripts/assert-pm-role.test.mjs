@@ -794,3 +794,27 @@ test('runStatus carries tmux and the adopted role without touching state', async
     home.cleanup();
   }
 });
+
+test('E2E: bare `/role` explains the whole surface, including the PM seat', async () => {
+  const fake = await startFakeBugApi(ticketRows());
+  const home = makeFleetHome();
+  try {
+    const args = { home: home.home, specsDir: home.specsDir, port: fake.port };
+    const plain = await simulate('/role', args);
+    assert.equal(plain.code, 0, `bot-host exited 0 (stderr: ${plain.stderr.slice(0, 400)})`);
+    assert.match(plain.stdout, /Active Project Roles/);
+    assert.match(plain.stdout, /runs as:.*general mode/, 'no seat taken yet, and it says so');
+    assert.match(plain.stdout, /\/role pm take/, 'the seat is discoverable');
+    assert.match(plain.stdout, /\/role pm run/);
+    assert.match(plain.stdout, /\/role pm status/);
+    assert.match(plain.stdout, /\/role pm sheet/);
+    assert.match(plain.stdout, /\/role reset/);
+
+    await simulate('/role pm take', args);
+    const seated = await simulate('/role', args);
+    assert.match(seated.stdout, /runs as:.*Project Manager/, 'the listing reflects the adopted seat');
+  } finally {
+    home.cleanup();
+    await fake.close();
+  }
+});
