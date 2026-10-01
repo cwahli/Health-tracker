@@ -12,6 +12,8 @@ second pipeline.
 | 2 | `meal-audit-ticket.mjs` | `assert-meal-audit-ticket.mjs` | `comparison.json` findings → bug cards |
 | 3 | `meal-audit-loop.mjs` | `assert-meal-audit-loop.mjs` | Bounded, resumable iteration driver |
 | 4 | `meal-audit-cron.sh` | (bash -n + live dry run) | Scheduled sweep, single-flight |
+| 2b | `meal-audit-handoff.mjs` | `assert-meal-audit-handoff.mjs` | The hand-off to the meal-audit agent |
+| — | `meal-qa-proof.mjs` | (renders PNGs) | L18 live proof, one screenshot per stage |
 
 ## The two problems this solves
 
@@ -34,6 +36,25 @@ Measured: `--latest=10` resolves **10/10** (6 + 4), where the naive path resolve
 **2. Nothing consumed the audit ledger.** `meal-audit-compare.mjs --ledger` wrote
 `issue_ledger.jsonl` and stopped. No script ever called `bugctl` from it, so every
 ground-truth divergence died in a JSONL file nobody read. Phase 2 is the bridge.
+
+**3. The loop could not hand a meal to the audit agent.** The loop can resolve,
+compare, file and re-verify — but it cannot look at a photo and declare the
+dishes, so a meal with no ground truth reported `needs_audit` forever with
+**nothing queued for the agent that does the auditing**. A human had to notice
+the log line. `meal-audit-handoff.mjs` is the missing step: a durable request
+queue with a claim/complete handshake.
+
+```
+specs/meal-qa-loop/requests/<mealId>.request.json   what the agent must audit
+specs/meal-qa-loop/requests/<mealId>.claimed.json   agent took it
+specs/meal-qa-loop/requests/<mealId>.done.json      agent finished; bundle path
+```
+
+Under `specs/` (committed) rather than `artifacts/` (gitignored), so a request
+survives a deploy instead of silently resetting. Idempotent per meal, a claim
+blocks a second agent, an expired claim is reclaimable, and `complete` refuses a
+missing bundle — a bad marker would unblock the loop into a compare that cannot
+run.
 
 ## Daily use
 
@@ -115,11 +136,31 @@ aggressive schedule burns quota without converging.
 ```bash
 node scripts/assert-meal-audit-resolve.mjs   # 14 pass
 node scripts/assert-meal-audit-ticket.mjs    # 19 pass
-node scripts/assert-meal-audit-loop.mjs      # 24 pass
+node scripts/assert-meal-audit-loop.mjs      # 29 pass
+node scripts/assert-meal-audit-assist.mjs    # 14 pass
+node scripts/assert-meal-audit-handoff.mjs   # 21 pass
+npx vitest run server_audit_food_nutrients.test.ts   # 7 pass
 npx tsc --noEmit
 ```
 
-All three are offline: no network, no Playwright, no dispatch, no sleeps.
+All offline: no network, no Playwright, no dispatch, no sleeps.
+
+## Live proof (L18)
+
+`scripts/meal-qa-proof.mjs` walks the real chain and writes one PNG per stage to
+`qa-evidence/meal-qa-proof/`:
+
+```
+stage1-resolve   the saved-meal window and its provenance tiers
+stage2-handoff   the request file the audit agent is handed
+stage3-audit     the bundle the agent produced, with its energy check
+stage4-compare   ground truth vs the live site, verdict and findings
+stage5-ticket    the card the bridge filed
+stage6-loop      the sweep summary that ties the stages together
+```
+
+Every panel is generated from files the run actually wrote, so a screenshot
+cannot claim something the chain did not do.
 
 ## Current state
 

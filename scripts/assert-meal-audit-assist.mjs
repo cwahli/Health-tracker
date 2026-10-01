@@ -119,6 +119,74 @@ check('buildDish sums components and derives the dish total', () => {
   for (const ing of d.ingredients) assert.ok(ing.fdcId, 'every ingredient keeps its FDC trace');
 });
 
+// The regression: a sourced declared value must REPLACE a catalog value, not
+// only fill a gap. Tesco cooked ham slices are 94 kcal / 17.6 g protein per 100 g
+// on the pack; the generic catalog `ham` is 263 kcal / ~22 g. While a
+// declaration was only consulted for UNRESOLVED keys, the catalog won every
+// disagreement and the emitted bundle reported 31.78 kcal for a 14 g slice
+// (2.4x the label) with declaredSources empty — the auditor's citation silently
+// discarded. A brand product could never be audited against its own label.
+check('a sourced declaredNutrients value OVERRIDES a catalog value the catalog got wrong', () => {
+  const d = buildDish({
+    dishName: 'Cooked ham slices',
+    catalogKey: 'ranch_dressing',           // stands in for any catalog value
+    weightGrams: 14,
+    declaredNutrients: {
+      calories: { value: 13.2, source: 'pack label: 94 kcal/100g x 14g slice' },
+      totalFat: { value: 0.29, source: 'pack label: Fat 2.1 g/100g' },
+    },
+  });
+  assert.equal(d.nutrients.calories, 13.2,
+    'the declared label calorie must survive, not be re-derived from macros');
+  assert.equal(d.nutrients.totalFat, 0.29,
+    'the declared label fat must replace the catalog value');
+  assert.match(d.declaredSources.calories, /pack label/,
+    'the override must carry its citation, or it is an unsourced number');
+  assert.match(d.declaredSources.totalFat, /pack label/);
+});
+
+check('a declared calorie is not clobbered by the Atwater re-derivation', () => {
+  // Guard the second half of the same defect: calories are re-derived from
+  // macros after summing, which re-introduced the disagreement the declared
+  // pass had just resolved.
+  const d = buildDish({
+    dishName: 'Cooked ham slices',
+    catalogKey: 'ranch_dressing',
+    weightGrams: 14,
+    declaredNutrients: { calories: { value: 13.2, source: 'pack label: 94 kcal/100g' } },
+  });
+  const atwater = 4 * d.nutrients.protein + 4 * d.nutrients.carbohydrates + 9 * d.nutrients.totalFat;
+  assert.notEqual(atwater.toFixed(2), d.nutrients.calories.toFixed(2),
+    'this sensor is only meaningful if the derivation WOULD have disagreed');
+  assert.equal(d.nutrients.calories, 13.2);
+});
+
+check('an UNSOURCED declared value is REFUSED, so the override cannot become a hole', () => {
+  // The override must not become a way to assert any number. Writing one
+  // without a citation is refused outright rather than silently applied or
+  // silently dropped — both of which would let a wrong calorie reach a bundle.
+  assert.throws(
+    () => buildDish({
+      dishName: 'Mystery',
+      catalogKey: 'ranch_dressing',
+      weightGrams: 20,
+      declaredNutrients: { calories: 999 },
+    }),
+    /no source/i,
+    'a declaration with no citable source must be refused, not honoured',
+  );
+  assert.throws(
+    () => buildDish({
+      dishName: 'Mystery',
+      catalogKey: 'ranch_dressing',
+      weightGrams: 20,
+      declaredNutrients: { calories: 999, source: '   ' },
+    }),
+    /no source/i,
+    'a blank source is not a source',
+  );
+});
+
 check('a single-catalogKey dish is accepted (components optional)', () => {
   const d = buildDish({ dishName: 'Dressing', catalogKey: 'vinaigrette', weightGrams: 15 });
   assert.equal(d.weightGrams, 15);
