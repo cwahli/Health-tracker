@@ -315,6 +315,15 @@ export function clusterSpatialCompositeDishes(
               weightGrams: cWeight,
               estimatedWeightGrams: cWeight,
               volumePercentage: cPct,
+              // The component's OWN box. Clustering unions the boxes onto
+              // `primary` below, which is correct for the composite, but it
+              // means a component's own box has to survive here or it is gone
+              // for good: nothing downstream can recover it, because by the
+              // time these reach itemsBreakdown the only box present is the
+              // union. Dropping it here is what made "Green Grapes" reach the
+              // ledger with no box and no independent row.
+              boundingBox2D: c.boundingBox2D || it.boundingBox2D || null,
+              sourceImageIndex: c.sourceImageIndex ?? it.sourceImageIndex ?? 0,
               packGrams: c.packGrams ?? it.packGrams ?? null,
               rawNutritionLabel: c.rawNutritionLabel || it.rawNutritionLabel || undefined,
               nutrients: c.nutrients || undefined,
@@ -345,6 +354,10 @@ export function clusterSpatialCompositeDishes(
             weightGrams: itWeight,
             estimatedWeightGrams: itWeight,
             volumePercentage: itPct,
+            // Same reason as the branch above: without this the whole-dish
+            // component loses its own box the moment clustering merges it.
+            boundingBox2D: it.boundingBox2D || null,
+            sourceImageIndex: it.sourceImageIndex ?? 0,
             packGrams: it.packGrams ?? null,
             rawNutritionLabel: it.rawNutritionLabel || undefined,
             nutrients: it.nutrients || undefined,
