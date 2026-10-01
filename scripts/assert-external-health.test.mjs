@@ -8,7 +8,7 @@ import { assertReadOnlySql, parseEnvFile, loadD1Config, createD1Reader, resolveP
 import { parseCsvLine, isoDate, mapSheetTest, parseSheetCsv, parseSheetDump, sheetRecord, MARKER_LABELS } from './lib/health/sheet.mjs';
 import { extractAppState, reconcile, evaluateFixList, unreviewedAppRows, valuesEqual, FIX_LIST } from './lib/health/reconcile.mjs';
 import { KNOWN_PROJECTS, resolveProjectId, resolveRoleId, getProjectRoles, getRoleInstructions, getProjectSoul, seedProjectWorkspace } from './lib/project-registry.mjs';
-import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText, RESEARCH_LOG, DOCTOR_FILE, DOCTOR_ARTIFACT } from './health-runner.mjs';
+import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText, RESEARCH_LOG, DOCTOR_FILE, DOCTOR_ARTIFACT, ANALYSIS_FILE, extractAnalysisPayload } from './health-runner.mjs';
 import { loadSearchFixture, recordedFetch, vendorCalls, providerOf, FIXTURE_FILE } from './fixtures/search-providers.mjs';
 import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, sectionPlan, unknownSections, renderDoc, renderSection, refusalText, staleRefusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore, validateAnalysisSections, ANALYSIS_SECTIONS } from './lib/health/docs.mjs';
 import { searchAvailability, webSearch, fetchHit, validateInsightCitations, citationRefusalText, loadResearchLog, CITATION_SOURCES, SEARCH_PROVIDERS, MAX_HITS_PER_QUERY } from './lib/health/research.mjs';
@@ -719,12 +719,12 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   check('refresh fails closed on a template that cannot render', noTemplate.ok === false && noTemplate.stage === 'template', JSON.stringify({ stage: noTemplate.stage, error: noTemplate.error }));
 
   // Analyze: the entry point refuses while the gate is open and names the inputs when it closes.
-  const refused = runHealthAnalyze({ workspace: dir, env });
+  const refused = await runHealthAnalyze({ workspace: dir, env });
   check('analyze refuses while the gate is open', refused.ok === false && refused.stage === 'gate', JSON.stringify(refused));
   eq('the refusal names every open item', (refused.openItems || []).map((i) => i.id), ['H-1', 'H-6']);
   check('the refusal carries each item title', (refused.openItems || []).every((i) => i.title === FIX_TITLES[i.id]), JSON.stringify(refused.openItems));
   check('the refusal reply names the items', /H-1 Profile demographics match the sheet/.test(formatAnalyzeText(refused)), formatAnalyzeText(refused));
-  const never = runHealthAnalyze({ workspace: fs.mkdtempSync(path.join(os.tmpdir(), 'health-no-verify-')), env });
+  const never = await runHealthAnalyze({ workspace: fs.mkdtempSync(path.join(os.tmpdir(), 'health-no-verify-')), env });
   check('analyze refuses when nothing was verified yet', never.ok === false && never.stage === 'verify', JSON.stringify(never));
   eq('analyze could not read a broken analysis file', loadAnalysisFile(path.join(dir, 'nope.json')).ok, false);
 
@@ -786,15 +786,11 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   const analyzeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-analyze-closed-'));
   fs.mkdirSync(path.join(analyzeDir, 'result'), { recursive: true });
   fs.writeFileSync(path.join(analyzeDir, 'result', 'health-verify.json'), JSON.stringify(closedArtifact));
-  const ready = runHealthAnalyze({ workspace: analyzeDir, env });
-  check('analyze opens when the gate is closed', ready.ok === true, JSON.stringify(ready));
-  if (ready.ok) {
-    eq('the entry point names the analyst role', ready.ready.role, 'health_analyst');
-    eq('the entry point names every analysis section', ready.ready.sections.length, Object.values(SECTION_SOURCES).filter((s) => s.startsWith('analysis.')).length);
-    eq('the entry point names the four documents', ready.ready.documents.length, 4);
-    check('the entry point names the payload file', /health-analysis\.json$/.test(ready.ready.analysisFile), ready.ready.analysisFile);
-    check('the ready reply names the payload', /Data gate closed/.test(formatAnalyzeText(ready)), formatAnalyzeText(ready).slice(0, 120));
-  }
+  // With the gate closed the producer runs; this workspace holds no brief, so
+  // the refusal is the pack's, not the gate's — and it still writes nothing.
+  const ready = await runHealthAnalyze({ workspace: analyzeDir, env });
+  check('with the gate closed the producer runs and refuses on the pack, not the gate', ready.ok === false && ready.stage === 'context', JSON.stringify(ready).slice(0, 200));
+  eq('that refusal wrote nothing', fs.readdirSync(path.join(analyzeDir, 'result')), ['health-verify.json']);
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -1725,6 +1721,172 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   // answers exactly like the declared path does.
   const braveEvidence = probe.providers.find((p) => p.id === 'brave');
   check('the unknown the probe could not settle stays on the record', braveEvidence.doesNotProve.some((line) => /routed path/.test(line)), JSON.stringify(braveEvidence.doesNotProve));
+}
+
+// ------------------------------- 17. the analysis producer
+{
+  console.log('\n  — the analysis producer —');
+  // `/health analyze` used to name the inputs and stop there: nothing wrote the
+  // payload the publisher reads, so the citation contract and the Doctor's
+  // checker had no live input. This section drives the producer end to end with
+  // no credential and no network — the gate, the pack, the model seam, the
+  // answers it refuses — and then, through the publisher's own loader,
+  // `planPublish`, the seat pack and readiness, what the payload it writes
+  // actually does downstream.
+  const scratch = [];
+  const analysisWorkspace = ({ state = 'closed', brief = true, payload = false, log = null } = {}) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-analyst-'));
+    scratch.push(dir);
+    fs.mkdirSync(path.join(dir, 'result'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'sources'), { recursive: true });
+    if (brief) fs.writeFileSync(path.join(dir, 'BRIEF.md'), '# Brief\n\nFour living documents.\n');
+    fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify({ ...fixtureArtifact(state), summary: { match: 2, missing: 1, appOnlyUnreviewed: 1, gap: 1 } }));
+    if (payload) fs.writeFileSync(path.join(dir, 'result', ANALYSIS_FILE), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: analysisPayload() }));
+    if (log) fs.writeFileSync(path.join(dir, 'result', RESEARCH_LOG), JSON.stringify(log));
+    return dir;
+  };
+  const pathsIn = (dir) => ({ workspace: dir, sources: path.join(dir, 'sources'), result: path.join(dir, 'result') });
+  const tree = (dir) => {
+    const out = {};
+    const walk = (rel) => {
+      for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+        const r = rel === '.' ? e.name : path.join(rel, e.name);
+        if (e.isDirectory()) walk(r);
+        else out[r] = contentHash(fs.readFileSync(path.join(dir, r), 'utf8'));
+      }
+    };
+    walk('.');
+    return out;
+  };
+
+  // The gate first, with the shape the command surface already reports.
+  const openDir = analysisWorkspace({ state: 'open' });
+  const openBefore = tree(openDir);
+  const openRun = await runHealthAnalyze({ paths: pathsIn(openDir), env: {} });
+  check('with the gate open the producer is refused before the model', openRun.ok === false && openRun.stage === 'gate', JSON.stringify(openRun).slice(0, 160));
+  eq('and it names all eight open items, with their titles', [openRun.openItems.length, Boolean(openRun.openItems[0].title)], [8, true]);
+  eq('the gate refusal wrote nothing', Object.keys(tree(openDir)).sort(), Object.keys(openBefore).sort());
+
+  // No brief: the pack refuses, so there is no seat turn at all.
+  const bareDir = analysisWorkspace({ brief: false });
+  const bareBefore = tree(bareDir);
+  const bareRun = await runHealthAnalyze({ paths: pathsIn(bareDir), env: {} });
+  check('a workspace with no brief is refused before the model', bareRun.ok === false && bareRun.stage === 'context', JSON.stringify(bareRun).slice(0, 160));
+  eq('the context refusal wrote nothing', Object.keys(tree(bareDir)).sort(), Object.keys(bareBefore).sort());
+
+  // No credential: the refusal comes before the model call and names the file.
+  const dir = analysisWorkspace();
+  const before = tree(dir);
+  const noKey = await runHealthAnalyze({ paths: pathsIn(dir), env: {} });
+  check('with no credential the producer refuses before the model', noKey.ok === false && noKey.stage === 'credential', JSON.stringify(noKey).slice(0, 200));
+  check('the refusal names the key and the file it goes in', /GEMINI_API_KEY/.test(noKey.error) && /common\.env/.test(noKey.error), noKey.error);
+  eq('the credential refusal wrote nothing', Object.keys(tree(dir)).sort(), Object.keys(before).sort());
+
+  // The payload itself: a fenced JSON answer with prose around it, and every
+  // document-4 line citing a link the literature lane never fetched.
+  const prompts = [];
+  const analyst = async ({ prompt }) => {
+    prompts.push(prompt);
+    return {
+      finalText: [
+        'Here is the payload, one claim per row, and every document-4 line cites the lane.',
+        '```json',
+        JSON.stringify({ sections: analysisPayload({ cite: CITATION }) }),
+        '```',
+      ].join('\n'),
+      code: 0,
+      lastError: null,
+    };
+  };
+  const run = await runHealthAnalyze({ paths: pathsIn(dir), env: {}, runGemini: analyst, now: new Date('2026-10-01T11:00:00Z') });
+  check('the producer writes the payload with the model seam', run.ok === true, run.error || '');
+  if (run.ok) {
+    eq('the receipt counts the sections and the lines', [run.artifact.sections, run.artifact.lines], [11, 11]);
+    eq('the receipt names the seat that wrote it', run.artifact.role, 'health_analyst');
+    check('the payload lands on the declared path', fs.existsSync(path.join(dir, 'result', ANALYSIS_FILE)), fs.readdirSync(path.join(dir, 'result')).join(','));
+    // The publisher's own loader is the door the payload has to pass.
+    const loaded = loadAnalysisFile(path.join(dir, 'result', ANALYSIS_FILE));
+    check('the payload passes the publisher\u2019s loader', loaded.ok === true && Object.keys(loaded.sections).length === 11, JSON.stringify(loaded).slice(0, 200));
+    eq('the loader carries the payload date through', loaded.at, '2026-10-01T11:00:00.000Z');
+    eq('the payload records the closed gate it was written under', [run.payload.gate.allowed, run.payload.gate.closed, run.payload.gate.total], [true, 8, 8]);
+    // The citation contract: the lines cite a link nobody fetched, so the
+    // withholding is recorded and the sections are not dropped.
+    eq('the citation contract withholds the four document-4 sections', run.withheld.map((w) => w.source), ['analysis.profile', 'analysis.by_marker', 'analysis.contradictions', 'analysis.not_settled']);
+    check('and names the reason in the contract\u2019s own terms', run.withheld.every((w) => w.reason === 'unverified'), JSON.stringify(run.withheld));
+    check('the payload carries the withholding too', run.payload.citations.withheld.length === 4 && run.payload.citations.fetched === 0, JSON.stringify(run.payload.citations));
+    const reply = formatAnalyzeText(run);
+    check('the reply says the payload was written, with its counts', /Analysis payload written/.test(reply) && /11 section\(s\)/.test(reply), reply.slice(0, 200));
+    check('the reply says which sections document 4 will withhold', /analysis\.by_marker/.test(reply) && /withheld/.test(reply), reply.slice(0, 300));
+    check('the reply points at the publisher', /health refresh/.test(reply), reply.slice(0, 200));
+    check('the seat was handed the mandate and the pack', /one JSON object/.test(prompts.at(-1) || '') && /analysis\.not_settled/.test(prompts.at(-1) || '') && /data gate: CLOSED/.test(prompts.at(-1) || ''), (prompts.at(-1) || '').slice(0, 200));
+    const after = tree(dir);
+    eq('exactly one file was added, the payload', Object.keys(after).filter((f) => !(f in before)).sort(), [`result/${ANALYSIS_FILE}`]);
+    check('every pre-existing byte is unchanged', Object.keys(before).every((f) => after[f] === before[f]), Object.keys(before).filter((f) => after[f] !== before[f]).join(','));
+
+    // Downstream, on the very payload the producer wrote. The publisher refuses
+    // document 4's sections by name and publishes the rest; with the link in the
+    // fetch log, the same payload publishes it.
+    const templates = readTemplates();
+    const planDraft = planPublish({ artifact: fixtureArtifact('closed'), analysis: loaded.sections, templates, registry: {}, now: new Date('2026-10-01T11:00:00Z') });
+    const insights = planDraft.items.find((i) => i.key === 'insights');
+    eq('the publisher withholds the four uncitable sections', insights.citationRefused.map((c) => c.reason), ['unverified', 'unverified', 'unverified', 'unverified']);
+    check('and publishes the documents that need no literature', planDraft.items.filter((i) => i.key === 'conditions' || i.key === 'test_plan').every((i) => i.refused.length === 0 && i.citationRefused.length === 0), JSON.stringify(planDraft.items.map((i) => [i.key, i.refused.length, i.citationRefused.length])));
+    const planCited = planPublish({ artifact: fixtureArtifact('closed'), analysis: loaded.sections, templates, registry: {}, now: new Date('2026-10-01T11:00:00Z'), citations: researchLog({ fetched: [CITATION] }) });
+    const insightsCited = planCited.items.find((i) => i.key === 'insights');
+    eq('with the link fetched and recorded the same payload publishes', insightsCited.citationRefused.length, 0);
+    check('and the published bytes carry the link', insightsCited.text.includes(CITATION), 'the link is missing from document 4');
+
+    // The payload is live for the other two consumers: the seat pack the Doctor
+    // reads shows it as accepted, and readiness stops calling it missing.
+    const pack = buildHealthContext(dir);
+    const analysisSection = pack.sections.find((s) => s.key === 'analysis');
+    check('the seat pack shows the payload as accepted, not refused', /shape: accepted/.test(analysisSection?.text || ''), (analysisSection?.text || '').slice(0, 140));
+    const readiness = checkHealthReadiness({ projectId: 'external-health', paths: pathsIn(dir), now: new Date('2026-10-01T11:00:00Z') });
+    const analysisCheck = readiness.checks.find((c) => c.key === 'analysis');
+    check('readiness reports the payload present and well-shaped, not missing', analysisCheck?.level === 'ok', JSON.stringify(analysisCheck));
+  }
+
+  // A model that does not answer with a payload writes nothing at all.
+  const answers = [
+    ['prose alone', 'I reviewed the markers and they look fine to me.', /without a JSON object/],
+    ['broken JSON', '```json\n{ "sections": { "analysis.conditions": [ "x" }\n```', /does not parse/],
+    ['a misspelt key', JSON.stringify({ sections: { 'analysis.condition': ['x'] } }), /unknown analysis key/],
+    ['a claim that is not a string', JSON.stringify({ sections: { 'analysis.conditions': [{ marker: 'LDL' }] } }), /must be a string/],
+  ];
+  for (const [label, answer, wanted] of answers) {
+    const badDir = analysisWorkspace();
+    const badBefore = tree(badDir);
+    const res = await runHealthAnalyze({ paths: pathsIn(badDir), env: {}, runGemini: async () => ({ finalText: answer, code: 0, lastError: null }) });
+    check(`[${label}] the producer refuses an answer that is not a payload`, res.ok === false && res.stage === 'payload', JSON.stringify({ stage: res.stage, error: res.error }).slice(0, 200));
+    check(`[${label}] the refusal says which rule broke`, wanted.test(res.error || ''), res.error);
+    eq(`[${label}] the refused run wrote nothing`, Object.keys(tree(badDir)).sort(), Object.keys(badBefore).sort());
+  }
+  const modelFail = await runHealthAnalyze({ paths: pathsIn(dir), env: {}, runGemini: async () => { throw new Error('no lane'); } });
+  check('a failed model call writes nothing', modelFail.ok === false && modelFail.stage === 'model' && /model call failed/.test(modelFail.error), JSON.stringify(modelFail).slice(0, 200));
+
+  // The extractor's own contract, small and explicit.
+  eq('a bare map of analysis keys is accepted', extractAnalysisPayload('{"analysis.conditions": ["x"]}').ok, true);
+  eq('prose around the object is ignored', extractAnalysisPayload('notes: {"sections": {"analysis.conditions": ["x"]}} end').sections['analysis.conditions'], ['x']);
+  eq('an answer with no object at all is refused', extractAnalysisPayload('no payload here').ok, false);
+  check('the refusal quotes the shape it wanted', /expected \{"sections"/.test(extractAnalysisPayload('nope').error), extractAnalysisPayload('nope').error);
+
+  // The CLI door: a refusal is an answer, so it exits 3 with the JSON saying why.
+  const runner = path.join(ROOT, 'scripts', 'health-runner.mjs');
+  const cliDir = analysisWorkspace();
+  const cliEnv = { ...process.env, HEALTH_WORKSPACE: cliDir, GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '' };
+  let cliCode = 0;
+  let cliOut = '';
+  try {
+    cliOut = execFileSync(process.execPath, [runner, '--analyze', '--json'], { env: cliEnv, encoding: 'utf8' });
+  } catch (err) {
+    cliCode = err.status;
+    cliOut = err.stdout || '';
+  }
+  const cliJson = JSON.parse(cliOut || '{}');
+  eq('the CLI refuses without a credential and exits 3', [cliCode, cliJson.stage], [3, 'credential']);
+  eq('and the CLI refusal wrote nothing', Object.keys(tree(cliDir)).sort(), ['BRIEF.md', 'result/health-verify.json']);
+
+  for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
 }
 
 console.log(`\n${passed} pass, ${failed} fail\n`);

@@ -38,3 +38,19 @@ and you say where they disagree.
 One claim per row: marker → value (date) → what it crosses → candidate condition
 → action (test, discuss with GP, monitor, nothing) → how sure this is and why.
 A row you cannot fill in from the data is a row you delete, not a row you guess.
+
+## What you hand back
+
+One JSON object, nothing else: `{"sections": {"analysis.conditions": ["one claim
+per line"], …}}` — the eleven `analysis.*` keys, each an array of strings.
+`/health analyze` judges the shape before it is written, and a payload it cannot
+read is not saved under a weaker name. An empty array renders as "awaiting the
+analysis pass", honest for a section the data cannot fill and a missing claim for
+one it can.
+
+Document 4's four keys (`analysis.profile`, `analysis.by_marker`,
+`analysis.contradictions`, `analysis.not_settled`) are under the citation
+contract: every line carries a link the literature lane has already fetched into
+`result/health-research.json`, and a year. A section citing a link nobody fetched
+is withheld from the published document by name — run `/health research` first,
+and cite only what it recorded.
