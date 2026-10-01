@@ -67,12 +67,17 @@ const COUNCIL_ROLES = [
 /**
  * The Personal Health Coach project's roles (Mission: external-health).
  *
- * Five seats, because the four documents have four different failure modes: the
+ * Six seats, because the four documents have four different failure modes: the
  * steward owns what the data *is*, the analyst owns what it *means*, the planner
  * owns what is tested next, the research lead owns what the literature says, and
  * the safety reviewer is the one seat whose job is to say no. A council of
  * six/seven that all speak about everything is how a health document gets
- * confident claims with no owner.
+ * confident claims with no owner. The Doctor is the sixth: it does not write
+ * claims at all, it re-reads the analyst's and strikes the ones whose receipts
+ * do not hold.
+ *
+ * The order below is the running order, and it is deliberate: the Doctor runs
+ * last, after the seats whose claims it checks.
  */
 const HEALTH_PROJECT_ROLES = [
   {
@@ -108,6 +113,19 @@ const HEALTH_PROJECT_ROLES = [
     name: 'Safety Reviewer',
     file: 'safety_reviewer.md',
     description: 'Strips any claim that cannot be traced to the data or a citation; owns the guardrails',
+    tools: ['read', 'grep'],
+  },
+  {
+    id: 'doctor',
+    name: 'Doctor',
+    file: 'doctor.md',
+    description: 'Re-checks the analyst\u2019s claims against their receipts and strikes the ones that do not hold',
+    // Two things a role markdown file cannot carry: the name of the artifact
+    // this seat owns (so the status reader looks for the file the writer
+    // writes, not a numbered transcript) and the checker that refuses a
+    // malformed report before it lands. Both survive the roles/ scan below.
+    outputFile: 'doctor-report.md',
+    validator: 'doctor',
     tools: ['read', 'grep'],
   },
 ];
@@ -251,6 +269,7 @@ export const ROLE_ALIASES = {
   literature: 'research_lead',
   safety: 'safety_reviewer',
   safety_reviewer: 'safety_reviewer',
+  doctor: 'doctor',
 
   // Project 2 Council Roles
   accuracy: 'accuracy_review',
@@ -662,6 +681,16 @@ export function getProjectRoles(projectId) {
     return proj.roles || COUNCIL_ROLES;
   }
 
+  // The declared manifest is the running order, because seats are numbered as
+  // they run (`/council 2`, "phase 3 of 6"). A directory listing's order is an
+  // accident of the filesystem: adding a seat must not renumber the ones a
+  // chat already knows, and the Doctor has to run last — after the seats whose
+  // claims it checks. Files the manifest does not know sort in after it, by
+  // name, so a repo-only role is still reachable and still deterministic.
+  const declared = new Map((proj.roles || []).map((r, i) => [r.id, { ...r, index: i }]));
+  const rank = (file) => declared.get(file.replace(/\.md$/, ''))?.index ?? Number.MAX_SAFE_INTEGER;
+  files.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+
   const dynamicRoles = [];
   for (const f of files) {
     const roleId = f.replace(/\.md$/, '');
@@ -670,13 +699,23 @@ export function getProjectRoles(projectId) {
     const firstLine = content.split('\n').find((l) => l.trim().startsWith('#'));
     const name = firstLine ? firstLine.replace(/^#+\s*/, '').trim() : roleId.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
-    dynamicRoles.push({
+    const role = {
       id: roleId,
       name,
       file: f,
       instructions: content,
       tools: ['standard_agent_tools'],
-    });
+    };
+    // Metadata the manifest declares but the file cannot carry (the seat's own
+    // output file, its report checker) is merged in, not lost to the scan.
+    const decl = declared.get(roleId);
+    if (decl) {
+      if (decl.description) role.description = decl.description;
+      if (decl.outputFile) role.outputFile = decl.outputFile;
+      if (decl.validator) role.validator = decl.validator;
+      if (decl.tools) role.tools = decl.tools;
+    }
+    dynamicRoles.push(role);
   }
 
   proj.roles = dynamicRoles;

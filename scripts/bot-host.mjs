@@ -157,7 +157,7 @@ import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-run
 // The Personal Health Coach's data loop. `/health` is deliberately not gated on
 // the chat's active project: the command names its own project, so a verify can
 // be run from any chat, and the reply says which one it read.
-import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText } from './health-runner.mjs';
+import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, runHealthDoctor, formatDoctorText } from './health-runner.mjs';
 // "Can a seat actually run?" — the readiness check reads the context a seat
 // would be handed plus this host's credentials, and reports what is missing
 // instead of letting a turn start on an empty context.
@@ -3020,6 +3020,27 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         // about the host rather than starting work in the workspace.
         const res = checkHealthReadiness({ projectId });
         await api.sendMessage(chatId, formatReadinessText(res), { parse_mode: 'Markdown' });
+        return;
+      }
+      if (sub === 'doctor') {
+        // The seat that checks the other seats. It writes only its own report;
+        // a refusal (no credential, a report the checker refuses) writes
+        // nothing and is reported as the answer it is.
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before the doctor review.');
+          return;
+        }
+        await api.sendMessage(
+          chatId,
+          '🩺 *Running /health doctor — re-checking the analyst\u2019s claims against their receipts...*',
+          { parse_mode: 'Markdown' },
+        );
+        try {
+          const res = await runHealthDoctor({ projectId });
+          await api.sendMessage(chatId, formatDoctorText(res), res.ok ? { parse_mode: 'Markdown' } : undefined);
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Doctor failed: ${err.message}`);
+        }
         return;
       }
       // Anything else (including no argument) is the status answer.

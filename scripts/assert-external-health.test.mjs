@@ -7,10 +7,11 @@ import { assertReadOnlySql, parseEnvFile, loadD1Config, createD1Reader, resolveP
 import { parseCsvLine, isoDate, mapSheetTest, parseSheetCsv, parseSheetDump, sheetRecord, MARKER_LABELS } from './lib/health/sheet.mjs';
 import { extractAppState, reconcile, evaluateFixList, unreviewedAppRows, valuesEqual, FIX_LIST } from './lib/health/reconcile.mjs';
 import { KNOWN_PROJECTS, resolveProjectId, resolveRoleId, getProjectRoles, getRoleInstructions, getProjectSoul, seedProjectWorkspace } from './lib/project-registry.mjs';
-import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile } from './health-runner.mjs';
+import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile, runHealthDoctor, formatDoctorText, DOCTOR_FILE, DOCTOR_ARTIFACT } from './health-runner.mjs';
 import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, sectionPlan, unknownSections, renderDoc, renderSection, refusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore, validateAnalysisSections, ANALYSIS_SECTIONS } from './lib/health/docs.mjs';
 import { buildHealthContext, renderContextBlock, clipToBudget, CONTEXT_CANDIDATES, CONTEXT_BUDGET } from './lib/health/context.mjs';
-import { readWorkspaceContext, contextProviderFor, runCouncilStage, getCouncilStatus, resolveCouncilStage, isCaseProject, LEGACY_CHECKPOINTS } from './council-runner.mjs';
+import { readWorkspaceContext, contextProviderFor, runCouncilStage, getCouncilStatus, getCouncilPhases, resolveCouncilStage, isCaseProject, LEGACY_CHECKPOINTS } from './council-runner.mjs';
+import { validateDoctorReport } from './lib/health/doctor.mjs';
 import { checkHealthReadiness, formatReadinessText, STALE_AFTER_DAYS } from './lib/health/readiness.mjs';
 import { execFileSync } from 'node:child_process';
 
@@ -290,10 +291,17 @@ const brokenRows = [
   eq('python/junk still rejected', resolveProjectId('banana'), null);
 
   const roles = getProjectRoles('external-health').map((r) => r.id).sort();
-  eq('the five seats are loadable from the committed roles dir', roles, ['data_steward', 'health_analyst', 'research_lead', 'safety_reviewer', 'test_planner']);
-  for (const [alias, id] of [['steward', 'data_steward'], ['analyst', 'health_analyst'], ['planner', 'test_planner'], ['research', 'research_lead'], ['safety', 'safety_reviewer']]) {
+  eq('the six seats are loadable from the committed roles dir', roles, ['data_steward', 'doctor', 'health_analyst', 'research_lead', 'safety_reviewer', 'test_planner']);
+  for (const [alias, id] of [['steward', 'data_steward'], ['analyst', 'health_analyst'], ['planner', 'test_planner'], ['research', 'research_lead'], ['safety', 'safety_reviewer'], ['doctor', 'doctor']]) {
     eq(`/role ${alias} resolves`, resolveRoleId(alias, 'external-health'), id);
   }
+  // The declared order is the running order, not the directory's: the Doctor
+  // runs last because it checks the seats that ran before it, and the seats a
+  // chat already numbers keep their numbers.
+  eq('the seats run in their declared order, the doctor last', getProjectRoles('external-health').map((r) => r.id), ['data_steward', 'health_analyst', 'test_planner', 'research_lead', 'safety_reviewer', 'doctor']);
+  const doctorRole = getProjectRoles('external-health').find((r) => r.id === 'doctor');
+  eq('the doctor declares the artifact it owns and its checker', [doctorRole?.outputFile, doctorRole?.validator], [DOCTOR_FILE, 'doctor']);
+  check('the doctor seat names the pass-on-absence rule', /PASS/.test(getRoleInstructions('external-health', 'doctor') || '') && /absence/i.test(getRoleInstructions('external-health', 'doctor') || ''), 'the seat file no longer names its own failure mode');
   const inst = getRoleInstructions('external-health', 'safety_reviewer') || '';
   check('the safety seat carries its mandate', /strike|no diagnosis/i.test(inst), inst.slice(0, 80));
   check('the analyst seat respects the data gate', /data gate|fix-list item is open/i.test(getRoleInstructions('external-health', 'health_analyst') || ''));
@@ -842,9 +850,21 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
 // ------------------------------------------------- 11. council stages resolve from the project's own seats
 {
   const captured = [];
+  // The Doctor's report is checked before it is written, so the fake model has
+  // to answer in the shape the seat promises. This workspace holds no analysis
+  // payload, so the honest report reviews no claims and says so.
+  const SENSOR_DOCTOR_REPORT = [
+    "# Doctor's report — 2026-10-01",
+    '',
+    'Coverage: 0 claim(s) reviewed · sections seen: verify, fix_list',
+    'Not seen: result/health-analysis.json — the analysis pass has not written a payload',
+    'Gate: OPEN (H-1, H-2, H-3, H-4, H-5, H-6, H-7, H-8)',
+    'Payload: not present',
+  ].join('\n');
   const fakeModel = async ({ prompt }) => {
     captured.push(prompt);
-    return { code: 0, finalText: 'SEAT OUTPUT FOR THE SENSOR', lastError: null, sessionID: null, stderr: '', usage: { cost: 0, tokens: null } };
+    const isDoctor = /the seat that checks the other seats/.test(prompt);
+    return { code: 0, finalText: isDoctor ? SENSOR_DOCTOR_REPORT : 'SEAT OUTPUT FOR THE SENSOR', lastError: null, sessionID: null, stderr: '', usage: { cost: 0, tokens: null } };
   };
 
   // Resolution is pure, so it is judged before any model is involved.
@@ -852,7 +872,9 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   eq('a stage resolves by its seat id', [byId.ok, byId.phases.map((p) => p.id)], [true, ['data_steward']]);
   eq('a stage resolves through a role alias', resolveCouncilStage('steward', 'external-health').phases.map((p) => p.id), ['data_steward']);
   eq('a stage resolves by its number', resolveCouncilStage('2', 'external-health').phases.map((p) => p.id), ['health_analyst']);
-  eq('all five seats are a stage', resolveCouncilStage('all', 'external-health').phases.length, 5);
+  eq('all six seats are a stage', resolveCouncilStage('all', 'external-health').phases.length, 6);
+  eq('the doctor is the last stage, by name and by number', [resolveCouncilStage('doctor', 'external-health').phases.map((p) => p.id), resolveCouncilStage('6', 'external-health').phases.map((p) => p.id)], [['doctor'], ['doctor']]);
+  eq('the doctor stage writes its own report file and declares its checker', [resolveCouncilStage('doctor', 'external-health').phases[0].file, resolveCouncilStage('doctor', 'external-health').phases[0].validator], [DOCTOR_FILE, 'doctor']);
   const refusedStage = resolveCouncilStage('banana', 'external-health');
   check('an unknown stage is refused, not run as the whole council', refusedStage.ok === false && /Unknown stage/.test(refusedStage.error), JSON.stringify(refusedStage).slice(0, 160));
   check('the refusal names the real stages', /data_steward/.test(refusedStage.error) && /safety_reviewer/.test(refusedStage.error), refusedStage.error);
@@ -886,16 +908,18 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
     check('nothing was written into output/', !fs.existsSync(path.join(healthWs, 'output')), 'a stage still writes to output/');
     const status = getCouncilStatus('external-health');
     eq('the stage the writer ran reads back as completed', status.phases.find((p) => p.phase === 'data_steward')?.completed, true);
-    eq('the project reports its own deliverables', status.deliverables.length, 5);
+    eq('the project reports its own deliverables', status.deliverables.length, 6);
+    check('the doctor report is one of them', status.deliverables.includes(DOCTOR_FILE), status.deliverables.join(','));
     check('the external-2 trio is never this project\'s deliverable', status.deliverables.every((d) => !d.startsWith('A_') && !d.startsWith('B_') && !d.startsWith('C_')), status.deliverables.join(','));
     eq('deliverables are not ready after one seat', status.deliverablesReady, false);
     eq('the status reply names the project pipeline', status.pipeline, 'roles');
 
     const all = await runCouncilStage('all', 'external-health', () => {}, { runGemini: fakeModel });
-    // Seats run in the loader's order (role file name), which is also the order
-    // `/council status` numbers them.
-    eq('all runs every seat in order', all.phases.map((p) => p.id), ['data_steward', 'health_analyst', 'research_lead', 'safety_reviewer', 'test_planner']);
-    eq('five files exist after all', getCouncilStatus('external-health').deliverablesReady, true);
+    // Seats run in the declared order — the manifest's, not the directory
+    // listing's — which is also the order `/council status` numbers them.
+    eq('all runs every seat in order', all.phases.map((p) => p.id), ['data_steward', 'health_analyst', 'test_planner', 'research_lead', 'safety_reviewer', 'doctor']);
+    eq('the doctor runs last and its file is its own report', all.phases.at(-1), { id: 'doctor', file: DOCTOR_FILE, path: path.join(healthWs, 'result', DOCTOR_FILE) });
+    eq('every deliverable exists after all', getCouncilStatus('external-health').deliverablesReady, true);
     check('every deliverable points at a real file', all.deliverables.every((d) => fs.existsSync(d)), all.deliverables.join(','));
 
     let threw = '';
@@ -993,6 +1017,231 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   eq('the CLI exits 0 when it can', JSON.parse(keyOut).exit, 0);
   eq('and reports the workspace it read', JSON.parse(keyOut).workspace, dir);
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ------------------------------------------------- 13. the Doctor seat and its checker
+{
+  // The checker first, on literal reports: every refusal names itself without a
+  // model in the loop, so a regression cannot hide behind one.
+  console.log('\n  — the doctor report checker —');
+  const OPEN = { allowed: false, open: ['H-4'] };
+  const report = ({ receipt = 'Receipt: ldl 2.1 mmol/L (2026-06-03) — result/health-analysis.json, analysis.conditions', status = 'Status: PASS' } = {}, {
+    date = '2026-10-01',
+    coverage = '1 claim(s) reviewed · sections seen: analysis.conditions',
+    notSeen = 'none',
+    gate = 'OPEN (H-4)',
+    payload = '2026-10-01T08:00:00Z',
+  } = {}) => [
+    `# Doctor's report — ${date}`,
+    '',
+    `Coverage: ${coverage}`,
+    `Not seen: ${notSeen}`,
+    `Gate: ${gate}`,
+    `Payload: ${payload}`,
+    '',
+    '## 1. The LDL fall',
+    'Claim: "LDL fell to 2.1 mmol/L on 2026-06-03."',
+    receipt,
+    status,
+    'Changes: the claim stands as written.',
+    'Recommendation: nothing',
+    'Who: health_analyst',
+  ].join('\n');
+  const checkRefusal = (name, text, opts, pattern) => {
+    const res = validateDoctorReport(text, opts);
+    check(name, res.ok === false && pattern.test(res.error || ''), res.ok ? 'accepted' : res.error);
+  };
+  const accepted = { analysis: 'accepted', gate: OPEN };
+  const good = validateDoctorReport(report(), accepted);
+  check('a well-formed report passes the checker', good.ok === true, good.error);
+  eq('the checker reads the verdict and the count', [good.report.counts.pass, good.report.coverage.reviewed], [1, 1]);
+  check('the checker keeps the receipt with the verdict', /ldl 2\.1 mmol\/L \(2026-06-03\)/.test(good.report.claims[0]?.receipt || ''), JSON.stringify(good.report.claims[0]));
+  checkRefusal('a report with no heading is refused', report().replace("# Doctor's report — 2026-10-01\n\n", ''), accepted, /heading/);
+  checkRefusal('a report with no coverage header is refused', report({}, { coverage: '' }), accepted, /coverage header/);
+  checkRefusal('a coverage line with no count is refused', report({}, { coverage: 'reviewed everything' }), accepted, /count/);
+  checkRefusal('a header without the gate line is refused', report({}, { gate: '' }), accepted, /Gate/);
+  checkRefusal('a header without the payload line is refused', report({}, { payload: '' }), accepted, /Payload/);
+  checkRefusal('a finding with no receipt is refused', report({ receipt: 'Changes: hidden by the rewrite' }), accepted, /Receipt/);
+  checkRefusal('a block missing any of the six labels is refused', report({ status: 'Recommendation: nothing' }), accepted, /Status/);
+  checkRefusal('a PASS on an absence is refused', report({ receipt: 'Receipt: not measured — nothing contradicted it' }), accepted, /absence/);
+  checkRefusal('a PASS with no date is refused', report({ receipt: 'Receipt: ldl 2.1 mmol/L — the sheet agrees' }), accepted, /date/);
+  checkRefusal('a PASS on an open item is refused', report({ status: 'Status: PASS (H-4)' }), accepted, /open item H-4/);
+  checkRefusal('a verdict that is not PASS/STRIKE/UNPROVEN is refused', report({ status: 'Status: MAYBE' }), accepted, /no verdict/);
+  checkRefusal('a report claiming claims with no payload is refused', report(), { analysis: 'absent', gate: OPEN }, /no readable payload/);
+  checkRefusal('a report over a present payload that reviews nothing is refused', report({}, { coverage: '0 claim(s) reviewed · sections seen: analysis.conditions' }), accepted, /checks nothing/);
+  checkRefusal('the count must match the blocks', report({}, { coverage: '2 claim(s) reviewed · sections seen: analysis.conditions' }), accepted, /2 claim\(s\) reviewed but the report carries 1 block/);
+  const zeroReport = (notSeen) => [
+    "# Doctor's report — 2026-10-01",
+    '',
+    'Coverage: 0 claim(s) reviewed · sections seen: verify, fix_list',
+    `Not seen: ${notSeen}`,
+    'Gate: OPEN (H-4)',
+    'Payload: not present',
+  ].join('\n');
+  checkRefusal('a 0-claim report must name the payload it could not read', zeroReport('none'), { analysis: 'absent', gate: OPEN }, /Not seen/);
+  checkRefusal('a 0-claim report with a claim block is refused', report({}, { coverage: '0 claim(s) reviewed · sections seen: verify' }), { analysis: 'absent', gate: OPEN }, /nothing to check/);
+  const empty = validateDoctorReport('', { analysis: 'absent' });
+  check('an empty report is refused', empty.ok === false && /empty/.test(empty.error), JSON.stringify(empty));
+  const honest = validateDoctorReport(report({ receipt: 'Receipt: not measured — the sheet has no weight since 2024-10-23', status: 'Status: UNPROVEN (H-4)' }), accepted);
+  check('the same absence is accepted as UNPROVEN', honest.ok === true && honest.report.counts.unproven === 1, honest.error);
+  const zero = validateDoctorReport(zeroReport('result/health-analysis.json — no payload has been written'), { analysis: 'absent', gate: OPEN });
+  check('the honest 0-claim report is accepted when there is no payload', zero.ok === true && zero.report.coverage.reviewed === 0, zero.error);
+
+  // The runner, on a copy of a real workspace: the report lands, the receipts
+  // land, and every other byte — the Docs registry included — is untouched.
+  console.log('\n  — the doctor run, end to end —');
+  const ACCEPTED_REPORT = [
+    "# Doctor's report — 2026-10-01",
+    '',
+    'Coverage: 3 claim(s) reviewed · sections seen: analysis.conditions, analysis.trends',
+    'Not seen: none',
+    'Gate: OPEN (H-4, H-6)',
+    'Payload: 2026-10-01T08:00:00Z',
+    '',
+    '## 1. The LDL fall',
+    'Claim: "LDL fell to 2.1 mmol/L on 2026-06-03."',
+    'Receipt: ldl 2.1 mmol/L (2026-06-03) — result/health-analysis.json, analysis.conditions',
+    'Status: PASS',
+    'Changes: the claim stands as written.',
+    'Recommendation: nothing',
+    'Who: health_analyst',
+    '',
+    '## 2. The HbA1c trend',
+    'Claim: "HbA1c is rising across 2025."',
+    'Receipt: hba1c 40 mmol/mol (2026-06-05) — one dated point in the sheet, and the payload names no earlier value',
+    'Status: STRIKE',
+    'Changes: a trend needs two dated points; the claim is struck until an earlier value is named.',
+    'Recommendation: take it to a GP with these numbers',
+    'Who: health_analyst',
+    '',
+    '## 3. The weight change since March',
+    'Claim: "Weight is unchanged since March 2025."',
+    'Receipt: not measured — the sheet holds body weight on 2024-10-23 only, and no 2025 value exists',
+    'Status: UNPROVEN (H-4)',
+    'Changes: the row is an open fix-list item; until it closes the claim cannot pass.',
+    'Recommendation: fix it in the app',
+    'Who: data_steward',
+  ].join('\n');
+  const makeWorkspace = ({ payload = true } = {}) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doctor-'));
+    fs.mkdirSync(path.join(dir, 'result'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'BRIEF.md'), '# Brief\n\nFour living documents.\n');
+    fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify({ ...fixtureArtifact('open'), summary: { match: 2, missing: 1, appOnlyUnreviewed: 1, gap: 1 } }));
+    fs.writeFileSync(path.join(dir, 'result', 'health-fix-list.md'), '# Data fix list\n\n- [ ] **H-1 — mis-filed rows**\n');
+    fs.writeFileSync(path.join(dir, 'result', 'health-docs.json'), JSON.stringify({ updatedAt: '2026-10-01T00:00:00Z', docs: { snapshot: { id: 'doc_snapshot', at: '2026-10-01T00:00:00Z' } }, history: [] }, null, 1));
+    if (payload) fs.writeFileSync(path.join(dir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: analysisPayload() }));
+    return dir;
+  };
+  const pathsFor = (dir) => ({ workspace: dir, sources: path.join(dir, 'sources'), result: path.join(dir, 'result') });
+  const tree = (dir) => {
+    const out = {};
+    const walk = (rel) => {
+      for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+        const r = rel === '.' ? e.name : path.join(rel, e.name);
+        if (e.isDirectory()) walk(r);
+        else out[r] = contentHash(fs.readFileSync(path.join(dir, r), 'utf8'));
+      }
+    };
+    walk('.');
+    return out;
+  };
+  const scratch = [];
+
+  // No credential: the refusal comes before the model, and it is actionable.
+  const noKeyDir = makeWorkspace();
+  scratch.push(noKeyDir);
+  const noKey = await runHealthDoctor({ paths: pathsFor(noKeyDir), env: {} });
+  check('with no credential the doctor refuses before the model', noKey.ok === false && noKey.stage === 'credential', JSON.stringify(noKey).slice(0, 200));
+  check('the refusal names the key and the file it goes in', /GEMINI_API_KEY/.test(noKey.error) && /common\.env/.test(noKey.error), noKey.error);
+  eq('a refused run writes nothing', Object.keys(tree(noKeyDir)).sort(), ['BRIEF.md', 'result/health-analysis.json', 'result/health-docs.json', 'result/health-fix-list.md', 'result/health-verify.json']);
+
+  const dir = noKeyDir;
+  const before = tree(dir);
+  const prompts = [];
+  const doctorModel = async ({ prompt }) => { prompts.push(prompt); return { finalText: ACCEPTED_REPORT, code: 0, lastError: null }; };
+  const run = await runHealthDoctor({ paths: pathsFor(dir), env: {}, runGemini: doctorModel });
+  check('the doctor run succeeds with the model seam', run.ok === true, run.error || '');
+  if (run.ok) {
+    eq('it counts the verdicts it read', run.artifact.counts, { pass: 1, strike: 1, unproven: 1 });
+    eq('it records the payload state and the open gate', [run.artifact.analysis.state, run.artifact.gate.open.length], ['accepted', 8]);
+    check('the report lands on the declared path', fs.existsSync(path.join(dir, 'result', DOCTOR_FILE)), fs.readdirSync(path.join(dir, 'result')).join(','));
+    check('the machine-readable receipt holds the claims', Array.isArray(run.artifact.claims) && run.artifact.claims.length === 3, JSON.stringify(run.artifact.claims).slice(0, 120));
+    const reply = formatDoctorText(run);
+    check('the reply names the verdicts, the gate and the report', /1 PASS/.test(reply) && /OPEN \(H-1/.test(reply) && reply.includes(DOCTOR_FILE), reply);
+    check('the reply says the documents were not touched', /not touched/.test(reply), reply);
+    check('the seat was handed the payload it reviews', /The analysis payload under review/.test(prompts.at(-1) || '') && /shape: accepted/.test(prompts.at(-1) || ''), (prompts.at(-1) || '').slice(0, 160));
+    check('the seat was told what to do with the claims', /STRIKE what does not hold/.test(prompts.at(-1) || ''), 'the mandate never reached the prompt');
+    const after = tree(dir);
+    const added = Object.keys(after).filter((f) => !(f in before)).sort();
+    eq('exactly two files were added, both the doctor\u2019s own', added, [`result/${DOCTOR_FILE}`, `result/${DOCTOR_ARTIFACT}`]);
+    check('every pre-existing byte is unchanged (the Docs registry included)', Object.keys(before).every((f) => after[f] === before[f]), Object.keys(before).filter((f) => after[f] !== before[f]).join(','));
+    check('the report on disk carries the coverage header the checker read', /^Coverage: 3 claim\(s\) reviewed/m.test(fs.readFileSync(path.join(dir, 'result', DOCTOR_FILE), 'utf8')), 'the report header is missing');
+  }
+
+  // A model that answers in the wrong shape writes nothing at all — the whole
+  // point of the checker is that a confident non-report cannot land.
+  const badDir = makeWorkspace();
+  scratch.push(badDir);
+  const badBefore = tree(badDir);
+  const bad = await runHealthDoctor({ paths: pathsFor(badDir), env: {}, runGemini: async () => ({ finalText: 'I reviewed the claims and they look fine to me.', code: 0, lastError: null }) });
+  check('a report the checker refuses is a refusal, not a write', bad.ok === false && bad.stage === 'report', JSON.stringify({ stage: bad.stage, error: bad.error }));
+  check('the refusal says which rule it broke', /heading/.test(bad.error || ''), bad.error);
+  eq('the refused run wrote nothing', Object.keys(tree(badDir)).sort(), Object.keys(badBefore).sort());
+  const modelFail = await runHealthDoctor({ paths: pathsFor(badDir), env: {}, runGemini: async () => { throw new Error('no lane'); } });
+  check('a failed model call writes nothing', modelFail.ok === false && modelFail.stage === 'model' && /model call failed/.test(modelFail.error), JSON.stringify(modelFail).slice(0, 200));
+
+  // No brief: the pack refuses, so there is no seat turn at all.
+  const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doctor-bare-'));
+  scratch.push(bareDir);
+  const bare = await runHealthDoctor({ paths: pathsFor(bareDir), env: {}, runGemini: doctorModel });
+  check('a workspace with no brief is refused before the model', bare.ok === false && bare.stage === 'context', JSON.stringify(bare).slice(0, 200));
+  eq('the context refusal wrote nothing', fs.readdirSync(bareDir), []);
+
+  // The CLI door: a refusal is an answer, so it exits 3 with the JSON saying why.
+  const runner = path.join(ROOT, 'scripts', 'health-runner.mjs');
+  const cliDir = makeWorkspace({ payload: false });
+  scratch.push(cliDir);
+  const cliEnv = { ...process.env, HEALTH_WORKSPACE: cliDir, GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '' };
+  let cliCode = 0;
+  let cliOut = '';
+  try {
+    cliOut = execFileSync(process.execPath, [runner, '--doctor', '--json'], { env: cliEnv, encoding: 'utf8' });
+  } catch (err) {
+    cliCode = err.status;
+    cliOut = err.stdout || '';
+  }
+  const cliJson = JSON.parse(cliOut || '{}');
+  eq('the CLI exits 3 when the doctor cannot run', cliCode, 3);
+  eq('and its JSON says why', cliJson.stage, 'credential');
+
+  // The other door: `/council doctor` runs the same seat and the same checker,
+  // and the file it writes is the one the status reader reads.
+  console.log('\n  — the doctor through the council stage door —');
+  const health = KNOWN_PROJECTS['external-health'];
+  const originalWs = health.workspace;
+  const ws = makeWorkspace();
+  scratch.push(ws);
+  health.workspace = ws;
+  try {
+    const staged = await runCouncilStage('doctor', 'external-health', () => {}, { runGemini: async () => ({ finalText: ACCEPTED_REPORT, code: 0, lastError: null }) });
+    const written = path.join(ws, 'result', DOCTOR_FILE);
+    check('the stage door writes the declared report, not a numbered transcript', fs.existsSync(written) && !fs.existsSync(path.join(ws, 'result', '06_doctor.md')), fs.readdirSync(path.join(ws, 'result')).join(','));
+    eq('the stage result names that file as its deliverable', staged.deliverables, [written]);
+    const status = getCouncilStatus('external-health');
+    eq('the doctor is the last phase and its report reads back as complete', [status.phases.at(-1).phase, status.phases.at(-1).completed, status.phases.at(-1).outputFile], ['doctor', true, written]);
+    eq('the project now reports six deliverables', status.deliverables.length, 6);
+    check('the doctor report is one of the deliverables', status.deliverables.includes(DOCTOR_FILE), status.deliverables.join(','));
+    eq('the phases are numbered in the declared order, doctor last', getCouncilPhases('external-health').map((p) => p.file), ['01_data_steward.md', '02_health_analyst.md', '03_test_planner.md', '04_research_lead.md', '05_safety_reviewer.md', DOCTOR_FILE]);
+    let refusedStage = '';
+    try {
+      await runCouncilStage('doctor', 'external-health', () => {}, { runGemini: async () => ({ finalText: 'looks good to me', code: 0, lastError: null }) });
+    } catch (err) { refusedStage = err.message; }
+    check('the stage door refuses a malformed report too', /checker refuses/.test(refusedStage), refusedStage);
+    check('and the refused re-run left the checked report in place', fs.readFileSync(written, 'utf8').includes('# Doctor'), 'the good report was overwritten');
+  } finally {
+    health.workspace = originalWs;
+  }
+  for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
 }
 
 console.log(`\n${passed} pass, ${failed} fail\n`);

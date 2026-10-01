@@ -30,7 +30,9 @@ import {
   seedProjectWorkspace,
 } from './lib/project-registry.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
-import { buildHealthContext, renderContextBlock } from './lib/health/context.mjs';
+import { buildHealthContext, renderContextBlock, VERIFY_FILE } from './lib/health/context.mjs';
+import { gateFromArtifact } from './lib/health/docs.mjs';
+import { validateDoctorReport } from './lib/health/doctor.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
@@ -168,7 +170,12 @@ export function getCouncilPhases(projectId = 'external-1') {
     return {
       id: r.id,
       title: known ? known.title : `Phase ${index + 1}: ${r.name}`,
-      file: known ? known.file : `${num}_${r.id}.md`,
+      // A seat may declare the artifact it owns, and then that is the file the
+      // writer writes and the status reader reads. The Doctor declares
+      // `doctor-report.md`: a numbered transcript would be a second report,
+      // and the one the seat's checker judges must be the one that lands.
+      file: known ? known.file : (r.outputFile || `${num}_${r.id}.md`),
+      validator: r.validator || '',
     };
   });
 }
@@ -262,12 +269,68 @@ export function readWorkspaceContext(workspace, { projectId = '' } = {}) {
 }
 
 /** The seat context for a turn, or a thrown refusal naming what is missing. */
-function seatContextText(projectId, workspace) {
+function seatContext(projectId, workspace) {
   const ctx = readWorkspaceContext(workspace, { projectId });
   if (!ctx.ok) {
     throw new Error(`workspace context refused for ${projectId}: ${ctx.refuses.join('; ')}`);
   }
-  return ctx.text;
+  return ctx;
+}
+
+/** The rendered context block a turn is given. */
+function seatContextText(projectId, workspace) {
+  return seatContext(projectId, workspace).text;
+}
+
+/**
+ * The declared output checkers, by the name a seat declares in the registry.
+ *
+ * A seat that declares a checker does not get to write an unchecked file,
+ * whichever door ran it: `/health doctor` and `/council doctor` write the same
+ * path, and the check belongs to the seat, not to the door.
+ */
+const STAGE_CHECKS = {
+  doctor: (text, facts) => validateDoctorReport(text, facts),
+};
+
+/**
+ * What a report checker needs to judge a report, read from the workspace the
+ * seat just read — never from the report itself. `analysis` is the payload's
+ * real state (`accepted`, `refused`, `absent`) and `gate` is the verify
+ * artifact's verdict, so a report cannot define its own ground truth.
+ */
+function reportFacts(workspace, projectId) {
+  const ctx = readWorkspaceContext(workspace, { projectId });
+  const pack = ctx.ok && ctx.provider === 'health' ? ctx.context : null;
+  const section = pack?.sections?.find((s) => s.key === 'analysis');
+  const analysis = !section ? 'absent' : /shape: REFUSED/.test(section.text) ? 'refused' : 'accepted';
+  let gate = { allowed: true, open: [] };
+  try {
+    gate = gateFromArtifact(JSON.parse(fs.readFileSync(path.join(workspace, 'result', VERIFY_FILE), 'utf8')));
+  } catch {
+    // No verify artifact: there are no open items to hold a PASS against.
+  }
+  return { analysis, gate };
+}
+
+/**
+ * Check a seat's output against its declared checker, then write it.
+ *
+ * A refused report writes nothing at all: a malformed report left on disk is
+ * indistinguishable from a good one to the next reader, and it would read back
+ * as "stage complete" in `/council status`.
+ */
+function writeStageOutput({ phase, output, outDir, workspace, projectId }) {
+  const check = STAGE_CHECKS[phase.validator];
+  if (check) {
+    const verdict = check(output, reportFacts(workspace, projectId));
+    if (!verdict.ok) {
+      throw new Error(`stage ${phase.id} produced a report its checker refuses: ${verdict.error} — nothing was written`);
+    }
+  }
+  const outFile = path.join(outDir, phase.file);
+  fs.writeFileSync(outFile, output, 'utf8');
+  return outFile;
 }
 
 export function getCouncilStatus(projectId = 'external-1') {
@@ -377,10 +440,9 @@ export async function runFullCouncil(projectId = 'external-1', onProgress = cons
       contextText,
       runGemini: runModel,
     });
-    const outFile = path.join(outDir, phase.file);
-    fs.writeFileSync(outFile, output, 'utf8');
+    const outFile = writeStageOutput({ phase, output, outDir, workspace, projectId });
     results[phase.id] = output;
-    onProgress(`✅ [Completed] ${phase.title} -> saved to ${path.relative(workspace, outDir)}/${phase.file}`);
+    onProgress(`✅ [Completed] ${phase.title} -> saved to ${path.relative(workspace, outDir)}/${path.basename(outFile)}`);
   }
 
   // Update the master templates in the workspace with compiled deliverables.
@@ -436,8 +498,7 @@ export async function runCouncilStage(stage = 'audit', projectId = 'external-1',
       contextText,
       runGemini: runModel,
     });
-    const outFile = path.join(outDir, phase.file);
-    fs.writeFileSync(outFile, output, 'utf8');
+    writeStageOutput({ phase, output, outDir, workspace, projectId });
     results[phase.id] = output;
     onProgress(`✅ [Completed] ${phase.title}`);
   }

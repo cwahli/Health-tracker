@@ -163,7 +163,7 @@ export function checkHealthReadiness({
 
   const analysisPath = path.join(result, ANALYSIS_FILE);
   if (!fs.existsSync(analysisPath)) {
-    checks.push(line('analysis', 'finding', 'No analysis payload', `Nothing has written ${ANALYSIS_FILE} yet, so every analysis section is unproven (Drop 2's Doctor seat is what produces it).`));
+    checks.push(line('analysis', 'finding', 'No analysis payload', `Nothing has written ${ANALYSIS_FILE} yet, so every analysis section is unproven and the Doctor seat has nothing to re-check — the analyst writes it, the Doctor reviews it.`));
   } else {
     let shape = null;
     try {
