@@ -35,12 +35,14 @@ import {
   bugItems,
   humanAge,
   laneItems,
+  listTmuxSessions,
   mdSafe,
   pmPaths,
   projectFleet,
   readSpecDir,
   renderFleet,
   specItem,
+  worktreeFor,
 } from './lib/pm-fleet.mjs';
 import {
   RUNGS,
@@ -57,6 +59,7 @@ import {
   SHEET_COLUMNS,
   flushSheet,
   headerMarkerPath,
+  markerColumns,
   pmSheetId,
   renderFlush,
   sheetReadiness,
@@ -64,7 +67,7 @@ import {
   sheetSend,
   spoolFleetRows,
 } from './lib/pm-sheet.mjs';
-import { deliverNudge, pmHelpText, renderCycle, runCycle, runPmCommand } from './lib/pm-run.mjs';
+import { adoptedRoleLine, deliverNudge, pmHelpText, renderCycle, runCycle, runPmCommand, runStatus } from './lib/pm-run.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BOT_HOST = path.join(ROOT, 'scripts', 'bot-host.mjs');
@@ -333,6 +336,48 @@ test('a row is the declared column layout, and dynamic text cannot break Markdow
   assert.equal(row[SHEET_COLUMNS.indexOf('rung')], 'retry');
   assert.equal(row[SHEET_COLUMNS.indexOf('attempts')], '1');
   assert.equal(mdSafe('a_b*c`d[e]'), 'abcde');
+});
+
+test('a heartbeat note rides the projection into the sheet row', () => {
+  assert.equal(worktreeFor('agent/f-13'), '~/dev/f-13');
+  assert.equal(worktreeFor('bot-host-vm'), '', 'a free-form branch implies no worktree, never a guessed path');
+  assert.equal(worktreeFor(''), '');
+  const lanes = laneItems([{ at: new Date(Date.now() - 4 * HOUR).toISOString(), surface: 'f-13', outcome: 'unresolved' }]);
+  const beats = { 'agent-f-13': { pid: process.pid, branch: 'agent/f-13', updatedAt: new Date().toISOString(), note: 'probing Vite preview' } };
+  const fleet = projectFleet({ lanes, beats, now: Date.now() });
+  const item = fleet.items[0];
+  assert.equal(item.branch, 'agent/f-13');
+  assert.equal(item.note, 'probing Vite preview');
+  assert.equal(item.worktree, '~/dev/f-13');
+  const row = sheetRow(item, { at: 'T', rung: '', attempts: 0 });
+  assert.equal(row.length, SHEET_COLUMNS.length);
+  assert.equal(row[SHEET_COLUMNS.indexOf('agent_branch')], 'agent/f-13');
+  assert.equal(row[SHEET_COLUMNS.indexOf('agent_note')], 'probing Vite preview');
+  assert.equal(row[SHEET_COLUMNS.indexOf('worktree')], '~/dev/f-13');
+  assert.equal(row[SHEET_COLUMNS.indexOf('live')], 'live');
+  const quiet = sheetRow({ key: 'k', kind: 'card', id: '#1', state: 'new' }, { at: 'T' });
+  assert.equal(quiet[SHEET_COLUMNS.indexOf('agent_branch')], '', 'no heartbeat means blank agent cells, never "dead"');
+  assert.equal(quiet[SHEET_COLUMNS.indexOf('live')], '');
+});
+
+test('the beat cwd (where the agent runs) beats the branch convention', () => {
+  const old = laneItems([{ at: new Date(Date.now() - 4 * HOUR).toISOString(), surface: 'card-8', outcome: 'unresolved' }]);
+  // A dispatch companion beats from inside the tree: cwd is ground truth,
+  // even when the branch follows no convention (e.g. a SHEPHERD journey fork).
+  const withCwd = projectFleet({
+    lanes: old,
+    beats: { 'journey-x': { pid: process.pid, branch: 'journey/card-8', updatedAt: new Date().toISOString(), note: 'dispatch #8', cwd: '/home/ubuntu/dev/dispatch-8' } },
+    now: Date.now(),
+  }).items[0];
+  assert.equal(withCwd.worktree, '/home/ubuntu/dev/dispatch-8');
+  // No cwd (an old beat, a hand beat from elsewhere): the convention answers.
+  const conventional = laneItems([{ at: new Date(Date.now() - 4 * HOUR).toISOString(), surface: 'f-13', outcome: 'unresolved' }]);
+  const noCwd = projectFleet({
+    lanes: conventional,
+    beats: { 'agent-f-13': { pid: process.pid, branch: 'agent/f-13', updatedAt: new Date().toISOString(), note: 'n' } },
+    now: Date.now(),
+  }).items[0];
+  assert.equal(noCwd.worktree, '~/dev/f-13');
 });
 
 test('the sheet is found by id, and an unset id is named, not guessed', () => {
@@ -622,4 +667,154 @@ test('a throwing cycle reports honestly instead of escaping to the poller', asyn
   const res = await runPmCommand({ sub: 'run', botId: 'vm', env: {}, home: os.tmpdir(), reader: () => { throw new Error('ENOSPC simulated'); } });
   assert.equal(res.ok, false);
   assert.match(res.text, /failed before it could report honestly/);
+});
+
+// ---------------------------------------------------------------------------
+// The PM seat on any bot-host bot (vm3 included): take it, see it, leave it.
+// ---------------------------------------------------------------------------
+
+test('E2E: `/role pm take` adopts the persona and `/role pm status` shows it', async () => {
+  const fake = await startFakeBugApi(ticketRows());
+  const home = makeFleetHome();
+  try {
+    const args = { home: home.home, specsDir: home.specsDir, port: fake.port };
+    const take = await simulate('/role pm take', args);
+    assert.equal(take.code, 0, `bot-host exited 0 (stderr: ${take.stderr.slice(0, 400)})`);
+    assert.match(take.stdout, /seat taken/);
+    assert.match(take.stdout, /Project Manager/);
+
+    // The adoption is a persisted chat role, not a reply string: later turns in
+    // this chat run under the PM mandate through the production path.
+    const state = JSON.parse(fs.readFileSync(path.join(home.home, '.hermes', 'projects_state.json'), 'utf8'));
+    assert.equal(state.chats.sim.roleId, 'pm');
+
+    const status = await simulate('/role pm status', args);
+    assert.equal(status.code, 0, `bot-host exited 0 (stderr: ${status.stderr.slice(0, 400)})`);
+    assert.match(status.stdout, /runs as: \*Project Manager\*/);
+
+    const reset = await simulate('/role pm reset', args);
+    assert.match(reset.stdout, /Back to general/);
+    const after = JSON.parse(fs.readFileSync(path.join(home.home, '.hermes', 'projects_state.json'), 'utf8'));
+    assert.ok(!after.chats.sim.roleId, 'reset leaves the seat');
+  } finally {
+    home.cleanup();
+    await fake.close();
+  }
+});
+
+test('the adopted-role line never guesses', () => {
+  assert.equal(adoptedRoleLine(''), '• this chat runs as: general mode — take the PM seat with `/role pm take`');
+});
+
+// ---------------------------------------------------------------------------
+// source_brief: the original ask travels to the sheet.
+// ---------------------------------------------------------------------------
+
+test('every row carries the original ask as its last cell', () => {
+  const spec = specItem('---\nid: PM-9\nstatus: locked\ngoal: keep the fleet honest\n---\n', { fileName: 'PM-9.md' });
+  const card = bugItems([{ tag_id: 'BUG-1', public_n: 1, title: 'Fix the thing', state: 'open', flags: {} }])[0];
+  const lane = laneItems([{ at: new Date().toISOString(), surface: 'vm', outcome: 'ok', ticket: '#1' }])[0];
+  assert.ok(SHEET_COLUMNS.includes('source_brief'), 'the column exists');
+  assert.equal(SHEET_COLUMNS[SHEET_COLUMNS.length - 1], 'source_brief', 'appended last, so existing indexes hold');
+  assert.equal(sheetRow(spec).at(-1), 'keep the fleet honest', 'packet goal, not the id');
+  assert.equal(sheetRow(card).at(-1), 'Fix the thing', 'ticket title');
+  assert.match(sheetRow(lane).at(-1), /vm/, 'lane summary names the surface');
+  for (const row of [sheetRow(spec), sheetRow(card), sheetRow(lane)]) {
+    assert.equal(row.length, SHEET_COLUMNS.length);
+  }
+});
+
+test('a column change re-seeds the header instead of misaligning rows', () => {
+  const home = makeFleetHome();
+  try {
+    const fleet = projectFleet({ lanes: [], now: Date.now() });
+    const first = spoolFleetRows('vm', fleet, { home: home.home, at: Date.now() });
+    assert.equal(first.header, true);
+    const second = spoolFleetRows('vm', fleet, { home: home.home, at: Date.now() });
+    assert.equal(second.header, false, 'same columns, no duplicate header');
+    // A marker from before versioning vouches for nothing: the header goes out
+    // again so new 17-cell rows line up under a 17-cell header.
+    const marker = headerMarkerPath('vm', { home: home.home });
+    fs.writeFileSync(marker, JSON.stringify({ writtenAt: new Date().toISOString() }) + '\n');
+    assert.equal(markerColumns(marker), '');
+    const third = spoolFleetRows('vm', fleet, { home: home.home, at: Date.now() });
+    assert.equal(third.header, true, 'unknown columns, header re-seeded');
+    assert.equal(markerColumns(marker), SHEET_COLUMNS.join(','));
+    const fourth = spoolFleetRows('vm', fleet, { home: home.home, at: Date.now() });
+    assert.equal(fourth.header, false);
+  } finally {
+    home.cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// tmux: deployed sessions next to live agents.
+// ---------------------------------------------------------------------------
+
+const TMUX_LS = ['VM-tui\t1790811000\t1', 'VM-tui-vm3\t1790812000\t0'].join('\n');
+
+test('tmux sessions parse to name, age and attached — never throw', () => {
+  const res = listTmuxSessions({ runner: () => TMUX_LS, now: 1790813000 * 1000 });
+  assert.equal(res.ok, true);
+  assert.equal(res.sessions.length, 2);
+  assert.equal(res.sessions[0].name, 'VM-tui');
+  assert.equal(res.sessions[0].attached, true);
+  assert.equal(res.sessions[1].name, 'VM-tui-vm3');
+  assert.equal(res.sessions[1].attached, false);
+  assert.match(res.sessions[1].age, /16m|17m/);
+  assert.deepEqual(listTmuxSessions({ runner: () => '' }).sessions, [], 'empty server output is zero sessions, not an error');
+  const down = listTmuxSessions({ runner: () => { throw new Error('ENOENT'); } });
+  assert.equal(down.ok, false);
+  assert.deepEqual(down.sessions, []);
+});
+
+test('the fleet render names deployed terminals and flags viewer-less ones', () => {
+  const fleet = projectFleet({ lanes: [], now: Date.now() });
+  const plain = renderFleet(fleet, {});
+  assert.ok(!plain.includes('deployed (tmux)'), 'no tmux read, no section');
+  const tmux = listTmuxSessions({ runner: () => TMUX_LS, now: 1790813000 * 1000 });
+  const withTmux = renderFleet(fleet, { tmux });
+  assert.match(withTmux, /deployed \(tmux\): 2 session\(s\)/);
+  assert.match(withTmux, /VM-tui-vm3/);
+  assert.match(withTmux, /no viewer attached/);
+  const off = renderFleet(fleet, { tmux: { ok: false, error: 'no tmux server', sessions: [] } });
+  assert.match(off, /deployed \(tmux\): unavailable/);
+});
+
+test('runStatus carries tmux and the adopted role without touching state', async () => {
+  const home = makeFleetHome();
+  try {
+    const reader = () => ({ specs: [], bugs: [], lanes: [], beats: {}, sources: {} });
+    const st = await runStatus({ env: {}, home: home.home, now: Date.now(), reader, chatId: '', tmuxRunner: () => TMUX_LS });
+    assert.equal(st.tmux.ok, true);
+    assert.equal(st.tmux.sessions.length, 2);
+    assert.equal(st.adoptedRole, '');
+    assert.match(pmHelpText(), /\/role pm take/);
+  } finally {
+    home.cleanup();
+  }
+});
+
+test('E2E: bare `/role` explains the whole surface, including the PM seat', async () => {
+  const fake = await startFakeBugApi(ticketRows());
+  const home = makeFleetHome();
+  try {
+    const args = { home: home.home, specsDir: home.specsDir, port: fake.port };
+    const plain = await simulate('/role', args);
+    assert.equal(plain.code, 0, `bot-host exited 0 (stderr: ${plain.stderr.slice(0, 400)})`);
+    assert.match(plain.stdout, /Active Project Roles/);
+    assert.match(plain.stdout, /runs as:.*general mode/, 'no seat taken yet, and it says so');
+    assert.match(plain.stdout, /\/role pm take/, 'the seat is discoverable');
+    assert.match(plain.stdout, /\/role pm run/);
+    assert.match(plain.stdout, /\/role pm status/);
+    assert.match(plain.stdout, /\/role pm sheet/);
+    assert.match(plain.stdout, /\/role reset/);
+
+    await simulate('/role pm take', args);
+    const seated = await simulate('/role', args);
+    assert.match(seated.stdout, /runs as:.*Project Manager/, 'the listing reflects the adopted seat');
+  } finally {
+    home.cleanup();
+    await fake.close();
+  }
 });

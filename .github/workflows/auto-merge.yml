@@ -59,7 +59,14 @@ jobs:
     name: merge-agent-pr
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth 0, not the default 1: the landed-work judgement runs here
+      # (scripts/lib/premerge-undo.mjs) and needs `origin/main`, the fork point,
+      # and the owning commits of the lines a branch rewrote. At depth 1 there is
+      # no history to judge, the gate degrades to "could not judge" on every PR,
+      # and a gate that cannot run is indistinguishable from one nobody enabled.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:

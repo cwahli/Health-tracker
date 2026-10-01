@@ -5,7 +5,7 @@
  */
 import "dotenv/config";
 import { Bot, GrammyError, HttpError, InlineKeyboard, InputFile } from "grammy";
-import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, openSync, closeSync, renameSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, rmSync, openSync, closeSync, renameSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { spawn, execSync } from "child_process";
@@ -35,6 +35,14 @@ import {
   forgetChatSid,
   ensureChatsMap,
 } from "./chat-sessions.js";
+import {
+  tuiAttachPlan,
+  tuiNoSessionText,
+  tuiSwitchKeyboard,
+  tuiUnsupportedText,
+} from "./tui-provider.js";
+import { getProviderSid, setProviderSid } from "./provider-sessions.js";
+import { runClineAcp } from "./cline-acp.js";
 import { prepareInboundMedia } from "./inbound-media-adapter.mjs";
 // Per-chat project selection. The router had no /project handler, so
 // `/project external 4` was dropped by the slash-guard and the bot answered
@@ -48,6 +56,22 @@ import {
   readBrief,
   resolveProjectId,
 } from "./project-registry.mjs";
+// /tui: the same Telegram Mini App door bot-host opens. Commit 86e284f declared
+// it out of scope for this bot; the terminal is a gateway service, not a bot
+// feature, so the router hands out the same button. See src/tui-miniapp.js.
+import {
+  TUI_OPEN_FILE,
+  botIdFromToken,
+  readTuiOpen,
+  resolveTuiUrl,
+  tuiButtonUrl,
+  tuiOffText,
+  tuiOfflineText,
+  tuiOpenPath,
+  tuiOpenText,
+  tuiStatusLine,
+  writeTuiOpen,
+} from "./tui-miniapp.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -64,6 +88,14 @@ const PID_PATH = join(RUN_DIR, "router.pid");
 const LEGACY_PID_PATHS = ["/tmp/tg-router.pid"];
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+// The Mini App's `?bot=` id. Telegram's id is the left half of the token; the
+// token itself is never put in a URL, a log line, or state.
+const ROUTER_BOT_ID = botIdFromToken(TOKEN);
+// A quick tunnel's hostname changes on every reconnect, so the button that was
+// sent a minute ago can be dead. Remember the last URL this process handed out
+// so the next /tui can say so. Process-local on purpose: a restart is a
+// reconnect too.
+let lastTuiUrl = "";
 const ALLOWED = String(process.env.TELEGRAM_USER_ID || process.env.TELEGRAM_ALLOWED_USER_ID || "").trim();
 // Import/test mode (scripts/test-quota-parse.mjs): expose the quota helpers
 // without acquiring the poller lock or starting Telegram long-polling.
@@ -1941,46 +1973,61 @@ function runCmd(cmd, args, { cwd, env, timeoutMs = 180000, trackClinePid = false
   });
 }
 
-async function runCline(prompt) {
-  let model = String(state.models.cline || "").replace(/^cline\//, "");
-  // Cline CLI treats single-token prompts (no whitespace) as "unquoted commands"
-  // and rejects them — e.g. plain "Hi". Ensure at least one space so argv is accepted.
+/**
+ * Run one Cline turn over ACP so the chat keeps ONE task.
+ *
+ * WHY NOT `cline --json "<prompt>"` ANY MORE: that started a brand-new Cline
+ * task on every Telegram turn, so the chat had no single conversation and /tui
+ * could not resume it (the reply and the terminal were different tasks).
+ * Cline's CLI cannot resume a task one-shot (`--id` forces interactive TTY),
+ * but ACP can: `session/new` returns the task id, `session/load` continues it.
+ * We persist the id per chat and hand the very same id to /tui.
+ */
+async function runCline(prompt, opts = {}) {
+  const chatId = opts.chatId ?? state.lastChatId ?? null;
+  const model = String(state.models.cline || "").replace(/^cline\//, "");
+  const existing = getProviderSid(state, "cline", chatId);
+  // Cline CLI treats single-token prompts (no whitespace) as "unquoted
+  // commands" and rejects them — e.g. plain "Hi". ACP sends the text as data,
+  // but keep the pad so prompt shape matches the old path.
   let q = String(prompt ?? "");
   if (q.trim() && !/\s/.test(q)) q = `${q} `;
-  // Flag order per `cline --help`: -m, -c, --thinking, --json, prompt last.
-  const think = clineThinkingLevel();
-  const args = ["-m", model, "-c", WORKSPACE];
-  if (think) args.push("--thinking", think);
-  args.push("--json", q);
-  console.log(`runCline argv: cline ${args.map((a) => (a === q ? "<prompt>" : a)).join(" ")}`);
-  const stripAnsi = (s) => String(s || "").replace(/\x1b\[[0-9;]*m/g, "").replace(/\[\d+m/g, "");
+  console.log(`runCline acp: model=${model} session=${existing || "new"}`);
+  let res;
   try {
-    // B) Telegram timeout default >= 20 min (CLINE_TIMEOUT_MS); PID tracked+reaped.
-    const out = await runCmd("cline", args, { timeoutMs: CLINE_TIMEOUT_MS, trackClinePid: true });
-    const lines = out.split("\n").filter(Boolean);
-    // Prefer terminal run_result / done event text
-    for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        const row = JSON.parse(lines[i]);
-        const textOut =
-          row.text ||
-          row.message ||
-          row.content ||
-          row?.event?.text ||
-          row?.event?.event?.text ||
-          null;
-        if (textOut && (row.type === "run_result" || row.finishReason || row?.event?.type === "done" || row.type === "agent_event")) {
-          return String(textOut);
+    res = await runClineAcp({
+      prompt: q,
+      model,
+      cwd: WORKSPACE,
+      thinking: clineThinkingLevel(),
+      sessionId: existing,
+      timeoutMs: CLINE_TIMEOUT_MS,
+      onSpawn: (child) => {
+        // B) Keep the Cline PID so timeout/unlock can SIGTERM->SIGKILL the tree.
+        if (child?.pid) {
+          activeClinePid = child.pid;
+          state.clinePid = child.pid;
+          try {
+            saveState(state);
+          } catch {}
         }
-        if (textOut && i === lines.length - 1) return String(textOut);
-      } catch {
-        /* continue */
-      }
-    }
-    return stripAnsi(out).slice(0, 4000);
+      },
+    });
   } catch (e) {
-    return `Cline error: ${stripAnsi(e.message)}`;
+    clearClineTracking();
+    return `Cline error: ${String(e?.message || e).slice(0, 500)}`;
   }
+  clearClineTracking();
+  if (res.sessionId && res.sessionId !== existing) {
+    try {
+      setProviderSid(state, "cline", chatId, res.sessionId);
+      saveState(state);
+    } catch (e) {
+      console.log("cline session persist failed:", e.message || e);
+    }
+  }
+  const text = String(res.text || "").trim();
+  return text || "(empty Cline reply)";
 }
 
 async function runTokenHarbor(prompt) {
@@ -2109,7 +2156,7 @@ async function runCommandCode(prompt) {
 async function dispatchOnce(prompt, opts = {}) {
   const p = state.provider;
   if (p === "opencode") return runOpenCode(prompt, opts);
-  if (p === "cline") return runCline(prompt);
+  if (p === "cline") return runCline(prompt, opts);
   if (p === "tokenharbor") return runTokenHarbor(prompt);
   if (p === "freebuff") return runFreebuff(prompt, opts);
   if (p === "commandcode") return runCommandCode(prompt);
@@ -3515,6 +3562,7 @@ bot.command("start", async (ctx) => {
       "/thinking [level] — show/set thinking effort (cline)\n" +
       "/allowance — remaining free-lane allowance (best-effort)\n" +
       "/allowance table — same ledger as an HTML grid (opens in chat)\n" +
+      "/tui — open a real terminal for this chat (Mini App)\n" +
       "/compact — compact OpenCode session context\n" +
       "/new — new OpenCode session\n" +
       "/help — this\n\n" +
@@ -3534,6 +3582,7 @@ bot.command("help", async (ctx) => {
       "/thinking [none|low|medium|high|xhigh] — show/set Cline thinking\n" +
       "/allowance — free-lane allowance snapshot\n" +
       "/allowance table — free-lane allowance as an HTML grid (pref/lane/status/reset/cooldown)\n" +
+      "/tui [status|off] — open a real terminal for this chat, as a Telegram Mini App\n" +
       "/compact — compact OpenCode context\n" +
       "/new — fresh OpenCode session\n" +
       "/unlock — cancel stuck work and unlock the bot\n" +
@@ -3629,6 +3678,26 @@ bot.command("compact", async (ctx) => {
   }
 });
 
+/**
+ * Switch the active provider and return the reply text (null = nothing to say).
+ * One implementation for /switch and the "Switch to …" buttons /tui offers, so
+ * there is a single place that mutates state.provider.
+ */
+async function switchProviderMessage(arg) {
+  if (!arg) return null;
+  if (!PROVIDERS[arg]) return `Unknown provider. Try: ${Object.keys(PROVIDERS).join(", ")}`;
+  if (arg === "freebuff") {
+    return (
+      "Freebuff is terminal-only (interactive CLI) — Telegram can’t run it yet.\n" +
+      "Use /freemodel for OpenCode Muse, Token Harbor, or Cline.\n" +
+      "Keep Freebuff for desktop/terminal coding sessions."
+    );
+  }
+  state.provider = arg;
+  saveState(state);
+  return `Switched to ${PROVIDERS[arg].label}.\nModel: \`${state.models[arg]}\``;
+}
+
 bot.command("switch", async (ctx) => {
   if (!gate(ctx)) return;
   let arg = (ctx.message?.text || "").split(/\s+/)[1]?.toLowerCase();
@@ -3647,21 +3716,8 @@ bot.command("switch", async (ctx) => {
     );
     return;
   }
-  if (!PROVIDERS[arg]) {
-    await ctx.reply(`Unknown provider. Try: ${Object.keys(PROVIDERS).join(", ")}`);
-    return;
-  }
-  if (arg === "freebuff") {
-    await ctx.reply(
-      "Freebuff is terminal-only (interactive CLI) — Telegram can’t run it yet.\n" +
-        "Use /freemodel for OpenCode Muse, Token Harbor, or Cline.\n" +
-        "Keep Freebuff for desktop/terminal coding sessions."
-    );
-    return;
-  }
-  state.provider = arg;
-  saveState(state);
-  await ctx.reply(`Switched to ${PROVIDERS[arg].label}.\nModel: \`${state.models[arg]}\``);
+  const msg = await switchProviderMessage(arg);
+  if (msg) await ctx.reply(msg);
 });
 
 // /thinking is the canonical name (scripts/lib/commands.mjs). /think is kept
@@ -3794,6 +3850,115 @@ bot.command("freemodel", async (ctx) => {
   } catch (e) {
     await ctx.reply(`freemodel failed: ${String(e.message || e).slice(0, 500)}`);
   }
+});
+
+// /tui — a real terminal for THIS chat, as a Telegram Mini App, matched to the
+// provider the chat is ACTUALLY using.
+//
+// The router does not run ttyd and holds no terminal credential: it hands out
+// the gateway URL exactly like bot-host does, and the gateway does the
+// `initData` HMAC with this bot's own token. The record written here is what a
+// per-chat attach on the gateway host reads, so the terminal lands on this
+// chat's conversation instead of whichever one happened to be first.
+//
+// Provider decides the door (src/tui-provider.js): OpenCode attaches the chat's
+// `ses_…` session; Cline resumes the chat's Cline task id. A provider with no
+// attachable terminal answers honestly and offers switches rather than opening
+// a mismatched pane — the live bug this fixes (provider cline, TUI on OpenCode).
+bot.command("tui", async (ctx) => {
+  if (!gate(ctx)) return;
+  const chatId = String(ctx.chat.id);
+  const sub = String(ctx.match || "").trim().toLowerCase().split(/\s+/)[0] || "";
+  const gatewayUrl = resolveTuiUrl();
+  const provider = state.provider;
+  const providerLabel = PROVIDERS[provider]?.label || provider;
+  const model = state.models?.[provider] || "";
+  const modelLabel = prettyFreeLabel(provider, model);
+  const sessionId = getProviderSid(state, provider, chatId);
+  const plan = tuiAttachPlan({ provider, providerLabel, model, modelLabel, sessionId, workspace: WORKSPACE });
+
+  if (sub === "status") {
+    const record = readTuiOpen({ stateDir: STATE_DIR });
+    const support = plan.attachable
+      ? `Terminal: ${plan.kind}${plan.sessionId ? ` · ${String(plan.sessionId).slice(0, 24)}` : " (fresh)"}`
+      : `Terminal: none for ${providerLabel} (${plan.reason})`;
+    await ctx.reply(
+      tuiStatusLine(record) +
+        `\nActive: ${providerLabel} · ${modelLabel}` +
+        `\n${support}` +
+        `\nGateway: ${gatewayUrl || "not configured (TUI_GATEWAY_URL unset)"}` +
+        `\nBot id: ${ROUTER_BOT_ID}`
+    );
+    return;
+  }
+
+  if (sub === "off" || sub === "kill" || sub === "stop") {
+    const record = readTuiOpen({ stateDir: STATE_DIR });
+    try {
+      if (record) rmSync(tuiOpenPath(STATE_DIR), { force: true });
+    } catch {
+      /* the record is best-effort; the pane lives on the gateway host */
+    }
+    await ctx.reply(tuiOffText(record));
+    return;
+  }
+
+  if (sub && sub !== "on" && sub !== "open") {
+    await ctx.reply("Usage: /tui (open) · /tui status · /tui off");
+    return;
+  }
+
+  if (!gatewayUrl) {
+    await ctx.reply(tuiOfflineText());
+    return;
+  }
+
+  // No attachable terminal for the active provider: say so, don't open a
+  // mismatched one. Buttons carry the same switch path as /switch.
+  if (!plan.attachable) {
+    const text =
+      plan.reason === "no-session"
+        ? tuiNoSessionText({ providerLabel, modelLabel })
+        : tuiUnsupportedText({ provider, providerLabel, modelLabel });
+    const rows = tuiSwitchKeyboard(plan.switchTo);
+    await ctx.reply(text, rows.length ? { reply_markup: { inline_keyboard: rows } } : {});
+    return;
+  }
+
+  const url = tuiButtonUrl({ gatewayUrl, botId: ROUTER_BOT_ID });
+  const moved = Boolean(lastTuiUrl) && lastTuiUrl !== url;
+  lastTuiUrl = url;
+  writeTuiOpen(
+    {
+      chatId,
+      botId: ROUTER_BOT_ID,
+      provider,
+      model: model || null,
+      modelLabel,
+      workspace: WORKSPACE,
+      sessionId: plan.sessionId,
+      gatewayUrl,
+      at: new Date().toISOString(),
+    },
+    { stateDir: STATE_DIR }
+  );
+  await ctx.reply(
+    tuiOpenText({ botId: ROUTER_BOT_ID, workspace: WORKSPACE, moved, providerLabel, modelLabel }),
+    { reply_markup: { inline_keyboard: [[{ text: "⌨️ Open the TUI", web_app: { url } }]] } }
+  );
+});
+
+// The switch buttons /tui offers when the active provider has no terminal.
+// Same path as /switch so there is one place that changes providers.
+bot.callbackQuery(/^tui_switch:/, async (ctx) => {
+  if (!gate(ctx)) {
+    await ctx.answerCallbackQuery({ text: "Not allowed", show_alert: true }).catch(() => {});
+    return;
+  }
+  const provider = String(ctx.callbackQuery.data || "").split(":")[1] || "";
+  const msg = await switchProviderMessage(provider);
+  await ctx.answerCallbackQuery({ text: msg ? `Switched to ${PROVIDERS[provider]?.label || provider}` : "Unknown provider" }).catch(() => {});
+  if (msg) await ctx.reply(msg);
 });
 
 bot.callbackQuery(/^fm/, async (ctx) => {
@@ -4121,6 +4286,7 @@ const BOT_COMMANDS = [
   { command: "status", description: "Live status: usage %, thinking, model" },
   { command: "thinking", description: "Show/set thinking effort (cline: none|low|medium|high|xhigh)" },
   { command: "allowance", description: "Free-lane allowance (add 'table' for the HTML grid)" },
+  { command: "tui", description: "Open this chat's terminal — matches the active provider (Mini App)" },
   { command: "compact", description: "Compact OpenCode session context" },
   { command: "switch", description: "Switch provider (opencode, cline, …)" },
   { command: "project", description: "Switch project workspace (e.g. /project external 4)" },
@@ -4298,6 +4464,8 @@ export {
   freeModelDepletion,
   formatFreeLine,
   FREEMODEL_HEADER,
+  ROUTER_BOT_ID,
+  TUI_OPEN_FILE,
   FREEMODEL_BUTTON_WIDTH,
   leftishButtonLabel,
   freemodelProviderTag,

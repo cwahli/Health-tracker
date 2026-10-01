@@ -728,3 +728,56 @@ jobsRouter.get('/api/audit/food-search', async (req, res) => {
     return res.status(500).json({ error: err?.message || 'food-search failed' });
   }
 });
+
+// AUDIT-ONLY nutrient lookup over food_items (the catalog the product itself
+// resolves against). The meal-audit agent needs per-100g values to scale by
+// weighed grams; without this the only reachable source was
+// STANDARD_BASE_FOODS, which is 6 dressing entries and cannot express a real
+// meal. Read-only, unauthenticated like the other audit routes, returns
+// nutrient metadata only (no user data, no photos).
+//
+// Query is token-AND on display_name/food_key so a caller can look up
+// "green grapes" or "rolled oats" the same way food-search works.
+jobsRouter.get('/api/audit/food-nutrients', async (req, res) => {
+  try {
+    if (!isD1Configured()) return res.json({ items: [], count: 0, reason: 'D1 not configured' });
+    const q = String((req.query as any).q || '').trim();
+    const rawLim = (req.query as any).limit != null ? parseInt(String((req.query as any).limit), 10) : 20;
+    const limit = Number.isFinite(rawLim) ? Math.min(Math.max(rawLim, 1), 50) : 20;
+
+    const tokens: string[] = q.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+      .filter((t) => t.length >= 2);
+
+    const where: string[] = [];
+    const params: any[] = [];
+    // Only catalog rows the product already trusts. A candidate row's numbers
+    // are not ground truth, and the audit chain must not build on them.
+    where.push("status = 'active'");
+    for (const t of tokens) {
+      where.push('(lower(display_name) LIKE ? OR lower(food_key) LIKE ?)');
+      params.push('%' + t + '%', '%' + t + '%');
+    }
+    const sql = 'SELECT food_id, food_key, display_name, nutrients_per_100g, fdc_id, standard_serving_g '
+      + 'FROM food_items WHERE ' + where.join(' AND ')
+      + ' ORDER BY (display_name IS NULL), display_name LIMIT ?';
+    params.push(limit);
+
+    const r = await d1Query<any>(sql, params);
+    const items = (r.results || []).map((row: any) => {
+      let nuts: any = {};
+      try { nuts = typeof row.nutrients_per_100g === 'string' ? JSON.parse(row.nutrients_per_100g) : (row.nutrients_per_100g || {}); } catch { nuts = {}; }
+      return {
+        foodId: row.food_id,
+        foodKey: row.food_key,
+        displayName: row.display_name,
+        fdcId: row.fdc_id || null,
+        standardServingG: row.standard_serving_g ?? null,
+        // Per 100 g, as stored. The caller scales by weighed grams.
+        nutrientsPer100g: nuts,
+      };
+    });
+    return res.json({ items, count: items.length, tokens });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'food-nutrients failed' });
+  }
+});

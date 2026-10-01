@@ -54,6 +54,7 @@ import {
   BugNow,
 } from '../../utils/bugWorkItem';
 import { queueKpis, tagIsFixed } from '../../utils/bugQueueKpis';
+import { cardDiscipline, dispositionLabel } from '../../utils/bugCardDisposition';
 import { FoodDetailTabs } from '../bugQueue';
 import {
   buildTapeReplayBody,
@@ -190,6 +191,8 @@ export function BugBoard({
   blockedCount,
   doneCount,
   openBugCount,
+  declinedCount,
+  dispositionCounts,
   selectedTag,
   selectedTagItem,
   selectedPubId,
@@ -198,6 +201,7 @@ export function BugBoard({
   selectedReports,
   topReadyTag,
   topReadyPubId,
+  snapshotIdentity,
   onClose,
   onViewJob,
   language,
@@ -244,8 +248,8 @@ export function BugBoard({
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
               {lastUpdated && (
-                <span className="text-[10px] font-mono text-white/50 whitespace-nowrap" title="Last refreshed">
-                  {lastUpdated} · {bugTags.length}
+                <span className="text-[10px] font-mono text-white/50 whitespace-nowrap" title={`Last refreshed. Showing ${sortedQueueTags.length} of ${bugTags.length} cards under filter ${statusFilter} / ${activeTab} — switch to All Statuses to see done cards. Snapshot ${snapshotIdentity || '…'}`}>
+                  {lastUpdated} · {sortedQueueTags.length}/{bugTags.length} · {statusFilter}{snapshotIdentity ? ` · ${snapshotIdentity}` : ''}
                 </span>
               )}
 
@@ -338,17 +342,20 @@ export function BugBoard({
                     onChange={(e) => setStatusFilter(e.target.value as any)}
                     className="bg-[#111827] text-white border border-white/15 rounded-xl px-2.5 py-1.5 text-xs font-bold focus:outline-none cursor-pointer"
                   >
+                    {/* Every count here comes from cardDiscipline(), the same
+                        function that draws the badge and fills the tiles. They
+                        used to be re-derived inline from `tagIsFixed`, which is
+                        how this list could promise "Human to do (2)" beside a
+                        card the tiles were counting as done. */}
                     <option value="active">Active ({openBugCount})</option>
                     <option value="ready">Ready now ({readyCount})</option>
-                    <option value="unactioned">Un-actioned ({bugTags.filter((t) => !tagIsFixed(t) && !hydrateWorkItem(t).commits?.some(c => c.kind === 'agent' || c.actor !== 'you')).length})</option>
-                    <option value="pending_review">Human to do ({bugTags.filter((t) => {
-                      const item = hydrateWorkItem(t);
-                      if (tagIsFixed(t)) return false;
-                      const last = item.commits?.[item.commits.length - 1];
-                      return last && (last.kind === 'agent' || last.actor !== 'you');
-                    }).length})</option>
+                    <option value="unactioned">Un-actioned ({dispositionCounts.untouched})</option>
+                    <option value="pending_review">Human to do ({dispositionCounts.review})</option>
                     <option value="stuck">Stuck / 2 Burns ({blockedCount})</option>
                     <option value="done">Done / Fixed ({kpis.doneAll})</option>
+                    {declinedCount > 0 && (
+                      <option value="declined">{t(language, 'bugFilterDeclined' as any) || 'Declined / not work'} ({declinedCount})</option>
+                    )}
                     <option value="all">All Statuses ({bugTags.length})</option>
                   </select>
 
@@ -469,7 +476,8 @@ export function BugBoard({
                     const burnedCount = item.burns.filter((b) => b.burned).length;
                     const lastActionedDate = getLastActionedDate(tag);
 
-                    const hasAgentCommits = item.commits && item.commits.some((c) => c.kind === 'agent' || c.actor !== 'you');
+                    const disposition = cardDiscipline(tag).disposition;
+                    const say = (k: string, fallback: string) => t(language, k as any) || fallback;
 
                     return (
                       <div
@@ -504,26 +512,36 @@ export function BugBoard({
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
-                            {/* Action state indicator */}
-                            {item.queue === 'done' || tag.status === 'fixed' ? (
+                            {/* Action state indicator. The WORD comes from
+                                cardDiscipline(), the same function the KPI tiles
+                                and the status filter use. It used to be decided
+                                inline, and a card with status='ignored' rendered
+                                the word "fixed" here while the tiles counted it as
+                                done — a card nobody fixed, presented as fixed
+                                (measured 2026-09-30). One rule, one answer. */}
+                            {disposition === 'declined' ? (
+                              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-extrabold border bg-stone-500/20 text-stone-400 border-stone-500/30" title="Not work. Counted as neither backlog nor a fix.">
+                                {dispositionLabel('declined', say)}
+                              </span>
+                            ) : disposition === 'fixed' ? (
                               <span className="px-1.5 py-0.5 rounded-full text-[9px] font-extrabold border bg-slate-500/20 text-slate-300 border-slate-500/30">
-                                fixed
+                                {dispositionLabel('fixed', say)}
                               </span>
-                            ) : item.queue === 'blocked' ? (
+                            ) : disposition === 'stuck' ? (
                               <span className="px-1.5 py-0.5 rounded-full text-[9px] font-extrabold border bg-red-500/15 text-red-400 border-red-500/30">
-                                stuck
+                                {dispositionLabel('stuck', say)}
                               </span>
-                            ) : (item.remaining || []).filter((r) => !isHumanCheckLine(r)).length > 0 ? (
-                              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-extrabold border bg-indigo-500/15 text-indigo-300 border-indigo-500/30">
-                                agent to do
-                              </span>
-                            ) : hasAgentCommits || (item.remaining || []).length > 0 ? (
+                            ) : disposition === 'review' ? (
                               <span className="px-1.5 py-0.5 rounded-full text-[9px] font-extrabold border bg-amber-500/15 text-amber-300 border-amber-500/30">
-                                human to do
+                                {dispositionLabel('review', say)}
+                              </span>
+                            ) : disposition === 'to_do' ? (
+                              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-extrabold border bg-indigo-500/15 text-indigo-300 border-indigo-500/30">
+                                {dispositionLabel('to_do', say)}
                               </span>
                             ) : (
                               <span className="px-1.5 py-0.5 rounded-full text-[9px] font-extrabold border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
-                                un-actioned
+                                {dispositionLabel('untouched', say)}
                               </span>
                             )}
 

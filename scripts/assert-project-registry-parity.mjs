@@ -57,6 +57,13 @@ const SHARED_CASES = [
   ['external 2', 'external-2'],
   ['pip', 'external-2'],
   ['pip-defense', 'external-2'],
+  // external-health (Personal Health Coach)
+  ['health', 'external-health'],
+  ['health coach', 'external-health'],
+  ['personal health', 'external-health'],
+  ['external health', 'external-health'],
+  ['external-health', 'external-health'],
+  ['coach', 'external-health'],
 ];
 
 // Pinned on the router resolver alone: the reported failure was `/project

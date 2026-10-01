@@ -16,6 +16,7 @@ import {
   BugCommit,
 } from '../../utils/bugWorkItem';
 import { queueKpis, tagIsFixed } from '../../utils/bugQueueKpis';
+import { cardDiscipline } from '../../utils/bugCardDisposition';
 import { bugArtifactUrl, bugShotName } from '../../utils/bugSnapshot';
 import {
   buildTapeReplayBody,
@@ -33,9 +34,38 @@ import { t } from '../../utils/i18n';
 /**
  * Lightweight change fingerprint for the overview payload. The overview
  * endpoint carries no generated_at, so the poller compares this key and
- * skips setData (no re-render) when nothing moved.
+ * skips setData (no re-render) when nothing moved. The key must cover
+ * steward-mutated work_item fields (class/queue/block/repro/curation):
+ * those rewrite work_item JSON without always bumping updated_at/status,
+ * and a blind key leaves the board stale while `bugctl list` (fresh
+ * bugState() per read) already shows the new Class/State.
  */
-const overviewPayloadKey = (json: any): string => {
+export const workItemChangeKey = (tag: any): string => {
+  const raw = (tag as any)?.work_item;
+  let w: any = null;
+  try {
+    w = typeof raw === 'string' ? JSON.parse(raw) : raw || null;
+  } catch {
+    return `rawlen:${String(raw || '').length}`;
+  }
+  if (!w || typeof w !== 'object') return '-';
+  const commits = Array.isArray(w.commits) ? w.commits.length : 0;
+  const remaining = Array.isArray(w.remaining) ? w.remaining.length : 0;
+  const done = Array.isArray(w.done) ? w.done.length : 0;
+  return [
+    w.public_n ?? '',
+    w.queue ?? '',
+    w.class ?? '',
+    w.blocked_reason ? 1 : 0,
+    w.duplicate_of ? 1 : 0,
+    w.repro?.status ?? '',
+    w.verify?.result ?? '',
+    commits,
+    remaining,
+    done,
+  ].join('.');
+};
+export const overviewPayloadKey = (json: any): string => {
   const tags: any[] = Array.isArray(json?.bugTags) ? json.bugTags : [];
   const reports: any[] = Array.isArray(json?.allReports) ? json.allReports : [];
   const del: any[] = Array.isArray(json?.deletionCandidates) ? json.deletionCandidates : [];
@@ -73,7 +103,9 @@ export function useBugBoard({ isOpen, language }: { isOpen: boolean; language?: 
 
   const [activeTab, setActiveTab] = useState<BugCategory | 'all'>('all');
   const [boardMode, setBoardMode] = useState<'bugs' | 'golden'>('bugs');
-  const [statusFilter, setStatusFilter] = useState<'active' | 'all' | 'pending_review' | 'ready' | 'unactioned' | 'stuck' | 'done'>('active');
+  const [statusFilter, setStatusFilter] = useState<
+    'active' | 'all' | 'pending_review' | 'ready' | 'unactioned' | 'stuck' | 'done' | 'declined'
+  >('active');
   const [sortOrder, setSortOrder] = useState<'last_actioned' | 'priority' | 'oldest'>('last_actioned');
   const [isFlagFormOpen, setIsFlagFormOpen] = useState(false);
 
@@ -1014,29 +1046,31 @@ export function useBugBoard({ isOpen, language }: { isOpen: boolean; language?: 
         return false;
       }
       const item = hydrateWorkItem(t);
-      const isFixed = tagIsFixed(t);
-      const isBlocked = item.queue === 'blocked' || item.burns.filter((b) => b.burned).length >= 2;
-      const isReady = !isFixed && !isBlocked && item.queue === 'ready';
-      
-      const hasAgent = item.commits && item.commits.some((c) => c.kind === 'agent' || c.actor !== 'you');
-      const lastCommit = item.commits && item.commits.length > 0 ? item.commits[item.commits.length - 1] : null;
-      const isPendingReview = !isFixed && lastCommit && (lastCommit.kind === 'agent' || lastCommit.actor !== 'you');
-      const isAgentToDo = !isFixed && hasAgent && lastCommit && (lastCommit.kind !== 'agent' && lastCommit.actor === 'you');
-      const isUnactioned = !isFixed && !hasAgent;
+      // One rule for "what is this card", shared with the KPI tiles and the row
+      // badge (src/utils/bugCardDisposition.ts). It used to be re-derived here
+      // line by line, which is how a declined card ended up filtered as open
+      // work on this screen while counted as done on the tiles above it.
+      const d = cardDiscipline(t);
+      const isBlocked = d.disposition === 'stuck';
+      const isReady = d.open && !isBlocked && item.queue === 'ready';
 
       // Status filter
       if (statusFilter === 'active') {
-        if (isFixed) return false;
+        if (!d.open) return false;
       } else if (statusFilter === 'stuck') {
-        if (isFixed || !isBlocked) return false;
+        if (!isBlocked) return false;
       } else if (statusFilter === 'ready') {
         if (!isReady) return false;
       } else if (statusFilter === 'pending_review') {
-        if (!isPendingReview) return false;
+        if (d.disposition !== 'review') return false;
+      } else if (statusFilter === 'declined') {
+        if (!d.declined) return false;
       } else if (statusFilter === 'unactioned') {
-        if (!isUnactioned) return false;
+        if (d.disposition !== 'untouched') return false;
       } else if (statusFilter === 'done') {
-        if (!isFixed) return false;
+        // Genuine completions only. A declined card is not a fix, so it must
+        // not appear under a filter that says "Done / Fixed".
+        if (!d.done) return false;
       }
 
       // Text search filter
@@ -1078,10 +1112,25 @@ export function useBugBoard({ isOpen, language }: { isOpen: boolean; language?: 
     return sortByLastActioned(filteredTags);
   }, [filteredTags, sortOrder]);
   const kpis = queueKpis(bugTags);
+  // One pass, one rule, the numbers the dropdown promises. Derived here rather
+  // than inline in the <option>s so the badge, the tiles and the filter counts
+  // are all reading the same classification of the same rows.
+  const dispositionCounts = useMemo(() => {
+    const out: Record<string, number> = { declined: 0, fixed: 0, stuck: 0, review: 0, to_do: 0, untouched: 0 };
+    for (const t of bugTags) {
+      const d = cardDiscipline(t).disposition;
+      out[d] = (out[d] || 0) + 1;
+    }
+    return out;
+  }, [bugTags]);
   const readyCount = kpis.ready;
   const blockedCount = kpis.blocked;
   const doneCount = kpis.doneThisWeek;
   const openBugCount = kpis.open;
+  // Now that the board serves every status (not just to_fix/in_progress/fixed),
+  // declined cards are visible and need a home of their own. Folding them into
+  // "Bugs open" or "Done" is what made the board lie about its own backlog.
+  const declinedCount = kpis.declined;
 
   // Selected tag object and work item
   const selectedTag = bugTags.find((t: any) => t.id === selectedTagId) || (sortedQueueTags[0] ?? null);
@@ -1094,6 +1143,18 @@ export function useBugBoard({ isOpen, language }: { isOpen: boolean; language?: 
   // Top ready tag for "Next bug" label
   const topReadyTag = sortReadyQueue(bugTags.filter((t) => hydrateWorkItem(t).queue === 'ready'))[0];
   const topReadyPubId = topReadyTag ? publicId(hydrateWorkItem(topReadyTag), topReadyTag.id) : null;
+
+  // Snapshot identity for the header (packet bug-board-parity, Node 2):
+  // card count + short hash of the overview fingerprint. Derives from
+  // `data` only, so it advances exactly when the board re-renders — two
+  // surfaces showing the same identity show the same cards.
+  const snapshotIdentity = useMemo(() => {
+    if (!data) return null;
+    const key = overviewPayloadKey(data);
+    let h = 5381;
+    for (let i = 0; i < key.length; i++) h = ((h << 5) + h + key.charCodeAt(i)) >>> 0;
+    return `${(data.bugTags || []).length}#${h.toString(16).padStart(8, '0')}`;
+  }, [data]);
   return {
     loading,
     setLoading,
@@ -1201,6 +1262,8 @@ export function useBugBoard({ isOpen, language }: { isOpen: boolean; language?: 
     kpis,
     readyCount,
     blockedCount,
+    declinedCount,
+    dispositionCounts,
     doneCount,
     openBugCount,
     selectedTag,
@@ -1211,5 +1274,6 @@ export function useBugBoard({ isOpen, language }: { isOpen: boolean; language?: 
     selectedReports,
     topReadyTag,
     topReadyPubId,
+    snapshotIdentity,
   };
 }

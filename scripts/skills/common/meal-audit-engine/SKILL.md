@@ -85,15 +85,77 @@ Every audit is packaged as a standardized benchmark bundle:
 
 ### Workflow 3 — Review Any Existing Meal (comparison report)
 *Triggered when the user asks to review/compare a meal already saved on the site.*
-1. Locate the meal with the same refs as Workflow 2 (`--timestamp` / `--name` / `--job-id` / `--debug-file`).
+1. **Resolve the meal to evidence first.** Most saved meals have no debug payload
+   (~39 of the last 50 on the live store), so `--job-id` alone dead-ends. Run:
+   ```bash
+   node scripts/meal-audit-resolve.mjs --latest=10 --list
+   ```
+   It returns one of three provenances — `debug_payload` (full multi-turn replay),
+   `photo_only` (single turn from saved photos), or `unreproducible` (fails loud).
+   For `photo_only`, `--emit-skeletons` writes a `flow_skeleton.json` you audit the
+   normal way. **A `photo_only` bundle has no edit history: never file
+   `turn_mismatch` or `edit_not_applied` against one.**
 2. Reconstruct the benchmark locally (same audit steps as W1/W2).
 3. Fetch the site-stored values for the same meal (debug `pendingFoodLog` / food-log row).
 4. Emit a side-by-side comparison table into `meal_result.md` and `comparison.json`
    using the tolerance matrix in `plan/MEAL_AUDIT_PAYLOAD_CONTRACT.md` (exact OCR/name,
    core ≤10%, other ≤30%, bbox IoU ≥0.5, Atwater ≤10%, turn structure exact).
-5. Verdicts: `PASS` / `FAIL(<taxonomy_code>)` / `DIVERGED`. On FAIL, append a line to
-   `artifacts/meal_audits/issue_ledger.jsonl` and (if asked) hand a V-29 ticket to
-   `@Orchestrator`.
+5. Verdicts: `PASS` / `FAIL(<taxonomy_code>)` / `DIVERGED`. On FAIL the ticket is
+   **no longer a manual step** — hand the bundle to the bridge and it files one
+   card per finding, most-structural first:
+   ```bash
+   node scripts/meal-audit-ticket.mjs --bundle=<bundleDir> --actual=<actual.json>
+   ```
+   It is idempotent per `(bundle, taxonomy, key)`, so re-running after a failed fix
+   reuses the card instead of filing a duplicate. Add `--dry-run` to plan only.
+
+### Workflow 4 — Closed loop (resolve → audit → ticket → fix → re-verify)
+*Triggered by the scheduled sweep, or when asked to "run the meal QA loop".*
+```bash
+node scripts/meal-audit-loop.mjs --latest=3 --dry-run   # plan only
+node scripts/meal-audit-loop.mjs --status               # attempts per card
+```
+The loop runs the same stages above unattended: it resolves a window of saved
+meals, compares, files cards, posts a plan whose gate is the comparator itself,
+dispatches a coder, waits for the rebuild, then **re-runs the same comparison** to
+verify. Attempts are capped at 3 and then the card is blocked for a human.
+
+Do not reimplement any of this by hand. If a meal needs auditing, the loop reports
+it as `needs_audit` and the correct action is to audit that bundle — not to
+hand-file a card for a meal nobody has checked.
+
+### Workflow 4b — Answering a hand-off request
+
+The loop queues unaudited meals for you. Check what is waiting:
+
+```bash
+node scripts/meal-audit-handoff.mjs status
+```
+
+For each `pending` request, take it, then finish it:
+
+```bash
+node scripts/meal-audit-handoff.mjs claim    --meal-id=<id> --by=meal_audit
+# ... audit the photos named in the request, write the bundle ...
+node scripts/meal-audit-handoff.mjs complete --meal-id=<id> --bundle=<abs bundle dir> --verdict=audited
+```
+
+Rules for the answer:
+- **The request inlines the contract** (bbox required, 32 nutrients, catalog or
+  scale for weight). It carries no chat history — follow the file.
+- `complete` is refused if the bundle does not exist, so do not report a bundle
+  you did not write.
+- If the catalog cannot source a nutrient, the audit is **incomplete**: say so.
+  `scripts/meal-audit-assist.mjs` refuses to emit a bundle that would zero-fill
+  one, because a zero scores as 100% drift against a real value and would file
+  bug cards against the audit instead of the product. Use `declaredNutrients`
+  with a citable reference, or report the gap.
+- A `photo_only` request has no edit history: never file `turn_mismatch` or
+  `edit_not_applied` against it.
+- Once `complete` lands, the next sweep adopts your bundle and compares it — you
+  do not file a ticket yourself.
+
+Runbook: `plan/MEAL_QA_LOOP.md`.
 
 ---
 

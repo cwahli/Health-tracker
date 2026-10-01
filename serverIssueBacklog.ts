@@ -13,9 +13,13 @@ export const DEFAULT_ISSUE_TYPE = 'general_bug';
 import type { Express, Request, Response } from 'express';
 import crypto from 'crypto';
 import { normalizeChainKey } from './serverBrandMenu.js';
-import { assignMissingPublicNs, hydrateWorkItem, lastCommit, publicId } from './src/utils/bugWorkItem';
+import { hydrateWorkItem, lastCommit, publicId } from './src/utils/bugWorkItem';
+import { publicNOf } from './src/utils/bugNumberParity';
+import { claimPublicNumbers, loadIssueTags, retireTicketNumber, retireTicketNumbers } from './serverBugNumbers.js';
+import { bugState } from './src/utils/bugTicketState';
 import { bugReportShotFields, bugShotContentType, bugShotExt, bugShotKey, parseDataUrl } from './src/utils/bugSnapshot';
 import { isD1Configured, d1Query, safeJsonParse } from './server_d1.js';
+import { onIssueTagsWrite } from './serverIssueTagEvents';
 
 // ---------------------------------------------------------------------------
 // D-2: D1-only data access for the issue tracker. D1 stores JSON columns
@@ -49,6 +53,35 @@ export function normBacklogRow(row: any): any {
   return {
     ...row,
     payload: typeof row.payload === 'string' ? safeJsonParse(row.payload, null) : (row.payload ?? null),
+  };
+}
+
+/**
+ * Canonical read-path projection for one overview tag (packet
+ * bug-board-parity, Node 1). Runs the same hydrateWorkItem() + bugState()
+ * the canonical `GET /api/bugs/list` route uses
+ * (`serverBugSnapshot.ts:1515-1528`), so the board and `bugctl list` agree
+ * on public_n/Class/State/queue for the same snapshot. Nested under
+ * `canonical` (additive — existing top-level readers are untouched) and
+ * shot-free by design (no R2/egress beyond the light overview shape).
+ */
+export function projectCanonicalRow(t: any): {
+  public_n: number;
+  class: string | null;
+  fingerprint: string | null;
+  state: string;
+  flags: Record<string, unknown>;
+  queue: string;
+} {
+  const item = hydrateWorkItem(t);
+  const ticket = bugState(item);
+  return {
+    public_n: item.public_n,
+    class: item.class || null,
+    fingerprint: item.fingerprint || null,
+    state: ticket.state,
+    flags: ticket.flags,
+    queue: ticket.queue,
   };
 }
 
@@ -501,16 +534,24 @@ export async function findIssueTag(param: string): Promise<any | null> {
   return null;
 }
 
+/**
+ * The board's row set. Now the SAME loader `/api/bugs/list` uses
+ * (serverBugNumbers.loadIssueTags): all statuses, one column list, one order.
+ *
+ * It used to be its own query — `status IN ('to_fix','in_progress','fixed')`
+ * with no `updated_at` column — so any card outside that list was counted by
+ * `bugctl list` and invisible here, and the board's own "last actioned" order
+ * and done-this-week count disagreed with the canonical list. Two answers to
+ * "how many bug tickets are there" is the bug this removes; the row set is
+ * deliberately NOT narrowed by status anymore.
+ */
 async function loadBugTagsWithLinks() {
   let tags: any[] = [];
   let links: any[] = [];
   try {
-    const tRes = await d1Query(
-      "SELECT id, created_at, title, title_key, category, status, resolution_note, whats_still_open, comments, resolved_at, work_item FROM issue_tags WHERE status IN ('to_fix', 'in_progress', 'fixed') ORDER BY created_at DESC LIMIT 200"
-    );
-    if (!tRes.success) return { tags, links };
-    const tagRows = tRes.results || [];
-    tags = (tagRows || []).map(normIssueTag);
+    const loaded = await loadIssueTags();
+    if (!loaded.ok) return { tags, links };
+    tags = loaded.rows;
     if (tags.length > 0) {
       const placeholders = tags.map(() => '?').join(', ');
       const lRes = await d1Query(`SELECT tag_id, issue_id FROM issue_tag_links WHERE tag_id IN (${placeholders})`, tags.map((t: any) => t.id));
@@ -535,11 +576,25 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
   const addDebugLog = deps.addDebugLog || ((m: string) => console.log(m));
 
   // Short TTL cache: this dashboard doesn't need per-request freshness, and the
-  // underlying query does 2-3 sequential Supabase round trips including a jsonb
-  // payload column. Cache is in-memory/per-server-instance and intentionally has
-  // no write-side invalidation (see TASK_5 instructions for the tradeoff).
+  // underlying query does 2-3 sequential D1 round trips including a TEXT
+  // payload column.
+  //
+  // The TTL used to be the ONLY expiry. It was also busted by three hand-placed
+  // `overviewCache = null` statements, all in this file, which meant a write
+  // from serverBugSnapshot.ts — the agent posting an attempt, a verify, a
+  // curation, an auto-file that mints a new card — left the board showing a
+  // stale COUNT for up to 20s (measured 2026-09-30). A second surface with its
+  // own idea of the truth, which is the defect class this board keeps hitting.
+  //
+  // Now the cache subscribes to the write signal emitted by d1Query itself, so
+  // every write to issue_tags busts it from one place and a future write route
+  // is covered by existing rather than by remembering. The TTL stays as a
+  // backstop for anything that bypasses D1.
   const OVERVIEW_CACHE_TTL_MS = 20_000;
   let overviewCache: { data: any; expiresAt: number } | null = null;
+  const stopOverviewInvalidation = onIssueTagsWrite(() => {
+    overviewCache = null;
+  });
 
   app.get('/api/bug-tracker/overview', async (_req: Request, res: Response) => {
     if (overviewCache && overviewCache.expiresAt > Date.now()) {
@@ -585,14 +640,27 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         return { ...t, linked_issue_ids: linkedIds, linked_issues: linkedIssues, linked_count: linkedIds.length };
       });
 
-      const numbered = assignMissingPublicNs(bugTags);
-      for (const row of numbered) {
-        const hit = bugTags.find((t: any) => t.id === row.id);
-        if (hit) hit.work_item = row.item;
-        try {
-          await d1Query('UPDATE issue_tags SET work_item = ? WHERE id = ?', [JSON.stringify(row.item), row.id]);
-        } catch {
-          /* numbers still returned this request */
+      // One numbering pass, shared with the canonical list, instead of a second
+      // private assign-then-write loop. The old loop wrote the whole work_item
+      // blob back with a number derived from a snapshot another request could
+      // have moved underneath it, so two overlapping reads minted the same #n
+      // on two cards (measured: #8, #10, #11 and #12 each sat on two cards).
+      // The shared pass writes only still-unnumbered cards, with the unnumbered
+      // guard in the WHERE clause, and re-reads until the numbering is unique.
+      const numbering = await claimPublicNumbers();
+      if (!numbering.ok) {
+        console.warn('[BugTracker Overview] numbering pass failed:', numbering.error);
+      } else if (numbering.duplicatesRemaining > 0) {
+        console.warn('[BugTracker Overview] duplicate ticket numbers remain after the numbering pass');
+      } else if (numbering.repaired.length || numbering.claimed.length) {
+        // Reflect freshly written numbers in THIS response too, so the board
+        // never renders a number the store has just changed.
+        const fresh = await loadIssueTags();
+        if (fresh.ok) {
+          bugTags.forEach((t: any, i: number) => {
+            const again = fresh.rows.find((r: any) => r.id === t.id);
+            if (again) bugTags[i] = { ...t, work_item: again.work_item };
+          });
         }
       }
 
@@ -601,6 +669,7 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         t.public_n = wi.public_n;
         t.public_id = publicId(wi, t.id);
         t.last_commit = lastCommit(wi);
+        t.canonical = projectCanonicalRow(t);
       }
 
       // A report is a deletion candidate once it had a tag and now has none left.
@@ -1297,6 +1366,11 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
       const tagIds = (doneTags || []).map((t: any) => t.id);
 
       if (tagIds.length > 0) {
+        // Retire the numbers BEFORE the rows go. Order matters: if the delete
+        // lands first there is a window in which the highest number is free and
+        // the next card created takes it. That is how #18 came back to a
+        // different defect on 2026-09-30.
+        await retireTicketNumbers((doneTags || []) as any[], 'purge-done');
         // Remove links first to ensure clean cascade
         const placeholders = tagIds.map(() => '?').join(', ');
         await d1Query(`DELETE FROM issue_tag_links WHERE tag_id IN (${placeholders})`, tagIds);
@@ -1305,7 +1379,7 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
       }
 
       overviewCache = null;
-      res.json({ success: true, count: tagIds.length, deleted_ids: tagIds });
+      res.json({ success: true, count: tagIds.length, deleted_ids: tagIds, retired_numbers: true });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'purge done failed' });
     }
@@ -1324,6 +1398,10 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
       if (!existing) return res.status(404).json({ error: 'tag not found' });
       const id = existing.id;
 
+      // Retire before delete, for the same reason as purge-done: a number that
+      // has been issued is that card's for good, and the moment its row is gone
+      // nothing else in the store remembers it existed.
+      await retireTicketNumber(publicNOf(existing as any), 'card deleted');
       await d1Query(`DELETE FROM issue_tag_links WHERE tag_id = ?`, [id]);
       const del = await d1Query(`DELETE FROM issue_tags WHERE id = ?`, [id]);
       if (!del.success) return res.status(500).json({ error: del.error });

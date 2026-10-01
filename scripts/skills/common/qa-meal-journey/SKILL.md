@@ -134,6 +134,15 @@ node "$REPO_DIR/scripts/meal-audit-fetch.mjs" \
   --output-dir="$REPO_DIR/artifacts/meal_audits/pending_review"
 ```
 
+**If the user names no specific meal** ("audit the latest meals", "check my recent
+meals"), resolve the saved window instead of guessing an identifier:
+```bash
+node "$REPO_DIR/scripts/meal-audit-resolve.mjs" --latest=10 --list
+```
+Most saved meals carry no debug payload, so this maps each one onto the evidence
+that actually survives: `debug_payload` (full replay), `photo_only` (single turn
+from saved photos), or `unreproducible` (fails loud — report it, never guess).
+
 ### Step 3 — Hand Off to Meal-Audit Bot
 Instruct @Meal_Audit_bot (or invoke meal-audit-engine) to perform the deep multi-turn 32-nutrient audit and bundle the ground truth into `Meal-[meal name]-[number]`:
 ```
@@ -162,12 +171,21 @@ the whole replay and only `meal-audit-compare.mjs` reads them afterward.
 2. Exit `0` ⇒ PASS. Exit `1`/`2` ⇒ score lives in `comparison.json` (taxonomy
    codes + harness card). Exit `4` ⇒ isolation violated (bug in tooling).
 3. If live site passes: Report resolution and clean benchmark match to user.
-4. If live site diverges: File an atomic bug ticket to @Orchestrator attaching the benchmark path and exact discrepancy (from `comparison.json`, not by re-reading expectations by hand):
-```bash
-bash "$REPO_DIR/scripts/run-coding-dispatch.sh" \
-  --task="Component: Vision/Dietitian Pipeline. Observed: Live site outputs <Actual> on <Dish>. Expected: Benchmark bundle <Meal-Name-01> specifies <Expected 32-nutrients/weight>. Verification: Journey test against Meal-Name-01 passes within tolerance." \
-  --bug-id="$BUG_ID" \
-  --category="meal" \
-  --thinking="high" \
-  --profile=orchestrator
-```
+4. If live site diverges: file the defect from `comparison.json` — do NOT hand-write
+   a ticket. The bridge reads the comparison, splits it into **one card per finding**
+   (V-29), and is idempotent so a re-run reuses the card:
+   ```bash
+   node "$REPO_DIR/scripts/meal-audit-ticket.mjs" \
+     --bundle="$REPO_DIR/artifacts/meal_audits/Meal-<Name>-01" \
+     --actual="$REPO_DIR/qa-evidence/actual_meal.json"
+   ```
+   Each card's acceptance criteria is the exact `meal-audit-compare.mjs` invocation
+   that must exit 0, so the fix is verifiable rather than a matter of opinion. Use
+   `--dry-run` first if you want to show the user the plan before anything is filed.
+
+   Only after the cards exist, hand off through the orchestrator (it posts the plan
+   whose gate is the comparator, dispatches the coder, and re-verifies separately):
+   ```bash
+   bash "$REPO_DIR/scripts/run-coding-dispatch.sh" --ticket="#<public_n>" --profile=orchestrator
+   ```
+

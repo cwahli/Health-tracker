@@ -23,6 +23,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -31,6 +33,7 @@ import {
   MAIN_SHA,
   MAIN_VERIFICATION_NAME,
   MERGE_SHA,
+  OPEN_PR,
   mainRun,
   runDriver,
   startFakeGitHub,
@@ -45,9 +48,18 @@ import {
   evaluatePrState,
   isGreen,
   isMainVerification,
+  parseDependsOn,
   requiredNames,
   validateRequiredAgainstWorkflows,
 } from './lib/merge-gate.mjs';
+import {
+  PREMERGE_DECISIONS,
+  decideBranchUndo,
+  describePremergeRefusal,
+  describePremergeUnknown,
+  formatViolations,
+} from './lib/premerge-undo.mjs';
+import { judgeBranchAgainstLandedWork, refreshPr } from './auto-merge.mjs';
 import {
   MAIN_RED_ISSUE_TITLE,
   MAIN_RED_MARKER,
@@ -66,7 +78,21 @@ const ROOT = path.resolve(HERE, '..');
 const [CI_CHECK, GUARD_CHECK] = requiredNames();
 
 /** A check run as the Checks API reports it. */
-const run = (name, conclusion, status = 'completed') => ({ name, status, conclusion });
+// `extra` carries the API's timestamps. They are what lets evaluateChecks tell
+// a stale verdict from a current one, so a fixture that omits them keeps the
+// historical worst-wins behaviour.
+const run = (name, conclusion, extra = {}) => {
+  // Older call sites pass a bare status string; newer ones pass an object with
+  // the API's timestamps. Both are supported so the helper change above does
+  // not silently reinterpret existing cases.
+  const opts = typeof extra === 'string' ? { status: extra } : (extra || {});
+  return {
+    name,
+    status: opts.status || 'completed',
+    conclusion,
+    ...('completed_at' in opts || 'started_at' in opts ? opts : {}),
+  };
+};
 
 const green = () => [run(CI_CHECK, 'success'), run(GUARD_CHECK, 'success')];
 
@@ -148,6 +174,51 @@ test('a custom required set is honoured (the gate is not hardcoded to two)', () 
   assert.equal(res.decision, 'merge');
   const red = evaluateChecks({ checkRuns: [run('only-me', 'failure')], required: [{ name: 'only-me' }] });
   assert.equal(red.decision, 'refuse');
+});
+
+test('Depends-On lines parse to numbers, duplicates collapse', () => {
+  assert.deepEqual(parseDependsOn('Depends-On: #365'), [365]);
+  assert.deepEqual(parseDependsOn('depends-on: 8\nDepends-On: #8\nDepends-On: #372'), [8, 372]);
+  assert.deepEqual(parseDependsOn('no deps here'), []);
+  assert.deepEqual(parseDependsOn('Depends-On: someday'), []);
+  assert.deepEqual(parseDependsOn(null), []);
+});
+
+// Measured 2026-09-30 on PR #396: a required name can have two runs on ONE sha
+// (ci and claim-guard both fire on `push: agent/**` and on `pull_request`), so
+// the same check is judged against two snapshots. `no-overlap` concluded
+// failure at 19:53:50 and success at 20:13:58 on the same sha, and the union
+// made it permanently red — the queue could not drain.
+test('the newest run of a check wins, so a stale red does not outlive the world', () => {
+  const green = run('tsc + named gates', 'success', { completed_at: '2026-09-30T20:13:58Z' });
+  const staleRed = run('no-overlap', 'failure', { completed_at: '2026-09-30T19:53:50Z' });
+  const freshGreen = run('no-overlap', 'success', { completed_at: '2026-09-30T20:14:01Z' });
+  const res = evaluateChecks({ checkRuns: [staleRed, freshGreen, green] });
+  assert.equal(res.decision, 'merge', `reason: ${res.reason}`);
+  assert.equal(res.failed.length, 0);
+});
+
+test('a newer red still refuses — recency is not an excuse to ignore a failure', () => {
+  const olderGreen = run('no-overlap', 'success', { completed_at: '2026-09-30T19:53:50Z' });
+  const newerRed = run('no-overlap', 'failure', { completed_at: '2026-09-30T20:14:01Z' });
+  const res = evaluateChecks({ checkRuns: [olderGreen, newerRed, run('tsc + named gates', 'success')] });
+  assert.equal(res.decision, 'refuse');
+  assert.match(res.reason, /not green/);
+});
+
+test('a still-running newest run waits rather than reading as a pass', () => {
+  const done = run('no-overlap', 'failure', { completed_at: '2026-09-30T19:53:50Z' });
+  const rerunning = { name: 'no-overlap', status: 'in_progress', conclusion: null, completed_at: '2026-09-30T20:14:01Z' };
+  const res = evaluateChecks({ checkRuns: [done, rerunning, run('tsc + named gates', 'success')] });
+  assert.equal(res.decision, 'wait', `reason: ${res.reason}`);
+});
+
+test('unstamped runs keep worst-wins, so bare fixtures behave as before', () => {
+  const res = evaluateChecks({
+    checkRuns: [run('tsc + named gates', 'success'), run('no-overlap', 'success'), run('no-overlap', 'failure')],
+  });
+  assert.equal(res.decision, 'refuse');
+  assert.match(res.reason, /not green/);
 });
 
 test('the PR state is judged separately from the checks', () => {
@@ -391,7 +462,13 @@ test('E2E: a green head merges exactly once, and the branch is deleted', async (
     const res = await runDriver(fake.port);
     assert.equal(res.code, 0, `driver exited 0 (stderr: ${res.stderr})`);
     assert.equal(fake.calls.merge.length, 1, 'exactly one merge call');
-    assert.deepEqual(fake.calls.merge[0], { merge_method: 'squash' });
+    // The squash commit is the durable record the next agent reads: the merge
+    // must carry the PR title+body so `## Left` survives in `git log`.
+    assert.deepEqual(fake.calls.merge[0], {
+      merge_method: 'squash',
+      commit_title: OPEN_PR.title,
+      commit_message: OPEN_PR.body,
+    });
     assert.equal(fake.calls.deleted.length, 1);
     assert.match(res.stdout, /merge/);
     assert.equal(fake.calls.comments.length, 1, 'the merge result is posted on the PR');
@@ -400,6 +477,123 @@ test('E2E: a green head merges exactly once, and the branch is deleted', async (
       ['all'],
       'every poll asks for all check runs, never the collapsing `latest` default',
     );
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: the squash message is the PR body, so ## Left survives in git log', async () => {
+  // Measured 2026-09-30: 0 of 16 squash commits preserved `## Left`, because the
+  // merge call sent no commit_message and GitHub minted the body from the
+  // branch's commit list. The PR body is the only place Left lives, so the
+  // driver must pass it through verbatim.
+  const body = [
+    '## Summary',
+    '',
+    'Does the thing.',
+    '',
+    '## Status',
+    '',
+    'Done.',
+    '',
+    '## Left',
+    '',
+    '- the exact next step',
+    '',
+    'Author: Test Model 1.0 (high) VM',
+    '',
+  ].join('\n');
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, title: 'feat: the thing', body }],
+  });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(res.code, 0, `driver exited 0 (stderr: ${res.stderr})`);
+    assert.equal(fake.calls.merge.length, 1, 'exactly one merge call');
+    assert.equal(fake.calls.merge[0].commit_title, 'feat: the thing');
+    assert.equal(fake.calls.merge[0].commit_message, body, 'THE ASSERTION: the full PR body, including ## Left, becomes the squash message');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: an empty PR body mints no blank squash message', async () => {
+  // Auto-PR bodies carry only a trailer; sending an empty commit_message would
+  // mint a blank squash body. Omit it and let GitHub default instead.
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, title: 'fix: auto', body: '' }],
+  });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(res.code, 0, `driver exited 0 (stderr: ${res.stderr})`);
+    assert.equal(fake.calls.merge.length, 1, 'exactly one merge call');
+    assert.equal(fake.calls.merge[0].commit_title, 'fix: auto');
+    assert.ok(!('commit_message' in fake.calls.merge[0]), 'no blank commit_message sent');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: an open dependency holds the merge and names the blocker', async () => {
+  // The #365/#372 class: landing out of order is how hunks get hand-reverted.
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, body: '## Left\n\nNext: #9\n\nDepends-On: #8\n' }],
+    pullStates: { 8: { state: 'open' } },
+  });
+  try {
+    await runDriver(fake.port, ['--wait=0']);
+    assert.equal(fake.calls.merge.length, 0, 'THE ASSERTION: no merge while #8 is open');
+    assert.match(fake.calls.comments[0], /held behind #8/, 'the hold names the blocker on the PR');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: the hold releases when the dependency lands', async () => {
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, body: '## Left\n\nNext: #9\n\nDepends-On: #8\n' }],
+    pullPlans: { 8: [{ state: 'open' }, { state: 'closed', merged_at: '2026-09-30T00:00:00Z' }] },
+  });
+  try {
+    // Bounded budget: a broken release burns 20s, never the 900s default.
+    const res = await runDriver(fake.port, ['--wait=20']);
+    assert.equal(res.code, 0, `driver exited 0 (stderr: ${res.stderr})`);
+    assert.equal(fake.calls.merge.length, 1, 'THE ASSERTION: held, then merged exactly once');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: a merged dependency is satisfied silently', async () => {
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, body: '## Left\n\nNext: #9\n\nDepends-On: #8\n' }],
+    pullStates: { 8: { state: 'closed', merged_at: '2026-09-30T00:00:00Z' } },
+  });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(res.code, 0, `driver exited 0 (stderr: ${res.stderr})`);
+    assert.equal(fake.calls.merge.length, 1, 'merges');
+    assert.equal(fake.calls.comments.length, 1, 'no hold comment — only the merge result');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: depending on itself refuses immediately', async () => {
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, number: 7, body: '## Left\n\nNext: #9\n\nDepends-On: #7\n' }],
+  });
+  try {
+    const res = await runDriver(fake.port, ['--wait=0']);
+    assert.equal(res.code, 1);
+    assert.equal(fake.calls.merge.length, 0, 'never merges');
+    assert.match(fake.calls.comments[0], /itself/, 'the refusal names the self-reference');
   } finally {
     await fake.close();
   }
@@ -840,4 +1034,322 @@ test('E2E: --evaluate raises no alarm and files nothing', async () => {
   } finally {
     await fake.close();
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pre-merge landed-work judgement.
+//
+// The landed-work rule ("a change may extend landed work and may not silently
+// erase it") was only ever judged post-merge for this repo's PRs: push `ci`
+// skips the step because its event carries no PR body, and auto-pr's
+// token-opened PRs run zero jobs. `d18568f6` landed three rewritten lines with
+// no declaration that way and turned `main` red, stalling every agent PR behind
+// it. So the rule is now judged before the merge, where a mistake is a comment
+// on the PR instead of a broken main.
+//
+// These tests drive the real judgement against real git. A stubbed diff would
+// prove the wiring and nothing about the rule.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const gitIn = (dir, ...argv) =>
+  execFileSync('git', ['-C', dir, ...argv], { encoding: 'utf8' }).trim();
+
+const scratchDirs = [];
+function scratchRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'premerge-undo-'));
+  scratchDirs.push(dir);
+  gitIn(dir, 'init', '-q', '-b', 'main');
+  gitIn(dir, 'config', 'user.name', 'premerge test');
+  gitIn(dir, 'config', 'user.email', 'premerge@test');
+  return dir;
+}
+
+function commitIn(dir, files, message) {
+  for (const [file, text] of Object.entries(files)) {
+    const p = path.join(dir, file);
+    if (text === null) fs.rmSync(p, { force: true });
+    else fs.writeFileSync(p, text);
+  }
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, 'commit', '-q', '-m', message);
+  return gitIn(dir, 'rev-parse', 'HEAD');
+}
+
+/**
+ * `main` carries a distinctive landed line, and a branch is forked from it.
+ *
+ * The branch matters: the judgement compares the branch's own diff against what
+ * `main` has landed, so a fixture that commits "the change" straight onto `main`
+ * makes the landed ref and the head the same commit — nothing to attribute, and
+ * a gate that silently finds nothing in that setup would look exactly like a
+ * working one.
+ */
+function repoWithLandedLine() {
+  const dir = scratchRepo();
+  commitIn(dir, { 'base.txt': 'a file\n' }, 'seed');
+  const owner = commitIn(
+    dir,
+    { 'feat.txt': 'keep me\nTHE DISTINCTIVE LANDED LINE\nand me\n' },
+    'land a feature\n\nAuthor: Test Model 1.0 (high) VM\n',
+  );
+  gitIn(dir, 'checkout', '-q', '-b', 'agent/probe');
+  return { dir, owner };
+}
+
+const judge = (repo, head, body = '') =>
+  judgeBranchAgainstLandedWork({ pr: { head: { sha: head }, body }, baseBranch: 'main', repo });
+
+test.after(() => {
+  for (const dir of scratchDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('the decision has exactly three answers', () => {
+  assert.deepEqual(Object.values(PREMERGE_DECISIONS).sort(), ['merge', 'refuse', 'unknown']);
+});
+
+test('an add-only branch is judged clean and merges', () => {
+  const { dir } = repoWithLandedLine();
+  const head = commitIn(dir, { 'new.txt': 'brand new\n' }, 'add a file');
+  assert.equal(judge(dir, head).decision, PREMERGE_DECISIONS.MERGE);
+});
+
+test('an undeclared rewrite of a landed line refuses, and names its owner', () => {
+  const { dir, owner } = repoWithLandedLine();
+  const head = commitIn(dir, { 'feat.txt': 'keep me\nand me\n' }, 'quietly drop the landed line');
+  const v = judge(dir, head, '## Summary\nAn ordinary-looking PR body.\n');
+  assert.equal(v.decision, PREMERGE_DECISIONS.REFUSE);
+  assert.equal(v.violations.length, 1);
+  assert.match(v.violations[0].file, /feat\.txt/);
+  assert.ok(String(v.violations[0].owner).startsWith(owner.slice(0, 8)), 'the violation names the owning commit');
+});
+
+test('the same branch merges once the PR body declares the rewrite', () => {
+  const { dir, owner } = repoWithLandedLine();
+  const head = commitIn(dir, { 'feat.txt': 'keep me\nand me\n' }, 'drop it, deliberately');
+  const v = judge(dir, head, `Reverts: ${owner} — this is a deliberate change to landed work\n`);
+  assert.equal(v.decision, PREMERGE_DECISIONS.MERGE);
+});
+
+test('declaring a DIFFERENT commit does not wave the violation through', () => {
+  // The cheapest way to neuter this gate would be for any declaration to pass.
+  const { dir } = repoWithLandedLine();
+  const head = commitIn(dir, { 'feat.txt': 'keep me\nand me\n' }, 'drop it');
+  const v = judge(dir, head, 'Reverts: 0000000 — declares something else entirely\n');
+  assert.equal(v.decision, PREMERGE_DECISIONS.REFUSE);
+});
+
+test('a deleted landed file is refused too, not only edited lines', () => {
+  const dir = scratchRepo();
+  commitIn(dir, { 'a.txt': 'keep\n' }, 'seed');
+  commitIn(dir, { 'gone.txt': 'landed content here\n' }, 'land a file');
+  gitIn(dir, 'checkout', '-q', '-b', 'agent/probe');
+  const head = commitIn(dir, { 'gone.txt': null }, 'delete a landed file');
+  const v = judge(dir, head, '');
+  assert.equal(v.decision, PREMERGE_DECISIONS.REFUSE);
+});
+
+test('a head with no SHA is unknown, never a silent pass', () => {
+  const { dir } = repoWithLandedLine();
+  const v = judge(dir, '');
+  assert.equal(v.decision, PREMERGE_DECISIONS.UNKNOWN);
+  assert.match(v.reason, /head SHA/);
+});
+
+test('an unresolvable base is unknown, never a silent pass', () => {
+  const { dir } = repoWithLandedLine();
+  const head = commitIn(dir, { 'x.txt': 'x\n' }, 'a commit');
+  const v = judgeBranchAgainstLandedWork({ pr: { head: { sha: head } }, baseBranch: 'no-such-branch', repo: dir });
+  assert.equal(v.decision, PREMERGE_DECISIONS.UNKNOWN);
+});
+
+test('unknown does not block: a gate that deadlocks on noise gets switched off', () => {
+  assert.equal(decideBranchUndo({ error: 'no merge-base' }).decision, PREMERGE_DECISIONS.UNKNOWN);
+  assert.equal(decideBranchUndo({ error: 'no merge-base' }).decision !== PREMERGE_DECISIONS.REFUSE, true);
+});
+
+test('the refusal names the owner and both valid ways out', () => {
+  const v = decideBranchUndo({ violations: [{ file: 'feat.txt', line: 2, owner: 'abcdef1234' }] });
+  const body = describePremergeRefusal(v);
+  assert.match(body, /Merge refused/);
+  assert.match(body, /feat\.txt/, 'names the file');
+  assert.match(body, /abcdef12/, 'names the owning commit');
+  assert.match(body, /Extend, don't erase/, 'offers the first way out');
+  assert.match(body, /Reverts: <sha>/, 'offers the declaration');
+});
+
+test('the refusal says how to proceed, because editing a body is not a push', () => {
+  // This gate runs on PUSH. Editing a PR body is not a push, so nothing re-runs
+  // it — a refusal that does not say so is a dead end, and a dead end is a
+  // stall. Found live: this gate refused its own PR for a declaration added
+  // minutes later, and the comment had to be read to learn the next move.
+  const v = decideBranchUndo({ violations: [{ file: 'a.md', line: 1, owner: 'abc12345' }] });
+  const withPr = describePremergeRefusal({ ...v, prNumber: 415 });
+  assert.match(withPr, /gh workflow run auto-merge\.yml -f pr=415/, 'names the exact re-run command');
+  assert.match(withPr, /push any commit/, 'and the alternative');
+  const withoutPr = describePremergeRefusal(v);
+  assert.match(withoutPr, /re-run the merge job/, 'still says something useful with no PR number');
+});
+
+test('a refusal with no PR number never renders a literal null', () => {
+  const v = decideBranchUndo({ violations: [{ file: 'a.md', line: 1, owner: 'abc12345' }] });
+  const body = describePremergeRefusal(v);
+  assert.doesNotMatch(body, /(^|\n)null(\n|$)/, 'a missing optional must not leak into prose');
+  assert.doesNotMatch(body, /undefined/);
+  assert.equal(body.trimEnd().endsWith('.'), true, 'and it ends on a sentence, not a stray token');
+});
+
+test('the refusal is not posted for a merge or an unknown', () => {
+  assert.equal(describePremergeRefusal({ decision: PREMERGE_DECISIONS.MERGE, violations: [] }), '');
+  assert.equal(describePremergeRefusal({ decision: PREMERGE_DECISIONS.UNKNOWN, violations: [] }), '');
+});
+
+test('a violation that is already a string still formats', () => {
+  assert.deepEqual(formatViolations(['feat.txt: raw text form']), ['- feat.txt: raw text form']);
+});
+
+test('a degraded environment logs loudly but is NOT commented on the PR', () => {
+  // The reason is specific: this shares a channel with the refusal that must be
+  // read. A signal that fires on infrastructure noise is one people stop reading.
+  const line = describePremergeUnknown({ reason: 'no merge-base for main..abc' });
+  assert.match(line, /did not run/);
+  assert.match(line, /not blocking/);
+  assert.match(line, /main/, 'says where the rule is still enforced');
+  assert.doesNotMatch(line, /^#/m, 'it is a log line, not a markdown block');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The body is the declaration source, and it can change while the checks run.
+//
+// Measured 2026-09-30: #414's `Reverts:` line was patched onto its PR during the
+// wait, the driver had read the body once at the start, the squash carried the
+// auto-PR skeleton instead, the post-merge verification judged the skeleton,
+// found seven undeclared lines and red-mained `main` (issue #416). The same
+// staleness produces the mirror-image failure in the other direction: a branch
+// that DOES declare reads as undeclared and gets refused for nothing.
+//
+// These E2E run the real driver in a real scratch repo, so the judgement is the
+// real judgement and the only thing faked is GitHub.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A branch that really erases a landed line, in a repo the driver can judge. */
+function scratchRewriteTree() {
+  const dir = scratchRepo();
+  commitIn(dir, { 'seed.txt': 'seed\n' }, 'seed');
+  const owner = commitIn(
+    dir,
+    { 'feat.txt': 'keep me\nTHE DISTINCTIVE LANDED LINE\nand me\n' },
+    'land a feature\n\nAuthor: Test Model 1.0 (high) VM\n',
+  );
+  gitIn(dir, 'checkout', '-q', '-b', 'agent/rewrite');
+  const head = commitIn(dir, { 'feat.txt': 'keep me\nand me\n' }, 'erase it');
+  return { dir, head, owner };
+}
+
+test('E2E: a declaration added while the checks ran is seen — no refusal for nothing', async () => {
+  const tree = scratchRewriteTree();
+  const stale = '## Summary\n\nGreen head, body not written yet.\n';
+  const fresh = `## Summary\n\nPatched during the wait.\n\nReverts: ${tree.owner} — deliberate.\n`;
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    // The LIST route (how the driver finds the PR) keeps serving the stale body;
+    // the numbered route is the re-read and answers the fresh one.
+    prs: [{ ...OPEN_PR, head: { sha: tree.head }, body: stale }],
+    pullPlans: { 7: [{ body: fresh, head: { sha: tree.head } }] },
+  });
+  try {
+    const res = await runDriver(fake.port, [], { cwd: tree.dir });
+    assert.equal(res.code, 0, `expected a merge (stderr: ${res.stderr})`);
+    assert.equal(fake.calls.merge.length, 1, 'the fresh declaration was honoured');
+    // The driver comments the merge result, so the assertion is on what was NOT
+    // said: no refusal. Asserting `comments.length === 0` would fail on the
+    // success notice and prove nothing about the gate.
+    assert.equal(
+      fake.calls.comments.filter((c) => /Merge refused/.test(String(c.body || ''))).length,
+      0,
+      'nothing was refused',
+    );
+    assert.equal(fake.calls.merge[0].commit_message, fresh, 'the squash carries the body read at merge time');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: a declaration REMOVED before the merge is still caught', async () => {
+  // The early judgement is feedback; the one before the merge PUT is the
+  // decision. If the body stops declaring between the two, the merge must not
+  // proceed — otherwise the gate can be satisfied by an edit nobody counted on.
+  const tree = scratchRewriteTree();
+  const declared = `## Summary\n\nDeclared at first.\n\nReverts: ${tree.owner} — deliberate.\n`;
+  const skeleton = '## Summary\n\n## Status\n\n## Left\n';
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, head: { sha: tree.head }, body: declared }],
+    // First read (early judgement) declares; second read (before the merge)
+    // does not.
+    pullPlans: { 7: [{ body: declared, head: { sha: tree.head } }, { body: skeleton, head: { sha: tree.head } }] },
+  });
+  try {
+    const res = await runDriver(fake.port, [], { cwd: tree.dir });
+    assert.equal(res.code, 1, 'the merge was refused');
+    assert.equal(fake.calls.merge.length, 0, 'THE ASSERTION: no merge on an undeclared rewrite');
+    assert.equal(fake.calls.comments.length, 1, 'and the refusal is on the PR');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: an undeclared rewrite is refused before the checks are even polled', async () => {
+  const tree = scratchRewriteTree();
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, head: { sha: tree.head }, body: '## Summary\n\nNothing declared.\n' }],
+  });
+  try {
+    const res = await runDriver(fake.port, [], { cwd: tree.dir });
+    assert.equal(res.code, 1);
+    assert.equal(fake.calls.merge.length, 0);
+    assert.equal(fake.calls.checkPolls, 0, 'refused on the branch, before waiting out the checks');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('a failed re-read keeps the body at hand and never throws', async () => {
+  const pr = { body: 'the body we have\n', title: 'the title we have' };
+  const client = { call: async () => { throw new Error('503'); } };
+  const ok = await refreshPr(client, { owner: 'o', repo: 'r', number: 7, pr });
+  assert.equal(ok, false);
+  assert.equal(pr.body, 'the body we have\n', 'a read failure is not a merge failure');
+  assert.equal(pr.title, 'the title we have');
+});
+
+test('a re-read takes only strings, so a null body cannot erase a declaration', async () => {
+  const pr = { body: 'Reverts: abc1234 — declared\n', title: 't' };
+  const client = { call: async () => ({ body: null, title: 42 }) };
+  await refreshPr(client, { owner: 'o', repo: 'r', number: 7, pr });
+  assert.match(pr.body, /Reverts: abc1234/, 'a null body must not wipe what we have');
+  assert.equal(pr.title, 't');
+});
+
+test('the workflow gives the job the history the judgement needs', () => {
+  // fetch-depth 1 (the default) checks out one commit: no origin/main, no fork
+  // point, so the gate would degrade to `unknown` on every PR — which is
+  // indistinguishable from a gate nobody turned on.
+  const wf = fs.readFileSync(path.join(ROOT, '.github/workflows/auto-merge.yml'), 'utf8');
+  assert.match(wf, /fetch-depth:\s*0/, 'auto-merge must check out the history it judges against');
+});
+
+test('the same judgement is the one CI and post-merge run', () => {
+  // One implementation, three call sites — not three implementations.
+  const driver = fs.readFileSync(path.join(ROOT, 'scripts/auto-merge.mjs'), 'utf8');
+  assert.match(driver, /from '\.\/lib\/no-undo\.mjs'/, 'the driver reuses checkRange');
+  assert.match(driver, /judgeBranchAgainstLandedWork/, 'and calls it before merging');
+  // Anchor on the CALL, not the definition: `waitForDecision` is also declared
+  // near the top of the file, and matching that would compare against the wrong
+  // line and pass on a driver that had the judgement wired in after the wait.
+  const idx = driver.indexOf('judgeBranchAgainstLandedWork({ pr, baseBranch: undoBase })');
+  const waitIdx = driver.indexOf('await waitForDecision(client, {');
+  assert.ok(idx > 0, 'the judgement is called');
+  assert.ok(waitIdx > 0, 'the wait is called');
+  assert.ok(idx < waitIdx, 'the judgement runs BEFORE waiting on checks, so a rewrite is reported early');
 });

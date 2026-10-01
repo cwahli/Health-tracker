@@ -49,6 +49,11 @@ export const OPEN_PR = {
   number: 7,
   state: 'open',
   draft: false,
+  title: 'fix: green head',
+  // Carries a `## Left` section on purpose: the driver must pass the PR body
+  // through as the squash message (see auto-merge.mjs), and the default E2E
+  // below pins that shape — a body without Left would make the pin vacuous.
+  body: '## Summary\n\nGreen head.\n\n## Status\n\nDone.\n\n## Left\n\nNothing left.\n',
   base: { ref: 'main' },
   head: { sha: HEAD_SHA },
 };
@@ -85,6 +90,12 @@ const ROUTES = {
  *   requests, as the real endpoint does, so the callers' filtering is exercised)
  * @param {boolean}  opts.issueFails  make every issue route a 403, so the
  *   "could not report" path is drivable and not just claimed
+ * @param {object}   opts.pullStates  per-number PR overrides for `GET
+ *   /pulls/:n` (dependency states), merged over the default open PR
+ * @param {object}   opts.pullPlans  per-number state SEQUENCES for
+ *   `GET /pulls/:n`: each read shifts one entry (last repeats), so a
+ *   dependency can be open on the first poll and merged on the next —
+ *   the transition the hold exists for
  */
 export function startFakeGitHub({
   checkPlans = [[]],
@@ -96,6 +107,8 @@ export function startFakeGitHub({
   mainCheckPlans = null,
   openIssues = [],
   issueFails = false,
+  pullStates = {},
+  pullPlans = {},
 } = {}) {
   const calls = {
     merge: [],
@@ -139,7 +152,17 @@ export function startFakeGitHub({
         calls.prListReads += 1;
         return send(200, prs === null ? [OPEN_PR] : prs);
       }
-      if (ROUTES.pr.test(route)) return send(200, (prs && prs[0]) || OPEN_PR);
+      if (ROUTES.pr.test(route)) {
+        const n = Number(url.pathname.split('/').pop());
+        const base = (prs && prs[0]) || OPEN_PR;
+        const plan = pullPlans[n];
+        if (plan && plan.length) {
+          const state = plan.length > 1 ? plan.shift() : plan[0];
+          return send(200, { ...base, number: n, ...state });
+        }
+        if (Number.isFinite(n) && pullStates[n]) return send(200, { ...base, number: n, ...pullStates[n] });
+        return send(200, base);
+      }
       if (ROUTES.gitRef.test(route)) return send(200, { object: { sha: MAIN_SHA } });
       if (ROUTES.checks.test(route)) {
         // Main's head is a different commit from the PR head, and the driver reads

@@ -23,6 +23,7 @@
  * one place and the transport cannot add a second creation path.
  */
 
+import fs from 'node:fs';
 import http from 'node:http';
 
 import { PIPELINE_STEPS } from './bot-forge-core.mjs';
@@ -92,9 +93,10 @@ export function forgePageHtml({ apiBase = '/api' } = {}) {
   body { margin: 0; padding: 16px; background: #101418; color: #e8eef4;
          font: 15px/1.45 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
   h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 14px; margin: 26px 0 4px; color: #cfdae4; }
   p.lede { color: #9fb0c0; margin: 0 0 16px; font-size: 13px; }
   label { display: block; margin: 12px 0 4px; font-size: 13px; color: #9fb0c0; }
-  input { width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px;
+  input, select { width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px;
           border: 1px solid #2b3642; background: #161c22; color: inherit; font: inherit; }
   button { margin-top: 16px; width: 100%; padding: 12px; border: 0; border-radius: 8px;
            background: #2f7d4f; color: #fff; font: inherit; font-weight: 600; }
@@ -120,7 +122,7 @@ export function forgePageHtml({ apiBase = '/api' } = {}) {
     <label for="name">Bot name</label>
     <input id="name" name="name" placeholder="VM3 Bot" autocomplete="off" required>
     <label for="token">Bot token</label>
-    <input id="token" name="token" placeholder="123456789:AA…" autocomplete="off">
+    <input id="token" name="token" placeholder="Leave empty for 1-click, or paste the full token" autocomplete="off">
     <p class="lede" id="tokenHint">Leave the token empty to let the userbot ask @BotFather. If that is not configured,
       open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a>, send <code>/newbot</code>,
       and paste the token here.</p>
@@ -130,9 +132,44 @@ export function forgePageHtml({ apiBase = '/api' } = {}) {
   <ol class="steps" id="steps"></ol>
   <div class="note" id="note">Checking this host…</div>
 
+  <h2>Finish a row that exists</h2>
+  <p class="lede" id="attachLede">A row with no working token yet is listed here.</p>
+  <form id="attach">
+    <label for="existing">Bot already in the registry</label>
+    <select id="existing"></select>
+    <label for="attachToken">Its @BotFather token</label>
+    <input id="attachToken" name="attachToken" placeholder="123456789:AA…" autocomplete="off">
+    <button id="attachSubmit" type="submit">Attach token</button>
+  </form>
+
 <script>
 const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
 if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
+
+// Same three-step order as the TUI exchange page: the bare Telegram global,
+// then window.Telegram, then the tgWebAppData launch param in the URL hash.
+// Some clients never inject window.Telegram but still carry the launch params
+// in the hash. A plain browser (no Telegram, no hash) yields '' and fails
+// closed at the server exactly as before.
+function forgeInitData() {
+  try {
+    if (typeof Telegram !== 'undefined' && Telegram && Telegram.WebApp && Telegram.WebApp.initData) {
+      return String(Telegram.WebApp.initData);
+    }
+  } catch (e) {}
+  try {
+    if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
+      return String(window.Telegram.WebApp.initData);
+    }
+  } catch (e) {}
+  try {
+    if (typeof location !== 'undefined' && location && location.hash) {
+      var data = new URLSearchParams(String(location.hash).replace(/^#/, '')).get('tgWebAppData');
+      if (data) return String(data);
+    }
+  } catch (e) {}
+  return '';
+}
 
 const el = (id) => document.getElementById(id);
 const stepsEl = el('steps');
@@ -158,57 +195,116 @@ function say(text, isError) {
   noteEl.className = isError ? 'note err' : 'note';
 }
 
+function showNote(text, isError) {
+  say(text, isError);
+  try { if (noteEl.scrollIntoView) noteEl.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+}
+
+// Same shape check as the server (bot-forge-core validateToken): <bot id>:<secret>.
+// A placeholder paste must fail HERE, next to the button — not as a receipt
+// below the fold where a tap looks like it did nothing.
+function tokenShapeError(token) {
+  const value = String(token || '').trim();
+  if (!value) return '';
+  if (/^\\d{5,12}:[A-Za-z0-9_-]{30,50}$/.test(value)) return '';
+  return 'that does not look like a bot token. @BotFather gives one line shaped like 123456789:AA… (30-50 characters after the colon); a name, a truncated paste and a username all fail this check on purpose. Leave it empty for 1-click, or paste the full line.';
+}
+
+function botLabel(bot) {
+  const name = bot.name && bot.name !== bot.id ? ' (' + bot.name + ')' : '';
+  return bot.id + name + (bot.enabled ? '' : ' — no token yet');
+}
+
+function fillExisting(bots) {
+  const select = el('existing');
+  const chosen = select.value;
+  select.innerHTML = '';
+  for (const bot of bots) {
+    const option = document.createElement('option');
+    option.value = bot.id;
+    option.textContent = botLabel(bot);
+    select.append(option);
+  }
+  if (chosen) select.value = chosen;
+  el('attachSubmit').disabled = bots.length === 0;
+  if (!bots.length) el('attachLede').textContent = 'The registry has no rows yet — create one above.';
+  else if (bots.some((b) => !b.enabled)) el('attachLede').textContent = 'A row with no working token yet is listed here. Paste its token and the same pipeline finishes it without writing a second row.';
+  else el('attachLede').textContent = 'Every row is already enabled, so attaching a token here rotates it.';
+}
+
 async function loadState() {
   try {
     const res = await fetch('${apiBase}/state', {
-      headers: { 'x-telegram-init-data': tg ? String(tg.initData || '') : '' },
+      headers: { 'x-telegram-init-data': forgeInitData() },
     });
     const state = await res.json();
-    const bots = (state.bots || []).join(', ') || 'none';
+    if (!state.ok) {
+      say(state.reason || 'could not read forge state', true);
+      return;
+    }
+    const bots = Array.isArray(state.bots) ? state.bots : [];
+    fillExisting(bots);
+    const list = bots.map(botLabel).join(', ') || 'none';
     const userbot = state.userbot && state.userbot.configured
       ? 'userbot ready (@BotFather automation is on).'
       : 'userbot not configured: ' + ((state.userbot && state.userbot.reason) || 'unknown') +
         '\\nThe paste path below works without it.';
-    say('master: ' + state.master + '\\nbots: ' + bots + '\\n' + userbot);
-    if (state.userbot && !state.userbot.configured) {
-      el('tokenHint').textContent = state.userbot.reason;
-    }
+    say('master: ' + state.master + '\\nbots: ' + list + '\\n' + userbot);
   } catch (err) {
     say('could not read forge state: ' + err.message, true);
+  }
+}
+
+async function post(input) {
+  stepsEl.innerHTML = '';
+  showNote((input.mode === 'attach' ? 'attaching a token to ' : 'creating ') + (input.id || input.name) + '…');
+  try {
+    const res = await fetch('${apiBase}/forge', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-telegram-init-data': forgeInitData(),
+      },
+      body: JSON.stringify(input),
+    });
+    const body = await res.json();
+    if (Array.isArray(body.steps)) renderSteps(body.steps);
+    if (res.ok === false || body.ok === false) {
+      showNote((body.reason || 'the forge stopped') + (body.hostCommands && body.hostCommands.length ? '\\n\\n' + body.hostCommands.join('\\n') : ''), true);
+      return false;
+    }
+    const bot = body.bot || {};
+    showNote((bot.attached ? 'attached the token to ' : 'created ') + (bot.id || input.id) + '. It replies in Telegram once the host finishes enabling it.', false);
+    return true;
+  } catch (err) {
+    showNote('request failed: ' + err.message, true);
+    return false;
   }
 }
 
 el('forge').addEventListener('submit', async (event) => {
   event.preventDefault();
   const name = String(el('name').value || '').trim();
-  const token = String(el('token').value || '').trim();
   if (!name) return;
+  const bad = tokenShapeError(el('token').value);
+  if (bad) { showNote(bad, true); return; }
   el('submit').disabled = true;
-  say('creating ' + name + '…');
-  stepsEl.innerHTML = '';
-  try {
-    const res = await fetch('${apiBase}/forge', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-telegram-init-data': tg ? String(tg.initData || '') : '',
-      },
-      body: JSON.stringify({ name, token }),
-    });
-    const body = await res.json();
-    if (Array.isArray(body.steps)) renderSteps(body.steps);
-    if (res.ok === false || body.ok === false) {
-      say((body.reason || 'creation failed') + (body.hostCommands && body.hostCommands.length ? '\\n\\n' + body.hostCommands.join('\\n') : ''), true);
-    } else {
-      say('created ' + body.bot.id + '. It replies in Telegram once the host finishes enabling it.', false);
-      el('token').value = '';
-    }
-  } catch (err) {
-    say('request failed: ' + err.message, true);
-  } finally {
-    el('submit').disabled = false;
-    loadState();
-  }
+  if (await post({ name, token: String(el('token').value || '').trim() })) el('token').value = '';
+  el('submit').disabled = false;
+  loadState();
+});
+
+el('attach').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const id = String(el('existing').value || '').trim();
+  const token = String(el('attachToken').value || '').trim();
+  if (!id || !token) return;
+  const bad = tokenShapeError(token);
+  if (bad) { showNote(bad, true); return; }
+  el('attachSubmit').disabled = true;
+  if (await post({ mode: 'attach', id, token })) el('attachToken').value = '';
+  el('attachSubmit').disabled = false;
+  loadState();
 });
 
 renderSteps(${JSON.stringify(PIPELINE_STEPS.map((s) => ({ ...s, status: 'pending' })))});
@@ -255,12 +351,19 @@ function sendJson(res, status, payload) {
  * the gateway passes its initData check (its token set is `TUI_BOT_TOKEN_<id>`,
  * not the registry's `<id>_BOT_TOKEN`). It returns { ok, status, reason, via }.
  *
+ * `registryPath` is where the registry file lives. When given, a state request
+ * re-reads it instead of serving the object parsed at construction: the forge
+ * itself writes new rows to that file, so a gateway started before the last
+ * create must still list it. The passed `registry` object stays the fallback
+ * for an unreadable or mid-write file.
+ *
  * Returns `false` when the path is not the forge's, so a mounting server can
  * fall through to its own routes.
  */
 export function createForgeHandler({
   env = process.env,
   registry = {},
+  registryPath = '',
   runCreate,
   buildRegistryView = null,
   allowLocal = true,
@@ -275,6 +378,19 @@ export function createForgeHandler({
   const statePath = `${apiBase}/state`;
   const forgePath = `${apiBase}/forge`;
 
+  // The registry file is written by the create pipeline, so the state view
+  // must be the file as of the request, not as of gateway start. The parsed
+  // object passed at construction is the fallback: a read or parse error
+  // (file mid-write) degrades to the startup snapshot, never to a blank page.
+  const readStateRegistry = () => {
+    if (!registryPath) return registry;
+    try {
+      return JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    } catch {
+      return registry;
+    }
+  };
+
   return async function handleForgeRequest(req, res) {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
     try {
@@ -287,11 +403,12 @@ export function createForgeHandler({
       }
 
       if (req.method === 'GET' && url.pathname === statePath) {
+        const stateRegistry = readStateRegistry();
         if (requireStateAuth) {
           const auth = authorize({
             initData: String(req.headers[FORGE_INIT_HEADER] || url.searchParams.get('initData') || ''),
             remoteAddress: req.socket?.remoteAddress || '',
-            registry,
+            registry: stateRegistry,
             env,
             allowLocal,
           });
@@ -301,7 +418,21 @@ export function createForgeHandler({
             return true;
           }
         }
-        const view = buildRegistryView ? buildRegistryView() : { master: registry.master || '', bots: (registry.bots || []).map((b) => b.id) };
+        // The page needs the rows, not just their ids: `enabled` is the honest
+        // "has no working token yet" signal, and the id/name pair is what the
+        // attach path targets. A caller may still inject its own view.
+        const view = buildRegistryView
+          ? buildRegistryView()
+          : {
+              master: stateRegistry.master || '',
+              bots: (stateRegistry.bots || []).map((b) => ({
+                id: b.id,
+                name: b.name || b.id,
+                enabled: b.enabled !== false,
+                tokenEnv: b.telegram?.tokenEnv || '',
+                runtime: b.runtime || 'bot-host',
+              })),
+            };
         const { userbotState } = await import('./tg-userbot.mjs');
         const userbot = await userbotState(env);
         sendJson(res, 200, { ok: true, ...view, userbot: { configured: userbot.configured, reason: userbot.reason, hostCommands: userbot.hostCommands } });

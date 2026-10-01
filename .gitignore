@@ -23,6 +23,11 @@ artifacts/
 # Local scratch (live captures, renders, replay scripts) — never commit
 tmp/
 qa-evidence/
+# meal-qa-proof.mjs renders per-stage DIAGRAMS here. Not L18 evidence — the
+# screenshots of the app come from meal-qa-l18.mjs and go to Drive. Generated
+# locally, so nothing to commit, but named apart from qa-evidence/ so a diagram
+# is never filed as proof of what the app showed.
+stage-diagrams/
 
 # Aider local
 .aider*

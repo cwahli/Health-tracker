@@ -737,6 +737,62 @@ describe('commands', () => {
     expect(parseCommand('/resume 5')).toEqual({ name: 'resume', args: '5', raw: '/resume 5' });
   });
 
+  it('/bugs reads the live store in the handler and formats count + cards deterministically', async () => {
+    const src = (await import('node:fs')).readFileSync(
+      new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8',
+    );
+    // The reply body is code, not model prose: the handler reads the store and
+    // the button rides alongside. A stale session can be wrong about phrasing,
+    // but not about this number (measured 2026-09-30: 4 cards quoted, 15 live).
+    expect(src).toContain("case 'bugs'");
+    expect(src).toMatch(/runBugctl\(\['list', '--json'\]\)/);
+    expect(src).toContain('bugsListText');
+    expect(src).toContain('formatBugsListText');
+  });
+
+  it('formatBugsListText quotes count, generated_at, and one line per card in number order', async () => {
+    const { formatBugsListText } = await import('../scripts/bot-host.mjs');
+    const text = formatBugsListText({
+      source: 'canonical-bug-list',
+      count: 3,
+      generated_at: '2026-09-30T22:34:55.138Z',
+      rows: [
+        { public_n: 7, title: 'Seventh', state: 'packed', queue: 'ready' },
+        { public_n: 1, title: 'First', state: 'in_fix', queue: 'in_progress' },
+        { public_n: 4, title: 'Fourth', state: 'packed', queue: 'blocked' },
+      ],
+    });
+    expect(text).toContain('3 cards');
+    expect(text).toContain('2026-09-30T22:34:55.138Z');
+    const lines = text.split('\n');
+    expect(lines.findIndex((l) => l.startsWith('#1 '))).toBeLessThan(lines.findIndex((l) => l.startsWith('#4 ')));
+    expect(lines.findIndex((l) => l.startsWith('#4 '))).toBeLessThan(lines.findIndex((l) => l.startsWith('#7 ')));
+    expect(text).toContain('#1 First (in_fix/in_progress)');
+    expect(text).toContain('#4 Fourth (packed/blocked)');
+  });
+
+  it('formatBugsListText says empty with count 0, and unreachable without inventing cards', async () => {
+    const { formatBugsListText } = await import('../scripts/bot-host.mjs');
+    const empty = formatBugsListText({ source: 'canonical-bug-list', count: 0, generated_at: '2026-09-30T22:34:55.138Z', rows: [] });
+    expect(empty).toContain('0 cards');
+    expect(empty).not.toContain('#');
+    const down = formatBugsListText({ error: 'connect ECONNREFUSED' });
+    expect(down).toMatch(/unreachable/i);
+    expect(down).not.toMatch(/#\d/);
+    expect(down).toContain('ECONNREFUSED');
+  });
+
+  it('formatBugsListText caps long queues behind the board button', async () => {
+    const { formatBugsListText } = await import('../scripts/bot-host.mjs');
+    const rows = Array.from({ length: 45 }, (_, i) => ({ public_n: i + 1, title: `Card ${i + 1}`, state: 'new', queue: 'ready' }));
+    const text = formatBugsListText({ source: 'canonical-bug-list', count: 45, generated_at: 'x', rows });
+    expect(text).toContain('45 cards');
+    expect(text).toContain('#40 ');
+    expect(text).not.toContain('#41 ');
+    expect(text).toMatch(/\+5 more/);
+    expect(text.length).toBeLessThan(4096);
+  });
+
   it('shows the effective model in status', () => {
     const config = {
       agent: { model: 'opencode-go/deepseek-v4.1-flash', variant: 'high', workspace: '/tmp' },

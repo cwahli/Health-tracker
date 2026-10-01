@@ -35,6 +35,27 @@ import { describeUserbot, parseBotFatherToken, usernameCandidates } from './bot-
 
 export const USERBOT_HANDLE = 'BotFather';
 
+/**
+ * Resolve the teleproto client classes from an imported module.
+ *
+ * teleproto (gramjs-derived) exports `TelegramClient` at top level but keeps
+ * `StringSession` under the `sessions` namespace — so a flat destructure of
+ * both dies with `StringSession is not a constructor`. This resolver is the
+ * one place that knows the shape, and it refuses with a sentence, not a
+ * TypeError, when the shape is wrong.
+ */
+export function resolveTeleproto(mod) {
+  const TelegramClient = mod?.TelegramClient;
+  const StringSession = mod?.sessions?.StringSession;
+  if (typeof TelegramClient !== 'function' || typeof StringSession !== 'function') {
+    return {
+      ok: false,
+      reason: `teleproto has an unexpected shape (TelegramClient: ${typeof TelegramClient}, sessions.StringSession: ${typeof StringSession}) — expected teleproto@1.229.0 with TelegramClient at top level and StringSession under sessions`,
+    };
+  }
+  return { ok: true, TelegramClient, StringSession };
+}
+
 export function sessionPath(env = process.env) {
   const explicit = String(env.TELEGRAM_USER_SESSION || '').trim();
   if (explicit) return explicit;
@@ -123,7 +144,9 @@ async function connect({ env = process.env } = {}) {
   let TelegramClient;
   let StringSession;
   try {
-    ({ TelegramClient, StringSession } = await import('teleproto'));
+    const resolved = resolveTeleproto(await import('teleproto'));
+    if (!resolved.ok) return { ok: false, reason: resolved.reason };
+    ({ TelegramClient, StringSession } = resolved);
   } catch (err) {
     return { ok: false, reason: `teleproto is not installed (${err.message}) — run: npm install (on the bot host)` };
   }
@@ -249,7 +272,9 @@ export async function login({ env = process.env, io = {} } = {}) {
   let TelegramClient;
   let StringSession;
   try {
-    ({ TelegramClient, StringSession } = await import('teleproto'));
+    const resolved = resolveTeleproto(await import('teleproto'));
+    if (!resolved.ok) return { ok: false, reason: resolved.reason };
+    ({ TelegramClient, StringSession } = resolved);
   } catch (err) {
     return { ok: false, reason: `teleproto is not installed (${err.message})` };
   }

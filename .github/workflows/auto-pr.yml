@@ -40,6 +40,11 @@ jobs:
           # content: auto-pr rewrites only its own block and the trailer
           # lines, so hand-written ## Summary/Status/Left sections (see the
           # PR body contract gate) survive every push.
+          # Title is set on CREATE only and never rewritten after: a human
+          # retitle (or the squash title the merger wants) must survive
+          # pushes. Proven 2026-09-30 on #380, whose hand-written umbrella
+          # title was flattened back to the first-commit subject on every
+          # push, landing a four-phase squash titled as phase one.
           TRAILER_RE='^(Agent|Author): [^ ].+ \([^)]+\)( [A-Za-z0-9][A-Za-z0-9._-]*)?$'
           git fetch --quiet origin main || true
           base="$(git merge-base origin/main HEAD 2>/dev/null || true)"
@@ -70,6 +75,12 @@ jobs:
             body="$managed"
             if [ -n "$(printf '%s' "$preserved" | tr -d '[:space:]')" ]; then
               body="$(printf '%s\n\n%s' "$body" "$preserved")"
+            else
+              # No author content yet (fresh auto-PR, or a wiped body): seed
+              # the contract skeleton so the next push has something to fill.
+              # The bare `Next:` fails the body gate on purpose — the sections
+              # must be written, not inherited blank.
+              body="$(printf '%s\n\n## Summary\n\n## Status\n\n## Left\n\nNext: ' "$body")"
             fi
             if [ -n "$trailers" ]; then
               body="$(printf '%s\n\n%s' "$body" "$trailers")"
@@ -84,10 +95,12 @@ jobs:
             prev="$(gh pr view "$me" --json body --jq .body 2>&1)" || {
               echo "::warning title=auto-pr read body failed::$prev"; prev=""; }
             build_body "$prev"
-            if ! out="$(gh pr edit "$me" --title "$title" --body "$body" 2>&1)"; then
+            # Body only: the title belongs to whoever set it last (human on
+            # create via --title above, or a later hand edit). Refs #380.
+            if ! out="$(gh pr edit "$me" --body "$body" 2>&1)"; then
               echo "::error title=auto-pr edit failed::$out"; exit 1
             fi
-            echo "updated PR #$me: $title"
+            echo "updated PR #$me"
             exit 0
           fi
 

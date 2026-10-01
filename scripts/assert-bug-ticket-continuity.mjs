@@ -8,7 +8,9 @@
  *  3. Artifact endpoints exist in serverBugSnapshot (defect/repro/plan/verify).
  *  4. There is NO agent-settable state route (no POST/PATCH .../state).
  *  5. Token guard (bugWriteGuard) is wired on write endpoints (A-f5).
- *  6. A-f1 fix present: /api/bugs/next no longer pre-slices LIMIT 100 on created_at ASC.
+ *  6. A-f1 fix present: /api/bugs/next no longer pre-slices LIMIT 100 on created_at ASC
+ *     (the window now lives in the shared loader, serverBugNumbers.ts, which is
+ *     what every bug read route uses — both files are checked).
  *  7. bugctl.mjs exists, is syntactically valid, and its help lists core commands.
  *  8. Journal path specs/bug-journal is the P1 D location (dir creatable).
  *  9. Offline projection walk: create→pack→attempt→verify derives the right states
@@ -76,8 +78,14 @@ check('bugWriteGuard defined (A-f5)', /function bugWriteGuard\b/.test(serverSrc)
 check('bugWriteGuard on attempts', /app\.post\('\/api\/bugs\/:tagId\/attempts',\s*bugWriteGuard/.test(serverSrc));
 check('bugWriteGuard on PATCH', /app\.patch\('\/api\/bugs\/:tagId',\s*bugWriteGuard/.test(serverSrc));
 check('bugWriteGuard on defect', /app\.post\('\/api\/bugs\/:tagId\/defect',\s*bugWriteGuard/.test(serverSrc));
-check('A-f1: next no longer LIMIT 100 on created_at ASC', !/status IN \('to_fix', 'in_progress'\) ORDER BY created_at ASC LIMIT 100/.test(serverSrc));
-check('A-f1: next uses large window', /ORDER BY updated_at DESC LIMIT 1000/.test(serverSrc));
+// A-f1 lives in the SHARED loader since 2026-09-30: /api/bugs/next, /api/bugs/queue
+// and the board all read serverBugNumbers.loadIssueTags(), so the window this rule
+// protects is declared there. Both halves are checked against the concatenation
+// of the route and the loader, because the regression this rule exists for is
+// about BEHAVIOUR (a small pre-sliced window) and either file could reintroduce it.
+const sharedSrc = serverSrc + read('serverBugNumbers.ts');
+check('A-f1: next no longer LIMIT 100 on created_at ASC', !/status IN \('to_fix', 'in_progress'\) ORDER BY created_at ASC LIMIT 100/.test(sharedSrc));
+check('A-f1: next uses large window', /ORDER BY updated_at DESC LIMIT 1000/.test(serverSrc) || /FROM issue_tags ORDER BY created_at ASC, id ASC LIMIT \?/.test(sharedSrc));
 check('projects bugState on writes', /projectBugState\(/.test(serverSrc));
 const stateSrc = read('src/utils/bugTicketState.ts');
 check(
@@ -104,7 +112,13 @@ if (fs.existsSync(ctlPath)) {
   check('bugctl writes journal', ctl.includes('bug-journal'));
   check('bugctl offline queue', ctl.includes('.bugctl-queue.jsonl') || ctl.includes('BUGCTL_QUEUE'));
   const skill = read('scripts/skills/common/bug-ticket/SKILL.md');
-  check('steward skill uses canonical list', skill.includes('bugctl.mjs list --json'));
+  // Either spelling is the canonical list. The shim (PR #404) moved the skill to
+  // the cwd-independent `bugctl list --json`; the old relative form is what lost
+  // the store on 2026-09-30, but pinning one SPELLING rather than the intent
+  // would forbid the fix. What must hold is that the skill tells the agent to
+  // read the canonical list at all.
+  check('steward skill uses canonical list', /bugctl(\.mjs)? list --json/.test(skill));
+  check('steward skill does not teach the cwd-dependent path', !/node scripts\/bugctl\.mjs/.test(skill));
   check('steward skill forbids dispatch', skill.includes('orchestrator-dispatcher') && /never/i.test(skill));
 }
 

@@ -21,9 +21,9 @@ import {
   validateToken,
   describeUserbot,
 } from './lib/bot-forge-core.mjs';
-import { negotiateBotToken } from './lib/tg-userbot.mjs';
+import { createBot, negotiateBotToken, resolveTeleproto } from './lib/tg-userbot.mjs';
 import { authorizeForge, createForgeHandler, forgePageHtml, isLoopback } from './lib/bot-forge-server.mjs';
-import { renderUserUnit, readMasterTokens, upsertMasterToken } from './bot-forge.mjs';
+import { runForge, renderUserUnit, readMasterTokens, upsertMasterToken } from './bot-forge.mjs';
 import { toTelegramCommands } from './lib/commands.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -185,6 +185,48 @@ test('a token already used by another registry bot is refused', () => {
   assert.match(plan.reason, /one token is one poller/);
 });
 
+test('an attach plan finishes a row that exists and borrows its name', () => {
+  const registry = registryFixture();
+  registry.bots.push({ id: 'pm', name: 'PM Bot', runtime: 'bot-host', enabled: false, extends: 'vm', telegram: { tokenEnv: 'PM_BOT_TOKEN' } });
+
+  const planned = planForge({ registry, mode: 'attach', id: 'pm', token: TOKEN });
+  assert.equal(planned.ok, true, planned.reason);
+  assert.equal(planned.plan.attached, true);
+  assert.equal(planned.plan.id, 'pm');
+  assert.equal(planned.plan.name, 'PM Bot', 'the row already knows its name');
+  assert.equal(planned.plan.tokenEnv, 'PM_BOT_TOKEN', 'and its own token key');
+  assert.equal(planned.plan.wasEnabled, false);
+
+  // A row that is already enabled is a rotation, not a new bot.
+  const rotate = planForge({ registry, mode: 'attach', id: 'vm', token: OTHER_TOKEN });
+  assert.equal(rotate.ok, true, rotate.reason);
+  assert.equal(rotate.plan.wasEnabled, true);
+
+  // Create still refuses the id, and now says which verb finishes it instead.
+  const clash = planForge({ registry, mode: 'create', name: 'PM Bot', token: OTHER_TOKEN });
+  assert.equal(clash.ok, false);
+  assert.match(clash.reason, /already in the registry/);
+  assert.match(clash.reason, /--attach=pm/);
+});
+
+test('attach refuses what it cannot do, and names the reason', () => {
+  const registry = registryFixture();
+  assert.match(planForge({ registry, mode: 'attach', id: 'vm9', token: TOKEN }).reason, /not in the registry/);
+  const userbot = planForge({ registry, mode: 'attach', id: 'vm2', tokenSource: 'userbot' });
+  assert.equal(userbot.ok, false);
+  assert.match(userbot.reason, /cannot mint a second one/);
+  assert.match(planForge({ registry, mode: 'attach', id: 'vm2', token: 'not-a-token' }).reason, /does not look like a bot token/);
+  assert.match(planForge({ registry: { bots: [] }, mode: 'typo', name: 'X Bot' }).reason, /unknown mode/);
+});
+
+test('attaching a token another row already carries is refused', () => {
+  const registry = registryFixture();
+  registry.bots[1].telegram.token = TOKEN; // vm2 holds it, and only one poller may
+  const planned = planForge({ registry, mode: 'attach', id: 'vm', token: TOKEN });
+  assert.equal(planned.ok, false);
+  assert.match(planned.reason, /one token is one poller/);
+});
+
 test('a token that is already the value of another master key is refused', () => {
   assert.match(tokenOwnershipConflict({ VM_BOT_TOKEN: TOKEN }, { token: TOKEN, tokenEnv: 'VM3_BOT_TOKEN' }), /already the value/);
   assert.equal(tokenOwnershipConflict({ VM3_BOT_TOKEN: TOKEN }, { token: TOKEN, tokenEnv: 'VM3_BOT_TOKEN' }), '');
@@ -263,6 +305,60 @@ test('every username taken is a clean refusal naming the candidates', async () =
   assert.match(result.reason, /taken/);
 });
 
+test('createBot without api credentials refuses before touching the network', async () => {
+  // No TELEGRAM_API_ID / TELEGRAM_API_HASH: userbotState refuses, so createBot
+  // must return before connect() (no teleproto login, no @BotFather). The
+  // session path points at a scratch dir to prove nothing on the real host is
+  // read either. Fixtures only — never a live @BotFather conversation.
+  const dir = scratch();
+  const result = await createBot({
+    name: 'VM3 Bot',
+    env: {
+      TELEGRAM_API_ID: '',
+      TELEGRAM_API_HASH: '',
+      TELEGRAM_USER_SESSION: path.join(dir, 'tg-user.session'),
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /TELEGRAM_API_ID/);
+  assert.equal(fs.existsSync(path.join(dir, 'tg-user.session')), false);
+});
+
+// ------------------------------------------------- teleproto import shape
+//
+// teleproto@1.229.0 (gramjs-derived) exports TelegramClient at top level but
+// keeps StringSession under the `sessions` namespace. A flat destructure of
+// both died with `StringSession is not a constructor` and killed
+// `userbot-login` instantly; resolveTeleproto is the one place that knows the
+// shape. Fixtures only — no account, no network, no client.connect().
+
+test('resolveTeleproto resolves a gramjs-shaped module', () => {
+  function FakeClient() {}
+  function FakeSession() {}
+  const resolved = resolveTeleproto({ TelegramClient: FakeClient, sessions: { StringSession: FakeSession } });
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.TelegramClient, FakeClient);
+  assert.equal(resolved.StringSession, FakeSession);
+});
+
+test('resolveTeleproto refuses a module missing the sessions namespace with a sentence', () => {
+  function FakeClient() {}
+  const resolved = resolveTeleproto({ TelegramClient: FakeClient });
+  assert.equal(resolved.ok, false);
+  assert.match(resolved.reason, /sessions\.StringSession/);
+  assert.match(resolved.reason, /unexpected shape/);
+});
+
+test('the real teleproto module resolves and constructs a client without touching the network', async () => {
+  const mod = await import('teleproto');
+  const resolved = resolveTeleproto(mod);
+  assert.equal(resolved.ok, true, resolved.reason);
+  const session = new resolved.StringSession('');
+  const client = new resolved.TelegramClient(session, 12345, 'hash-not-real', { connectionRetries: 3 });
+  assert.ok(client, 'construction must not throw');
+  assert.equal(typeof client.disconnect, 'function');
+});
+
 // ------------------------------------------------------------ supervision
 
 test('the user unit is a transform of the repo system unit, one source', () => {
@@ -275,6 +371,11 @@ test('the user unit is a transform of the repo system unit, one source', () => {
   assert.match(unit.text, /WorkingDirectory=\/srv\/bot-host/);
   assert.equal(unit.environmentFile, '/srv/config/%i.env');
   assert.match(unit.text, /EnvironmentFile=-\/srv\/config\/%i\.env/);
+  // Only the directory moves: each line keeps its basename, so the shared
+  // common.env survives next to the per-bot %i.env. Rewriting both lines to
+  // %i.env dropped the fleet-wide env file from the user unit.
+  assert.match(unit.text, /EnvironmentFile=-\/srv\/config\/common\.env/);
+  assert.equal((unit.text.match(/^EnvironmentFile=/gm) || []).length, 2, 'exactly the two env files the system unit declares');
 });
 
 test('the master token file is upserted in place and keeps its other lines', () => {
@@ -318,8 +419,14 @@ test('the page posts to the one endpoint and carries initData', () => {
   assert.match(html, /\/api\/forge/);
   assert.match(html, /x-telegram-init-data/);
   assert.match(html, /Telegram\.WebApp/);
+  assert.match(html, /forgeInitData/);
+  assert.match(html, /tgWebAppData/);
   assert.match(html, /BotFather/);
   for (const step of PIPELINE_STEPS) assert.ok(html.includes(step.title) || html.includes(step.id), `page does not show ${step.id}`);
+  // The attach path is on the page the operator already has — a registered row
+  // with no token must not send anyone back to a shell.
+  assert.match(html, /id="existing"/);
+  assert.match(html, /mode: 'attach'/);
 });
 
 /**
@@ -345,7 +452,7 @@ function makeDom({ telegram = null } = {}) {
     append(...kids) { this.children.push(...kids); },
     addEventListener(ev, fn) { this.handlers[ev] = fn; },
   });
-  for (const id of ['forge', 'name', 'token', 'tokenHint', 'steps', 'note', 'submit']) elements.set(id, element());
+  for (const id of ['forge', 'name', 'token', 'tokenHint', 'steps', 'note', 'submit', 'attach', 'attachLede', 'existing', 'attachToken', 'attachSubmit']) elements.set(id, element());
   const document = {
     getElementById: (id) => elements.get(id) || null,
     createElement: () => element(),
@@ -354,9 +461,33 @@ function makeDom({ telegram = null } = {}) {
   const fetch = async (url, options = {}) => {
     calls.push({ url, options });
     if (String(url).includes('/api/state')) {
-      return { ok: true, status: 200, json: async () => ({ ok: true, master: 'vm', bots: ['vm', 'vm2'], userbot: { configured: false, reason: 'no session', hostCommands: ['x'] } }) };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          master: 'vm',
+          // vm already works; vm2 is the row that still has no token, which is
+          // exactly the distinction the page has to draw.
+          bots: [
+            { id: 'vm', name: 'VM Bot', enabled: true, tokenEnv: 'VM_BOT_TOKEN' },
+            { id: 'vm2', name: 'VM2 Bot', enabled: false, tokenEnv: 'VM2_BOT_TOKEN' },
+          ],
+          userbot: { configured: false, reason: 'no session', hostCommands: ['x'] },
+        }),
+      };
     }
-    return { ok: true, status: 200, json: async () => ({ ok: true, bot: { id: 'vm3', name: 'VM3 Bot' }, steps: PIPELINE_STEPS.map((s) => ({ ...s, status: 'done', detail: 'ok' })) }) };
+    let input = {};
+    try { input = JSON.parse(options.body || '{}'); } catch { input = {}; }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        bot: { id: input.id || 'vm3', name: input.name || 'VM3 Bot', attached: input.mode === 'attach' },
+        steps: PIPELINE_STEPS.map((s) => ({ ...s, status: 'done', detail: 'ok' })),
+      }),
+    };
   };
   return { document, calls, fetch, window: { Telegram: telegram ? { WebApp: telegram } : undefined }, elements };
 }
@@ -398,6 +529,87 @@ test('the button sends Telegram initData when a Mini App opened it', async () =>
   assert.equal(forged.options.headers['x-telegram-init-data'], 'auth_date=1&user=%7B%22id%22%3A1%7D&hash=abc');
 });
 
+test('the button sends bare-global Telegram initData when window.Telegram is missing', async () => {
+  const saved = globalThis.Telegram;
+  globalThis.Telegram = { WebApp: { ready() {}, expand() {}, initData: 'auth_date=2&hash=bare' } };
+  try {
+    const dom = runPageScript(makeDom());
+    dom.document.getElementById('name').value = 'VM3 Bot';
+    await dom.document.getElementById('forge').handlers.submit({ preventDefault() {} });
+    const forged = dom.calls.find((c) => String(c.url).includes('/api/forge'));
+    assert.equal(forged.options.headers['x-telegram-init-data'], 'auth_date=2&hash=bare');
+  } finally {
+    if (saved === undefined) delete globalThis.Telegram;
+    else globalThis.Telegram = saved;
+  }
+});
+
+test('the page falls back to the tgWebAppData hash param on both fetches', async () => {
+  const saved = globalThis.location;
+  const initData = 'auth_date=3&user=%7B%22id%22%3A3%7D&hash=fromhash';
+  globalThis.location = { hash: `#tgWebAppData=${encodeURIComponent(initData)}&tgWebAppVersion=7.0` };
+  try {
+    const dom = runPageScript(makeDom());
+    await new Promise((resolve) => setTimeout(resolve, 0)); // let loadState() resolve
+    const state = dom.calls.find((c) => String(c.url).includes('/api/state'));
+    assert.ok(state, 'the page did not load state');
+    assert.equal(state.options.headers['x-telegram-init-data'], initData);
+
+    dom.document.getElementById('name').value = 'VM3 Bot';
+    await dom.document.getElementById('forge').handlers.submit({ preventDefault() {} });
+    const forged = dom.calls.find((c) => String(c.url).includes('/api/forge'));
+    assert.equal(forged.options.headers['x-telegram-init-data'], initData);
+  } finally {
+    if (saved === undefined) delete globalThis.location;
+    else globalThis.location = saved;
+  }
+});
+
+test('initData resolution prefers the bare global, then window.Telegram, then the hash', async () => {
+  const savedTelegram = globalThis.Telegram;
+  const savedLocation = globalThis.location;
+  const initData = 'auth_date=4&hash=winner';
+  globalThis.location = { hash: `#tgWebAppData=${encodeURIComponent('auth_date=4&hash=hashloser')}&tgWebAppVersion=7.0` };
+  try {
+    // window.Telegram beats the hash.
+    let dom = runPageScript(makeDom({ telegram: { ready() {}, expand() {}, initData } }));
+    dom.document.getElementById('name').value = 'VM3 Bot';
+    await dom.document.getElementById('forge').handlers.submit({ preventDefault() {} });
+    assert.equal(
+      dom.calls.find((c) => String(c.url).includes('/api/forge')).options.headers['x-telegram-init-data'],
+      initData,
+    );
+
+    // The bare global beats window.Telegram.
+    globalThis.Telegram = { WebApp: { ready() {}, expand() {}, initData } };
+    dom = runPageScript(makeDom({ telegram: { ready() {}, expand() {}, initData: 'auth_date=4&hash=windowloser' } }));
+    dom.document.getElementById('name').value = 'VM3 Bot';
+    await dom.document.getElementById('forge').handlers.submit({ preventDefault() {} });
+    assert.equal(
+      dom.calls.find((c) => String(c.url).includes('/api/forge')).options.headers['x-telegram-init-data'],
+      initData,
+    );
+  } finally {
+    if (savedTelegram === undefined) delete globalThis.Telegram;
+    else globalThis.Telegram = savedTelegram;
+    if (savedLocation === undefined) delete globalThis.location;
+    else globalThis.location = savedLocation;
+  }
+});
+
+test('an empty environment sends no initData on either fetch (fails closed)', async () => {
+  const dom = runPageScript(makeDom());
+  await new Promise((resolve) => setTimeout(resolve, 0)); // let loadState() resolve
+  const state = dom.calls.find((c) => String(c.url).includes('/api/state'));
+  assert.ok(state, 'the page did not load state');
+  assert.equal(state.options.headers['x-telegram-init-data'], '');
+
+  dom.document.getElementById('name').value = 'VM3 Bot';
+  await dom.document.getElementById('forge').handlers.submit({ preventDefault() {} });
+  const forged = dom.calls.find((c) => String(c.url).includes('/api/forge'));
+  assert.equal(forged.options.headers['x-telegram-init-data'], '');
+});
+
 test('the button reports a refusal instead of claiming success', async () => {
   const dom = makeDom();
   dom.fetch = async (url) => {
@@ -413,12 +625,32 @@ test('the button reports a refusal instead of claiming success', async () => {
   assert.equal(note.className, 'note err');
 });
 
+test('the page offers the attach path and posts it as a mode', async () => {
+  const dom = runPageScript(makeDom());
+  await new Promise((resolve) => setTimeout(resolve, 0)); // let loadState() resolve
+
+  const select = dom.document.getElementById('existing');
+  assert.deepEqual(select.children.map((o) => o.value), ['vm', 'vm2'], 'every row is offered');
+  assert.match(select.children[1].textContent, /VM2 Bot/);
+  assert.match(select.children[1].textContent, /no token yet/, 'the row that needs a token says so');
+
+  select.value = 'vm2';
+  dom.document.getElementById('attachToken').value = OTHER_TOKEN;
+  await dom.document.getElementById('attach').handlers.submit({ preventDefault() {} });
+
+  const forged = dom.calls.find((c) => String(c.url).includes('/api/forge'));
+  assert.deepEqual(JSON.parse(forged.options.body), { mode: 'attach', id: 'vm2', token: OTHER_TOKEN });
+  assert.match(dom.document.getElementById('note').textContent, /attached the token to vm2/);
+  assert.equal(dom.document.getElementById('attachToken').value, '', 'the token box is cleared after an attach');
+});
+
 // ------------------------------------------------------- the HTTP surface
 
-async function startForge(runCreate, { allowLocal }) {
+async function startForge(runCreate, { allowLocal, registryPath = '' }) {
   const server = (await import('./lib/bot-forge-server.mjs')).createForgeServer({
     env: {},
     registry: registryFixture(),
+    registryPath,
     allowLocal,
     runCreate,
   });
@@ -433,10 +665,47 @@ test('the Mini App backend serves the page and the fleet state', async () => {
     assert.equal(page.status, 200);
     assert.match(await page.text(), /Bot forge/);
     const state = await (await fetch(`${base}/api/state`)).json();
-    assert.deepEqual(state.bots, ['vm', 'vm2']);
+    assert.deepEqual(state.bots, [
+      { id: 'vm', name: 'VM Bot', enabled: true, tokenEnv: 'VM_BOT_TOKEN', runtime: 'bot-host' },
+      { id: 'vm2', name: 'VM2 Bot', enabled: true, tokenEnv: 'VM2_BOT_TOKEN', runtime: 'bot-host' },
+    ]);
     assert.equal(state.master, 'vm');
     assert.equal(state.userbot.configured, false, 'no session on a dev box: the page must say so');
     assert.ok(state.userbot.hostCommands.length > 0, 'the operator must be told what to run');
+  } finally {
+    server.close();
+  }
+});
+
+test('state re-reads the registry file, so a bot created after start appears without a restart', async () => {
+  const dir = scratch();
+  const registryPath = path.join(dir, 'registry.json');
+  fs.writeFileSync(registryPath, JSON.stringify(registryFixture(), null, 2));
+  const { server, base } = await startForge(async () => ({ ok: true, steps: [] }), { allowLocal: true, registryPath });
+  try {
+    const before = await (await fetch(`${base}/api/state`)).json();
+    assert.deepEqual(before.bots.map((b) => b.id), ['vm', 'vm2']);
+
+    // The live defect: the gateway started at 20:27, a bot was created at
+    // 20:37, and the dropdown never listed it. The row lands in the file while
+    // the handler is already serving, and the SAME handler must serve it now.
+    const grown = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    grown.bots.push({ id: 'vm3', name: 'VM3 Bot', runtime: 'bot-host', enabled: true, telegram: { tokenEnv: 'VM3_BOT_TOKEN' } });
+    fs.writeFileSync(registryPath, JSON.stringify(grown, null, 2));
+
+    const after = await (await fetch(`${base}/api/state`)).json();
+    assert.deepEqual(after.bots.map((b) => b.id), ['vm', 'vm2', 'vm3']);
+    assert.equal(after.bots[2].name, 'VM3 Bot');
+    assert.equal(after.bots[2].tokenEnv, 'VM3_BOT_TOKEN');
+
+    // A file mid-write must not blank the page: a read or parse error falls
+    // back to the object the handler was constructed with.
+    fs.writeFileSync(registryPath, '{ not json');
+    const corrupt = await (await fetch(`${base}/api/state`)).json();
+    assert.deepEqual(corrupt.bots.map((b) => b.id), ['vm', 'vm2']);
+    fs.rmSync(registryPath);
+    const missing = await (await fetch(`${base}/api/state`)).json();
+    assert.deepEqual(missing.bots.map((b) => b.id), ['vm', 'vm2']);
   } finally {
     server.close();
   }
@@ -539,7 +808,7 @@ test('a mounted forge serves its own prefix and yields every other path', async 
 
     const state = await (await fetch(`${base}/forge/api/state`)).json();
     assert.equal(state.ok, true);
-    assert.deepEqual(state.bots, ['vm', 'vm2']);
+    assert.deepEqual(state.bots.map((b) => b.id), ['vm', 'vm2']);
 
     const created = await fetch(`${base}/forge/api/forge`, {
       method: 'POST',
@@ -733,6 +1002,52 @@ test('END TO END: the userbot path refuses cleanly when unconfigured', () => {
   assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, 'utf8')).bots.map((b) => b.id), ['vm', 'vm2']);
 });
 
+test('the injected userbot transport mints the token the pipeline publishes (wiring contract)', async () => {
+  // The production call sites pass createBot into runForge's io; this proves
+  // the contract from the inside with a fake transport — no account, no
+  // @BotFather, the fake Telegram above answers getMe/setMyCommands.
+  const dir = scratch();
+  const registryPath = path.join(dir, 'registry.json');
+  const tokensPath = path.join(dir, 'tokens.env');
+  const configDir = path.join(dir, 'config');
+  const unitDir = path.join(dir, 'units');
+  const hostRoot = path.join(dir, 'bot-host');
+  fs.writeFileSync(registryPath, JSON.stringify(registryFixture(), null, 2));
+  fs.writeFileSync(tokensPath, 'VM_BOT_TOKEN=123456789:master-token-not-real-000000000000\n');
+
+  const seen = [];
+  const fakeCreateBot = async ({ name, username, env }) => {
+    seen.push({ name, username });
+    assert.ok(env, 'runForge forwards its env to the transport');
+    return { ok: true, token: TOKEN, username: '', turns: [] };
+  };
+
+  const api = await startFakeTelegram();
+  try {
+    const result = await runForge(
+      {
+        name: 'VM3 Bot',
+        paths: { registryPath, tokensPath, configDir, unitDir, botHostRoot: hostRoot, repoRoot: ROOT },
+        apiBase: `http://127.0.0.1:${api.port}`,
+      },
+      { env: process.env, createBot: fakeCreateBot, allowStart: false },
+    );
+    assert.equal(result.ok, true, JSON.stringify(result, null, 2));
+    assert.deepEqual(seen.map((s) => s.name), ['VM3 Bot']);
+    assert.equal(result.bot.id, 'vm3');
+    assert.equal(result.bot.tokenSource, 'userbot');
+    const tokenStep = result.steps.find((s) => s.id === 'token');
+    assert.equal(tokenStep.status, 'done');
+    assert.equal(tokenStep.detail, 'minted through @BotFather');
+    assert.ok(!JSON.stringify(result).includes(TOKEN), 'the minted token must not appear in the receipt');
+    assert.ok(!tokenStep.detail.includes(TOKEN), 'the token-step detail must stay token-free');
+    assert.equal(readMasterTokens(tokensPath).VM3_BOT_TOKEN, TOKEN);
+    assert.deepEqual(api.calls.map((c) => c.method), ['getMe', 'setMyCommands']);
+  } finally {
+    api.server.close();
+  }
+});
+
 test('END TO END: an unreachable Telegram stops at publish and does NOT enable the bot', () => {
   const dir = scratch();
   const registryPath = path.join(dir, 'registry.json');
@@ -754,6 +1069,78 @@ test('END TO END: an unreachable Telegram stops at publish and does NOT enable t
   assert.deepEqual(run.json.summary.remaining, ['publish', 'enable']);
 });
 
+test('END TO END: attach finishes a registered row that has no token', async () => {
+  const dir = scratch();
+  const registryPath = path.join(dir, 'registry.json');
+  const tokensPath = path.join(dir, 'tokens.env');
+  const registry = registryFixture();
+  registry.bots.push({ id: 'pm', name: 'PM Bot', runtime: 'bot-host', enabled: false, extends: 'vm', telegram: { tokenEnv: 'PM_BOT_TOKEN' } });
+  fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2));
+  fs.writeFileSync(tokensPath, 'VM_BOT_TOKEN=123456789:master-token-not-real-000000000000\n');
+
+  const api = await startFakeTelegram();
+  try {
+    const run = await runCliAsync([
+      '--attach=pm',
+      `--token=${TOKEN}`,
+      `--registry=${registryPath}`,
+      `--tokens=${tokensPath}`,
+      `--config-dir=${path.join(dir, 'config')}`,
+      `--unit-dir=${path.join(dir, 'units')}`,
+      `--bot-host-root=${path.join(dir, 'host')}`,
+      `--api-base=http://127.0.0.1:${api.port}`,
+      '--no-start',
+      '--json',
+    ]);
+
+    assert.equal(run.status, 0, `attach failed: ${run.stdout}\n${run.stderr}`);
+    assert.equal(run.json.ok, true, JSON.stringify(run.json, null, 2));
+    assert.equal(run.json.summary.ok, true);
+    assert.deepEqual(run.json.summary.remaining, [], 'every step should have run — attach is the same pipeline');
+    assert.equal(run.json.bot.attached, true);
+    assert.equal(run.json.bot.name, 'PM Bot');
+    assert.equal(run.json.bot.telegramBotId, '123456789');
+
+    // The whole point: the only change to the row is the enable flip at the end.
+    // Anything else means attach rewrote a row it was supposed to leave alone.
+    const expected = structuredClone(registry);
+    expected.bots.find((b) => b.id === 'pm').enabled = true;
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(registryPath, 'utf8')),
+      expected,
+      'attach must not rewrite the row it attached a token to',
+    );
+
+    // And the token really reached every surface the row needs.
+    assert.equal(readMasterTokens(tokensPath).PM_BOT_TOKEN, TOKEN);
+    assert.equal(readMasterTokens(tokensPath).VM_BOT_TOKEN, '123456789:master-token-not-real-000000000000');
+    assert.equal(fs.readFileSync(path.join(dir, 'config', 'pm.env'), 'utf8').trim(), `PM_BOT_TOKEN=${TOKEN}`);
+    assert.deepEqual(api.calls.map((c) => c.method), ['getMe', 'setMyCommands']);
+    assert.ok(run.json.steps.some((s) => s.id === 'registry' && /kept as it is/.test(s.detail)), 'the receipt must say the row was kept');
+  } finally {
+    api.server.close();
+  }
+});
+
+test('END TO END: attach on an id nobody registered writes nothing', () => {
+  const dir = scratch();
+  const registryPath = path.join(dir, 'registry.json');
+  fs.writeFileSync(registryPath, JSON.stringify(registryFixture(), null, 2));
+  const before = fs.readFileSync(registryPath, 'utf8');
+
+  const run = runCli([
+    '--attach=vm9', `--token=${TOKEN}`,
+    `--registry=${registryPath}`, `--tokens=${path.join(dir, 'tokens.env')}`,
+    `--config-dir=${path.join(dir, 'config')}`, `--unit-dir=${path.join(dir, 'units')}`,
+    '--bot-host-root=/tmp/host', '--no-start', '--json',
+  ]);
+  assert.equal(run.status, 1);
+  assert.equal(run.json.failedStep, 'plan');
+  assert.match(run.json.reason, /not in the registry/);
+  assert.equal(fs.readFileSync(registryPath, 'utf8'), before);
+  assert.equal(fs.existsSync(path.join(dir, 'tokens.env')), false);
+});
+
 test('a dry run plans without writing', () => {
   const dir = scratch();
   const registryPath = path.join(dir, 'registry.json');
@@ -767,6 +1154,20 @@ test('a dry run plans without writing', () => {
   ]);
   assert.equal(run.status, 0);
   assert.equal(run.json.dryRun, true);
+  assert.equal(fs.readFileSync(registryPath, 'utf8'), before);
+  assert.equal(fs.existsSync(path.join(dir, 'tokens.env')), false);
+
+  // The attach variant plans just as harmlessly.
+  const attachRun = runCli([
+    '--attach=vm2', `--token=${OTHER_TOKEN}`,
+    `--registry=${registryPath}`, `--tokens=${path.join(dir, 'tokens.env')}`,
+    `--config-dir=${path.join(dir, 'config')}`, `--unit-dir=${path.join(dir, 'units')}`,
+    '--bot-host-root=/tmp/host', '--dry-run', '--json',
+  ]);
+  assert.equal(attachRun.status, 0, attachRun.stdout);
+  assert.equal(attachRun.json.dryRun, true);
+  assert.equal(attachRun.json.bot.attached, true);
+  assert.equal(attachRun.json.bot.tokenEnv, 'VM2_BOT_TOKEN');
   assert.equal(fs.readFileSync(registryPath, 'utf8'), before);
   assert.equal(fs.existsSync(path.join(dir, 'tokens.env')), false);
 });

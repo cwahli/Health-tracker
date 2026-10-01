@@ -63,6 +63,7 @@ import {
   evaluateChecks,
   evaluateMainHealth,
   evaluatePrState,
+  parseDependsOn,
   validateRequiredAgainstWorkflows,
 } from './lib/merge-gate.mjs';
 import {
@@ -73,6 +74,13 @@ import {
 } from './lib/main-verify.mjs';
 import { makeClient } from './lib/github-rest.mjs';
 import { describeNotice, syncRedMainNotice } from './lib/red-main-notice.mjs';
+import { checkRange, git } from './lib/no-undo.mjs';
+import {
+  PREMERGE_DECISIONS,
+  decideBranchUndo,
+  describePremergeRefusal,
+  describePremergeUnknown,
+} from './lib/premerge-undo.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -194,11 +202,60 @@ export async function waitForDecision(client, {
   pollSeconds = DEFAULT_POLL_SECONDS,
   log = () => {},
   notice = async () => null,
+  depNumbers = [],
+  prNumber = null,
 } = {}) {
   const deadline = Date.now() + Math.max(0, waitSeconds) * 1000;
   let last = null;
   let mainNotice = null;
+  // Sequencing before gating: a PR held behind another PR must not burn its
+  // budget racing checks, and must say so on the PR (the wait path below
+  // comments via describeDecision). Unknown dep state holds, never merges —
+  // a typo'd number ends in a refusal that names the number, not a merge.
+  const readDeps = async () => {
+    const open = [];
+    const unreadable = [];
+    for (const n of depNumbers) {
+      if (prNumber !== null && n === prNumber) {
+        return { selfRef: true, open, unreadable };
+      }
+      try {
+        const dep = await client.call(`/repos/${owner}/${repo}/pulls/${n}`);
+        if (dep && String(dep.state || 'open') === 'open' && !dep.merged_at) open.push(n);
+      } catch (err) {
+        unreadable.push(n);
+      }
+    }
+    return { selfRef: false, open, unreadable };
+  };
   for (;;) {
+    const deps = depNumbers.length ? await readDeps() : { selfRef: false, open: [], unreadable: [] };
+    if (deps.selfRef) {
+      return {
+        decision: 'refuse',
+        scope: 'deps',
+        reason: `Depends-On names this PR itself (#${prNumber}) — fix the line, it can never clear`,
+        deps: depNumbers,
+      };
+    }
+    if (deps.open.length || deps.unreadable.length) {
+      const why = [
+        ...deps.open.map((n) => `#${n} still open`),
+        ...deps.unreadable.map((n) => `#${n} unreadable`),
+      ].join(', ');
+      last = {
+        decision: 'wait',
+        scope: 'deps',
+        reason: `held behind ${why} — merges when it lands; nothing about this PR needs to change`,
+        deps: depNumbers,
+      };
+      log(`  ${describeDecision(last, { head })}`);
+      if (Date.now() >= deadline) {
+        return { ...last, decision: 'refuse', timedOut: true };
+      }
+      await sleep(pollSeconds * 1000);
+      continue;
+    }
     const runs = await listCheckRuns(client, { owner, repo, ref: head });
     last = evaluateChecks({ checkRuns: runs, required: REQUIRED_CHECKS });
     log(`  ${describeDecision(last, { head })}`);
@@ -277,6 +334,69 @@ export async function waitForDecision(client, {
       };
     }
     await sleep(pollSeconds * 1000);
+  }
+}
+
+/**
+ * Re-read the PR from the API onto `pr`, in place.
+ *
+ * The body is two things at once: the squash message (so `git log` keeps the
+ * `## Left` a reader needs) and the only place `Reverts:` declarations exist.
+ * Reading it once at the start is not enough — it can be edited while this run
+ * waits for checks, and a stale read has already cost this repo a red `main`:
+ * measured 2026-09-30, #414's declaration was patched onto the PR during the
+ * wait, the squash carried the auto-PR skeleton instead, the post-merge
+ * verification judged the skeleton, found seven undeclared lines, and the merge
+ * queue stalled behind it (issue #416).
+ *
+ * A read failure is swallowed on purpose: the body already held is the one we
+ * use, because a failed re-read must not become a failed merge. It cannot pass
+ * a judgement silently either — the judgement re-reads for itself and reports
+ * `unknown` when it cannot see.
+ */
+export async function refreshPr(client, { owner, repo, number, pr } = {}) {
+  try {
+    const fresh = await client.call(`/repos/${owner}/${repo}/pulls/${number}`);
+    if (fresh && typeof fresh === 'object') {
+      if (typeof fresh.body === 'string') pr.body = fresh.body;
+      if (typeof fresh.title === 'string') pr.title = fresh.title;
+      return true;
+    }
+  } catch {
+    /* keep what we have */
+  }
+  return false;
+}
+
+/**
+ * Judge this branch's own diff against what has landed, using the PR body as
+ * the declaration source.
+ *
+ * The judgement is `checkRange`'s — the same pure code the CI step and the
+ * post-merge verification run — so the rule has exactly one implementation and
+ * three call sites rather than one implementation and three opinions. `base` is
+ * passed as `origin/<branch>`: `checkRange` resolves the fork point itself, and
+ * judging the branch side (not a two-tree diff against moving main) is what
+ * keeps another agent's later commits from reading as this branch's deletions.
+ */
+export function judgeBranchAgainstLandedWork({ pr, baseBranch = 'main', repo = process.cwd() } = {}) {
+  // `origin/<base>` is the ref in CI, where the job checks out a pushed branch.
+  // A local clone (or the sensor's scratch repo) has no remote, and judging
+  // against the local branch is the same comparison — falling back beats
+  // degrading to `unknown` for want of a remote that is not the point.
+  let landedRef = `origin/${baseBranch}`;
+  try {
+    git(repo, 'rev-parse', '--verify', '--quiet', landedRef);
+  } catch {
+    landedRef = baseBranch;
+  }
+  const head = String(pr?.head?.sha || '');
+  if (!head) return decideBranchUndo({ error: 'the PR has no head SHA to judge', baseBranch });
+  try {
+    const { violations = [], error = '' } = checkRange(repo, landedRef, head, landedRef, String(pr?.body || ''));
+    return decideBranchUndo({ violations, error, baseBranch });
+  } catch (err) {
+    return decideBranchUndo({ error: err?.message || String(err), baseBranch });
   }
 }
 
@@ -366,6 +486,45 @@ async function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
+  // Judge this branch against landed work BEFORE waiting on the checks. The
+  // landed-work rule has never had a pre-merge home for this repo's PRs: push
+  // `ci` deliberately skips it (no PR body in the event) and auto-pr's
+  // token-opened PRs run zero jobs, so the rule was only ever judged after the
+  // merge — which is how `d18568f6` turned `main` red and stalled the queue.
+  // See scripts/lib/premerge-undo.mjs. An early, precise comment on the PR is
+  // worth more than one that arrives after the merge was already attempted.
+  const undoBase = String(pr.base?.ref || 'main');
+
+  // One judgement, two moments. The body is re-read first because it is the
+  // declaration source and it can change while the checks run: judging the
+  // start-time body is how a declared rewrite reads as undeclared and is refused
+  // for nothing. The EARLY call below is for feedback — the agent hears about a
+  // problem without waiting out the checks. The call immediately before the
+  // merge is the authoritative one, because only there is the body known to be
+  // the body that will be squashed.
+  const judgeNow = async () => {
+    await refreshPr(client, { owner, repo, number: pr.number, pr });
+    return judgeBranchAgainstLandedWork({ pr, baseBranch: undoBase });
+  };
+  const refuseUndo = async (verdict) => {
+    log(`  🛑 ${verdict.reason}`);
+    if (!args.evaluate) {
+      await comment(client, { owner, repo, number: pr.number, body: describePremergeRefusal({ ...verdict, baseBranch: undoBase, prNumber: pr.number }) });
+    }
+  };
+
+  const undoVerdict = await judgeNow();
+  if (undoVerdict.decision === PREMERGE_DECISIONS.REFUSE) {
+    await refuseUndo(undoVerdict);
+    return 1;
+  }
+  if (undoVerdict.decision === PREMERGE_DECISIONS.UNKNOWN) {
+    // Logged, never commented. A degradation signal that shares a channel with
+    // the refusal is a signal people learn to skip; the run log is where a
+    // broken environment is diagnosed. See scripts/lib/premerge-undo.mjs.
+    log(`  ${describePremergeUnknown({ reason: undoVerdict.reason, baseBranch: undoBase })}`);
+  }
+
   const head = String(pr.head?.sha || '');
   const baseBranch = String(pr.base?.ref || 'main');
   log(`auto-merge: PR #${pr.number} (${branch}) head ${head.slice(0, 7)} onto ${baseBranch}`);
@@ -388,7 +547,10 @@ async function main(argv = process.argv.slice(2)) {
             overridden: allowRedMain,
           },
         });
-  const result = await waitForDecision(client, { owner, repo, head, baseBranch, allowRedMain, waitSeconds, pollSeconds, log, notice });
+  const result = await waitForDecision(client, {
+    owner, repo, head, baseBranch, allowRedMain, waitSeconds, pollSeconds, log, notice,
+    depNumbers: parseDependsOn(pr.body), prNumber: pr.number,
+  });
 
   if (result.decision !== 'merge') {
     const body = [
@@ -424,12 +586,32 @@ async function main(argv = process.argv.slice(2)) {
     return 0;
   }
 
+  // The authoritative judgement, at the last moment before the merge PUT.
+  // Everything above is feedback; this is the decision. The body re-read here is
+  // also the body that becomes the squash message, so what was judged and what
+  // lands are the same document — the gap that red-mained `main` on #414.
+  const finalVerdict = await judgeNow();
+  if (finalVerdict.decision === PREMERGE_DECISIONS.REFUSE) {
+    await refuseUndo(finalVerdict);
+    return 1;
+  }
+
   let mergeResult = '';
   let mergeSha = null;
   try {
+    // The squash commit is the durable record: `git log` is what the next agent
+    // reads, and GitHub mints the squash body from the branch's commit list
+    // unless told otherwise — which dropped the PR body's `## Left` on every
+    // merge (measured 2026-09-30: 0 of 16 squash commits preserved it). Passing
+    // the PR title+body as the squash message keeps Done and Left in history.
+    // `commit_message` is omitted when the body is empty so auto-PR bodies with
+    // only a trailer do not mint blank squash bodies.
+    const mergeBody = { merge_method: 'squash' };
+    if (pr.title) mergeBody.commit_title = String(pr.title);
+    if (pr.body && String(pr.body).trim()) mergeBody.commit_message = String(pr.body);
     const res = await client.call(`/repos/${owner}/${repo}/pulls/${pr.number}/merge`, {
       method: 'PUT',
-      body: { merge_method: 'squash' },
+      body: mergeBody,
     });
     const merged = res?.merged === true;
     // The merge response carries the commit it created. That is the commit to

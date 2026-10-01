@@ -50,7 +50,7 @@ const CORE_PROJECT_ROLES = [
     id: 'pm',
     name: 'Project Manager',
     description: 'Projects the fleet from its existing records, climbs the retry → find-another-way → escalate ladder, and keeps the ongoing-projects sheet current',
-    instructions: 'You are the Project Manager (see scripts/lib/pm-run.mjs, which is the whole implementation). Your three jobs: (1) project fleet status from records that already exist — specs/active packet frontmatter, `bugctl list --json`, the run ledger, and the agent-heartbeat liveness store — and never keep a board of your own, because a fifth write is the one that goes stale; (2) for anything stalled, climb the ladder exactly one rung per cycle (retry → find another way → escalate to the operator) with the attempt counter persisted on disk, so a host restart cannot reset it; (3) keep the ongoing-projects Google Sheet current through the governed writer (spool, then flush), never by opening a second Google client, and never inside a project folder. `/role pm` prints the projection; `/role pm run` runs one cycle. Nudges go out as the operator, from the session scripts/lib/tg-userbot.mjs already manages; when that session is not configured, say so and print the commands only the operator can run — never report a message that did not go out.',
+    instructions: 'You are the Project Manager (implementation: scripts/lib/pm-run.mjs; take this seat with `/role pm take`). Your standing duties: (1) project fleet status from records that already exist — specs/active packet frontmatter, `bugctl list --json` tickets (drive every ticket to completed), the run ledger, agent-heartbeat liveness, and `tmux ls` deployed sessions — and never keep a board of your own, because a fifth write is the one that goes stale; (2) for anything stalled, climb the ladder exactly one rung per cycle (retry → find another way → escalate to the operator) with the attempt counter persisted on disk, so a host restart cannot reset it; remind the responsible agent and get the work completed — a stall with no owner action is the failure; (3) keep the ongoing-projects Google Sheet current through the governed writer (spool, then flush), never by opening a second Google client, and never inside a project folder — and read its source_brief column (the original ask: packet goal, ticket title) to check each implementation against what was asked before signing off; (4) judge agent resourcing from tmux sessions side by side with live heartbeats — a terminal with no live agent behind it is reassignable, a live agent with no terminal is headless, and two agents on one terminal is a collision; (5) nudge as the operator through `/role pm run`, from the session scripts/lib/tg-userbot.mjs already manages; when that session is not configured, say so and print the commands only the operator can run — never report a message that did not go out. Chat surface: `/role pm` projects, `/role pm take` takes this seat, `/role pm run` cycles, `/role pm sheet` records, `/role pm status` projects read-only, `/role pm reset` leaves (counters kept).',
     tools: ['read', 'grep', 'status'],
   },
 ];
@@ -64,7 +64,88 @@ const COUNCIL_ROLES = [
   { id: 'final_case_builder', name: 'Final Case Builder (Executive Publisher)', file: 'final_case_builder.md' },
 ];
 
+/**
+ * The Personal Health Coach project's roles (Mission: external-health).
+ *
+ * Six seats, because the four documents have four different failure modes: the
+ * steward owns what the data *is*, the analyst owns what it *means*, the planner
+ * owns what is tested next, the research lead owns what the literature says, and
+ * the safety reviewer is the one seat whose job is to say no. A council of
+ * six/seven that all speak about everything is how a health document gets
+ * confident claims with no owner. The Doctor is the sixth: it does not write
+ * claims at all, it re-reads the analyst's and strikes the ones whose receipts
+ * do not hold.
+ *
+ * The order below is the running order, and it is deliberate: the Doctor runs
+ * last, after the seats whose claims it checks.
+ */
+const HEALTH_PROJECT_ROLES = [
+  {
+    id: 'data_steward',
+    name: 'Data Steward',
+    file: 'data_steward.md',
+    description: 'Owns what the app stored, what the sheet says, and every open fix-list item',
+    tools: ['read', 'grep'],
+  },
+  {
+    id: 'health_analyst',
+    name: 'Health Analyst',
+    file: 'health_analyst.md',
+    description: 'Turns verified markers into candidate conditions and next actions',
+    tools: ['read', 'grep'],
+  },
+  {
+    id: 'test_planner',
+    name: 'Test Planner',
+    file: 'test_planner.md',
+    description: 'Confirm/renew test list with due windows, reconciled with the app\u2019s pending actions',
+    tools: ['read', 'grep'],
+  },
+  {
+    id: 'research_lead',
+    name: 'Research Lead',
+    file: 'research_lead.md',
+    description: 'Cited, dated literature for this profile\u2019s markers',
+    tools: ['read', 'grep'],
+  },
+  {
+    id: 'safety_reviewer',
+    name: 'Safety Reviewer',
+    file: 'safety_reviewer.md',
+    description: 'Strips any claim that cannot be traced to the data or a citation; owns the guardrails',
+    tools: ['read', 'grep'],
+  },
+  {
+    id: 'doctor',
+    name: 'Doctor',
+    file: 'doctor.md',
+    description: 'Re-checks the analyst\u2019s claims against their receipts and strikes the ones that do not hold',
+    // Two things a role markdown file cannot carry: the name of the artifact
+    // this seat owns (so the status reader looks for the file the writer
+    // writes, not a numbered transcript) and the checker that refuses a
+    // malformed report before it lands. Both survive the roles/ scan below.
+    outputFile: 'doctor-report.md',
+    validator: 'doctor',
+    tools: ['read', 'grep'],
+  },
+];
+
 export const KNOWN_PROJECTS = {
+  'external-health': {
+    id: 'external-health',
+    name: 'Personal Health Coach (External Health)',
+    type: 'external',
+    projectNumber: null,
+    workspace: path.join(os.homedir(), 'projects', 'external-health-coach'),
+    templateDir: path.join(REPO_ROOT, 'projects', 'external-health'),
+    allowGit: false,
+    gdriveFolder: 'External-Personal-Health-Coach',
+    description: 'Four living health documents built from verified lab data and managed from Telegram',
+    // Its workspace is a data workspace: the case/ reader finds BRIEF.md and
+    // nothing else, so the seat context comes from lib/health/context.mjs.
+    contextProvider: 'health',
+    roles: HEALTH_PROJECT_ROLES,
+  },
   'health-tracker': {
     id: 'health-tracker',
     name: 'Health Tracker Website (Project 1)',
@@ -85,6 +166,9 @@ export const KNOWN_PROJECTS = {
     allowGit: false,
     gdriveFolder: '[External-1-PIP-Defense]',
     description: 'Multi-agent legal, accuracy, and defense case council for performance rating and PIP navigation',
+    // The case checkpoints (audit/defense/finalize) and the A/B/C deliverables
+    // belong to this pipeline alone; every other project runs its own roles.
+    councilPipeline: 'case',
     roles: COUNCIL_ROLES,
   },
   'external-2': {
@@ -97,6 +181,7 @@ export const KNOWN_PROJECTS = {
     allowGit: false,
     gdriveFolder: '[External-2-PIP-Defense]',
     description: 'Multi-agent legal, accuracy, and defense case council for performance rating and PIP navigation',
+    councilPipeline: 'case',
     roles: COUNCIL_ROLES,
   },
 };
@@ -169,6 +254,22 @@ export const ROLE_ALIASES = {
   // council aliases below.
   pm: 'pm',
   projectmanager: 'pm',
+
+  // Personal Health Coach roles (external-health). Kept distinct from the council
+  // aliases on purpose: `/role analyst` must mean the health analyst only in a
+  // project that has that seat, and never silently borrow a council seat.
+  steward: 'data_steward',
+  data_steward: 'data_steward',
+  analyst: 'health_analyst',
+  health_analyst: 'health_analyst',
+  planner: 'test_planner',
+  test_planner: 'test_planner',
+  research: 'research_lead',
+  research_lead: 'research_lead',
+  literature: 'research_lead',
+  safety: 'safety_reviewer',
+  safety_reviewer: 'safety_reviewer',
+  doctor: 'doctor',
 
   // Project 2 Council Roles
   accuracy: 'accuracy_review',
@@ -395,6 +496,23 @@ export function resolveProjectId(raw) {
   if (s === 'external 1' || s === 'external-1' || s === 'external1') {
     return 'external-1';
   }
+  // Personal Health Coach (the brief's own project folder). "health" alone is
+  // deliberate: this is the project the chat is about, and "ht" still means the
+  // website. Pinned by scripts/assert-project-registry-parity.mjs so the
+  // standalone router cannot drift from this grammar.
+  if (
+    s === 'external health' ||
+    s === 'external-health' ||
+    s === 'externalhealth' ||
+    s === 'health' ||
+    s === 'health-coach' ||
+    s === 'health coach' ||
+    s === 'personal-health' ||
+    s === 'personal health' ||
+    s === 'coach'
+  ) {
+    return 'external-health';
+  }
 
   // Dynamic project 3+ check (e.g. "external 3", "project 3", "3", "external-4")
   const matchNum = s.match(/^(?:project\s*|external\s*|-)?(\d+)$/);
@@ -563,6 +681,16 @@ export function getProjectRoles(projectId) {
     return proj.roles || COUNCIL_ROLES;
   }
 
+  // The declared manifest is the running order, because seats are numbered as
+  // they run (`/council 2`, "phase 3 of 6"). A directory listing's order is an
+  // accident of the filesystem: adding a seat must not renumber the ones a
+  // chat already knows, and the Doctor has to run last — after the seats whose
+  // claims it checks. Files the manifest does not know sort in after it, by
+  // name, so a repo-only role is still reachable and still deterministic.
+  const declared = new Map((proj.roles || []).map((r, i) => [r.id, { ...r, index: i }]));
+  const rank = (file) => declared.get(file.replace(/\.md$/, ''))?.index ?? Number.MAX_SAFE_INTEGER;
+  files.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+
   const dynamicRoles = [];
   for (const f of files) {
     const roleId = f.replace(/\.md$/, '');
@@ -571,13 +699,23 @@ export function getProjectRoles(projectId) {
     const firstLine = content.split('\n').find((l) => l.trim().startsWith('#'));
     const name = firstLine ? firstLine.replace(/^#+\s*/, '').trim() : roleId.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
-    dynamicRoles.push({
+    const role = {
       id: roleId,
       name,
       file: f,
       instructions: content,
       tools: ['standard_agent_tools'],
-    });
+    };
+    // Metadata the manifest declares but the file cannot carry (the seat's own
+    // output file, its report checker) is merged in, not lost to the scan.
+    const decl = declared.get(roleId);
+    if (decl) {
+      if (decl.description) role.description = decl.description;
+      if (decl.outputFile) role.outputFile = decl.outputFile;
+      if (decl.validator) role.validator = decl.validator;
+      if (decl.tools) role.tools = decl.tools;
+    }
+    dynamicRoles.push(role);
   }
 
   proj.roles = dynamicRoles;

@@ -54,6 +54,19 @@ function pickKey(scope) {
 }
 
 /**
+ * The key that is in *this* env map, and nothing else.
+ *
+ * `resolveGeminiKey` deliberately falls back to the process env (a caller that
+ * was handed a partial map should still find the host's credential). A
+ * readiness check is the opposite question — "does THIS host have a key?" — so
+ * it asks this one: an explicit empty env must read as empty rather than
+ * silently picking up a key from somewhere else.
+ */
+export function geminiKeyIn(env) {
+  return pickKey(env);
+}
+
+/**
  * Key chain mirrors the live site's getGeminiApiKey (server.ts):
  * GEMINI_API_KEY -> GOOGLE_API_KEY -> API_KEY -> GEMINI_API_KEYS[0].
  * Empty string when unset — callers report it, never crash on it.

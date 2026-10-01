@@ -75,6 +75,17 @@ CREATE TABLE IF NOT EXISTS profiles (
 );
 CREATE INDEX IF NOT EXISTS idx_profiles_uid ON profiles(firebase_uid);
 
+-- Ticket numbers that were issued and whose card was deleted, so the number is
+-- never handed to a different card. Added 2026-09-30 after #18 was issued to a
+-- scratch card, the card was deleted, and the number came back minutes later to
+-- a real meal-audit defect — silently re-pointing every citation to it.
+-- The numbering pass floors on max(live numbers, retired numbers) + 1.
+CREATE TABLE IF NOT EXISTS retired_ticket_numbers (
+  public_n INTEGER PRIMARY KEY,
+  retired_at TEXT DEFAULT (datetime('now')),
+  reason TEXT DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS issue_tags (
   id TEXT PRIMARY KEY,
   title TEXT,

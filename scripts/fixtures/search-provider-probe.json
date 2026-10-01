@@ -1,0 +1,287 @@
+{
+  "note": "A dated, unauthenticated observation of the literature lane's three declared search endpoints, taken by hand from a dev host. It is the wire-side backing for scripts/fixtures/search-providers.json: each declared request below was built by the lane's own SEARCH_PROVIDERS[].build (the code the shipped lane runs) and sent to the vendor with a deliberately invalid credential, and every reply is verbatim. It records one moment — not a subscription to the vendors, and not an input to any gate: no test or CI job replays it against a network. scripts/assert-external-health.test.mjs section 16 reads it offline, only to check that the evidence still describes the request the lane builds today.",
+  "statement": "Unauthenticated observation, not a captured successful response. No credential existed on the host that ran this probe, so nothing below is a successful search: every reply is a rejection. A rejection still discriminates — a refusal that names the credential, or that arrives where a wrong path would have returned 404, proves the endpoint and the credential placement are the ones the vendor routes on. What it cannot prove is listed under doesNotProve, per provider.",
+  "observedAt": "2026-10-01T03:33:05.239Z",
+  "platform": "darwin node v26.8.1",
+  "client": "fleet-store/1.0 (linux; node) — the lane's own User-Agent; the transport adds its own headers (accept-encoding, connection, …), which are not part of the contract",
+  "credential": "probe-not-a-credential-0000",
+  "credentialNote": "probe-not-a-credential-0000 — a well-formed value that is not a credential, so every status below is the vendor's answer to the request rather than a search result",
+  "proves": [
+    "each declared host and path routes: Tavily answered POST /search with 401 where /searchX returned 404, and Google answered GET /customsearch/v1 with a key error where /customsearch/v1x returned 404",
+    "the credential travels in the place the fixture puts it: Brave's declared path names x-subscription-token as a required header when it is missing and rejects the token as invalid when it is present; Tavily reaches its auth layer through Authorization: Bearer; Google validates the key query parameter as an API key",
+    "each vendor answered the declared path with the envelope family the lane parses (JSON, with an error object on a refusal) — the lane's non-200 path needs only the status, but a bot check or a redirect is exactly what changes the content type"
+  ],
+  "doesNotProve": [
+    "acceptance: no successful response was captured, so no 200 envelope, result field, or rate-limit status is confirmed here",
+    "the recorded 200 bodies in search-providers.json, which remain transcriptions of the vendors' documentation — a green sensor still means only that the lane matches that transcription",
+    "any parameter the vendor checks after the credential (result count, query syntax)"
+  ],
+  "providers": [
+    {
+      "id": "brave",
+      "doc": "https://api-dashboard.search.brave.com/documentation/services/web-search",
+      "endpoint": "GET https://api.search.brave.com/res/v1/web/search?q=<query>&count=<limit>",
+      "probes": [
+        {
+          "label": "declared request, invalid credential",
+          "sentBy": "SEARCH_PROVIDERS.build",
+          "request": {
+            "method": "GET",
+            "url": "https://api.search.brave.com/res/v1/web/search?q=vitamin%20D%20and%20muscle%20strength&count=10",
+            "headers": {
+              "Accept": "application/json",
+              "X-Subscription-Token": "probe-not-a-credential-0000",
+              "User-Agent": "fleet-store/1.0 (linux; node)"
+            },
+            "body": ""
+          },
+          "response": {
+            "status": 422,
+            "contentType": "application/json",
+            "body": "{\"error\":{\"code\":\"SUBSCRIPTION_TOKEN_INVALID\",\"detail\":\"The provided subscription token is invalid.\",\"meta\":{\"component\":\"authentication\"},\"status\":422},\"type\":\"ErrorResponse\"}"
+          },
+          "ms": 532
+        },
+        {
+          "label": "control: declared path, credential header removed",
+          "sentBy": "hand",
+          "request": {
+            "method": "GET",
+            "url": "https://api.search.brave.com/res/v1/web/search?q=vitamin%20D%20and%20muscle%20strength&count=10",
+            "headers": {
+              "Accept": "application/json",
+              "User-Agent": "fleet-store/1.0 (linux; node)"
+            },
+            "body": ""
+          },
+          "response": {
+            "status": 422,
+            "contentType": "application/json",
+            "body": "{\"error\":{\"code\":\"VALIDATION\",\"detail\":\"Unable to validate request parameter(s)\",\"meta\":{\"errors\":[{\"input\":null,\"loc\":[\"header\",\"x-subscription-token\"],\"msg\":\"Field required\",\"type\":\"missing\"}]},\"status\":422},\"type\":\"ErrorResponse\"}"
+          },
+          "ms": 142
+        },
+        {
+          "label": "control: path that does not exist, declared header kept",
+          "sentBy": "hand",
+          "request": {
+            "method": "GET",
+            "url": "https://api.search.brave.com/res/v1/web/searchX?q=vitamin%20D%20and%20muscle%20strength&count=10",
+            "headers": {
+              "Accept": "application/json",
+              "X-Subscription-Token": "probe-not-a-credential-0000",
+              "User-Agent": "fleet-store/1.0 (linux; node)"
+            },
+            "body": ""
+          },
+          "response": {
+            "status": 422,
+            "contentType": "application/json",
+            "body": "{\"error\":{\"code\":\"SUBSCRIPTION_TOKEN_INVALID\",\"detail\":\"The provided subscription token is invalid.\",\"meta\":{\"component\":\"authentication\"},\"status\":422},\"type\":\"ErrorResponse\"}"
+          },
+          "ms": 154
+        }
+      ],
+      "proves": [
+        "the credential header is X-Subscription-Token: with the header removed the declared path returns 422 VALIDATION whose error lists loc [\"header\",\"x-subscription-token\"] and msg \"Field required\" — the vendor naming the header it wants",
+        "the endpoint is live and authenticates on that header: the declared request with the invalid token returns 422 SUBSCRIPTION_TOKEN_INVALID with meta.component \"authentication\" — an auth decision, not a routing or a parameter error"
+      ],
+      "doesNotProve": [
+        "that /res/v1/web/search is the routed path: the identical token on the nonexistent /res/v1/web/searchX returns the identical SUBSCRIPTION_TOKEN_INVALID, so Brave checks auth before routing and this probe cannot tell the two paths apart — an explicit unknown, not a confirmation",
+        "anything about the fixture's 429 RATE_LIMITED envelope: a rate limit cannot be reached without a credential"
+      ],
+      "rejectedCase": "the fixture's brave.rejected case is the verbatim body of the declared probe (HTTP 422 SUBSCRIPTION_TOKEN_INVALID)"
+    },
+    {
+      "id": "tavily",
+      "doc": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
+      "endpoint": "POST https://api.tavily.com/search, body {query, max_results, search_depth}",
+      "probes": [
+        {
+          "label": "declared request, invalid credential",
+          "sentBy": "SEARCH_PROVIDERS.build",
+          "request": {
+            "method": "POST",
+            "url": "https://api.tavily.com/search",
+            "headers": {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+              "Authorization": "Bearer probe-not-a-credential-0000",
+              "User-Agent": "fleet-store/1.0 (linux; node)"
+            },
+            "body": "{\"query\":\"vitamin D and muscle strength\",\"max_results\":10,\"search_depth\":\"basic\"}"
+          },
+          "response": {
+            "status": 401,
+            "contentType": "application/json",
+            "body": "{\n    \"detail\": {\n        \"error\": \"Unauthorized: missing or invalid API key.\"\n    }\n}\n"
+          },
+          "ms": 299
+        },
+        {
+          "label": "control: declared path, credential in the body (the shape this lane used to send)",
+          "sentBy": "hand",
+          "request": {
+            "method": "POST",
+            "url": "https://api.tavily.com/search",
+            "headers": {
+              "Content-Type": "application/json",
+              "User-Agent": "fleet-store/1.0 (linux; node)"
+            },
+            "body": "{\"api_key\":\"probe-not-a-credential-0000\",\"query\":\"vitamin D and muscle strength\",\"max_results\":10,\"search_depth\":\"basic\"}"
+          },
+          "response": {
+            "status": 401,
+            "contentType": "application/json",
+            "body": "{\n    \"detail\": {\n        \"error\": \"Unauthorized: missing or invalid API key.\"\n    }\n}\n"
+          },
+          "ms": 97
+        },
+        {
+          "label": "control: path that does not exist, Bearer kept",
+          "sentBy": "hand",
+          "request": {
+            "method": "POST",
+            "url": "https://api.tavily.com/searchX",
+            "headers": {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+              "Authorization": "Bearer probe-not-a-credential-0000",
+              "User-Agent": "fleet-store/1.0 (linux; node)"
+            },
+            "body": "{\"query\":\"vitamin D and muscle strength\",\"max_results\":10,\"search_depth\":\"basic\"}"
+          },
+          "response": {
+            "status": 404,
+            "contentType": "",
+            "body": ""
+          },
+          "ms": 98
+        }
+      ],
+      "proves": [
+        "the declared path exists and is the vendor's search route: POST /search with the invalid Bearer token returns 401 {\"detail\":{\"error\":\"Unauthorized: missing or invalid API key.\"}} where the same request to /searchX returns 404 with no body",
+        "the credential is read from Authorization: Bearer — the same invalid token sent as api_key in the JSON body (the shape this lane used to send, and the RESEARCH-2 defect) returns the identical 401, as does an X-Api-Key header, so the header the fixture sends is a credential transport the auth layer reads and the body field is not"
+      ],
+      "doesNotProve": [
+        "whether the api_key body field is rejected or silently ignored: its 401 is indistinguishable from the no-credential control, so the finding is 'the body shape does not authenticate', not 'the vendor rejects it'",
+        "a successful search, the 200 envelope's fields, or Tavily's real rate-limit answer"
+      ],
+      "rejectedCase": "the fixture's tavily.rejected case is the verbatim body of the declared probe (HTTP 401 Unauthorized: missing or invalid API key.)"
+    },
+    {
+      "id": "google-cse",
+      "doc": "https://developers.google.com/custom-search/v1/reference/rest/v1/cse/list",
+      "endpoint": "GET https://www.googleapis.com/customsearch/v1?key=<key>&cx=<cx>&num=<limit>&q=<query>",
+      "probes": [
+        {
+          "label": "declared request, invalid credential",
+          "sentBy": "SEARCH_PROVIDERS.build",
+          "request": {
+            "method": "GET",
+            "url": "https://www.googleapis.com/customsearch/v1?key=probe-not-a-credential-0000&cx=probe-not-a-credential-0000&num=10&q=vitamin%20D%20and%20muscle%20strength",
+            "headers": {
+              "Accept": "application/json",
+              "User-Agent": "fleet-store/1.0 (linux; node)"
+            },
+            "body": ""
+          },
+          "response": {
+            "status": 400,
+            "contentType": "application/json; charset=UTF-8",
+            "body": "{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"errors\": [\n      {\n        \"message\": \"API key not valid. Please pass a valid API key.\",\n        \"domain\": \"global\",\n        \"reason\": \"badRequest\"\n      }\n    ],\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\",\n        \"reason\": \"API_KEY_INVALID\",\n        \"domain\": \"googleapis.com\",\n        \"metadata\": {\n          \"service\": \"customsearch.googleapis.com\"\n        }\n      },\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.LocalizedMessage\",\n        \"locale\": \"en-US\",\n        \"message\": \"API key not valid. Please pass a valid API key.\"\n      }\n    ]\n  }\n}\n"
+          },
+          "ms": 104
+        },
+        {
+          "label": "control: declared path, no key at all",
+          "sentBy": "hand",
+          "request": {
+            "method": "GET",
+            "url": "https://www.googleapis.com/customsearch/v1?cx=probe-not-a-credential-0000&num=10&q=vitamin%20D%20and%20muscle%20strength",
+            "headers": {
+              "Accept": "application/json",
+              "User-Agent": "fleet-store/1.0 (linux; node)"
+            },
+            "body": ""
+          },
+          "response": {
+            "status": 403,
+            "contentType": "application/json; charset=UTF-8",
+            "body": "{\n  \"error\": {\n    \"code\": 403,\n    \"message\": \"Method doesn't allow unregistered callers (callers without established identity). Please use API Key or other form of API consumer identity to call this API.\",\n    \"errors\": [\n      {\n        \"message\": \"Method doesn't allow unregistered callers (callers without established identity). Please use API Key or other form of API consumer identity to call this API.\",\n        \"domain\": \"global\",\n        \"reason\": \"forbidden\"\n      }\n    ],\n    \"status\": \"PERMISSION_DENIED\"\n  }\n}\n"
+          },
+          "ms": 32
+        },
+        {
+          "label": "control: declared path, key in a header instead of the query",
+          "sentBy": "hand",
+          "request": {
+            "method": "GET",
+            "url": "https://www.googleapis.com/customsearch/v1?cx=probe-not-a-credential-0000&num=10&q=vitamin%20D%20and%20muscle%20strength",
+            "headers": {
+              "Accept": "application/json",
+              "User-Agent": "fleet-store/1.0 (linux; node)",
+              "X-Goog-Api-Key": "probe-not-a-credential-0000"
+            },
+            "body": ""
+          },
+          "response": {
+            "status": 400,
+            "contentType": "application/json; charset=UTF-8",
+            "body": "{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"errors\": [\n      {\n        \"message\": \"API key not valid. Please pass a valid API key.\",\n        \"domain\": \"global\",\n        \"reason\": \"badRequest\"\n      }\n    ],\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\",\n        \"reason\": \"API_KEY_INVALID\",\n        \"domain\": \"googleapis.com\",\n        \"metadata\": {\n          \"service\": \"customsearch.googleapis.com\"\n        }\n      },\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.LocalizedMessage\",\n        \"locale\": \"en-US\",\n        \"message\": \"API key not valid. Please pass a valid API key.\"\n      }\n    ]\n  }\n}\n"
+          },
+          "ms": 34
+        },
+        {
+          "label": "control: declared path, num above the documented maximum, invalid key",
+          "sentBy": "hand",
+          "request": {
+            "method": "GET",
+            "url": "https://www.googleapis.com/customsearch/v1?key=probe-not-a-credential-0000&cx=probe-not-a-credential-0000&num=25&q=vitamin%20D%20and%20muscle%20strength",
+            "headers": {
+              "Accept": "application/json",
+              "User-Agent": "fleet-store/1.0 (linux; node)"
+            },
+            "body": ""
+          },
+          "response": {
+            "status": 400,
+            "contentType": "application/json; charset=UTF-8",
+            "body": "{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"errors\": [\n      {\n        \"message\": \"API key not valid. Please pass a valid API key.\",\n        \"domain\": \"global\",\n        \"reason\": \"badRequest\"\n      }\n    ],\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\",\n        \"reason\": \"API_KEY_INVALID\",\n        \"domain\": \"googleapis.com\",\n        \"metadata\": {\n          \"service\": \"customsearch.googleapis.com\"\n        }\n      },\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.LocalizedMessage\",\n        \"locale\": \"en-US\",\n        \"message\": \"API key not valid. Please pass a valid API key.\"\n      }\n    ]\n  }\n}\n"
+          },
+          "ms": 62
+        },
+        {
+          "label": "control: path that does not exist",
+          "sentBy": "hand",
+          "request": {
+            "method": "GET",
+            "url": "https://www.googleapis.com/customsearch/v1x?key=probe-not-a-credential-0000&cx=probe-not-a-credential-0000&num=10&q=vitamin%20D%20and%20muscle%20strength",
+            "headers": {
+              "Accept": "application/json",
+              "User-Agent": "fleet-store/1.0 (linux; node)"
+            },
+            "body": ""
+          },
+          "response": {
+            "status": 404,
+            "contentType": "text/html; charset=UTF-8",
+            "body": "<!DOCTYPE html>\n<html lang=en>\n  <meta charset=utf-8>\n  <meta name=viewport content=\"initial-scale=1, minimum-scale=1, width=device-width\">\n  <title>Error 404 (Not Found)!!1</title>\n  <style>\n    *{margin:0;padding:0}html,code{font:15px/22px arial,sans-serif}html{background:#fff;color:#222;padding:15px}body{margin:7% auto 0;max-width:390px;min-height:180px;padding:30px 0 15px}* > body{background:url(//www.google.com/images/errors/robot.png) 100% 5px no-repeat;padding-right:205px}p{margin:11px 0 22px;overflow:hidden}ins{color:#777;text-decoration:none}a img{border:0}@media screen and (max-width:772px){body{background:none;margin-top:0;max-width:none;padding-right:0}}#logo{background:url(//www.google.com/images/branding/googlelogo/1x/googlelogo_color_150x54dp.png) no-repeat;margin-left:-5px}@media only screen and (min-resolution:192dpi){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat 0% 0%/100% 100%;-moz-border-image:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) 0}}@media only screen and (-webkit-min-device-pixel-ratio:2){#logo{background:url(//www.google.com/images/branding/googlelogo/2x… [373 bytes withheld]",
+            "truncated": true
+          },
+          "ms": 116
+        }
+      ],
+      "proves": [
+        "the declared path exists: GET /customsearch/v1 with an invalid key returns 400 \"API key not valid. Please pass a valid API key.\" (details[].reason API_KEY_INVALID, metadata.service customsearch.googleapis.com) where /customsearch/v1x returns 404 with Google's HTML error page",
+        "the credential is read from the key query parameter: the 400 is a key-validation answer, which only happens after a key has been read from where the lane put it; with the parameter absent entirely the answer is different — 403 PERMISSION_DENIED, \"Method doesn't allow unregistered callers\""
+      ],
+      "doesNotProve": [
+        "that num is checked before the key: num=25 (above the documented maximum) returns the same key error, so the lane's MAX_HITS_PER_QUERY cap is an assumption of the fixture, not an observation",
+        "whether the key query parameter is the only placement Google accepts: the same invalid key in an X-Goog-Api-Key header also reaches key validation, so the header is read too — the lane's placement is confirmed, its exclusivity is not",
+        "a successful search"
+      ],
+      "rejectedCase": "the fixture's google-cse.rejected case is the verbatim body of the declared probe (HTTP 400 API key not valid)"
+    }
+  ]
+}

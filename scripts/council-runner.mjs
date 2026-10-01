@@ -26,9 +26,13 @@ import {
   getProjectSoul,
   getRoleInstructions,
   getProjectRoles,
+  resolveRoleId,
   seedProjectWorkspace,
 } from './lib/project-registry.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
+import { buildHealthContext, renderContextBlock, VERIFY_FILE } from './lib/health/context.mjs';
+import { gateFromArtifact } from './lib/health/docs.mjs';
+import { validateDoctorReport } from './lib/health/doctor.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
@@ -48,6 +52,113 @@ export const COUNCIL_PHASES = [
   { id: 'final_case_builder', title: 'Phase 6: Final Executive Dossier Compilation', file: '06_final_dossier.md' },
 ];
 
+/**
+ * The case pipeline's checkpoints, declared rather than inferred.
+ *
+ * external-1 and external-2 were the council's first tenants and their three
+ * checkpoints are part of a working routine: the messages and the phase sets
+ * below are what those chats have always received. They live here, in one map,
+ * so that a second project's stages can be its own roles without this file
+ * having to guess which pipeline a call belongs to.
+ */
+export const LEGACY_CHECKPOINTS = {
+  audit: {
+    phases: ['accuracy_review'],
+    nextStepMsg: '🛑 *Stage 1 Checkpoint:* Accuracy Audit complete.\nReview `01_accuracy_audit.md` in Drive. Add any missing exhibits/receipts to the folder, then send `/council defense` to run the defense and manager simulation.',
+  },
+  defense: {
+    phases: ['case_review', 'manager_simulation'],
+    nextStepMsg: '🛑 *Stage 2 Checkpoint:* Defense & Manager Red-Team simulation complete.\nReview `02_defense_rebuttal.md` and `03_manager_critique.md`. Address any high-vulnerability points, then send `/council finalize` to generate the legal memo and final deliverables.',
+  },
+  finalize: {
+    phases: ['legal_policy', 'arbitrator', 'final_case_builder'],
+    nextStepMsg: '🎉 *Stage 3 Complete:* Legal review, arbitration, and final deliverables compiled.\nCheck `A_Executive_1-on-1_Talking_Points.md` and `B_Formal_Performance_Rating_Rebuttal.md` in your project folder.',
+  },
+};
+
+/** The three executive documents the case pipeline reports. */
+export const LEGACY_DELIVERABLES = [
+  'A_Executive_1-on-1_Talking_Points.md',
+  'B_Formal_Performance_Rating_Rebuttal.md',
+  'C_30_60_90_Performance_Alignment_Plan.md',
+];
+
+/**
+ * Which pipeline a project runs: the declared legacy case map, or its own roles.
+ *
+ * The registry says so (`councilPipeline: 'case'`); a project that does not say
+ * is a roles project, because every project but the two case councils is.
+ */
+export function isCaseProject(projectId) {
+  return KNOWN_PROJECTS[projectId]?.councilPipeline === 'case';
+}
+
+/** The stages a project can run, numbered as the chat numbers them. */
+export function councilStages(projectId) {
+  return getCouncilPhases(projectId).map((p, i) => ({ ...p, index: i + 1 }));
+}
+
+/**
+ * Resolve a `/council <stage>` token against the project's own phases.
+ *
+ * Accepted for a roles project: a phase id (`data_steward`), a role alias
+ * (`steward` → `data_steward`, through the same alias table `/role` uses), a
+ * 1-based number (`2`), or `all`/`run`/`` for every phase. A case project gets
+ * its three checkpoints first, so `/council audit` keeps meaning what it means.
+ *
+ * Anything else is a refusal naming the real stages — the previous fallback ran
+ * the **entire** council for an unknown token, which is the one thing a stage
+ * command must never silently do.
+ */
+export function resolveCouncilStage(stage, projectId = 'external-1') {
+  const proj = KNOWN_PROJECTS[projectId];
+  if (!proj) return { ok: false, error: `Unknown project: ${projectId}`, stages: [] };
+
+  const phases = councilStages(projectId);
+  const byId = (id) => phases.find((p) => p.id === id);
+  const stageList = phases.map((p) => `${p.index} ${p.id}`).join(', ');
+  const token = String(stage ?? '').trim().toLowerCase();
+
+  if (isCaseProject(projectId) && LEGACY_CHECKPOINTS[token]) {
+    const checkpoint = LEGACY_CHECKPOINTS[token];
+    return {
+      ok: true,
+      label: token,
+      legacy: true,
+      phases: checkpoint.phases.map((id) => byId(id)).filter(Boolean),
+      nextStepMsg: checkpoint.nextStepMsg,
+    };
+  }
+
+  if (token === '' || token === 'all' || token === 'run' || token === 'full') {
+    return {
+      ok: true,
+      label: 'all',
+      legacy: false,
+      phases,
+      nextStepMsg: `✅ *Council complete* — ${phases.length} seat(s): ${phases.map((p) => p.title).join(' · ')}\nArtifacts: \`${resultDir(proj.workspace)}/\` — one file per seat.\nNext: review them, then \`/council <stage>\` to re-run one seat.`,
+    };
+  }
+
+  const index = /^\d+$/.test(token) ? Number(token) : NaN;
+  const phase = byId(token) || byId(resolveRoleId(token, projectId) || '') || (Number.isInteger(index) ? phases[index - 1] : null);
+  if (!phase) {
+    return {
+      ok: false,
+      error: `Unknown stage "${stage}" for ${proj.name} — stages: ${stageList}${isCaseProject(projectId) ? `, or the checkpoints ${Object.keys(LEGACY_CHECKPOINTS).join(' / ')}` : ''}`,
+      stages: phases,
+    };
+  }
+  const next = phases[phase.index];
+  return {
+    ok: true,
+    label: phase.id,
+    legacy: false,
+    phases: [phase],
+    nextStepMsg: `✅ *Stage ${phase.index}/${phases.length} complete* — ${phase.title}\nArtifact: \`${phase.file}\` in the workspace's result folder.\n${next ? `Next: \`/council ${next.id}\`` : 'That was the last stage.'}${next ? ', or ' : ' '}\`/council status\` lists every stage and which have run.`,
+  };
+}
+
 export function getCouncilPhases(projectId = 'external-1') {
   const roles = getProjectRoles(projectId);
   if (!roles || !roles.length) {
@@ -59,7 +170,12 @@ export function getCouncilPhases(projectId = 'external-1') {
     return {
       id: r.id,
       title: known ? known.title : `Phase ${index + 1}: ${r.name}`,
-      file: known ? known.file : `${num}_${r.id}.md`,
+      // A seat may declare the artifact it owns, and then that is the file the
+      // writer writes and the status reader reads. The Doctor declares
+      // `doctor-report.md`: a numbered transcript would be a second report,
+      // and the one the seat's checker judges must be the one that lands.
+      file: known ? known.file : (r.outputFile || `${num}_${r.id}.md`),
+      validator: r.validator || '',
     };
   });
 }
@@ -86,32 +202,135 @@ export function findInWorkspace(workspace, ...candidates) {
   return '';
 }
 
-export function readWorkspaceContext(workspace) {
-  const context = {};
-  if (!fs.existsSync(workspace)) return context;
-  // Root files (old layout) plus the current layout's case/ and working/ trees,
-  // keyed by relative path so same-named files cannot collide silently.
-  const readFile = (rel) => {
-    try {
-      context[rel] = fs.readFileSync(path.join(workspace, rel), 'utf8');
-    } catch { /* listed but unreadable: skip, do not fail the turn */ }
-  };
-  for (const f of fs.readdirSync(workspace)) {
-    if (f.endsWith('.md')) {
+/**
+ * Which context reader a project declares, if any.
+ *
+ * A project names a `contextProvider` in the registry when its workspace is not
+ * a case/ workspace. external-health is one: its data lives in `result/` and
+ * `sources/`, and the case/ reader below — root `*.md` plus `case/` and
+ * `working/` — found exactly one file there (`BRIEF.md`), so every seat reasoned
+ * from the brief and none of the verified numbers.
+ */
+export function contextProviderFor(workspace, projectId = '') {
+  const proj = projectId
+    ? KNOWN_PROJECTS[projectId]
+    : Object.values(KNOWN_PROJECTS).find((p) => p.workspace === workspace);
+  return proj?.contextProvider || '';
+}
+
+/**
+ * The context block a seat turn is given.
+ *
+ * `context` is the legacy file map for case/ projects and the structured pack
+ * for a provider project; `text` is what goes into the prompt. The legacy path
+ * renders byte-for-byte what it always did (`### File:` headers, 1000-character
+ * slice) so external-1 and external-2 prompts do not change.
+ *
+ * A provider that refuses (no brief, no such folder) answers `ok:false` with its
+ * reasons, and the caller must refuse the turn rather than send an empty block:
+ * a seat reasoning from nothing produces exactly the confident claims this
+ * project exists to prevent.
+ */
+export function readWorkspaceContext(workspace, { projectId = '' } = {}) {
+  if (contextProviderFor(workspace, projectId) === 'health') {
+    const context = buildHealthContext(workspace);
+    return { ok: context.ok, provider: 'health', refuses: context.refuses, context, text: renderContextBlock(context) };
+  }
+
+  const files = {};
+  if (fs.existsSync(workspace)) {
+    // Root files (old layout) plus the current layout's case/ and working/ trees,
+    // keyed by relative path so same-named files cannot collide silently.
+    const readFile = (rel) => {
       try {
-        if (fs.statSync(path.join(workspace, f)).isFile()) readFile(f);
-      } catch { /* ignore */ }
+        files[rel] = fs.readFileSync(path.join(workspace, rel), 'utf8');
+      } catch { /* listed but unreadable: skip, do not fail the turn */ }
+    };
+    for (const f of fs.readdirSync(workspace)) {
+      if (f.endsWith('.md')) {
+        try {
+          if (fs.statSync(path.join(workspace, f)).isFile()) readFile(f);
+        } catch { /* ignore */ }
+      }
+    }
+    for (const dir of ['case', 'working']) {
+      const abs = path.join(workspace, dir);
+      let entries = [];
+      try {
+        entries = fs.statSync(abs).isDirectory() ? fs.readdirSync(abs) : [];
+      } catch { /* absent dir: nothing to add */ }
+      for (const f of entries) if (f.endsWith('.md')) readFile(path.join(dir, f));
     }
   }
-  for (const dir of ['case', 'working']) {
-    const abs = path.join(workspace, dir);
-    let entries = [];
-    try {
-      entries = fs.statSync(abs).isDirectory() ? fs.readdirSync(abs) : [];
-    } catch { /* absent dir: nothing to add */ }
-    for (const f of entries) if (f.endsWith('.md')) readFile(path.join(dir, f));
+  const text = Object.entries(files)
+    .map(([f, c]) => `### File: ${f}\n${c.slice(0, 1000)}...\n`)
+    .join('\n');
+  return { ok: true, provider: 'legacy', refuses: [], context: files, text };
+}
+
+/** The seat context for a turn, or a thrown refusal naming what is missing. */
+function seatContext(projectId, workspace) {
+  const ctx = readWorkspaceContext(workspace, { projectId });
+  if (!ctx.ok) {
+    throw new Error(`workspace context refused for ${projectId}: ${ctx.refuses.join('; ')}`);
   }
-  return context;
+  return ctx;
+}
+
+/** The rendered context block a turn is given. */
+function seatContextText(projectId, workspace) {
+  return seatContext(projectId, workspace).text;
+}
+
+/**
+ * The declared output checkers, by the name a seat declares in the registry.
+ *
+ * A seat that declares a checker does not get to write an unchecked file,
+ * whichever door ran it: `/health doctor` and `/council doctor` write the same
+ * path, and the check belongs to the seat, not to the door.
+ */
+const STAGE_CHECKS = {
+  doctor: (text, facts) => validateDoctorReport(text, facts),
+};
+
+/**
+ * What a report checker needs to judge a report, read from the workspace the
+ * seat just read — never from the report itself. `analysis` is the payload's
+ * real state (`accepted`, `refused`, `absent`) and `gate` is the verify
+ * artifact's verdict, so a report cannot define its own ground truth.
+ */
+function reportFacts(workspace, projectId) {
+  const ctx = readWorkspaceContext(workspace, { projectId });
+  const pack = ctx.ok && ctx.provider === 'health' ? ctx.context : null;
+  const section = pack?.sections?.find((s) => s.key === 'analysis');
+  const analysis = !section ? 'absent' : /shape: REFUSED/.test(section.text) ? 'refused' : 'accepted';
+  let gate = { allowed: true, open: [] };
+  try {
+    gate = gateFromArtifact(JSON.parse(fs.readFileSync(path.join(workspace, 'result', VERIFY_FILE), 'utf8')));
+  } catch {
+    // No verify artifact: there are no open items to hold a PASS against.
+  }
+  return { analysis, gate };
+}
+
+/**
+ * Check a seat's output against its declared checker, then write it.
+ *
+ * A refused report writes nothing at all: a malformed report left on disk is
+ * indistinguishable from a good one to the next reader, and it would read back
+ * as "stage complete" in `/council status`.
+ */
+function writeStageOutput({ phase, output, outDir, workspace, projectId }) {
+  const check = STAGE_CHECKS[phase.validator];
+  if (check) {
+    const verdict = check(output, reportFacts(workspace, projectId));
+    if (!verdict.ok) {
+      throw new Error(`stage ${phase.id} produced a report its checker refuses: ${verdict.error} — nothing was written`);
+    }
+  }
+  const outFile = path.join(outDir, phase.file);
+  fs.writeFileSync(outFile, output, 'utf8');
+  return outFile;
 }
 
 export function getCouncilStatus(projectId = 'external-1') {
@@ -125,32 +344,41 @@ export function getCouncilStatus(projectId = 'external-1') {
   const has = (...rels) => rels.some((r) => files.includes(r) || Boolean(findInWorkspace(workspace, r)));
 
   const phasesList = getCouncilPhases(projectId);
-  const phases = phasesList.map((p) => {
+  const phases = phasesList.map((p, i) => {
+    // The same directory the stage writer uses: a run that reported success and
+    // a status page that says "pending" is one bug, not two opinions.
     const done = outputs.includes(p.file);
     return {
       phase: p.id,
+      index: i + 1,
       title: p.title,
       completed: done,
       outputFile: done ? path.join(outDir, p.file) : null,
     };
   });
 
+  // A project's deliverables are its own phase files; the case pipeline keeps
+  // the A/B/C trio it has always checked.
+  const casePipeline = isCaseProject(projectId);
+  const deliverables = casePipeline ? LEGACY_DELIVERABLES : phasesList.map((p) => p.file);
+  const deliverablesReady = deliverables.every((rel) => outputs.includes(rel) || Boolean(findInWorkspace(workspace, rel)));
+
   return {
     projectId,
     name: proj.name,
     workspace,
+    outDir,
     gdriveFolder: proj.gdriveFolder,
+    pipeline: casePipeline ? 'case' : 'roles',
     hasInputFacts: has('01_Case_Facts_and_Timeline.md', 'case/01_Case_Facts_and_Timeline.md'),
     hasEvidenceLedger: has('02_Evidence_and_Metric_Ledger.md', 'case/02_Evidence_and_Metric_Ledger.md'),
     phases,
-    deliverablesReady:
-      has('A_Executive_1-on-1_Talking_Points.md', 'working/A_Executive_1-on-1_Talking_Points.md') &&
-      has('B_Formal_Performance_Rating_Rebuttal.md', 'working/B_Formal_Performance_Rating_Rebuttal.md') &&
-      has('C_30_60_90_Performance_Alignment_Plan.md', 'working/C_30_60_90_Performance_Alignment_Plan.md'),
+    deliverables,
+    deliverablesReady,
   };
 }
 
-export async function executeRoleTurn({ projectId = 'external-1', roleId, prompt, contextText = '' }) {
+export async function executeRoleTurn({ projectId = 'external-1', roleId, prompt, contextText = '', runGemini: runModel = runGemini }) {
   const soul = getProjectSoul(projectId) || '';
   const roleInst = getRoleInstructions(projectId, roleId) || '';
 
@@ -171,7 +399,7 @@ ${prompt}`;
   // the reader and invents case facts nobody supplied.
   let res;
   try {
-    res = await runGemini({
+    res = await runModel({
       prompt: fullPrompt,
       model: COUNCIL_MODEL,
       timeoutMs: 120000,
@@ -188,7 +416,7 @@ ${prompt}`;
 }
 
 
-export async function runFullCouncil(projectId = 'external-1', onProgress = console.log) {
+export async function runFullCouncil(projectId = 'external-1', onProgress = console.log, { runGemini: runModel = runGemini } = {}) {
   const proj = KNOWN_PROJECTS[projectId];
   if (!proj) throw new Error(`Unknown project: ${projectId}`);
 
@@ -197,10 +425,7 @@ export async function runFullCouncil(projectId = 'external-1', onProgress = cons
   const outDir = resultDir(workspace);
   fs.mkdirSync(outDir, { recursive: true });
 
-  const context = readWorkspaceContext(workspace);
-  const contextText = Object.entries(context)
-    .map(([f, c]) => `### File: ${f}\n${c.slice(0, 1000)}...\n`)
-    .join('\n');
+  const contextText = seatContextText(projectId, workspace);
 
   onProgress(`🚀 Starting Multi-Agent Council for project: "${proj.name}"`);
 
@@ -213,11 +438,11 @@ export async function runFullCouncil(projectId = 'external-1', onProgress = cons
       roleId: phase.id,
       prompt: `Execute ${phase.title} based on active workspace facts and evidence ledger.`,
       contextText,
+      runGemini: runModel,
     });
-    const outFile = path.join(outDir, phase.file);
-    fs.writeFileSync(outFile, output, 'utf8');
+    const outFile = writeStageOutput({ phase, output, outDir, workspace, projectId });
     results[phase.id] = output;
-    onProgress(`✅ [Completed] ${phase.title} -> saved to ${path.relative(workspace, outDir)}/${phase.file}`);
+    onProgress(`✅ [Completed] ${phase.title} -> saved to ${path.relative(workspace, outDir)}/${path.basename(outFile)}`);
   }
 
   // Update the master templates in the workspace with compiled deliverables.
@@ -226,73 +451,67 @@ export async function runFullCouncil(projectId = 'external-1', onProgress = cons
     const hit = findInWorkspace(workspace, path.join('working', name), name);
     return hit ? path.join(workspace, hit) : path.join(workspace, 'working', name);
   };
-  const talkingPoints = at('A_Executive_1-on-1_Talking_Points.md');
-  const rebuttal = at('B_Formal_Performance_Rating_Rebuttal.md');
-  const plan = at('C_30_60_90_Performance_Alignment_Plan.md');
+  const deliverables = isCaseProject(projectId)
+    ? [
+        at('A_Executive_1-on-1_Talking_Points.md'),
+        at('B_Formal_Performance_Rating_Rebuttal.md'),
+        at('C_30_60_90_Performance_Alignment_Plan.md'),
+      ]
+    : phases.map((p) => path.join(outDir, p.file));
 
   onProgress(`📦 Final deliverables verified in workspace: ${workspace}`);
   return {
     success: true,
     results,
     workspace,
-    deliverables: [talkingPoints, rebuttal, plan],
+    outDir,
+    phases: phases.map((p) => p.id),
+    deliverables,
   };
 }
 
-export async function runCouncilStage(stage = 'audit', projectId = 'external-1', onProgress = console.log) {
+export async function runCouncilStage(stage = 'audit', projectId = 'external-1', onProgress = console.log, { runGemini: runModel = runGemini } = {}) {
   const proj = KNOWN_PROJECTS[projectId];
   if (!proj) throw new Error(`Unknown project: ${projectId}`);
 
   seedProjectWorkspace(projectId);
   const workspace = proj.workspace;
-  const outDir = path.join(workspace, 'output');
+  // One agreed directory, and it is the one getCouncilStatus reads. This used to
+  // be a hardcoded `output/` while the reader looked in `result/`, so every
+  // completed stage read back as pending.
+  const outDir = resultDir(workspace);
   fs.mkdirSync(outDir, { recursive: true });
 
-  const context = readWorkspaceContext(workspace);
-  const contextText = Object.entries(context)
-    .map(([f, c]) => `### File: ${f}\n${c.slice(0, 1000)}...\n`)
-    .join('\n');
+  const resolved = resolveCouncilStage(stage, projectId);
+  if (!resolved.ok) throw new Error(resolved.error);
 
-  let targetPhases = [];
-  let nextStepMsg = '';
+  const contextText = seatContextText(projectId, workspace);
 
-  if (stage === 'audit') {
-    targetPhases = COUNCIL_PHASES.filter((p) => p.id === 'accuracy_review');
-    nextStepMsg = '🛑 *Stage 1 Checkpoint:* Accuracy Audit complete.\nReview `01_accuracy_audit.md` in Drive. Add any missing exhibits/receipts to the folder, then send `/council defense` to run the defense and manager simulation.';
-  } else if (stage === 'defense') {
-    targetPhases = COUNCIL_PHASES.filter((p) => p.id === 'case_review' || p.id === 'manager_simulation');
-    nextStepMsg = '🛑 *Stage 2 Checkpoint:* Defense & Manager Red-Team simulation complete.\nReview `02_defense_rebuttal.md` and `03_manager_critique.md`. Address any high-vulnerability points, then send `/council finalize` to generate the legal memo and final deliverables.';
-  } else if (stage === 'finalize') {
-    targetPhases = COUNCIL_PHASES.filter(
-      (p) => p.id === 'legal_policy' || p.id === 'arbitrator' || p.id === 'final_case_builder'
-    );
-    nextStepMsg = '🎉 *Stage 3 Complete:* Legal review, arbitration, and final deliverables compiled.\nCheck `A_Executive_1-on-1_Talking_Points.md` and `B_Formal_Performance_Rating_Rebuttal.md` in your project folder.';
-  } else {
-    return runFullCouncil(projectId, onProgress);
-  }
-
-  onProgress(`🚀 Running Council Stage: "${stage.toUpperCase()}" for ${proj.name}`);
+  onProgress(`🚀 Running Council Stage: "${resolved.label.toUpperCase()}" for ${proj.name}`);
   const results = {};
-  for (const phase of targetPhases) {
+  for (const phase of resolved.phases) {
     onProgress(`🔄 [Running] ${phase.title}...`);
     const output = await executeRoleTurn({
       projectId,
       roleId: phase.id,
       prompt: `Execute ${phase.title} based on active workspace facts and evidence ledger.`,
       contextText,
+      runGemini: runModel,
     });
-    const outFile = path.join(outDir, phase.file);
-    fs.writeFileSync(outFile, output, 'utf8');
+    writeStageOutput({ phase, output, outDir, workspace, projectId });
     results[phase.id] = output;
     onProgress(`✅ [Completed] ${phase.title}`);
   }
 
   return {
-    stage,
+    stage: resolved.label,
     success: true,
     results,
     workspace,
-    nextStepMsg,
+    outDir,
+    phases: resolved.phases.map((p) => ({ id: p.id, file: p.file, path: path.join(outDir, p.file) })),
+    deliverables: resolved.phases.map((p) => path.join(outDir, p.file)),
+    nextStepMsg: resolved.nextStepMsg,
   };
 }
 

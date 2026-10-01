@@ -3,6 +3,7 @@
  * Used for tiny golden_cases metadata. Logs stay on R2.
  */
 import 'dotenv/config';
+import { notifyIssueTagsWrite } from './serverIssueTagEvents';
 
 function cfg() {
   const accountId = (process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
@@ -38,6 +39,13 @@ export async function d1Query<T = any>(sql: string, params: any[] = []): Promise
     body: JSON.stringify({ sql, params }),
   });
   const json: any = await res.json().catch(() => ({}));
+  // A write against issue_tags changes what every bug-card reader should
+  // return, so it fires the shared signal here rather than at each of the two
+  // dozen call sites. Listeners must not be able to fail this write, so this
+  // happens after the response is parsed and is wrapped by the callee.
+  if (res.ok && json.success !== false) {
+    notifyIssueTagsWrite(sql, params);
+  }
   if (!res.ok || json.success === false) {
     const err =
       json?.errors?.[0]?.message ||

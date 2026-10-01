@@ -1,0 +1,12 @@
+# The meal-QA hand-off queue. This file exists so git tracks the DIRECTORY.
+
+# Do not delete it. The queue is deliberately under specs/ rather than
+# artifacts/ because artifacts/ is gitignored, so a request written there would be
+# lost on the next deploy and the loop would re-ask for the same meal forever.
+#
+# That durability claim is only true while this directory is tracked. It was not:
+# specs/meal-qa-loop/state.json was committed, but specs/meal-qa-loop/requests/
+# held no tracked file at all, so a fresh checkout had no queue directory.
+#
+# scripts/assert-meal-audit-handoff.mjs asserts this file is tracked, so the
+# directory cannot quietly stop being part of the repository again.

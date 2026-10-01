@@ -15,10 +15,12 @@ BOT_ID="${TUI_BOT_ID:-vm}"
 CHAT_ID="${TUI_CHAT_ID:-6218257274}"
 
 # The terminal page is per-bot (gateway TTYD_ROUTES): vm2 lives under /tty2/,
-# every other bot under /tty/. Probing a vm2 token against /tty/ is refused by
-# design (bot isolation), so the proof must ask for this bot's own path.
+# vm3 under /tty3/, every other bot under /tty/. Probing a bot's token against
+# another bot's path is refused by design (bot isolation), so the proof must
+# ask for this bot's own path.
 TTY_PATH="/tty/"
 if [ "$BOT_ID" = "vm2" ]; then TTY_PATH="/tty2/"; fi
+if [ "$BOT_ID" = "vm3" ]; then TTY_PATH="/tty3/"; fi
 
 # The env key is the bot id UPPER-CASED with punctuation folded to "_", which is
 # what the gateway's tokenFor() does. Building it any other way finds nothing
@@ -143,6 +145,20 @@ ws_none=$(curl -s --http1.1 -o /dev/null -w '%{http_code}' --max-time 10 \
   && printf '  PASS  %-46s HTTP %s\n' "the socket is refused without one" "$ws_none" \
   || printf '  FAIL  %-46s HTTP %s (expected 401)\n' "the socket is refused without one" "$ws_none"
 rm -f "$TOKEN_JAR"
+
+echo
+echo "--- the tmux panes themselves (a missing session means that bot has no terminal)"
+# Presence only, never a verdict: a missing session is recreated on the next
+# /tui by design, but after vm2's unexplained 21:09-22:16 gap on 2026-09-29 the
+# live proof should at least SAY which panes exist. Per-bot attach detail lives
+# in <state>/<bot>/tui-attach.log.
+for _pane in VM-tui VM-tui-vm2; do
+  if tmux has-session -t "$_pane" 2>/dev/null; then
+    printf '  INFO  %-46s present\n' "$_pane"
+  else
+    printf '  INFO  %-46s MISSING - the next /tui recreates it\n' "$_pane"
+  fi
+done
 
 echo
 echo "--- the website hostname must not serve this"

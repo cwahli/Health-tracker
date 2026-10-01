@@ -243,6 +243,50 @@ export const TOKEN_ROUTES = {
   '/tty2/token': 'vm2',
 };
 
+/**
+ * The route table for a deployment: the two built-in bots plus any bot the
+ * operator registered with `TUI_ROUTE_<BOT>_PATH=/ttyx/`.
+ *
+ * The built-ins are the bots this gateway has always served (vm, vm2). The
+ * extension exists because a third agent — the standalone Grok TG router — now
+ * opens the same Mini App door, and it needs its own ttyd (its attach script
+ * reads its own per-chat session map). Hardcoding a third path here would be
+ * the same mistake as the router forking its own command list: the deployment
+ * shape belongs in the deployment's env, not in the gateway's source.
+ *
+ * Values are refused unless they are a plain path, so an env typo cannot make
+ * the gateway proxy somewhere unexpected.
+ */
+export function ttydRoutes(env = process.env) {
+  const routes = { ...TTYD_ROUTES };
+  for (const [key, value] of Object.entries(env || {})) {
+    const m = /^TUI_ROUTE_([A-Z0-9_]+)_PATH$/.exec(key);
+    if (!m) continue;
+    const path = String(value || '').trim();
+    if (!/^\/[A-Za-z0-9._/-]*$/.test(path) || path === '/') continue;
+    const bot = m[1].toLowerCase();
+    const base = path.endsWith('/') ? path : `${path}/`;
+    routes[base] = { bot, base };
+    routes[base.replace(/\/$/, '')] = { bot, base };
+  }
+  return routes;
+}
+
+/**
+ * The socket AuthToken routes for a deployment, derived from `ttydRoutes` so
+ * the page route and its token route can never drift apart (they were two
+ * hand-kept maps before, which is exactly how the second bot's token path gets
+ * forgotten when a third bot is added).
+ */
+export function tokenRoutes(env = process.env) {
+  const out = { ...TOKEN_ROUTES };
+  for (const [path, route] of Object.entries(ttydRoutes(env))) {
+    if (!path.endsWith('/')) continue;
+    out[`${path}token`] = route.bot;
+  }
+  return out;
+}
+
 /** The ttyd upstream for a bot. Per-bot URL wins; the shared one is the fallback. */
 export function ttydFor(botId, env = process.env) {
   const direct = env[`TUI_TTYD_URL_${String(botId).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`];
@@ -251,8 +295,8 @@ export function ttydFor(botId, env = process.env) {
 }
 
 /** Where the landing page sends a bot after the exchange. */
-export function ttydPathFor(botId) {
-  for (const [path, route] of Object.entries(TTYD_ROUTES)) {
+export function ttydPathFor(botId, env = process.env) {
+  for (const [path, route] of Object.entries(ttydRoutes(env))) {
     if (route.bot === botId && path.endsWith('/')) return path;
   }
   return '/tty/';
@@ -370,7 +414,7 @@ function logGatewayError(err) {
  */
 export function landingLocationFor(botId, token, env = process.env) {
   const debug = String(env.TUI_PAGE_DEBUG || '') === '1' ? '&tui_measure=1' : '';
-  return `${ttydPathFor(botId)}?token=${encodeURIComponent(token)}${debug}`;
+  return `${ttydPathFor(botId, env)}?token=${encodeURIComponent(token)}${debug}`;
 }
 
 
@@ -573,7 +617,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       const token = issueToken({ botId, chatId: verdict.chatId, secret, ttlSec: ttl });
       log(`admitted bot=${botId} ${verdict.boundBy}=${verdict.chatId}`);
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      return res.end(JSON.stringify({ ok: true, token, bot: botId, chat: verdict.chatId, ttyd: ttydPathFor(botId) }));
+      return res.end(JSON.stringify({ ok: true, token, bot: botId, chat: verdict.chatId, ttyd: ttydPathFor(botId, env) }));
     }
 
     // Caddy calls this before proxying the websocket. Answering 204 lets the
@@ -591,7 +635,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
 
     // The socket AuthToken the served page fetches as ./token (see
     // TOKEN_ROUTES). Same admission as the page below.
-    const tokenBot = TOKEN_ROUTES[url.pathname];
+    const tokenBot = tokenRoutes(env)[url.pathname];
     if (tokenBot) {
       const verdict = verifyAnyToken(req, url, secret);
       if (!verdict.ok) {
@@ -616,7 +660,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // handling hung up on the socket, and Caddy proxies upgrades properly. The
     // token's bot must match the path's bot — otherwise a vm session could open
     // the vm2 terminal and land in another bot's conversation map.
-    const route = TTYD_ROUTES[url.pathname];
+    const route = ttydRoutes(env)[url.pathname];
     if (route) {
       const verdict = verifyAnyToken(req, url, secret);
       if (!verdict.ok) {
@@ -736,15 +780,20 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
  */
 async function loadForgeRoute({ env, log }) {
   try {
-    const [forgeMod, serverMod] = await Promise.all([
+    const [forgeMod, serverMod, userbotMod] = await Promise.all([
       import('./bot-forge.mjs'),
       import('./lib/bot-forge-server.mjs'),
+      import('./lib/tg-userbot.mjs'),
     ]);
     const paths = forgeMod.resolvePaths({ env });
     const registry = JSON.parse(fs.readFileSync(paths.registryPath, 'utf8'));
     return serverMod.createForgeHandler({
       env,
       registry,
+      // The registry file is written by the create pipeline; the handler
+      // re-reads it per state request so a bot created after gateway start
+      // appears without a restart. `registry` above is only the fallback.
+      registryPath: paths.registryPath,
       basePath: '/forge',
       // The gateway is public and this writes credentials: no loopback
       // admission (behind Caddy every request is loopback), initData only.
@@ -754,7 +803,7 @@ async function loadForgeRoute({ env, log }) {
       log,
       runCreate: (input) => forgeMod.runForge(
         { ...input, paths, apiBase: forgeMod.DEFAULT_API_BASE },
-        { env },
+        { env, createBot: userbotMod.createBot },
       ),
     });
   } catch (err) {

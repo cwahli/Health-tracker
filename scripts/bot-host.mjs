@@ -154,6 +154,14 @@ import {
 } from './lib/project-registry.mjs';
 import { runPmCommand } from './lib/pm-run.mjs';
 import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-runner.mjs';
+// The Personal Health Coach's data loop. `/health` is deliberately not gated on
+// the chat's active project: the command names its own project, so a verify can
+// be run from any chat, and the reply says which one it read.
+import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText } from './health-runner.mjs';
+// "Can a seat actually run?" — the readiness check reads the context a seat
+// would be handed plus this host's credentials, and reports what is missing
+// instead of letting a turn start on an empty context.
+import { checkHealthReadiness, formatReadinessText } from './lib/health/readiness.mjs';
 
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -1997,6 +2005,52 @@ async function resumePacketText(rawArg) {
   return `Current ticket packet — #${id}\n\n${packet}\n\n/resume ${id} reprints this packet.`;
 }
 
+/**
+ * Deterministic /bugs body: the live card list, read from the store in the
+ * command handler — never composed by the model.
+ *
+ * Why this exists (measured 2026-09-30): the ticket bot answered "what's the
+ * list" with 4 cards from its own chat history while the store held 15,
+ * because the read is a tool call the model may skip and a stale session may
+ * never re-issue. The /bugs reply is code, so its number cannot be bypassed:
+ * it quotes the live read's `count` and `generated_at`, then one line per
+ * card in public_n order. A stale session can be wrong about phrasing, but
+ * not about this number.
+ */
+export function formatBugsListText(parsed) {
+  const rows = Array.isArray(parsed?.rows) ? parsed.rows : null;
+  if (!rows) {
+    const err = String(parsed?.error || '').slice(0, 160);
+    return `Bug store unreachable (bug API down or not local to this host). /bugs needs the store — retry later.${err ? ` ${err}` : ''}`;
+  }
+  const count = Number(parsed?.count ?? rows.length);
+  const at = String(parsed?.generated_at || '').trim();
+  const head = `🐛 *Bug queue* — ${count} card${count === 1 ? '' : 's'}${at ? ` (live read ${at})` : ''}.`;
+  if (!rows.length) return `${head}\nThe queue is empty — no tickets on the store.`;
+  const sorted = [...rows].sort((a, b) => Number(a?.public_n ?? 0) - Number(b?.public_n ?? 0));
+  // Telegram caps a message at 4096 chars; ~40 cards fit, the rest live behind
+  // the board button in the same message.
+  const MAX_ROWS = 40;
+  const lines = sorted.slice(0, MAX_ROWS).map((r) => {
+    const n = r?.public_n ?? '?';
+    const title = String(r?.title || '(untitled)').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const st = [r?.state, r?.queue].filter(Boolean).join('/');
+    return `#${n} ${title}${st ? ` (${st})` : ''}`;
+  });
+  if (sorted.length > MAX_ROWS) lines.push(`… +${sorted.length - MAX_ROWS} more (open the board for the full list).`);
+  return `${head}\n${lines.join('\n')}`;
+}
+
+async function bugsListText() {
+  let parsed;
+  try {
+    parsed = JSON.parse(await runBugctl(['list', '--json']));
+  } catch (e) {
+    return `Bug store unreachable (bug API down or not local to this host). /bugs needs the store — retry later. ${String(e?.message || '').slice(0, 120)}`;
+  }
+  return formatBugsListText(parsed);
+}
+
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd }) {
   const eff = effective(config, prefs, chatId);
 
@@ -2037,6 +2091,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const statusProject = getChatProject(chatId);
       const statusWorkspace = statusProject.type === 'external' ? statusProject.workspace : config.agent.workspace;
       const activeStatusSession = sessionForWorkspace(sessions, chatId, statusWorkspace);
+      // The seat this chat runs in, so /status answers which role the agent is
+      // using — the PM seat included (`/role pm take`). Unknown or unset means
+      // general mode, never a guessed name.
+      const statusRole = checkRoleDetails(statusProject.id, getChatRole(chatId) || '')?.name || null;
       const tuiLine = tuiStatusLine(config.id, activeStatusSession);
       const snap = buildStatusSnapshot({
         bot: { id: config.id, name: config.name },
@@ -2044,6 +2102,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         capabilities: { compact: true, costTracking: true, backends: false },
         effective: eff,
         session: activeStatusSession ? { id: activeStatusSession, workspace: statusWorkspace } : null,
+        role: statusRole,
         handoff: Boolean((prefFor(prefs, chatId)).handoff),
         usage: lastUsage?.get(chatId) || null,
         totals: totals?.get(chatId) || null,
@@ -2488,10 +2547,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const tuiUrl = readTuiUrl();
       if (!tuiUrl) {
         // Say what is actually true. This used to blame a phone tunnel, which
-        // is only the story on the phone: the URL file defaults to a Termux
-        // path, so on the VM it can never exist and the reply named a tunnel
-        // this bot has no relationship with.
-        const onPhone = String(miniappUrlFile()).includes('/data/data/com.termux/');
+        // is only the story on the phone: the URL file's default path is a
+        // Termux path on EVERY host, so the path cannot be the tell — the
+        // platform can (the same markers freemodels.mjs uses for the mobile
+        // lane). Measured 2026-09-30: vm3, a VM bot with no gateway URL, was
+        // told its "phone tunnel" was down — a tunnel it has no relationship
+        // with.
+        const onPhone = Boolean(process.env.TERMUX_VERSION || process.env.ANDROID_ROOT);
         await api.sendMessage(chatId, onPhone
           ? '⌨️ TUI is offline — the phone tunnel is down. It restarts itself; try /tui again in a minute.'
           : [
@@ -2586,7 +2648,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
       const bugsGatewayUrl = readTuiUrl();
       if (!bugsGatewayUrl) {
-        const onPhone = String(miniappUrlFile()).includes('/data/data/com.termux/');
+        const onPhone = Boolean(process.env.TERMUX_VERSION || process.env.ANDROID_ROOT);
         await api.sendMessage(chatId, onPhone
           ? '🐛 Bug board is offline — the phone tunnel is down. It restarts itself; try /bugs again in a minute.'
           : '🐛 Bug board is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /bugs again.');
@@ -2595,9 +2657,14 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const boardUrl = `${bugsGatewayUrl}/bugs/?bot=${config.id}`;
       const moved = lastBugsUrl && lastBugsUrl !== boardUrl;
       lastBugsUrl = boardUrl;
+      // The card list below is read live from the store by this handler, not
+      // composed by the model — so its count is the same number the board
+      // shows, even for a stale session that would otherwise answer from chat
+      // history.
+      const liveList = await bugsListText();
       await api.sendMessage(chatId, [
         moved ? '⚠️ *The tunnel was reconnected*, so any earlier /bugs button is dead — use this one.' : null,
-        '🐛 *Bug queue* — the same board as the Health Tracker site (Ready now, Stuck, Bugs open), auto-refreshing.',
+        liveList,
         'What changes here lands in the same list the site shows.',
       ].filter(Boolean).join('\n'), {
         reply_markup: { inline_keyboard: [[{ text: '🐛 Open bug board', web_app: { url: boardUrl } }]] },
@@ -2715,7 +2782,12 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         return;
       }
       const sub = (cmd.args || '').trim().toLowerCase();
-      if (sub === 'audit' || sub === 'defense' || sub === 'finalize') {
+      // Any token that is not `run` is a stage for this project: the runner
+      // resolves it against the project's own seats (by id, alias or number) or
+      // refuses with the list. It used to accept only the three case
+      // checkpoints and answer anything else by running the **whole** council —
+      // the one thing a stage command must never do silently.
+      if (sub && sub !== 'run' && sub !== 'status') {
         if (running.get(chatId)) {
           await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish first.');
           return;
@@ -2745,7 +2817,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         );
         try {
           const res = await runFullCouncil(activeProj.id);
-          const reply = `✅ *Council Review Completed!*\n• *Workspace:* \`${res.workspace}\`\n• *Artifacts Generated:* 6 phases\n• *Executive Deliverables:* Ready in Google Drive mirror.\n\nType \`/role builder\` to inspect the final talking points or \`/status\` to review.`;
+          const reply = `✅ *Council Review Completed!*\n• *Workspace:* \`${res.workspace}\`\n• *Seats run:* ${res.phases.length}\n• *Deliverables:* ${res.deliverables.map((d) => `\`${path.basename(d)}\``).join(' · ')}\n\nType \`/council status\` to see which stages have run.`;
           await api.sendMessage(chatId, reply, { parse_mode: 'Markdown' });
         } catch (err) {
           await api.sendMessage(chatId, `❌ Council run failed: ${err.message}`);
@@ -2754,8 +2826,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
 
       const status = getCouncilStatus(activeProj.id);
-      const phasesText = (status.phases || []).map((p) => `• ${p.title}: ${p.completed ? '✅ Done' : '⏳ Pending'}`).join('\n');
-      const reply = `🏛️ *[Council Status — ${status.name}]*\n• *Workspace:* \`${status.workspace}\`\n• *Google Drive:* \`${status.gdriveFolder}\`\n• *Evidence Ledger:* ${status.hasEvidenceLedger ? '✅ Attached' : '⚠️ Missing'}\n\n*Review Phases:*\n${phasesText}\n\n*Staged Checkpoints (Human-in-the-Loop):*\n• \`/council audit\` — Phase 1: Audit facts & flag missing receipts\n• \`/council defense\` — Phases 2 & 3: Defense arguments & Manager simulation\n• \`/council finalize\` — Phases 4-6: Legal review, arbitrator ruling & final dossier\n• \`/council run\` — Unattended full pipeline`;
+      const phasesText = (status.phases || []).map((p) => `• ${p.index}. ${p.title}: ${p.completed ? '✅ Done' : '⏳ Pending'}`).join('\n');
+      // The case councils keep their three checkpoints; every other project is
+      // told its own stages, because those are the tokens that resolve.
+      const stageHelp = status.pipeline === 'case'
+        ? '*Staged Checkpoints (Human-in-the-Loop):*\n• \`/council audit\` — Phase 1: Audit facts & flag missing receipts\n• \`/council defense\` — Phases 2 & 3: Defense arguments & Manager simulation\n• \`/council finalize\` — Phases 4-6: Legal review, arbitrator ruling & final dossier\n• \`/council run\` — Unattended full pipeline'
+        : `*Stages:*\n• \`/council <stage>\` — one seat, by id, alias or number (1-${status.phases.length})\n• \`/council all\` — every seat, in order\n• \`/council run\` — every seat, unattended`;
+      const ledger = status.pipeline === 'case' ? `\n• *Evidence Ledger:* ${status.hasEvidenceLedger ? '✅ Attached' : '⚠️ Missing'}` : '';
+      const ready = status.deliverablesReady ? `✅ ${status.deliverables.length} deliverable(s)` : `⏳ ${status.deliverables.length} expected`;
+      const reply = `🏛️ *[Council Status — ${status.name}]*\n• *Workspace:* \`${status.workspace}\`\n• *Google Drive:* \`${status.gdriveFolder}\`${ledger}\n• *Deliverables:* ${ready}\n\n*Review Phases:*\n${phasesText}\n\n${stageHelp}`;
       await api.sendMessage(chatId, reply, { parse_mode: 'Markdown' });
       return;
     }
@@ -2781,9 +2860,27 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const currentRoles = getProjectRoles(activeProj.id);
       if (!cmd.args) {
         const rolesList = (currentRoles || []).map((r) => `• \`/role ${r.id.split('_')[0]}\` — *${r.name}*`).join('\n');
+        // The whole explanation lives here: this listing is the one place every
+        // role surface is named together, so a chat never has to guess how the
+        // PM seat or a persona is taken, inspected, or left.
+        const listedRole = checkRoleDetails(activeProj.id, getChatRole(chatId) || '')?.name || null;
         await api.sendMessage(
           chatId,
-          `👥 *[Active Project Roles — ${activeProj.name}]*\n\n${rolesList || '• None declared.'}\n\n• \`/role check <name>\` — Inspect role mandate & instructions\n• \`/role add <id> <name> : <instructions>\` — Add a new dynamic role\n• \`/role remove <id>\` — Delete a role\n• \`/role reset\` — Return to general collaborative mode`,
+          [
+            `👥 *[Active Project Roles — ${activeProj.name}]*`,
+            '',
+            rolesList || '• None declared.',
+            '',
+            '*How roles work:*',
+            `• This chat runs as: ${listedRole ? `*${listedRole}*` : '_general mode_'} (also on \`/status\` as \`role:\`)`,
+            '• `/role <name>` — Assume a role; later turns run under its mandate',
+            '• `/role pm take` — Take the Project Manager seat (fleet, ladder, sheet, nudges)',
+            '• `/role pm` — Fleet projection · `/role pm status` — read-only plus adopted role',
+            '• `/role pm run` — One PM cycle: project, nudge, record · `/role pm sheet` — record rows now',
+            '• `/role check <name>` — Inspect role mandate & instructions',
+            '• `/role add <id> <name> : <instructions>` — Add a new dynamic role',
+            '• `/role remove <id>` — Delete a role · `/role reset` — back to general mode',
+          ].join('\n'),
           { parse_mode: 'Markdown' }
         );
         return;
@@ -2854,6 +2951,153 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       } catch (err) {
         await api.sendMessage(chatId, `❌ Role error: ${err.message}`);
       }
+      return;
+    }
+
+    case 'health': {
+      const projectId = 'external-health';
+      // `sub` is the lowercased head for matching; the raw text is kept because
+      // the literature lane's query is a sentence, not a keyword.
+      const rawArgs = String(cmd.args || '').trim();
+      const sub = rawArgs.toLowerCase();
+      if (sub === 'verify') {
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before verifying the health data.');
+          return;
+        }
+        await api.sendMessage(
+          chatId,
+          '🩺 *Running /health verify — re-reading the app (read-only) and diffing it against the sheet...*',
+          { parse_mode: 'Markdown' },
+        );
+        try {
+          const res = await runHealthVerify({ projectId });
+          if (!res.ok) {
+            // No parse_mode on the failure path: an error string is not ours to
+            // format, and Telegram rejects a message whose markdown it cannot parse.
+            await api.sendMessage(chatId, `❌ Verify could not run (${res.stage}): ${res.error}`);
+            return;
+          }
+          await api.sendMessage(chatId, formatVerifyText(res.artifact), { parse_mode: 'Markdown' });
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Verify failed: ${err.message}`);
+        }
+        return;
+      }
+      if (sub === 'ingest') {
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before the ingest.');
+          return;
+        }
+        await api.sendMessage(chatId, '📥 *Reading the Brief folder (sheets + docs, read-only)...*', { parse_mode: 'Markdown' });
+        try {
+          const res = await runHealthIngest({ projectId, botId: config.id });
+          if (!res.ok) {
+            await api.sendMessage(chatId, `❌ Ingest could not run (${res.stage}): ${res.error}`);
+            return;
+          }
+          const lines = [`📥 *Ingested into* \`${res.paths.sources}\``];
+          for (const w of res.manifest.written) lines.push(`• \`${w.file}\` — ${w.kind}${w.tabs ? `, ${w.tabs} tabs` : ''}`);
+          for (const s of res.manifest.skipped) lines.push(`• skipped ${s.name}: ${s.reason}`);
+          lines.push('');
+          lines.push('Run `/health verify` to diff the app against it.');
+          await api.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown' });
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Ingest failed: ${err.message}`);
+        }
+        return;
+      }
+      if (sub === 'refresh') {
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before refreshing the documents.');
+          return;
+        }
+        await api.sendMessage(
+          chatId,
+          '📄 *Refreshing the four documents — verify first, then publish into the project folder...*',
+          { parse_mode: 'Markdown' },
+        );
+        try {
+          const res = await runHealthRefresh({ projectId, botId: config.id });
+          if (!res.ok) {
+            await api.sendMessage(chatId, `❌ Refresh could not run (${res.stage}): ${res.error}`);
+            return;
+          }
+          await api.sendMessage(chatId, formatRefreshText(res), { parse_mode: 'Markdown' });
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Refresh failed: ${err.message}`);
+        }
+        return;
+      }
+      if (sub === 'analyze') {
+        // The producer takes a model turn, so it holds the running-guard the
+        // other seat commands hold. A refusal — the gate open, no credential, a
+        // payload the publisher would refuse — writes nothing and is reported
+        // as the answer it is.
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before the analysis pass.');
+          return;
+        }
+        await api.sendMessage(chatId, '📊 *Running /health analyze — one analyst turn, judged before it lands...*', { parse_mode: 'Markdown' });
+        try {
+          const res = await runHealthAnalyze({ projectId });
+          await api.sendMessage(chatId, formatAnalyzeText(res), res.ok ? { parse_mode: 'Markdown' } : undefined);
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Analysis failed: ${err.message}`);
+        }
+        return;
+      }
+      if (sub === 'readiness') {
+        // Read-only and cheap: no running-guard, because this answers a question
+        // about the host rather than starting work in the workspace.
+        const res = checkHealthReadiness({ projectId });
+        await api.sendMessage(chatId, formatReadinessText(res), { parse_mode: 'Markdown' });
+        return;
+      }
+      if (sub === 'research' || sub.startsWith('research ')) {
+        // The literature lane's reach. It searches the declared provider chain,
+        // fetches every hit, and records them in the workspace. A refusal — no
+        // credential, or nothing returned — records nothing and is the answer,
+        // because an empty log the seat could read as "no literature" is the
+        // failure this lane exists to prevent.
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before running the research lane.');
+          return;
+        }
+        await api.sendMessage(chatId, '🔎 *Running /health research — searching the declared provider chain and fetching every hit...*', { parse_mode: 'Markdown' });
+        try {
+          const query = rawArgs.replace(/^research\s*/i, '').trim();
+          const res = await runHealthResearch({ projectId, queries: query ? [query] : [] });
+          await api.sendMessage(chatId, formatResearchText(res), res.ok ? { parse_mode: 'Markdown' } : undefined);
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Research failed: ${err.message}`);
+        }
+        return;
+      }
+      if (sub === 'doctor') {
+        // The seat that checks the other seats. It writes only its own report;
+        // a refusal (no credential, a report the checker refuses) writes
+        // nothing and is reported as the answer it is.
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before the doctor review.');
+          return;
+        }
+        await api.sendMessage(
+          chatId,
+          '🩺 *Running /health doctor — re-checking the analyst\u2019s claims against their receipts...*',
+          { parse_mode: 'Markdown' },
+        );
+        try {
+          const res = await runHealthDoctor({ projectId });
+          await api.sendMessage(chatId, formatDoctorText(res), res.ok ? { parse_mode: 'Markdown' } : undefined);
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Doctor failed: ${err.message}`);
+        }
+        return;
+      }
+      // Anything else (including no argument) is the status answer.
+      const status = getHealthStatus({ projectId });
+      await api.sendMessage(chatId, formatStatusText(status), { parse_mode: 'Markdown' });
       return;
     }
 
@@ -3656,13 +3900,6 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const activeRole = getChatRole(chatId);
     const isExternalTurn = activeProject.type === 'external';
     const effectiveWorkspace = isExternalTurn ? activeProject.workspace : config.agent.workspace;
-    // The session this chat owns in the workspace THIS turn runs in. Null means
-    // "start one here", which is the correct answer after a project switch and
-    // also when the stored row belongs to another project.
-    turnSessionId = sessionForWorkspace(sessions, chatId, effectiveWorkspace)
-      || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
-        ? workSession.opencodeSessionId
-        : undefined);
     // An external folder's child is built from a list, so it never holds the
     // website's git or deploy credentials. Project 1 keeps inheriting them.
     const turnEnvMode = isExternalTurn ? 'project' : 'inherit';
@@ -3730,6 +3967,17 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         // view reconcile is best-effort — the run continues on the observer log
       }
     }
+    // The session this chat owns in the workspace THIS turn runs in. Null means
+    // "start one here", which is the correct answer after a project switch and
+    // also when the stored row belongs to another project. Computed here, after
+    // the work session is resolved and its view settled — reading it earlier put
+    // this assignment in the `workSession` temporal dead zone and every agent
+    // turn died with "Cannot access 'workSession' before initialization".
+    turnSessionId = sessionForWorkspace(sessions, chatId, effectiveWorkspace)
+      || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
+        ? workSession.opencodeSessionId
+        : undefined);
+
     // Only when a tx view is NOT live: with one, the session comes from the
     // work-session row instead. The id is workspace-scoped now, so a chat that
     // switched project passes nothing here rather than the previous project's

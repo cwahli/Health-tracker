@@ -185,13 +185,24 @@ for unit in tui-ttyd-vm tui-ttyd-vm2; do
     *) echo "  FAIL  $unit session name says no location (got '${name:-none}')"; FAIL=$((FAIL + 1)) ;;
   esac
 done
-# Two bots on one host must not share a session: that would put two chats on
-# one terminal, which is the isolation vm2's unit exists to protect.
+# Bots on one host must not share a session: that would put two chats on one
+# terminal, which is the isolation vm2's and vm3's units exist to protect.
 VM_NAME=$(grep -o 'TUI_TMUX_NAME=.*' "$HERE/tui-ttyd-vm.service" | cut -d= -f2)
 VM2_NAME=$(grep -o 'TUI_TMUX_NAME=.*' "$HERE/tui-ttyd-vm2.service" | cut -d= -f2)
-[ -n "$VM_NAME" ] && [ "$VM_NAME" != "$VM2_NAME" ] \
-  && { echo "  PASS  the two bots keep separate sessions ($VM_NAME vs $VM2_NAME)"; PASS=$((PASS + 1)); } \
-  || { echo "  FAIL  the two bots share one session ($VM_NAME)"; FAIL=$((FAIL + 1)); }
+VM3_NAME=$(grep -o 'TUI_TMUX_NAME=.*' "$HERE/tui-ttyd-vm3.service" | cut -d= -f2)
+[ -n "$VM_NAME" ] && [ -n "$VM2_NAME" ] && [ -n "$VM3_NAME" ] \
+  && [ "$VM_NAME" != "$VM2_NAME" ] && [ "$VM_NAME" != "$VM3_NAME" ] && [ "$VM2_NAME" != "$VM3_NAME" ] \
+  && { echo "  PASS  the three bots keep separate sessions ($VM_NAME / $VM2_NAME / $VM3_NAME)"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  bots share one session ($VM_NAME / $VM2_NAME / $VM3_NAME)"; FAIL=$((FAIL + 1)); }
+
+# The phone-vs-VM tell must be the platform, not the URL file's path: that path
+# defaults to a Termux location on every host, so a VM bot with no gateway URL
+# was told its "phone tunnel" was down (vm3, live 2026-09-30). The markers are
+# the ones freemodels.mjs already uses for the mobile lane.
+TELL=$(grep -c 'const onPhone = Boolean(process.env.TERMUX_VERSION || process.env.ANDROID_ROOT);' "$HERE/bot-host.mjs" || true)
+[ "$TELL" = "2" ] \
+  && { echo "  PASS  the phone-vs-VM tell is the platform, not the URL path"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the phone-vs-VM tell is the platform, not the URL path (found $TELL of 2)"; FAIL=$((FAIL + 1)); }
 
 # 13. The terminal launches the tool the CHAT is on, not the bot's default.
 #     This is the class that shipped: the attach hardcoded $OPENCODE_BIN, so a
@@ -293,6 +304,80 @@ else
   echo "  PASS  the attach no longer launches \$OPENCODE_BIN unconditionally"; PASS=$((PASS + 1))
 fi
 
+# 14. A legacy or junk pane mark migrates instead of flapping. On 2026-09-29
+#     /tmp/tui-session-id-vm held `ses_x` — a bare string with no `surface:`
+#     prefix and no writer anywhere in this tree. A bare mark can never equal a
+#     qualified `<surface>:<session>` mark, so the old compare killed the pane
+#     on EVERY attach without saying why. The decision is a pure function now
+#     (executed here like lease_held): junk reaps once, migrates, and logs.
+eval "$(sed -n '/^pane_mark_decision() {/,/^}/p' "$ATTACH")"
+check "no mark yet means a fresh pane" "$(pane_mark_decision '' 'cline:1790_x')" "fresh"
+check "the same surface and session keeps the pane" \
+  "$(pane_mark_decision 'cline:1790_x' 'cline:1790_x')" "keep"
+check "a lane switch reaps the old tool's pane" \
+  "$(pane_mark_decision 'opencode:ses_old' 'cline:1790_x')" "reap-switch"
+check "a bare legacy session id reaps and migrates" \
+  "$(pane_mark_decision 'ses_f227779acffeXj1OcLC4RXXWTW' 'cline:1790_x')" "reap-legacy"
+check "writer-less junk (ses_x) reaps and migrates, never flaps silently" \
+  "$(pane_mark_decision 'ses_x' 'cline:1790_x')" "reap-legacy"
+# The migration must be observable after the fact: every attach logs its
+# surface, session, source and decision to a per-bot log, and the reap
+# verifies the kill landed before new-session -A (which ignores its command
+# while the session still exists — the stale-tool survival path).
+grep -q 'tui-attach.log' "$ATTACH" \
+  && { echo "  PASS  every attach logs surface/sid/source/decision per bot"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  no per-bot attach log in the attach"; FAIL=$((FAIL + 1)); }
+grep -q 'reap-verdict=lingering' "$ATTACH" \
+  && { echo "  PASS  a lingering session is logged, never silently kept"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  no lingering-session verdict in the attach"; FAIL=$((FAIL + 1)); }
+grep -q 'has-session -t "$TMUX_NAME"' "$ATTACH" \
+  && { echo "  PASS  the reap verifies the kill before new-session -A"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the reap does not verify the kill before new-session -A"; FAIL=$((FAIL + 1)); }
+
+# The bot's turn path must compute its workspace-scoped session id only after
+# the work session exists. #365 (2026-09-30) assigned it above the `let
+# workSession`, so every plain message on every bot died with "Cannot access
+# 'workSession' before initialization" while every command kept working — only
+# a live turn found it. This pins the order.
+BOT="$HERE/bot-host.mjs"
+ws_line=$(grep -n 'let workSession = resolveSession(' "$BOT" | head -1 | cut -d: -f1)
+ts_line=$(grep -n 'turnSessionId = sessionForWorkspace(' "$BOT" | head -1 | cut -d: -f1)
+if [ -n "$ws_line" ] && [ -n "$ts_line" ] && [ "$ws_line" -lt "$ts_line" ]; then
+  echo "  PASS  the turn session id is computed after the work session exists"; PASS=$((PASS + 1));
+else
+  echo "  FAIL  the turn session id is computed after the work session exists (workSession@${ws_line:-missing}, turnSessionId@${ts_line:-missing})"; FAIL=$((FAIL + 1));
+fi
+
+# 15. Workspace-scoped rows (bot-host #365 writes `<workspace>\\u0000<id>`).
+#     The resolver must split the scope, never match the packed string: live
+#     2026-10-01 vm3 TUI opened a fresh session (SID empty, legacy-first)
+#     while Telegram answered from the chat real session.
+SCOPED="$ROOT/scoped"
+mkdir -p "$SCOPED/vm3" "$SCOPED/w"
+WS="$SCOPED/w"
+scoped_run() { # scoped_run outputs the dry-run decision line
+  TUI_STATE_ROOT="$SCOPED" TUI_BOT_ID=vm3 TUI_WORKTREE="$WS" \
+    OPENCODE_BIN=/oc CLINE_BIN=/cl \
+    TUI_DRY_RUN=1 bash "$ATTACH" 2>/dev/null | grep '^SURFACE='
+}
+printf '{"6218257274": "%s\\u0000ses_live123"}' "$WS" > "$SCOPED/vm3/sessions.json"
+printf '{"chatId":"6218257274","surface":"opencode","model":"opencode/nemotron-3.5-lightning-free","sessionId":"ses_live123","workspace":"%s"}' "$WS" > "$SCOPED/vm3/tui-open.json"
+check "a scoped row resolves through tui-open" "$(scoped_run)" "SURFACE=opencode SID=ses_live123 SOURCE=tui-open-hit"
+check "a scoped row resolves explicit" "$(TUI_CHAT_ID=6218257274 scoped_run)" "SURFACE=opencode SID=ses_live123 SOURCE=explicit-hit"
+# Another workspace row is never borrowed: the cross-project drift scoping
+# was built to stop.
+printf '{"6218257274": "/other/proj\\u0000ses_other999"}' > "$SCOPED/vm3/sessions.json"
+rm "$SCOPED/vm3/tui-open.json"
+check "a foreign-workspace row is refused, not attached" "$(TUI_CHAT_ID=6218257274 scoped_run)" "SURFACE=opencode SID= SOURCE=legacy-first"
+# The map lost the row but /tui recorded this workspace session seconds ago.
+printf '{}' > "$SCOPED/vm3/sessions.json"
+printf '{"chatId":"6218257274","surface":"opencode","model":"opencode/nemotron-3.5-lightning-free","sessionId":"ses_snap999","workspace":"%s"}' "$WS" > "$SCOPED/vm3/tui-open.json"
+check "a lost map row falls back to the opening-chat snapshot" "$(TUI_CHAT_ID=6218257274 scoped_run)" "SURFACE=opencode SID=ses_snap999 SOURCE=tui-open-snapshot"
+# ...but the snapshot never serves a different explicit chat.
+printf '{"111": "ses_A111"}' > "$SCOPED/vm3/sessions.json"
+check "the snapshot does not hijack another chat" "$(TUI_CHAT_ID=111 scoped_run)" "SURFACE=opencode SID=ses_A111 SOURCE=explicit-hit"
+
+rm -rf "$SCOPED"
 rm -rf "$LEASE_FIX" "$ROOT" "$LANE"
 echo
 echo "$PASS pass, $FAIL fail"

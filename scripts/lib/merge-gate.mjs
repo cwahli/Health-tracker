@@ -137,7 +137,28 @@ export function evaluateChecks({ checkRuns = [], required = REQUIRED_CHECKS, non
       missing.push(name);
       continue;
     }
-    for (const run of list) {
+    // Judge the NEWEST run of this name, not the union of every run ever
+    // reported for it. A required name can legitimately have several runs on
+    // one SHA: ci fires on both `push: agent/**` and `pull_request`, and
+    // claim-guard does too, so the same check is evaluated twice against
+    // different snapshots of the world. If the earlier snapshot was red — a
+    // PR overlapping then, gone now — worst-wins kept the PR open forever,
+    // because nothing re-runs the stale one.
+    //
+    // Measured 2026-09-30 on PR #396: `no-overlap` concluded failure at
+    // 19:53:50 and success at 20:13:58 on the SAME sha, and the merge driver
+    // read the pair as one permanently red check. A later verdict is strictly
+    // more information than an earlier one; treating it as a tie is what made
+    // the queue unable to drain.
+    //
+    // Newest by `completed_at`, falling back to `started_at`, then to the order
+    // the API returned them. Runs with no timestamps at all keep the old
+    // worst-wins behaviour, so a caller that passes bare fixtures is unaffected.
+    const stamped = list.filter((r) => r && (r.completed_at || r.started_at));
+    const runsToJudge = stamped.length
+      ? [stamped.slice().sort((a, b) => String(a.completed_at || a.started_at || '').localeCompare(String(b.completed_at || b.started_at || ''))).pop()]
+      : list;
+    for (const run of runsToJudge) {
       if (String(run.status || '') !== 'completed') {
         pending.push(`${name} (${run.status || 'unknown'})`);
         continue;
@@ -182,6 +203,21 @@ export function evaluatePrState(pr) {
   if (String(pr.state || 'open') !== 'open') return { decision: 'refuse', reason: `the PR is ${pr.state}` };
   if (pr.merged_at) return { decision: 'refuse', reason: 'the PR is already merged' };
   return { decision: 'merge', reason: 'the PR is open' };
+}
+
+/**
+ * Sequencing between PRs: `Depends-On: #n` lines in a PR body hold this PR
+ * until #n is merged or closed. Pure parse; the driver resolves states.
+ * Numbers only — anything else on the line is ignored, and duplicates
+ * collapse. A merged-or-closed dependency is satisfied silently.
+ */
+export function parseDependsOn(body) {
+  const out = [];
+  for (const raw of String(body || '').split('\n')) {
+    const m = raw.trim().match(/^Depends-On:\s*#?(\d+)\b/i);
+    if (m && !out.includes(Number(m[1]))) out.push(Number(m[1]));
+  }
+  return out;
 }
 
 /** One line a human can read in a PR comment or a run log. */

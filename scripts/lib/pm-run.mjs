@@ -39,18 +39,20 @@
 import os from 'node:os';
 
 import {
+  listTmuxSessions,
   mdSafe,
   pmPaths,
   projectFleet,
   readFleetSources,
   renderFleet,
 } from './pm-fleet.mjs';
+import { checkRoleDetails, getChatProject, getChatRole, switchChatRole } from './project-registry.mjs';
 import { attemptFor, forgetCounters, ladderFile, readLadder, recordAttempts, rungMessage } from './pm-ladder.mjs';
 import { flushSheet, renderFlush, spoolFleetRows } from './pm-sheet.mjs';
 import { sendAsUser, userbotState } from './tg-userbot.mjs';
 
 /** The subcommands `/role pm …` answers to. */
-export const PM_SUBCOMMANDS = ['', 'status', 'run', 'sheet', 'help', 'reset'];
+export const PM_SUBCOMMANDS = ['', 'status', 'run', 'sheet', 'help', 'reset', 'take'];
 
 /**
  * Deliver one nudge as the operator, through the session the forge already
@@ -75,6 +77,17 @@ export async function deliverNudge({ chatId, text, env = process.env, send = nul
   }
 }
 
+/** The human name of the role this chat runs under, or '' for general mode. */
+export function adoptedRoleName(chatId) {
+  if (!chatId) return '';
+  try {
+    const det = checkRoleDetails(getChatProject(chatId).id, getChatRole(chatId) || '');
+    return det ? det.name : '';
+  } catch {
+    return '';
+  }
+}
+
 /** The one message a cycle sends back to the chat that asked for it. */
 export function renderCycle(cycle) {
   const { fleet, decisions, spool, flush, nudgeState } = cycle;
@@ -94,6 +107,13 @@ export function renderCycle(cycle) {
   lines.push('');
   lines.push(renderFlush(flush));
   if (spool?.header) lines.push('• the sheet header was seeded this cycle.');
+  if (cycle.tmux) {
+    lines.push(
+      cycle.tmux.ok
+        ? `• deployed (tmux): ${cycle.tmux.sessions.length} session(s)${cycle.tmux.sessions.length ? `: ${cycle.tmux.sessions.map((t) => `${mdSafe(t.name)}${t.attached ? ' (viewed)' : ''}, ${t.age}`).join('; ')}` : ''}`
+        : `• deployed (tmux): unavailable (${mdSafe(cycle.tmux.error || 'unknown')})`,
+    );
+  }
   if (!decisions.length && !flush.ok) lines.push(`• queued rows: ${spool?.spooled ?? 0}`);
   if (nudgeState && !nudgeState.configured) {
     lines.push('');
@@ -124,6 +144,7 @@ export async function runCycle({
   writer = null,
   recipient = null,
   ladderFileOverride = '',
+  tmuxRunner = null,
 } = {}) {
   const p = paths || pmPaths(env, { home });
   const read = reader || readFleetSources;
@@ -170,15 +191,25 @@ export async function runCycle({
   });
   const flush = await flushSheet(botId, { env, home, writer, recipient });
 
-  return { fleet, sources: raw.sources, decisions, spool, flush, nudgeState, ladderFile: ladder, at, requestChatId: chatId, operatorChatWarning: !operatorChatId };
+  const tmux = listTmuxSessions({ runner: tmuxRunner, now });
+  return { fleet, tmux, sources: raw.sources, decisions, spool, flush, nudgeState, ladderFile: ladder, at, requestChatId: chatId, operatorChatWarning: !operatorChatId };
 }
 
 /** Status only: the projection, with no writes and no sends. */
-export async function runStatus({ env = process.env, home = os.homedir(), now = Date.now(), paths = null, sources = null, reader = null } = {}) {
+export async function runStatus({ env = process.env, home = os.homedir(), now = Date.now(), paths = null, sources = null, reader = null, chatId = '', tmuxRunner = null } = {}) {
   const p = paths || pmPaths(env, { home });
   const raw = sources || (reader || readFleetSources)({ paths: p, env });
   const fleet = projectFleet({ specs: raw.specs, bugs: raw.bugs, lanes: raw.lanes, beats: raw.beats, now });
-  return { fleet, sources: raw.sources };
+  const tmux = listTmuxSessions({ runner: tmuxRunner, now });
+  return { fleet, sources: raw.sources, tmux, adoptedRole: adoptedRoleName(chatId) };
+}
+
+/** One line naming the seat this chat runs in — the `/status` answer for roles. */
+export function adoptedRoleLine(chatId) {
+  const name = adoptedRoleName(chatId);
+  return name
+    ? `• this chat runs as: *${mdSafe(name)}*`
+    : '• this chat runs as: general mode — take the PM seat with `/role pm take`';
 }
 
 /**
@@ -234,8 +265,8 @@ async function runPmCommandInner({
     return { ok: true, text: pmHelpText(), resetRole: false };
   }
   if (verb === 'status') {
-    const { fleet, sources } = await runStatus({ env, home, now, reader });
-    return { ok: true, text: `🎭 *Role: Project Manager*\n\n${renderFleet(fleet, { sources })}`, resetRole: false };
+    const st = await runStatus({ env, home, now, reader, chatId, tmuxRunner: null });
+    return { ok: true, text: `🎭 *Role: Project Manager*\n${adoptedRoleLine(chatId)}\n\n${renderFleet(st.fleet, { sources: st.sources, tmux: st.tmux })}`, resetRole: false };
   }
   if (verb === 'sheet') {
     const { fleet, sources } = await runStatus({ env, home, now, reader });
@@ -251,21 +282,46 @@ async function runPmCommandInner({
     const cycle = await runCycle({ botId, chatId, operatorChatId, env, home, now, send, reader, writer, recipient });
     return { ok: true, text: renderCycle(cycle), resetRole: false };
   }
+  if (verb === 'take') {
+    // Taking the seat IS the write: every later turn in this chat runs under
+    // the PM mandate (composeExternalPrompt prepends it). Kept as an explicit
+    // subcommand because bare `/role pm` is pinned read-only — a projection
+    // must never adopt a persona as a side effect.
+    let role;
+    try {
+      role = switchChatRole(chatId, 'pm');
+    } catch (err) {
+      return { ok: false, text: `Cannot take the PM seat here: ${mdSafe(String(err?.message || err).slice(0, 200))}`, resetRole: false };
+    }
+    const st = await runStatus({ env, home, now, reader, chatId, tmuxRunner: null });
+    return {
+      ok: true,
+      text: [
+        `🎭 *${mdSafe(role.name)} seat taken* — future turns in this chat run under the PM mandate: fleet, ladder, sheet, nudges.`,
+        adoptedRoleLine(chatId),
+        '',
+        `Fleet now: ${st.fleet.counts.total} item(s), ${st.fleet.counts.stalled} stalled, ${st.tmux.ok ? `${st.tmux.sessions.length} tmux session(s) deployed` : 'tmux unavailable'}.`,
+        '• `/role pm run` starts a cycle · `/role pm status` projects read-only · `/role pm reset` leaves the seat (counters kept)',
+      ].join('\n'),
+      resetRole: false,
+    };
+  }
   // Bare `/role pm`: the standing answer, plus what `/role pm run` would do.
-  const { fleet, sources } = await runStatus({ env, home, now, reader });
-  const tail = fleet.stalled.length
-    ? `\n\nRun the ladder with \`/role pm run\` (${fleet.stalled.length} stalled).`
+  const bare = await runStatus({ env, home, now, reader, chatId, tmuxRunner: null });
+  const tail = bare.fleet.stalled.length
+    ? `\n\nRun the ladder with \`/role pm run\` (${bare.fleet.counts.stalled} stalled).`
     : '\n\nNothing needs the ladder right now.';
-  return { ok: true, text: `🎭 *Role: Project Manager*\n\n${renderFleet(fleet, { sources })}${tail}`, resetRole: false };
+  return { ok: true, text: `🎭 *Role: Project Manager*\n${adoptedRoleLine(chatId)}\n\n${renderFleet(bare.fleet, { sources: bare.sources, tmux: bare.tmux })}${tail}`, resetRole: false };
 }
 
 export function pmHelpText() {
   return [
     '🎭 *Project Manager role*',
-    '• `/role pm` — fleet status (packets, tickets, ledger, heartbeats)',
+    '• `/role pm take` — take the PM seat in this chat (later turns run under the mandate)',
+    '• `/role pm` — fleet status (packets, tickets, ledger, heartbeats, tmux)',
     '• `/role pm run` — one cycle: project, climb the ladder, nudge, record',
-    '• `/role pm sheet` — spool and flush the ongoing-projects sheet',
-    '• `/role pm status` — the projection only (no writes)',
+    '• `/role pm sheet` — spool and flush the ongoing-projects sheet (carries source_brief, the original ask)',
+    '• `/role pm status` — the projection only (no writes), plus this chat\'s adopted role',
     '• `/role pm reset` — leave the role (counters are kept)',
   ].join('\n');
 }

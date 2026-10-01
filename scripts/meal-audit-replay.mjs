@@ -72,13 +72,34 @@ function listExpectationFiles(bundleDir) {
   return found;
 }
 
+/**
+ * Move a file, tolerating a cross-device boundary.
+ *
+ * os.tmpdir() is a different filesystem from the repo on this box (/tmp is
+ * tmpfs, the worktree is not), so renameSync across the two fails with EXDEV.
+ * That was not cosmetic: hideExpectations is the anti-cheat guard, and the
+ * journey aborted before it hid anything, so the isolated replay had never
+ * actually run here — it just failed loudly on the way in. Copy-then-delete
+ * crosses devices; rename stays the fast path when both sides share one.
+ */
+function moveAcrossDevices(from, to) {
+  try {
+    fs.renameSync(from, to);
+  } catch (err) {
+    if (err.code !== 'EXDEV') throw err;
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.cpSync(from, to, { recursive: true });
+    fs.rmSync(from, { recursive: true, force: true });
+  }
+}
+
 function hideExpectations(bundleDir) {
   const holdRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'meal-audit-hold-'));
   const manifest = [];
   for (const file of listExpectationFiles(bundleDir)) {
     const base = path.basename(file);
     const dest = path.join(holdRoot, base);
-    fs.renameSync(file, dest);
+    moveAcrossDevices(file, dest);
     manifest.push({ original: file, held: dest });
   }
   return { holdRoot, manifest };
@@ -88,7 +109,7 @@ function restoreExpectations(hold) {
   for (const entry of hold.manifest) {
     if (fs.existsSync(entry.held)) {
       fs.mkdirSync(path.dirname(entry.original), { recursive: true });
-      fs.renameSync(entry.held, entry.original);
+      moveAcrossDevices(entry.held, entry.original);
     }
   }
   try {
@@ -179,7 +200,53 @@ function proveIsolation() {
   console.log('[Isolation] Restored expectations; post-run compare can score');
 
   fs.rmSync(root, { recursive: true, force: true });
-  console.log('[Isolation] PROVE PASS — hidden-bundle run');
+  console.log('[Isolation] same-device hide/restore: OK');
+
+  // --- cross-device phase -------------------------------------------------
+  // Everything above runs with the bundle INSIDE os.tmpdir(), the same place the
+  // hold dir is created — so renameSync always succeeds and the test is blind to
+  // the case that actually broke in the field. On this box /tmp is tmpfs while
+  // the worktree is not, so hiding a real bundle's expectations died with EXDEV
+  // and the journey aborted before it hid anything: the isolation guarantee had
+  // never actually been exercised. A synthetic bundle is therefore written
+  // under the repo, which is where real bundles live.
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  fs.mkdirSync(path.join(repoRoot, 'artifacts', 'meal_audits'), { recursive: true });
+  const crossRoot = fs.mkdtempSync(path.join(repoRoot, 'artifacts', 'meal_audits', '.prove-xdev-'));
+  let crossHold = null;
+  try {
+    fs.writeFileSync(path.join(crossRoot, 'expected.json'), JSON.stringify(sentinelExpected), 'utf8');
+    fs.writeFileSync(path.join(crossRoot, 'meal_result.json'), JSON.stringify({ sentinel: sentinelExpected.secret }), 'utf8');
+
+    crossHold = hideExpectations(crossRoot);
+    const during = expectationsReadable(crossRoot);
+    if (during.length !== 0) {
+      console.error('[Isolation] FAIL: cross-device hide left readable:', during);
+      process.exit(4);
+    }
+    restoreExpectations(crossHold);
+    crossHold = null;
+
+    const back = expectationsReadable(crossRoot);
+    if (back.length !== 2) {
+      console.error('[Isolation] FAIL: cross-device restore failed, readable after:', back);
+      process.exit(4);
+    }
+    const crossExp = JSON.parse(fs.readFileSync(path.join(crossRoot, 'expected.json'), 'utf8'));
+    if (crossExp.secret !== sentinelExpected.secret) {
+      console.error('[Isolation] FAIL: cross-device restore corrupted expected.json');
+      process.exit(4);
+    }
+    console.log('[Isolation] cross-device (repo -> os.tmpdir()) hide/restore: OK');
+  } catch (err) {
+    if (crossHold) { try { restoreExpectations(crossHold); } catch { /* best effort */ } }
+    console.error('[Isolation] FAIL: cross-device hide/restore threw:', err && err.code ? `${err.code} ${err.message}` : err);
+    process.exit(4);
+  } finally {
+    fs.rmSync(crossRoot, { recursive: true, force: true });
+  }
+
+  console.log('[Isolation] PROVE PASS — hidden-bundle run (same-device + cross-device)');
   process.exit(0);
 }
 
