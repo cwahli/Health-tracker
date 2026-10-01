@@ -37,6 +37,7 @@
     "gate:main-verify": "node scripts/assert-main-verify.test.mjs",
     "gate:external-health": "node scripts/assert-external-health.test.mjs",
     "gate:bugctl-reachable": "node scripts/assert-bugctl-is-reachable.mjs",
+    "gate:dispatch-toolchain": "node scripts/assert-dispatch-toolchain.mjs",
     "auto-merge": "node scripts/auto-merge.mjs",
     "golden:from-debug": "node scripts/golden-from-debug.mjs",
     "golden:inbox": "vitest run tests/golden_inbox.test.ts",

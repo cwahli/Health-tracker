@@ -24,6 +24,10 @@ set -eo pipefail
 
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 REPO_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.."; pwd)"
+# Proves the coder worktree's TypeScript compiler is real before any build
+# output is believed. See scripts/lib/coder-toolchain.mjs for why `npx tsc`
+# cannot be trusted here.
+TOOLCHAIN_HELPER="${REPO_DIR}/scripts/lib/coder-toolchain.mjs"
 cd "$REPO_DIR"
 
 HERMES_DIR="${HERMES_DIR:-${HOME}/.hermes}"
@@ -1069,10 +1073,30 @@ ${tail_output:-No output logged}
 \`\`\`
 $(printf '%s\n' "$diff_files" | head -10)
 \`\`\`
-Running TypeScript build check ('npx tsc --noEmit')..."
+Running TypeScript build check ('tsc --noEmit')..."
+
+  # ENVIRONMENT FIRST. `npx tsc` does not fail when the worktree has no local
+  # compiler — it resolves the npm package named `tsc` (2.0.4, "a deprecated
+  # release of the TypeScript compiler"), which prints "This is not the tsc
+  # command you are looking for". That banner reads as a build failure, so the
+  # attempt gets reverted and nudged against a cause no amount of retrying can
+  # touch (card #19, 2026-10-01: 4 identical args hashes, and the agent's own
+  # test passed 2/2 as soon as deps existed). Prove the compiler first; if the
+  # environment is broken, say so, keep the work, and refuse to nudge.
+  local tc_out tc_rc=0
+  tc_out=$(node "$TOOLCHAIN_HELPER" --dir="$CODER_DIR" 2>&1) || tc_rc=$?
+  if [ "$tc_rc" -ne 0 ]; then
+    tg_msg "🚧 *[Orchestrator]* Toolchain broken in the coder worktree (\`$BUG_ID\`, \`$CODER_DIR\`) — the build check was NOT run:
+\`\`\`
+${tc_out:0:600}
+\`\`\`
+*This is the environment, not the attempt.* The agent's work is left in place for a human. Not reverting, not nudging."
+    return 3
+  fi
+  echo "[Dispatcher] $tc_out"
 
   local tsc_output
-  if tsc_output=$(git -C "$CODER_DIR" rev-parse --show-toplevel >/dev/null 2>&1 && (cd "$CODER_DIR" && npx tsc --noEmit 2>&1)); then
+  if tsc_output=$(git -C "$CODER_DIR" rev-parse --show-toplevel >/dev/null 2>&1 && (cd "$CODER_DIR" && node ./node_modules/typescript/bin/tsc --noEmit 2>&1)); then
     echo "[Dispatcher] tsc clean."
 
     # BOT-23: Pre-dispatch dev regression & blast radius verification
@@ -1290,10 +1314,10 @@ Ensure the root page background renders the dark theme navy (#0f172a) properly f
 
   if [ "$THINKING" = "low" ]; then
     base_prompt="${base_prompt}
-Make a minimal, single-file atomic change. Verify with npx tsc --noEmit before finishing."
+Make a minimal, single-file atomic change. Stay inside allowed_files. Do not run the build yourself — the dispatcher runs \`tsc --noEmit\` after you finish, and it uses the worktree's own compiler (never \`npx tsc\`, which silently resolves a decoy package named tsc)."
   else
     base_prompt="${base_prompt}
-Think carefully before modifying files. Verify with npx tsc --noEmit before finishing."
+Think carefully before modifying files. Stay inside allowed_files. Do not run the build yourself — the dispatcher runs \`tsc --noEmit\` after you finish, and it uses the worktree's own compiler (never \`npx tsc\`, which silently resolves a decoy package named tsc)."
   fi
 
   if [ -n "${MEMORY_CONTEXT:-}" ]; then
@@ -1376,7 +1400,10 @@ $prompt_preview
       start_heartbeat "OpenCode (free fallback)" "$alt_log"
       run_opencode_agent "$prompt" "$alt_log" 8m "$alt_model"
       stop_heartbeat
-      if check_git_and_tsc "opencode" "$alt_model" "$alt_log"; then return 0; fi
+      local fb_rc=0
+      check_git_and_tsc "opencode" "$alt_model" "$alt_log" || fb_rc=$?
+      if [ "$fb_rc" -eq 0 ]; then return 0; fi
+      if [ "$fb_rc" -eq 3 ]; then return 3; fi
     fi
     if [ "$CASCADE" -eq 1 ]; then
       tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\` (no free model succeeded). Escalating to Cline..."
@@ -1395,7 +1422,14 @@ $prompt_preview
     return 2
   fi
 
-  if check_git_and_tsc "opencode" "$model" "$log_file"; then return 0; fi
+  # Exit 3 from the gate means the CODER WORKTREE's toolchain is broken, not
+  # that the attempt was bad. Nudging replays the identical invocation into the
+  # identical wall — that is what burned card #19 four times on one args hash —
+  # so stop here, keep the work, and let a human fix the environment.
+  local gate_rc=0
+  check_git_and_tsc "opencode" "$model" "$log_file" || gate_rc=$?
+  if [ "$gate_rc" -eq 0 ]; then return 0; fi
+  if [ "$gate_rc" -eq 3 ]; then return 3; fi
 
   # One nudge attempt
   tg_msg "🔄 *[Orchestrator]* OpenCode nudged to retry \`$BUG_ID\`..."
@@ -1404,7 +1438,10 @@ $prompt_preview
   start_heartbeat "OpenCode (nudge)" "$nudge_log"
   run_opencode_agent "Previous attempt for $BUG_ID had errors or no changes. Inspect git status, analyze errors, and complete the fix now." "$nudge_log" 4m "$model"
   stop_heartbeat
-  if check_git_and_tsc "opencode" "$model" "$nudge_log"; then return 0; fi
+  local nudge_rc=0
+  check_git_and_tsc "opencode" "$model" "$nudge_log" || nudge_rc=$?
+  if [ "$nudge_rc" -eq 0 ]; then return 0; fi
+  if [ "$nudge_rc" -eq 3 ]; then return 3; fi
 
   if [ "$CASCADE" -eq 1 ]; then
     tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\`. Escalating to Cline..."
