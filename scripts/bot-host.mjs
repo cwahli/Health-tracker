@@ -3012,10 +3012,21 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         return;
       }
       if (sub === 'analyze') {
-        // The gate refusal is the answer this command exists to give, so it is
-        // reported as a plain refusal (no crash path, no markdown parse risk).
-        const res = runHealthAnalyze({ projectId });
-        await api.sendMessage(chatId, formatAnalyzeText(res), res.ok ? { parse_mode: 'Markdown' } : undefined);
+        // The producer takes a model turn, so it holds the running-guard the
+        // other seat commands hold. A refusal — the gate open, no credential, a
+        // payload the publisher would refuse — writes nothing and is reported
+        // as the answer it is.
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before the analysis pass.');
+          return;
+        }
+        await api.sendMessage(chatId, '📊 *Running /health analyze — one analyst turn, judged before it lands...*', { parse_mode: 'Markdown' });
+        try {
+          const res = await runHealthAnalyze({ projectId });
+          await api.sendMessage(chatId, formatAnalyzeText(res), res.ok ? { parse_mode: 'Markdown' } : undefined);
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Analysis failed: ${err.message}`);
+        }
         return;
       }
       if (sub === 'readiness') {
