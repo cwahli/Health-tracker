@@ -11,6 +11,10 @@
  *                   open, otherwise names the inputs the analysis pass needs
  *   /health readiness  can a seat run at all: workspace, brief, gate, artifact
  *                   age, context bytes, model credential, role drift
+ *   /health doctor  the seat that checks the other seats: re-read the analyst's
+ *                   claims, trace each to a receipt, strike what does not hold,
+ *                   and write result/doctor-report.md — refused, having written
+ *                   nothing, unless the report passes the checker
  *   /health status  what is still wrong, how fresh the data is, what is next
  *
  * WHY IT IS A RUNNER, NOT A COMMAND HANDLER
@@ -42,11 +46,18 @@ import {
   validateAnalysisSections, ANALYSIS_SECTIONS,
 } from './lib/health/docs.mjs';
 import { foldersFromEnv } from './lib/google-store.mjs';
-import { checkHealthReadiness, formatReadinessText } from './lib/health/readiness.mjs';
+import { checkHealthReadiness, formatReadinessText, CONTEXT_ENV_FILE } from './lib/health/readiness.mjs';
+import { buildHealthContext, renderContextBlock } from './lib/health/context.mjs';
+import { validateDoctorReport, renderDoctorReport } from './lib/health/doctor.mjs';
+import { geminiKeyIn } from './lib/agent-gemini.mjs';
+import { executeRoleTurn } from './council-runner.mjs';
 
 export const DEFAULT_PROJECT = 'external-health';
 export const VERIFY_FILE = 'health-verify.json';
 export const FIX_LIST_FILE = 'health-fix-list.md';
+/** The Doctor's own output, and the machine-readable copy of its verdicts. */
+export const DOCTOR_FILE = 'doctor-report.md';
+export const DOCTOR_ARTIFACT = 'health-doctor.json';
 
 /** Where this project keeps its sources and its results. */
 export function healthWorkspace(projectId = DEFAULT_PROJECT, { env = process.env } = {}) {
@@ -531,6 +542,156 @@ export function formatAnalyzeText(result) {
   return lines.join('\n');
 }
 
+/**
+ * `/health doctor` — the seat that checks the other seats.
+ *
+ * The Doctor reads the same context pack every seat reads, then writes one
+ * report: every claim the analyst made, traced to a receipt, with a verdict of
+ * PASS, STRIKE or UNPROVEN. `validateDoctorReport` judges that report before it
+ * lands — a report with no coverage header, a finding with no receipt, or a PASS
+ * resting on an absence is refused and **nothing is written**, because a
+ * malformed report on disk is indistinguishable from a good one to the next
+ * reader (and would read back as "stage complete").
+ *
+ * It writes `result/doctor-report.md` and nothing else except its own receipt
+ * (`result/health-doctor.json`). It never edits the payload — the analyst
+ * rewrites, the Doctor re-checks — and it never touches the four published
+ * documents.
+ *
+ * Every dependency is injectable (`runGemini`, `paths`) so the sensor and the
+ * live proof drive the whole path without a credential and without a network.
+ */
+export async function runHealthDoctor({
+  projectId = DEFAULT_PROJECT,
+  env = process.env,
+  paths = null,
+  workspace = '',
+  runGemini = null,
+  now = new Date(),
+} = {}) {
+  const dirs = paths || (workspace
+    ? { workspace, sources: path.join(workspace, 'sources'), result: path.join(workspace, 'result') }
+    : healthPaths(projectId, { env }));
+
+  // The pack is the seat's whole world: if it refuses (no workspace, no brief)
+  // there is no turn to take. Missing artifacts are findings inside the pack,
+  // not refusals — a seat reports what it could not see.
+  const context = buildHealthContext(dirs.workspace);
+  if (!context.ok) {
+    return { ok: false, stage: 'context', error: `the seat context refuses: ${context.refuses.join('; ')}`, paths: dirs };
+  }
+
+  // The credential is answered here, not discovered by the model call: "no key"
+  // and "the model failed" are different answers, and only one is the
+  // operator's to fix. A report must come from a model call — this runner will
+  // not synthesise one.
+  if (!runGemini && !geminiKeyIn(env)) {
+    return {
+      ok: false,
+      stage: 'credential',
+      error: `no model credential on this host — set GEMINI_API_KEY in ${CONTEXT_ENV_FILE} (all bots on a host); a doctor report has to come from a model call, and nothing has been written`,
+      paths: dirs,
+    };
+  }
+
+  // The facts the checker judges with, read from the workspace the seat reads:
+  // what state the payload under review is in, and which items are still open.
+  let artifact = null;
+  try {
+    artifact = JSON.parse(fs.readFileSync(path.join(dirs.result, VERIFY_FILE), 'utf8'));
+  } catch { artifact = null; }
+  const gate = artifact ? gateFromArtifact(artifact) : { allowed: true, open: [], unknown: true };
+  const analysisSection = context.sections.find((s) => s.key === 'analysis');
+  const analysis = !analysisSection ? 'absent' : /shape: REFUSED/.test(analysisSection.text) ? 'refused' : 'accepted';
+
+  const prompt = analysis === 'accepted'
+    ? 'Re-check the analysis payload in the workspace context and write the doctor\'s report: one numbered block per claim, in the order the claims appear, with all six labels and the receipt each verdict rests on. STRIKE what does not hold; a claim whose receipt you cannot find is UNPROVEN, never PASS.'
+    : analysis === 'refused'
+      ? 'The analysis payload is present but the publisher refuses its shape, so no claim in it can be published yet. Write the doctor\'s report for that fact: coverage 0 claim(s) reviewed, the sections you could see, and the payload named under `Not seen:` with the shape refusal as the receipt-less finding. Review no claims.'
+      : 'The workspace holds no analysis payload, so there are no claims to review. Write the doctor\'s report for what you could see: coverage 0 claim(s) reviewed, the sections you read, and the missing payload named under `Not seen:` — review no claims, and do not supply any of your own.';
+
+  let text = '';
+  try {
+    text = await executeRoleTurn({
+      projectId,
+      roleId: 'doctor',
+      prompt,
+      contextText: renderContextBlock(context),
+      runGemini: runGemini || undefined,
+    });
+  } catch (err) {
+    return { ok: false, stage: 'model', error: err.message, paths: dirs };
+  }
+
+  const checked = validateDoctorReport(text, { analysis, gate });
+  if (!checked.ok) {
+    return { ok: false, stage: 'report', error: checked.error, paths: dirs };
+  }
+
+  const at = (now instanceof Date ? now : new Date(now)).toISOString();
+  const report = renderDoctorReport(text);
+  const receipt = {
+    at,
+    projectId,
+    workspace: dirs.workspace,
+    reportFile: path.join(dirs.result, DOCTOR_FILE),
+    bytes: Buffer.byteLength(report),
+    analysis: {
+      state: analysis,
+      file: path.join(dirs.result, 'health-analysis.json'),
+      at: analysisSection?.date || '',
+      sections: context.sections.length,
+    },
+    gate: { allowed: gate.allowed, open: gate.open, read: !gate.unknown },
+    coverage: checked.report.coverage,
+    counts: checked.report.counts,
+    claims: checked.report.claims,
+  };
+  try {
+    fs.mkdirSync(dirs.result, { recursive: true });
+    fs.writeFileSync(path.join(dirs.result, DOCTOR_FILE), report);
+    fs.writeFileSync(path.join(dirs.result, DOCTOR_ARTIFACT), JSON.stringify(receipt, null, 1));
+  } catch (err) {
+    return { ok: false, stage: 'write', error: err.message, paths: dirs, report: checked.report };
+  }
+
+  return { ok: true, artifact: receipt, report: checked.report, text: report, paths: dirs };
+}
+
+/**
+ * The Telegram reply for a doctor run.
+ *
+ * The gate being open is the normal case, so the reply says what the numbers
+ * mean instead of dressing them as a failure: UNPROVEN is the honest verdict
+ * for a claim resting on an open item, and naming that item is the whole job.
+ */
+export function formatDoctorText(result) {
+  if (!result.ok) {
+    const lines = [`🩺 *The Doctor could not write a report (${escapeMd(result.stage)})*`];
+    lines.push(escapeMd(result.error));
+    if (result.stage === 'report' || result.stage === 'model' || result.stage === 'write') {
+      lines.push('');
+      lines.push('Nothing was written — a report the checker refuses is not saved under a weaker name. Fix the cause and run `/health doctor` again.');
+    }
+    return lines.join('\n');
+  }
+  const a = result.artifact;
+  const lines = ["🩺 *Doctor's report — the claims were re-checked*", ''];
+  lines.push(`• coverage: ${a.coverage.reviewed} claim(s) reviewed · payload ${escapeMd(a.analysis.state)}`);
+  lines.push(`• verdicts: ${a.counts.pass} PASS · ${a.counts.strike} STRIKE · ${a.counts.unproven} UNPROVEN`);
+  lines.push(`• gate: ${a.gate.allowed ? 'CLOSED' : `OPEN (${a.gate.open.join(', ')})`}`);
+  if (a.counts.unproven) {
+    lines.push('   UNPROVEN is the honest verdict while an item is open — the item id in the block is what closes it.');
+  }
+  if (a.counts.strike) {
+    lines.push(`   ${a.counts.strike} claim(s) struck: the owning seat rewrites them, the report does not.`);
+  }
+  lines.push(`• report: \`${a.reportFile}\``);
+  lines.push('');
+  lines.push('The four published documents were not touched — the Doctor only reads them.');
+  return lines.join('\n');
+}
+
 /** What the last verify said, plus what the workspace holds. No network. */
 export function getHealthStatus({ projectId = DEFAULT_PROJECT, env = process.env, workspace = '' } = {}) {
   const paths = workspace ? { workspace, sources: path.join(workspace, 'sources'), result: path.join(workspace, 'result') } : healthPaths(projectId, { env });
@@ -707,7 +868,7 @@ export function formatStatusText(status) {
 function parseArgs(argv) {
   const args = { mode: '', project: DEFAULT_PROJECT, uid: '', envFile: '', json: false, folder: '', docsFolder: '', analysis: '', docs: [], force: false, dryRun: false };
   for (const raw of argv) {
-    if (raw === '--verify' || raw === '--status' || raw === '--ingest' || raw === '--refresh' || raw === '--analyze' || raw === '--readiness') { args.mode = raw.slice(2); continue; }
+    if (raw === '--verify' || raw === '--status' || raw === '--ingest' || raw === '--refresh' || raw === '--analyze' || raw === '--readiness' || raw === '--doctor') { args.mode = raw.slice(2); continue; }
     if (raw === '--json') { args.json = true; continue; }
     if (raw === '--force') { args.force = true; continue; }
     if (raw === '--dry-run') { args.dryRun = true; continue; }
@@ -756,6 +917,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const res = checkHealthReadiness({ projectId: args.project, paths: healthPaths(args.project) });
       console.log(args.json ? JSON.stringify(res, null, 1) : formatReadinessText(res));
       process.exit(res.exit);
+    }
+    if (mode === 'doctor') {
+      const res = await runHealthDoctor({ projectId: args.project });
+      if (!res.ok) {
+        // The refusal is the answer, not a crash — it goes to stdout where a
+        // caller asked for it, and exits 3, the same "refused on purpose" code
+        // --readiness uses.
+        console.log(args.json ? JSON.stringify(res, null, 1) : formatDoctorText(res));
+        process.exit(3);
+      }
+      console.log(args.json ? JSON.stringify(res.artifact, null, 1) : formatDoctorText(res));
+      return;
     }
     if (mode === 'analyze') {
       const res = runHealthAnalyze({ projectId: args.project });
