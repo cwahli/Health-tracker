@@ -1,0 +1,20 @@
+{
+  "schema": "meal-audit-request/1",
+  "mealId": "meal_1790784386905",
+  "name": "Sainsbury Oat and Fruit with Green Grapes",
+  "provenance": "debug_payload",
+  "photos": [
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1790784386905/photos/sha256_0aa49da2d85f54546874f080c044b8f094fc751370ced556ce066b6d67242798.jpg"
+  ],
+  "skeleton": "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1790784386905/flow_skeleton.json",
+  "requestedAt": "2026-10-01T00:17:03.531Z",
+  "requestedBy": "meal-audit-loop",
+  "status": "pending",
+  "instructions": [
+    "Audit this meal and produce a ground-truth bundle.",
+    "For each dish: dishName, weightGrams, boundingBox2D (0-1000, required because photos exist), and all 32 nutrient keys.",
+    "Weight must come from the catalog (scripts/meal-audit-assist.mjs api:<query>) or a scale, never an eyeball estimate.",
+    "Run scripts/generate-meal-result.mjs to write meal_result.json, then report the bundle path with `complete`.",
+    "If the catalog cannot source a nutrient, the audit is INCOMPLETE: say so rather than filling zeros."
+  ]
+}
