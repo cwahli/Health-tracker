@@ -10,6 +10,7 @@ allowed_files:
   - scripts/assert-health-renewal.test.mjs
   - systemd/health-renewal@.service
   - systemd/health-renewal@.timer
+  - scripts/author-trail-debt.txt
   - specs/active/HEALTH-RENEWAL-1.md
 frozen_files:
   - scripts/health-runner.mjs
@@ -97,6 +98,15 @@ timer following the repo's unit pattern (`systemd/pm-sweep@.service` /
   (measured 2026-10-02), so the units land in `systemd/` with the install
   command recorded below; the user installs them. Linger is already on and
   `pm-sweep@vm.timer` runs as a **user** unit — the same shape works here.
+- **The base carried one unrecorded author-trail debt, and it reddens every
+  PR.** `8a36e332` ("[queue-sync] refresh WORK_QUEUE.md") landed on `main`
+  pushed straight by `github-actions[bot]` with no trailer; `ci`'s
+  author-trail audit fails on it for every branch, and the audit's own header
+  names the fix: record it in `scripts/author-trail-debt.txt` with a dated
+  reason, never rewrite shared history. The file already carries the same
+  entry for `da059d8d` (2026-10-01), so this pass adds the new one in that
+  exact shape — a host-of-record housekeeping line required for this PR's
+  checks to conclude, not a change to the rule.
 - **#455 owns the health runner's siblings.** `scripts/health-runner.mjs`,
   `scripts/lib/health/docs.mjs`, `scripts/lib/health/sheet.mjs` and
   `scripts/assert-external-health.test.mjs` are in the stalled PR #455's
