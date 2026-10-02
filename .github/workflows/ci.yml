@@ -298,6 +298,8 @@ jobs:
       # while main was red: two bots were seated as health_analyst and two as
       # test_planner, and assert-health-group — the sensor that refuses exactly
       # that — was only ever run by hand. A sensor nobody runs is a comment.
+      # assert-tax-group prints one SKIP line on a runner (the operator's books
+      # are not in git); a skip is visible, a green line it never earned is not.
       - name: Group seats gate (health + tax)
         run: |
           node scripts/assert-health-group.test.mjs
