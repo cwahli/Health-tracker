@@ -10,7 +10,8 @@
  * Live-site parity (server.ts getGeminiApiKey / callUnifiedLLM /
  * server_gemini_retry.ts): same key chain, same quota vocabulary (429 is never
  * auto-retried — it burns the shared 15/min bucket), same single 404 fallback
- * to gemini-2.5-flash. Transport differs on purpose: the live site uses the
+ * to gemini-2.5-flash, and the same one-extra-try rule for a 503-class
+ * "UNAVAILABLE / high demand" answer (withGeminiRetry). Transport differs on purpose: the live site uses the
  * @google/genai SDK, but its deps (google-auth-library) are not installed in
  * the bot runtimes (VPS bot-host / phone / collab), so this lane speaks the
  * first-party OpenAI-compatible REST endpoint with plain fetch (zero deps).
@@ -39,6 +40,26 @@ export const GEMINI_DEFAULT_TIMEOUT_MS = 300000;
 
 /** Fallback the live site uses when a model 404s (one hop, like callUnifiedLLMInternal). */
 export const GEMINI_FALLBACK_MODEL = 'gemini-2.5-flash';
+
+/**
+ * Live-site parity, retry half (server_gemini_retry.ts withGeminiRetry): a
+ * 503-class transient — the provider answering "UNAVAILABLE / high demand" —
+ * gets exactly one extra try after a short wait. A 429 is never retried: it
+ * burns the shared 15/min bucket, which a retry only makes worse. This is not
+ * theoretical: on 2026-10-02 the health room on the VPS drew a 503 from
+ * gemini-3.7-flash on the first try and the second answered — the difference
+ * between a real answer and the room's fallback line.
+ */
+export const GEMINI_RETRY_DELAY_MS = 2000;
+
+/** One more try is warranted for 502/503/504 or an UNAVAILABLE/high-demand body. Quota beats everything. */
+export function isGeminiTransient(status, body) {
+  const code = Number(status) || 0;
+  if (code === 429) return false;
+  if (code === 502 || code === 503 || code === 504) return true;
+  const text = typeof body === 'string' ? body : JSON.stringify(body || {});
+  return /unavailable|high demand/i.test(text);
+}
 
 function pickKey(scope) {
   if (!scope || typeof scope !== 'object') return '';
@@ -125,6 +146,7 @@ export async function runGemini({
   timeoutMs = GEMINI_DEFAULT_TIMEOUT_MS,
   env,
   fetchImpl = fetch,
+  retryDelayMs = GEMINI_RETRY_DELAY_MS,
 } = {}) {
   const fail = (lastError, code = -1) => ({
     code,
@@ -175,14 +197,31 @@ export async function runGemini({
     }
     return { res, data };
   };
+  // One extra try when the provider is transiently unavailable — never for
+  // quota, never for a real error. The wait is injectable so a sensor does
+  // not sleep for the live two seconds.
+  const postTryingTransientOnce = async (vendorModel) => {
+    let attempt = await post(vendorModel);
+    if (
+      !attempt.transportError &&
+      attempt.res &&
+      !attempt.res.ok &&
+      isGeminiTransient(attempt.res.status, attempt.data)
+    ) {
+      console.warn(`[agent-gemini] "${vendorModel}" answered ${attempt.res.status} (transient) — one retry in ${Math.round(retryDelayMs / 1000)}s (live-site parity).`);
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      attempt = await post(vendorModel);
+    }
+    return attempt;
+  };
   let fellBack = '';
-  let attempt = await post(apiModel);
+  let attempt = await postTryingTransientOnce(apiModel);
   if (attempt.transportError) return fail(attempt.transportError);
   // Live-site parity: one 404 hop to gemini-2.5-flash (callUnifiedLLMInternal).
   if (!attempt.res.ok && Number(attempt.res.status) === 404 && apiModel !== GEMINI_FALLBACK_MODEL) {
     console.warn(`[agent-gemini] Model "${apiModel}" 404 — falling back to "${GEMINI_FALLBACK_MODEL}" (live-site parity).`);
     fellBack = ` (answered by fallback ${GEMINI_FALLBACK_MODEL})`;
-    attempt = await post(GEMINI_FALLBACK_MODEL);
+    attempt = await postTryingTransientOnce(GEMINI_FALLBACK_MODEL);
     if (attempt.transportError) return fail(attempt.transportError);
   }
   const { res, data } = attempt;

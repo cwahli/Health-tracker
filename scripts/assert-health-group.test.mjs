@@ -19,6 +19,11 @@
  * kind: it runs the publisher under the same busy guard the seats use, and the
  * room gets the refresh reply (drafts publish, analysis withheld). Questions
  * about the brief see its state as facts in the model context.
+ *
+ * The lane under the room retries a transient provider refusal (503-class
+ * "UNAVAILABLE / high demand") exactly once after a short wait — the live
+ * site's own withGeminiRetry rule. A 429 is never retried; a second 503 keeps
+ * the provider's error so the room's fallback line can name it.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -40,6 +45,7 @@ import {
 } from './lib/health-group.mjs';
 import { formatRefreshText } from './health-runner.mjs';
 import { answerBriefAsk } from './bot-host.mjs';
+import { runGemini } from './lib/agent-gemini.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOST = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
@@ -362,6 +368,63 @@ check('the model context carries the last refresh time', /2026-10-02T09:30:00Z/.
 check('the model context names all four documents', ['Health Snapshot', 'Conditions & Actions', 'Test Plan', 'Medical Insights'].every((t) => (briefPrompts[0] || '').includes(t)));
 check('the model context names a withheld section', /Candidate conditions/.test(briefPrompts[0] || ''));
 fs.rmSync(briefDir, { recursive: true, force: true });
+
+// The room's model lane retries a transient provider refusal once. Live on
+// 2026-10-02 the health room's prompt drew a 503 ("high demand") from
+// gemini-3.7-flash and the second try answered — without this the room gets
+// only the fallback line. Parity: server_gemini_retry.ts withGeminiRetry
+// ("503: at most one extra try after a short wait"; 429 never retried).
+const gemOk = (text) => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: text } }], usage: { total_tokens: 7 } }) });
+const gemErr = (status, message, statusLabel = 'UNAVAILABLE') => ({ ok: false, status, json: async () => ({ error: { code: status, message, status: statusLabel } }) });
+const highDemand = 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.';
+
+const transientModels = [];
+const transientRetried = await runGemini({
+  prompt: 'how do I clean up the data?',
+  model: 'gemini/gemini-3.7-flash',
+  env: { GEMINI_API_KEY: 'k' },
+  retryDelayMs: 1,
+  fetchImpl: async (url, init) => {
+    transientModels.push(JSON.parse(init.body).model);
+    return transientModels.length === 1 ? gemErr(503, highDemand) : gemOk('the retry answered');
+  },
+});
+check('a 503 answers on the one allowed retry', transientRetried.finalText === 'the retry answered' && transientRetried.lastError === null, JSON.stringify({ text: transientRetried.finalText, err: transientRetried.lastError }));
+check('the retry asks the same model exactly twice', transientModels.length === 2 && transientModels.every((m) => m === 'gemini-3.7-flash'), JSON.stringify(transientModels));
+
+let doubleCalls = 0;
+const double503 = await runGemini({
+  prompt: 'q',
+  model: 'gemini/gemini-3.7-flash',
+  env: { GEMINI_API_KEY: 'k' },
+  retryDelayMs: 1,
+  fetchImpl: async () => { doubleCalls += 1; return gemErr(503, highDemand); },
+});
+check('a second 503 is not retried a third time', doubleCalls === 2 && /unavailable|high demand|provider error/i.test(double503.lastError || ''), `${doubleCalls} calls; ${double503.lastError}`);
+
+let quotaCalls = 0;
+const quotaRefusal = await runGemini({
+  prompt: 'q',
+  model: 'gemini/gemini-3.7-flash',
+  env: { GEMINI_API_KEY: 'k' },
+  retryDelayMs: 1,
+  fetchImpl: async () => { quotaCalls += 1; return gemErr(429, 'Resource has been exhausted (e.g. check quota).'); },
+});
+check('a 429 is never retried', quotaCalls === 1 && /quota|rate limit/i.test(quotaRefusal.lastError || ''), `${quotaCalls} calls; ${quotaRefusal.lastError}`);
+
+const hopModels = [];
+const hop = await runGemini({
+  prompt: 'q',
+  model: 'gemini/gemini-3.7-flash',
+  env: { GEMINI_API_KEY: 'k' },
+  retryDelayMs: 1,
+  fetchImpl: async (url, init) => {
+    hopModels.push(JSON.parse(init.body).model);
+    return hopModels.length === 1 ? gemErr(404, 'model not found', 'NOT_FOUND') : gemOk('fallback answered');
+  },
+});
+check('the 404 hop still lands on gemini-2.5-flash, once', hopModels.length === 2 && hopModels[1] === 'gemini-2.5-flash' && hop.finalText === 'fallback answered', JSON.stringify(hopModels));
+check('the default retry wait is the live site\'s two seconds', /GEMINI_RETRY_DELAY_MS = 2000/.test(fs.readFileSync(path.join(HERE, 'lib', 'agent-gemini.mjs'), 'utf8')));
 
 const normalized = normalizeConfig(planner);
 check('normalizeConfig keeps the health seat', normalized.agent.healthRole === 'test_planner');
