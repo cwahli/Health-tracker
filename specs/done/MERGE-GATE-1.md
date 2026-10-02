@@ -1,6 +1,6 @@
 ---
 id: MERGE-GATE-1
-status: locked
+status: done
 class: FAIL_OPEN_MERGE
 edit_mode: rewrite
 skill: debug-contract
@@ -247,3 +247,5 @@ second.
 **Residual.** The re-read costs two extra `GET /pulls/:n` per merge. The early
 judgement can still be superseded by the final one, which is the point — it is
 feedback, not the decision.
+
+<!-- closed 2026-10-02: gate assert-auto-merge 89/89 green; every merge in this session passed through it -->

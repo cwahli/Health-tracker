@@ -1,6 +1,6 @@
 ---
 id: MAIN-VERIFY-1
-status: locked
+status: done
 class: FAIL_OPEN_MERGE
 edit_mode: patch
 skill: debug-contract
@@ -140,3 +140,5 @@ reported as a success.
 - The symlink failure mode found here is present in about twenty other scripts
   that compare `process.argv[1]` to `import.meta.url`. Each of those is the same
   silent no-op with a success exit code. Reported, not swept.
+
+<!-- closed 2026-10-02: gate assert-main-verify 17/17 green; main-verify ran and reported success on every landing -->

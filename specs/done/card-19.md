@@ -1,6 +1,6 @@
 ---
 id: card-19
-status: locked
+status: done
 class: DISH_DROP
 skill: food-calc
 edit_mode: patch
@@ -115,3 +115,5 @@ apart downstream.
    per-row boxes, and 1 scout dish → 1 unchanged row.
 2. `git diff --name-only` ⊆ allowed_files
 3. Both gate commands exit 0.
+
+<!-- closed 2026-10-02: card #19 state=done with PR #452 merged; scoutGeometry 8/8 green (2 scout dishes -> 2 rows with matching boxes) -->

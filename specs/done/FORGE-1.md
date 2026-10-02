@@ -1,6 +1,6 @@
 ---
 id: FORGE-1
-status: locked
+status: done
 class: new-bot-needs-five-surfaces
 # `bots/TOKENS.md`'s "Add a bot" procedure is restructured around the forge (~34%
 # line churn), which is a rewrite of that section rather than a patch to it.
@@ -138,3 +138,5 @@ the step that stopped if any of it fails.
   purpose: licensing them here would let unrelated edits ride on FORGE-1.
 - Supervision is proven as generated-and-wired, not as running: no `systemd
   --user` on a Mac, and the VPS was not touched.
+
+<!-- closed 2026-10-02: gate assert-bot-forge 51/51 plus bot-clone and add-bot green; vm3 was forged through this path and is connected -->
