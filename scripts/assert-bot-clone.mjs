@@ -87,6 +87,11 @@ export const PER_BOT_KEYS = new Set([
   // per-bot difference the accuracy architecture cannot function without.
   // Any other use of this key to fork model policy fleet-wide stays forbidden.
   'agent.model',
+  // Seat identity, not capability: which council/health/tax chair a bot is, and
+  // which project it treats as home. None of them changes what the bot can do.
+  'agent.healthRole',
+  'agent.taxRole',
+  'agent.homeProject',
 ]);
 
 /**

@@ -206,6 +206,16 @@ export const KNOWN_COUNCIL_ROLES = {
     name: 'Doctor',
     aliases: ['doctor', 'dr', 'doc', 'audit', 'auditor'],
   },
+  tax_accountant: {
+    id: 'tax_accountant',
+    name: 'Tax Accountant',
+    aliases: ['tax accountant', 'tax_accountant', 'accountant', 'maker', 'companies house', 'company house'],
+  },
+  tax_verifier: {
+    id: 'tax_verifier',
+    name: 'Tax Verifier',
+    aliases: ['tax verifier', 'tax_verifier', 'verifier', 'checker'],
+  },
   lifestyle: {
     id: 'health_analyst',
     name: 'Lifestyle & Nutrition Specialist',
@@ -355,11 +365,27 @@ export function clearAllActiveThreads() {
   activeThreads.clear();
 }
 
+/**
+ * The coordinator adopts a named seat only when no enabled bot owns it.
+ * `dedicatedRoleIds` is the live fleet. `hasDedicatedRoleBots: false` is the
+ * single-bot switch. Passing neither leaves the coordinator quiet.
+ */
+function masterAdoptsUnownedRole(roleId, isMaster, opts) {
+  if (!isMaster || !roleId || roleId === 'all') return false;
+  if (Array.isArray(opts.dedicatedRoleIds)) return !opts.dedicatedRoleIds.includes(roleId);
+  return opts.hasDedicatedRoleBots === false;
+}
+
 export function resolveGroupAddressing(message, self, opts = {}) {
   const rawText = String(message?.text || message?.caption || '').trim();
   const username = String(self?.username || '').replace(/^@/, '').toLowerCase();
   const id = Number(self?.id) || 0;
   const myRole = String(opts.role || self?.role || '').toLowerCase();
+  const myRoles = new Set(
+    [myRole, ...(Array.isArray(opts.roles) ? opts.roles : [])]
+      .map((role) => String(role || '').toLowerCase())
+      .filter(Boolean),
+  );
   const myName = String(opts.name || self?.name || '').toLowerCase();
   const isMaster = Boolean(opts.isMaster || self?.isMaster || self?.id === 'vm');
   const now = Number(opts.now) || Date.now();
@@ -414,10 +440,10 @@ export function resolveGroupAddressing(message, self, opts = {}) {
     const matchedIndex = extracted.roles.findIndex((r) => {
       const rId = r.roleId;
       const rName = r.roleName.toLowerCase();
-      return (myRole && myRole === rId) ||
+      return (myRoles.has(rId)) ||
         (myName && myName.includes(rName)) ||
         (username && username.includes(rId.replace(/_/g, ''))) ||
-        (isMaster && opts.hasDedicatedRoleBots === false);
+        masterAdoptsUnownedRole(rId, isMaster, opts);
     });
 
     if (matchedIndex !== -1) {
@@ -517,9 +543,10 @@ export function resolveGroupAddressing(message, self, opts = {}) {
           return { addressed: false, roleId: null, isBroadcast: false, cleanText: rawText, jointRoles: [], turnOrder: 0, delayMs: 0 };
         }
       } else {
-        const botMatchesThread = (thread.roleId && myRole && myRole === thread.roleId) ||
+        const botMatchesThread = (thread.roleId && myRoles.has(thread.roleId)) ||
           (thread.botId && (String(id) === String(thread.botId) || username === String(thread.botId).toLowerCase())) ||
-          (isMaster && opts.hasDedicatedRoleBots === false && (!thread.botId || String(thread.botId) === String(id)));
+          (opts.hasDedicatedRoleBots === false && isMaster && (!thread.botId || String(thread.botId) === String(id))) ||
+          (Array.isArray(opts.dedicatedRoleIds) && masterAdoptsUnownedRole(thread.roleId, isMaster, opts));
         if (botMatchesThread) {
           return {
             addressed: true,
