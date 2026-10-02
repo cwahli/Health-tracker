@@ -1,6 +1,6 @@
 ---
 id: phone-bug-intake
-status: locked
+status: done
 class: BUG_INTAKE_VISIBILITY
 skill: debug-contract
 edit_mode: patch
@@ -417,3 +417,4 @@ tests into a new file contradicts L16 (consolidate into the most relevant
 existing file), and splitting the CLI into a second script fragments one tool for
 no product reason. Left for a human to rule on.
 
+<!-- closed 2026-10-02: implemented by #303 and named as landed by its own follow-on (collab-bug-intake: "Follow-on to phone-bug-intake (#303), which made a phone screenshot become a real ticket"). Verified, not assumed: its own three gates green (vitest bugSnapshot + bugctl-queue, assert-bug-ticket-continuity, assert-bug-pack) and journey-guard phone-bug-intake GUARD PASS (exit 0, 99 PASS, patch_not_rewrite PASS - run with the packet temporarily back in specs/active/, because the guard resolves specs/active/<id>.md only). Substance checked against the packet's three named failure points rather than the gates alone: (1) a normal user reaches the capture UI - Header.tsx:507 renders BugSnapshotFab behind canFileBugForProfile, pinned by bugSnapshot.test.ts:118 ("a Standard phone profile can file a bug - the gate is not the admin check") and :124 (demo and signed-out refused); (2) the write path emits the fields the report reader reads, pinned by :130; (3) the text surface carries evidence - the live card #35 text packet prints an Evidence: line, and :35 pins that photos resolve through /api/bugs/<tag>/artifacts rather than raw R2 keys. The follow-on that still needs doing is collab-bug-intake. -->
