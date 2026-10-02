@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
-import { isConnectionFailure, stampCooldown, CONNECTION_FAILED_COOLDOWN_MS } from './lib/free-lanes.mjs';
+import { isConnectionFailure, isHardModelFailure, stampCooldown, CONNECTION_FAILED_COOLDOWN_MS } from './lib/free-lanes.mjs';
 import { runOpencodeWithFailover, failureSignature, turnKindFor, noteDeadEnd, deadEndNotesFor, attemptFailureText } from './bot-host.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -62,6 +62,17 @@ try {
   check('a 429 is not a connection failure', !isConnectionFailure('429 Too Many Requests'));
   check('a quota message is not a connection failure', !isConnectionFailure('Try again in 22h 46m'));
 
+  // 1b. Vocabulary: a hard model failure is its own class — not quota, not
+  // transport. Live 2026-10-03: tokenharbor answered 'Model unavailable' and
+  // the next turn walked straight back into it because nothing was stamped.
+  check('model unavailable is a hard model failure', isHardModelFailure('Model unavailable: tokenharbor/deepseek-v4.1-flash:free'));
+  check('model not found counts', isHardModelFailure('model not found: foo/bar'));
+  check('no such model counts', isHardModelFailure('No such model: x'));
+  check('an empty error is not', !isHardModelFailure(''));
+  check('a 429 is not a hard model failure', !isHardModelFailure('429 Too Many Requests'));
+  check('a quota message is not one either', !isHardModelFailure('Daily free limit reached. Try again in 13h.'));
+  check('a transport error is not one either', !isHardModelFailure('connect ECONNREFUSED 127.0.0.1:9'));
+
   // 2. One retry, then the walk moves on.
   sent.length = 0;
   const conn = await runOpencodeWithFailover({
@@ -103,6 +114,29 @@ try {
   });
   check('a quota-hit lane is not retried', sent.filter((s) => s.args.includes('m-quota')).length === 1);
   check('and the walk moved on', quota.finalText === 'ok');
+
+  // 3b. A hard model failure is not retried either — a second attempt cannot
+  // help — but the lane is cooled down so the next turn skips it.
+  sent.length = 0;
+  let cooled = null;
+  const dead = await runOpencodeWithFailover({
+    api: { sendMessage: async () => ({}) },
+    chatId: 1,
+    prompt: 'x',
+    models: ['m-dead', 'm-good3'],
+    workspace: '/tmp',
+    timeoutMs: 5000,
+    spawnImpl: stubFor([
+      { text: '', err: 'Model unavailable: m-dead' },
+      { text: 'ok', err: '' },
+    ]),
+    onCooldown: (info) => { cooled = info; },
+  });
+  check('a model-unavailable lane is not retried', sent.filter((s) => s.args.includes('m-dead')).length === 1);
+  check('and the walk moved on', dead.finalText === 'ok');
+  check('and the dead lane was cooled down', Boolean(cooled && cooled.model === 'm-dead'));
+  const mstamped = stampCooldown({ stateDir: (await import('./lib/free-lanes.mjs')).ensureBotLedger('vm').dir, provider: 'opencode', model: 'm-dead-2', errText: 'Model unavailable: m-dead-2', kind: 'model-unavailable', now: Date.now() });
+  check('the model-unavailable stamp carries its own kind', mstamped.stamped === true);
 
   // 4. The cooldown stamp is short and carries its own kind.
   const { dir } = (await import('./lib/free-lanes.mjs')).ensureBotLedger('vm');

@@ -96,6 +96,7 @@ import {
   projectLanes,
   soonestResetAmongDepleted,
   isConnectionFailure,
+  isHardModelFailure,
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
   freemodelDisplayTier,
@@ -734,12 +735,12 @@ function getAnnotatedFreeModels(caches, botId) {
  * Keep a lane out of the walk for a few minutes after a transport failure.
  * Never throws: a stamp that fails must not cost the chat its answer.
  */
-export function stampLaneCooldown({ botId, model, errText, now = Date.now() } = {}) {
+export function stampLaneCooldown({ botId, model, errText, kind = 'connection-failed', now = Date.now() } = {}) {
   try {
     const { provider, model: m } = freemodelRefToRoute(model || '');
     if (!provider || !m) return null;
     const { dir } = ensureBotLedger(botId || 'default');
-    const stamped = stampCooldown({ stateDir: dir, provider, model: m, errText, now });
+    const stamped = stampCooldown({ stateDir: dir, provider, model: m, errText, kind, now });
     if (stamped.stamped) {
       console.log(`[${botId}] connection cooldown on ${provider}/${m} until ${new Date(now + CONNECTION_FAILED_COOLDOWN_MS).toISOString()}`);
     }
@@ -3977,6 +3978,24 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
       ) {
         const errText = attemptFailureText(attemptResult);
         const stamp = stampLaneCooldown({ botId: config?.id, model, errText });
+        if (typeof onCooldown === 'function') {
+          try { onCooldown({ model, errText, stamp }); } catch {}
+        }
+      }
+      // A lane that answers "model unavailable" is neither quota (no 6h stamp)
+      // nor transport (no retry — a second attempt cannot help). Without a
+      // stamp the next turn walks straight back into the same dead lane, so
+      // it gets the same short cooldown a connection failure does and the
+      // walk skips it until the stamp expires.
+      if (
+        !String(attemptResult?.finalText || '').trim() &&
+        !isQuotaOrLimitError(attemptFailureText(attemptResult)) &&
+        !isConnectionFailure(attemptFailureText(attemptResult)) &&
+        isHardModelFailure(attemptFailureText(attemptResult)) &&
+        !isAborted()
+      ) {
+        const errText = attemptFailureText(attemptResult);
+        const stamp = stampLaneCooldown({ botId: config?.id, model, errText, kind: 'model-unavailable' });
         if (typeof onCooldown === 'function') {
           try { onCooldown({ model, errText, stamp }); } catch {}
         }
