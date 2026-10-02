@@ -87,10 +87,14 @@ export const PER_BOT_KEYS = new Set([
   // per-bot difference the accuracy architecture cannot function without.
   // Any other use of this key to fork model policy fleet-wide stays forbidden.
   'agent.model',
-  // Seat identity, not capability: which council/health/tax chair a bot is, and
-  // which project it treats as home. None of them changes what the bot can do.
+  // Which health-council seat this existing bot speaks for in a group.
+  // A seat is not a new bot and not a new token. The coordinator adopts any
+  // seat that no enabled row claims.
   'agent.healthRole',
+  // Which tax seat this bot speaks for. Same rule as a health seat: not a
+  // new token, and the desk adopts a seat no enabled row claims.
   'agent.taxRole',
+  // The project a desk bot treats as home when the chat has never been switched.
   'agent.homeProject',
 ]);
 

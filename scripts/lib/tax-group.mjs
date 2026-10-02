@@ -10,6 +10,11 @@
  * The books are not filing-ready. The reply quotes results/*.json and the
  * period table. It does not ask a model to invent a tax figure.
  *
+ * Any real question is answered in one reply: the room IS the tax group, so a
+ * short question with no keyword still counts. The accountant's facts and the
+ * verifier's check are worked into that one answer in a single voice — never
+ * one numbered paragraph per seat. Acknowledgements stay quiet.
+ *
  * A bot only hears a bare room question when it is an admin in the supergroup
  * (or its privacy mode is off). A seat mention still arrives either way.
  */
@@ -57,18 +62,27 @@ export function taxDeskBotId(bots, masterId = 'vm') {
 }
 
 export function isTaxAsk(text) {
-  const t = String(text || '').trim();
+  const t = plainQuestion(text);
   if (!t || ACK.test(t)) return false;
-  if (t.includes('?')) return true;
-  if (/\b(tax|vat|ct600|companies house|company house|filing|hmrc|accounts|frs|ledger|improve|gap|gaps)\b/i.test(t)) return true;
-  return t.split(/\s+/).filter(Boolean).length >= 6;
+  if (t.length < 2 || !/[\p{L}\p{N}]/u.test(t)) return false;
+  return true;
+}
+
+function plainQuestion(question) {
+  return String(question || '')
+    .replace(/(^|\s)@[A-Za-z0-9_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function classifyTaxGroupTurn({ kind, addr, text, projectId, taxChat, isDesk } = {}) {
   if (kind !== 'group' || !addr?.addressed) return null;
   const question = String(text || '').trim();
   const seat = TAX_SEAT_IDS.includes(addr.roleId) ? addr.roleId : null;
-  if (seat && !addr.isBroadcast) return { mode: 'seat', roleId: seat, question };
+  if (seat && !addr.isBroadcast) {
+    if (!isTaxAsk(question)) return { mode: 'skip' };
+    return { mode: 'seat', roleId: seat, question };
+  }
   const home = Boolean(taxChat) || projectId === TAX_PROJECT_ID;
   if (addr.isBroadcast && home && isDesk) {
     if (!isTaxAsk(question)) return { mode: 'skip' };
@@ -250,9 +264,54 @@ function verifierText(snapshot, question) {
   return lines.join('\n');
 }
 
+function taxAskKind(question) {
+  const t = plainQuestion(question);
+  if (/\bhow\b|\bsteps\b|\bwhere do i\b|\bwhat do i\b/i.test(t)) return 'how';
+  if (/\b(fix|clean|repair|correct|edit)\b/i.test(t)) return 'fix';
+  if (/\b(list|every period|all periods|show the periods|what(?:'s| is) open)\b/i.test(t)) return 'list';
+  return 'status';
+}
+
+function periodListText(snapshot) {
+  return snapshot.periods.map((row) => `- ${row.label}: chargeable ${money(row.chargeable)}, tax ${money(row.tax)} at ${row.rate || 'the rate on that period'}`).join('\n');
+}
+
+function accountantFacts(snapshot) {
+  const lines = [];
+  const long = snapshot.overlong?.[0];
+  if (long) {
+    const row = snapshot.periods.find((item) => item.label === long.label);
+    lines.push(`Engine chargeable profit for ${long.label} is ${money(row?.chargeable)} at ${row?.rate || 'the rate on that period'}. That period cannot be filed as one CT600.`);
+  }
+  if (snapshot.flatYears?.length) {
+    lines.push(`From ${snapshot.flatYears[0]} the engine applies a flat 25% (${snapshot.flatYears.join(', ')}). The £50,000 small-profits line and marginal relief are not applied.`);
+  }
+  if (snapshot.p2pIncome != null) {
+    lines.push(`P2P interest income (account 4020) is ${money(snapshot.p2pIncome)}. Inflows tagged as P2P interest were credited to the loan, not to income.`);
+  }
+  return lines.join('\n');
+}
+
+function verifierCheck(snapshot) {
+  const lines = ['The verifier re-read the same files and changed none of them — a checker that edits can hide a miss.'];
+  if (snapshot.suspense != null) {
+    lines.push(`Suspense 9000 nets to ${money(snapshot.suspense)}. That is not a cleared transfer.`);
+  }
+  if (snapshot.filed?.length) {
+    const row = snapshot.filed[0];
+    lines.push(`For ${row.period} the filed tax is ${money(row.filedTax)} and the engine tax in the variance file is ${money(row.engineTax)}. Those are not the same figure, so nothing here is signed for filing.`);
+  } else {
+    lines.push('No filed-tax comparison is in the variance file, so nothing here is ready for Companies House.');
+  }
+  lines.push('D8 is still open: FRS 105 or FRS 102 Section 1A. There is no accounts pack to file.');
+  return lines.join('\n');
+}
+
 /**
  * The group reply. Always from the snapshot. `null` snapshot refuses
- * instead of guessing a number.
+ * instead of guessing a number. The room gets one joint answer in a single
+ * voice: the accountant's facts with the verifier's check worked in, never
+ * one numbered paragraph per seat.
  */
 export function formatTaxGroupReply({ mode, roleId, question, snapshot } = {}) {
   if (!snapshot?.periods?.length) {
@@ -260,17 +319,16 @@ export function formatTaxGroupReply({ mode, roleId, question, snapshot } = {}) {
     return `${asked}I can't see engine results in the tax workspace, so I won't guess a profit, a tax bill, or a filing. Run tools/build.py, then ask again.`;
   }
   if (mode === 'council') {
-    return [
-      'One answer',
-      '',
-      `${askedLine(question)}The Companies House filing is not ready. ${firstRepair(snapshot)} The seats below looked at the same results, in order, and this is the only reply.`,
-      '',
-      'Seats, in order:',
-      '',
-      `1. Tax Accountant\n${accountantText(snapshot, '')}`,
-      '',
-      `2. Tax Verifier\n${verifierText(snapshot, '')}`,
-    ].join('\n');
+    const kind = taxAskKind(question);
+    const lead = `${askedLine(question)}The Companies House filing is not ready. ${firstRepair(snapshot)} The accountant and the verifier looked at the same results, and this is the only reply.`;
+    if (kind === 'list') {
+      return ['One answer', '', lead, '', periodListText(snapshot)].join('\n');
+    }
+    if (kind === 'fix' || kind === 'how') {
+      return ['One answer', '', `${lead} Fix it in the books, rebuild, then ask again.`, '', verifierCheck(snapshot)].join('\n');
+    }
+    const facts = accountantFacts(snapshot);
+    return ['One answer', '', lead, '', facts, '', verifierCheck(snapshot), '', 'Numbers are copied from results/*.json. Nothing new was computed in this chat.'].filter((part) => part !== '').join('\n');
   }
   const seat = TAX_SEAT_ORDER.find((item) => item.id === roleId) || TAX_SEAT_ORDER[0];
   const body = seat.id === 'tax_verifier'

@@ -100,6 +100,17 @@ export function resolveProjectId(raw) {
   ) {
     return "external-health";
   }
+  if (
+    s === "tax" ||
+    s === "chiwah" ||
+    s === "chiwah-tax" ||
+    s === "chiwah tax" ||
+    s === "companies house" ||
+    s === "company house" ||
+    s === "companies-house"
+  ) {
+    return "chiwah-tax";
+  }
   // "external 4", "external-4", "external_4", "ext 4", "4", "project 4", "4th"
   const m = s.match(/^(?:project|external|ext)?[\s_-]*(\d+)(?:st|nd|rd|th)?$/);
   if (m) {
@@ -120,6 +131,15 @@ export function describeProject(id) {
       type: "external",
       projectNumber: null,
       workspace: path.join(PROJECTS_HOME, "external-health-coach"),
+    };
+  }
+  if (id === "chiwah-tax") {
+    return {
+      id,
+      name: "Chiwah LTD tax and Companies House",
+      type: "external",
+      projectNumber: null,
+      workspace: path.join(process.env.HOME || "/home/ubuntu", "chiwah-tax"),
     };
   }
   const m = String(id).match(/^external-(\d+)$/);
