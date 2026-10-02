@@ -1,0 +1,21 @@
+[Unit]
+Description=Renew the health brief's four documents when a current snapshot is unpublished (%i)
+Documentation=file:///home/ubuntu/deploy/Health-tracker/specs/active/HEALTH-RENEWAL-1.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/deploy/Health-tracker
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.opencode/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/home/ubuntu/.config/bot-host/common.env
+EnvironmentFile=-/home/ubuntu/.config/bot-host/%i.env
+# The read-only D1 snapshot reads its credentials from the deploy clone's .env —
+# the same file /health readiness names for /health verify. It is a path, not a
+# secret; the file itself is host-owned and never committed.
+Environment=HEALTH_ENV_FILE=/home/ubuntu/deploy/Health-tracker/.env
+ExecStart=/usr/bin/node /home/ubuntu/deploy/Health-tracker/scripts/health-renewal.mjs
+NoNewPrivileges=true
