@@ -173,5 +173,22 @@ const read = await readCurrentRanks([{ username: 'vm4_bot' }], {
 });
 check('a read records the current title and admin flag', read.current.vm4_bot.rank === 'Health Analyst' && read.current.vm4_bot.admin === true);
 
+// --- 7. the front door is pinned too ---------------------------------------
+// The writer being safe is not enough if the operator's door to it is not: a
+// CLI that defaults to --apply would make the safe path the unusual one and no
+// sensor in this file would notice. So the entry point itself is checked — for
+// being present, for previewing by default, and for requiring --rights.
+const CLI = path.join(HERE, 'seat-tags.mjs');
+check('the operator has a door to this', fs.existsSync(CLI));
+if (fs.existsSync(CLI)) {
+  const cli = fs.readFileSync(CLI, 'utf8');
+  check('it previews unless --apply is given', /const APPLY = flag\('apply'\)/.test(cli) && /APPLY \? '[^']*APPLYING[^']*' : '[^']*plan only/.test(cli));
+  check('it refuses without rights before it will write',
+    /if \(!verdict\.ok\) \{[\s\S]*?process\.exit/.test(cli) && cli.indexOf('if (!verdict.ok)') < cli.lastIndexOf('applyTagWrites'));
+  check('it prints the rights it needs when it refuses', /change_info/.test(cli) && /--rights=change_info:true,view:true/.test(cli));
+  check('it never renames a bot either', !/setMyName|setMyUsername|setMyDescription/.test(
+    cli.split('\n').filter((l) => !l.trim().startsWith('*') && !l.trim().startsWith('//')).join('\n')));
+}
+
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
