@@ -372,7 +372,7 @@ export function runComparison(bundleDir, { actualPath, skip = false } = {}) {
           : 'meal_result.json absent — bundle not audited yet',
       };
     }
-    return { skipped: true, verdict: existing.verdict, primaryCode: existing.primaryCode || null, comparisonPath, failures: existing.failures || [] };
+    return { skipped: true, verdict: existing.verdict, comparisonPath, failures: existing.failures || [] };
   }
 
   if (!fs.existsSync(expected)) {
@@ -397,15 +397,31 @@ export function runComparison(bundleDir, { actualPath, skip = false } = {}) {
   return {
     skipped: false,
     verdict: cmp.verdict,
-    // Surfaced so the caller can refuse an ungrounded comparison. primaryCode is
-    // the comparator's own statement of what went wrong FIRST; when it is
-    // turn_mismatch the nutrient deltas are measured against the wrong meal.
-    primaryCode: cmp.primaryCode || null,
     comparisonPath,
     failures: cmp.failures || [],
     // 0 = PASS, 1 = FAIL, 2 = DIVERGED
     exitCode: r.status,
   };
+}
+
+/**
+ * The comparator's own statement of what went wrong FIRST, read back off the
+ * comparison it wrote.
+ *
+ * Read from the file rather than threaded through runCompare's return on
+ * purpose. runCompare already returns `comparisonPath`, so the value is one read
+ * away, and returning it would mean rewriting a line that landed work owns
+ * (5b11c1db) for no gain — the no-undo gate is right to object to that, and the
+ * behaviour wanted here is a refusal, not a wider return shape.
+ *
+ * @returns {string|null} e.g. 'turn_mismatch', or null when absent/unreadable.
+ */
+export function primaryCodeOf(comparisonPath) {
+  try {
+    return JSON.parse(fs.readFileSync(comparisonPath, 'utf8')).primaryCode || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -813,7 +829,7 @@ async function main() {
     // measured against is not real. Meal-prawn-ham-01 filed 13 such cards off a
     // single comparison whose ground truth declared 0 g and 13.2 kcal at once.
     // Refuse here, before anything is created, and name the field that is missing.
-    const grounding = auditGrounding(bundle.bundleDir, { primaryCode: cmp.primaryCode });
+    const grounding = auditGrounding(bundle.bundleDir, { primaryCode: primaryCodeOf(cmp.comparisonPath) });
     rec.stages.grounding = grounding;
     if (grounding.refuse) {
       rec.error = `ungrounded comparison, no cards filed: ${grounding.reasons.join('; ')}`;
