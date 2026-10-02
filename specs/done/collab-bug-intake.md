@@ -1,6 +1,6 @@
 ---
 id: collab-bug-intake
-status: locked
+status: done
 class: BUG_INTAKE_VISIBILITY
 skill: debug-contract
 edit_mode: patch
@@ -270,3 +270,6 @@ skill file, or leaving the wrong recipe in place) are worse than the flag.
   links work from every surface *and* makes the pictures world-readable. Gating
   them needs the separate decision flagged in #299.
 
+<!-- caveat: journey-guard collab-bug-intake exits non-zero once this packet is archived, because journey-guard.mjs:25 resolves specs/active/<slug>.md only and returns null otherwise - it reports FAIL spec_missing. It passed (exit 0) while the packet was active. Any packet whose gate list names journey-guard <ID> therefore goes red on its own closure; the guard is a Frozen file, so the fix waits for the human. -->
+
+<!-- closed 2026-10-02: all three nodes are built on main and every gate is green: vitest bugSnapshot, node --test scripts/bug-intake.test.mjs, assert-bug-ticket-continuity, and journey-guard collab-bug-intake GUARD PASS (exit 0, 99 PASS, allowed_files PASS, frozen_files PASS, patch_not_rewrite PASS). The packet's own build log recorded ONE Guard FAIL - `rewrite`, assert-spec-diff.mjs:198-202 counting a 59-line section in an 82-line bug-ticket SKILL.md as 43% churn. That FAIL was a transient of an uncommitted working tree, not a standing property of the change: the same heuristic now passes, because the work is committed and merged and the diff it measures is empty. The builder was right not to work around it - changing what the gate means needs the human (AGENTS.md section 3). Substance re-checked rather than trusted: Node 1 originFromHeaders exists in src/utils/bugSnapshot.ts and buildBugEvidenceText takes the origin; Node 3 ships scripts/bugctl-drain.mjs (131 lines) + scripts/lib/bug-intake.mjs (122) + 14 unit cases. Node 2's sensor reads "no qa-runner --journey=meal remains as the answer to 'capture the phone'" - the recipe is still in the file, but demoted under its own heading "A fresh render of the app" with the phone case stated first ("You cannot produce this - it already exists, in the chat, as an inbound attachment") and the render labelled "a simulation of the app, not the user's phone". That satisfies the sensor, and the opposite reading - that the old recipe was left contradicting the new - is not what the file says. Honest residuals stand unchanged and are still true: BUG_API_TOKEN is not provisioned, the drainer is not scheduled, no bot auto-files a photo, and the artifacts route is unauthenticated so these absolute URLs are world-readable (gating them is the separate decision flagged in #299). -->
