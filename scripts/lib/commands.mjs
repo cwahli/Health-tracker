@@ -367,8 +367,11 @@ export function clearAllActiveThreads() {
 
 /**
  * The coordinator adopts a named seat only when no enabled bot owns it.
- * `dedicatedRoleIds` is the live fleet. `hasDedicatedRoleBots: false` is the
- * single-bot switch. Passing neither leaves the coordinator quiet.
+ *
+ * `dedicatedRoleIds` is the per-seat list (the live fleet). `hasDedicatedRoleBots:
+ * false` is the older single-bot switch: the coordinator adopts every seat.
+ * Passing neither leaves the coordinator quiet, which is what the bare addressing
+ * tests rely on.
  */
 function masterAdoptsUnownedRole(roleId, isMaster, opts) {
   if (!isMaster || !roleId || roleId === 'all') return false;

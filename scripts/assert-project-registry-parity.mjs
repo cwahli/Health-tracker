@@ -64,6 +64,13 @@ const SHARED_CASES = [
   ['external health', 'external-health'],
   ['external-health', 'external-health'],
   ['coach', 'external-health'],
+  // chiwah-tax (Companies House)
+  ['tax', 'chiwah-tax'],
+  ['chiwah', 'chiwah-tax'],
+  ['chiwah-tax', 'chiwah-tax'],
+  ['chiwah tax', 'chiwah-tax'],
+  ['companies house', 'chiwah-tax'],
+  ['company house', 'chiwah-tax'],
 ];
 
 // Pinned on the router resolver alone: the reported failure was `/project

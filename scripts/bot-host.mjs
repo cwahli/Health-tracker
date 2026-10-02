@@ -4057,7 +4057,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   // Direct chats skip this entirely: everything there is for this bot.
   let fleetBots = [];
   try {
-    fleetBots = loadRegistry(resolveRegistryPath(null, REPO_ROOT)).bots;
+    fleetBots = loadRegistry(registryFileInUse()).bots;
   } catch {
     fleetBots = [];
   }
@@ -4070,7 +4070,8 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   const isTaxDesk = config.id === deskId;
   const myRoles = [config.agent?.healthRole, config.agent?.taxRole].filter(Boolean);
   // The tax desk is a coordinator in its own supergroup, the same way vm is
-  // the coordinator for the health seats.
+  // the coordinator for the health seats. Both can be admins of one group;
+  // the chat binding decides which council a bare question belongs to.
   const isMasterBot = config.id === 'vm' || Boolean(config.isMaster) || isTaxDesk;
   const addr = resolveGroupAddressing(message, config.me, {
     role: myRoles[0] || config.role || config.agent?.role || null,
@@ -4098,8 +4099,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   }
 
   // A named health seat, or a bare question to the room, is answered here.
-  // The coordinator runs the seats in order and posts one message.
+  // It does not fall through to the website coder: that turn can edit the
+  // repo and does not see the verify artifact. One model call answers the
+  // question. A room question is one joint answer. A named seat answers that
+  // question. The other bots stay quiet.
   const storedProjectId = getChatProject(chatId).id;
+  // The tax desk's home is the tax supergroup. A chat that has never been
+  // switched still looks like health-tracker, and this bot must not answer
+  // that room as the health council.
   const deskHome = isTaxDesk
     && config.agent?.homeProject === TAX_PROJECT_ID
     && storedProjectId === 'health-tracker';
@@ -4121,13 +4128,18 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const workspace = KNOWN_PROJECTS['external-health'].workspace;
     console.log(`[${config.id}] health group ${healthTurn.mode}${healthTurn.roleId ? ` ${healthTurn.roleId}` : ''}`);
     let reply;
+    let typing;
     try {
       const artifact = readHealthVerify(workspace);
-      const closed = artifact && gateFromArtifact(artifact);
-      if (closed?.allowed && closed.total > 0) {
-        await api.sendMessage(chatId, healthTurn.mode === 'council'
-          ? 'Council is working through the seats in order. One answer follows.'
-          : `${healthTurn.roleId.replace(/_/g, ' ')} is looking at the verified rows.`).catch(() => {});
+      const gate = artifact && gateFromArtifact(artifact);
+      if (gate?.total > 0 && typeof api.sendChatAction === 'function') {
+        const ping = () => {
+          const pending = api.sendChatAction(chatId, 'typing');
+          if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+        };
+        ping();
+        typing = setInterval(ping, 4000);
+        typing.unref?.();
       }
       reply = await answerHealthGroup({
         ...healthTurn,
@@ -4148,6 +4160,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       await api.sendMessage(chatId, `The health seats did not finish: ${err.message}`).catch(() => {});
       return;
     } finally {
+      if (typing) clearInterval(typing);
       busy.delete(chatId);
     }
     if (reply?.text) await api.sendMessage(chatId, reply.text).catch(() => {});
@@ -4164,8 +4177,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     return;
   }
 
-  // Tax seats, same rule. @accountant or @verifier answers alone. A bare
-  // question in the tax supergroup is one reply: accountant, then verifier.
+  // Same shape as the health room, for the tax seats. A named seat answers
+  // alone. A bare question in the tax supergroup is one consolidated reply
+  // after the accountant and the verifier, in that order. No slash command.
   const taxProjectId = deskHome ? TAX_PROJECT_ID : storedProjectId;
   const taxHome = taxProjectId === TAX_PROJECT_ID || taxChat;
   const taxTurn = classifyTaxGroupTurn({
@@ -4186,7 +4200,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     console.log(`[${config.id}] tax group ${taxTurn.mode}${taxTurn.roleId ? ` ${taxTurn.roleId}` : ''}`);
     let reply;
     try {
-      rememberTaxGroup(taxWorkspace, chatId);
+      // A seat mention answers in any room without binding it: only the
+      // desk's room answer makes this chat a tax supergroup. Otherwise one
+      // @accountant mention in the health room would steal its bare questions.
+      if (taxTurn.mode === 'council') rememberTaxGroup(taxWorkspace, chatId);
       reply = answerTaxGroup({
         ...taxTurn,
         workspace: taxWorkspace,
@@ -4943,7 +4960,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     if (storeFacts.outcome === 'answered') {
       recordActiveThread(chatId, {
         roleId: activeRole || addr?.roleId || null,
-        botId: config.id,
+        botId: config.me?.id || config.id,
         isCouncil: Boolean(addr?.isBroadcast),
         jointRoles: addr?.jointRoles || [],
         timestamp: Date.now(),
