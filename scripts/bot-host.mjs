@@ -3342,7 +3342,9 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       if (sub === 'readiness') {
         // Read-only and cheap: no running-guard, because this answers a question
         // about the host rather than starting work in the workspace.
-        const res = checkHealthReadiness({ projectId });
+        const { seatModelReach } = await import('./lib/health/seat-model.mjs');
+        const modelReach = await seatModelReach();
+        const res = checkHealthReadiness({ projectId, modelReach });
         await api.sendMessage(chatId, formatReadinessText(res), { parse_mode: 'Markdown' });
         return;
       }
@@ -4230,6 +4232,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     && config.agent?.homeProject === TAX_PROJECT_ID
     && storedProjectId === 'health-tracker';
   const taxChat = storedProjectId === TAX_PROJECT_ID || isTaxGroupChat(taxWorkspace, chatId) || deskHome;
+  // The lane this chat would use for a normal message: the /model pref, then the
+  // bot's registry default. Read once here so the health seats below answer on the
+  // same model the user picked for this chat instead of a lane chosen elsewhere.
+  const eff = effective(config, prefs, chatId);
   const healthTurn = classifyHealthGroupTurn({
     kind: chatKind(message),
     addr,
@@ -4274,10 +4280,17 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           ...healthTurn,
           workspace,
           runModel: async ({ prompt }) => {
-            const { runGemini } = await import('./lib/agent-gemini.mjs');
-            const res = await runGemini({
+            // The seat runs on the lane *this chat* already uses. `eff` is the
+            // same resolution a normal message in this chat gets: the /model
+            // pref, then the bot's registry default. A seat is not a separate
+            // species of agent, so if the user set this chat to a model the
+            // analyst answers on it — and if that lane is dead, the bot default
+            // is the fallback, exactly as `failoverModels` does elsewhere.
+            const { runSeatModel } = await import('./lib/health/seat-model.mjs');
+            const res = await runSeatModel({
               prompt,
-              model: process.env.COUNCIL_MODEL || 'gemini/gemini-3.7-flash',
+              chatModel: eff.model,
+              botModel: config.agent.model,
               timeoutMs: 120000,
             });
             const out = String(res?.finalText || '').trim();
@@ -4468,7 +4481,6 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   const storeFacts = { bot: config.id, chat: chatId, location: process.env.LOCATION || '', at: new Date(turnStartedAt).toISOString() };
   try {
     await renderer.start();
-    const eff = effective(config, prefs, chatId);
     // One shared working headline (provider + model + elapsed + usage) for
     // every bot-host agent — same line shape as the Grok TG router. The
     // provider follows the chat's effective model, not the registry default.
