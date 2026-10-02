@@ -94,7 +94,7 @@ export const HELP_USAGE = {
   project: { args: '[name]', text: 'view or switch project (/project external 1)' },
   council: { args: '[stage]', text: 'run a council stage by name or number (all | run | status)' },
   role: { args: '[name]', text: 'switch bot role (/role accountant) or project persona (/role legal)' },
-  health: { args: '[sub]', text: 'health coach: verify · ingest · refresh · analyze · readiness · research · doctor · status' },
+  health: { args: '[sub]', text: 'health coach: verify · ingest · refresh · analyze · readiness · research · doctor · status · triage · dashboard' },
   tax: { args: '[sub]', text: 'Chiwah LTD tax: snapshot · sweep · status · deadlines · saving · doc' },
   location: { args: '[name]', text: 'show or switch compute location / quota pool' },
 };

@@ -199,7 +199,7 @@ function fallbackLine(reason) {
 }
 
 function missingText() {
-  return "I can't see a verify artifact in the health workspace, so I won't guess at a gap, a risk, or a test. Send /health verify in this chat, then ask again.";
+  return "I can't see a verify artifact in the health workspace, so I won't guess at a gap, a risk, or a test. Run /health verify in this chat — then /health refresh publishes the documents as drafts, and the analysis sections open when the fix list closes.";
 }
 
 /**
@@ -211,7 +211,7 @@ export function formatHealthGroupReply({ artifact, reason = 'no council model' }
   if (!artifact) return missingText();
   const gate = gateFromArtifact(artifact);
   if (!gate.total) {
-    return "The verify artifact has no fix-list items, so nothing proves the gate is closed. I won't guess at a gap or a test. Run /health verify and ask again.";
+    return "The verify artifact has no fix-list items, so nothing proves the gate is closed. I won't guess at a gap or a test. Run /health verify again — /health refresh publishes the documents as drafts, and the analysis sections open when the fix list closes.";
   }
   return fallbackLine(reason);
 }
@@ -304,7 +304,7 @@ export function healthAnswerPrompt({ mode, roleId, question, artifact, refusal =
       'The data gate is open. Answer the question they actually asked, using only the open repairs below.',
       'Do not name a disease, a drug, or a risk score. Name a lab test only when it is already written in the repairs below — quoting a repair is allowed, introducing a new test is not.',
       'Do not invent a number. Quote a figure only when it is already written in the repairs or the question. Do not subtract or round one.',
-      'You cannot edit the app from this chat. If they want something fixed, say the change is made in the app, name the first open repair, and tell them to run /health verify after.',
+      'You cannot change the app or the sheet from this chat. For the repair steps, name the first open repair and point at /health triage; /health dashboard has the full list. The documents refresh as drafts now — the analysis sections open when the fix list closes.',
       'If the question cannot be answered until those repairs close, say that in a sentence that still responds to what they asked.',
       'Do not dump every open repair unless they asked for the list.',
     ];
