@@ -25,7 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { resolveGroupAddressing } from './lib/commands.mjs';
+import { resolveGroupAddressing, HELP_USAGE } from './lib/commands.mjs';
 import { getProjectRoles } from './lib/project-registry.mjs';
 import { loadRegistry, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
@@ -35,6 +35,7 @@ import {
   dedicatedHealthRoleIds,
   acceptHealthReply,
   formatHealthGroupReply,
+  healthAnswerPrompt,
   isHealthAsk,
 } from './lib/health-group.mjs';
 import { formatRefreshText } from './health-runner.mjs';
@@ -155,6 +156,22 @@ check('the fallback does not name a condition', !/diabetes|cardiovascular|hypert
 const refusedFallback = formatHealthGroupReply({ artifact: openArtifact, reason: 'condition' });
 check('a refused draft falls back to the short line, not a status paragraph', /couldn't put that answer together/.test(refusedFallback) && /condition the record does not state/.test(refusedFallback) && !/H-1|data gate is open/i.test(refusedFallback), refusedFallback.slice(0, 240));
 check('a missing artifact refuses instead of guessing', /won't guess/.test(formatHealthGroupReply({ artifact: null })));
+
+// Plan item 4: the surviving guidance names only commands the /health handler
+// serves and the help line lists, and the retired wording is gone.
+const guidanceTexts = [
+  formatHealthGroupReply({ artifact: null }),
+  formatHealthGroupReply({ artifact: { fixList: { items: [] } } }),
+  noModelFallback,
+  refusedFallback,
+  healthAnswerPrompt({ mode: 'council', roleId: null, question: roomQuery, artifact: openArtifact }),
+];
+check('no health-room reply carries the retired guidance', guidanceTexts.every((t) => !/0 open|not a habit|not a new test|ask again/i.test(t)), guidanceTexts.map((t) => t.slice(0, 100)).join(' || '));
+const namedCommands = [...new Set(guidanceTexts.flatMap((t) => [...t.matchAll(/\/health ([a-z-]+)/g)].map((m) => m[1])))];
+check('the guidance names the lane commands', ['verify', 'refresh', 'triage', 'dashboard'].every((c) => namedCommands.includes(c)), namedCommands.join(', '));
+check('every command the guidance names is handled by /health', namedCommands.every((c) => new RegExp(`sub === '${c}'|sub\\.startsWith\\('${c}'`).test(HOST)), namedCommands.join(', '));
+check('every command the guidance names is in the help line', namedCommands.every((c) => HELP_USAGE.health.text.includes(c)), namedCommands.join(', '));
+check('the help line lists triage and dashboard', /triage/.test(HELP_USAGE.health.text) && /dashboard/.test(HELP_USAGE.health.text), HELP_USAGE.health.text);
 
 const calls = [];
 const closedArtifact = {
