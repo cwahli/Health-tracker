@@ -35,12 +35,27 @@ const HOST = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
 
 let passed = 0;
 let failed = 0;
+let skipped = 0;
 function check(name, cond, detail = '') {
   if (cond) passed += 1;
   else {
     failed += 1;
     console.log(`  FAIL  ${name}${detail ? `  — ${detail}` : ''}`);
   }
+}
+
+/**
+ * A case that needs state this host does not have. It reports SKIP, visibly,
+ * rather than passing: a green line for a check that never ran is the same lie
+ * as a green line for a check that failed.
+ */
+function checkWhen(available, name, cond, detail = '') {
+  if (!available) {
+    skipped += 1;
+    console.log(`  SKIP  ${name}  — ${detail}`);
+    return;
+  }
+  check(name, cond, detail);
 }
 
 const group = (text) => ({ chat: { type: 'supergroup', id: -100999 }, text });
@@ -194,8 +209,16 @@ forgetTaxGroup(tmp, -100999);
 check('a health seat mention drops the tax binding', !isTaxGroupChat(tmp, '-100999'));
 fs.rmSync(tmp, { recursive: true, force: true });
 
-const live = readTaxSnapshot(path.join(os.homedir(), 'chiwah-tax'));
-check('the live books show 2015-16 as longer than 12 months', live?.overlong?.some((row) => row.label === '2015-16' && row.days > 366));
+// The books are the operator's real project (~/chiwah-tax), not a fixture, so
+// they exist on the VPS and nowhere else — a CI runner has no ~/chiwah-tax and
+// this case could only ever fail there. It is a host case, reported as such,
+// and the rest of the tax surface is pinned against fixtures.
+const TAX_HOME = path.join(os.homedir(), 'chiwah-tax');
+const hasBooks = fs.existsSync(TAX_HOME);
+const live = hasBooks ? readTaxSnapshot(TAX_HOME) : null;
+checkWhen(hasBooks, 'the live books show 2015-16 as longer than 12 months',
+  live?.overlong?.some((row) => row.label === '2015-16' && row.days > 366),
+  `no ${TAX_HOME} on this host`);
 
 const normalized = normalizeConfig(reg.bots.find((b) => b.id === 'tax_accountant'));
 check('normalizeConfig keeps the tax seat and its home project', normalized.agent.taxRole === 'tax_accountant' && normalized.agent.homeProject === 'chiwah-tax');
@@ -204,5 +227,5 @@ check('the handler classifies a tax turn', HOST.includes('classifyTaxGroupTurn')
 check('the handler answers with answerTaxGroup', HOST.includes('answerTaxGroup'));
 check('the handler passes both seat lists', HOST.includes('dedicatedTaxRoleIds'));
 
-console.log(`\n${passed} pass, ${failed} fail`);
+console.log(`\n${passed} pass, ${failed} fail${skipped ? `, ${skipped} skipped (host-only)` : ''}`);
 process.exit(failed === 0 ? 0 : 1);
