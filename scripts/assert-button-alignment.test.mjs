@@ -132,29 +132,29 @@ check('padding is by width: padUnits stops at the budget in em, not in character
   Math.abs(widthUnits(padUnits('a', 2)) - 2) < SP && widthUnits(padUnits('a', 2)) >= 2 - 1e-9);
 
 // --- the columns begin at the same x on every row, whatever the content ---
-//   mark + space + name = W_HEAD, two spaces = plan, three more = countdown,
-//   two more = benchmark. Offsets are em, because that is the unit the client
+//   mark + space + name = W_HEAD, two spaces = plan, three more = benchmark,
+//   two more = countdown last. Offsets are em, because that is the unit the client
 //   lays the label out in; a character index drifts with the name's letters.
 check('the column offsets are the sum of the budgets and the gaps',
   Math.abs(ROW_UNITS.plan - (W_HEAD_UNITS + 2 * SP)) < 1e-9
-  && Math.abs(ROW_UNITS.expiry - (ROW_UNITS.plan + W_PLAN_UNITS + 3 * SP)) < 1e-9
-  && Math.abs(ROW_UNITS.score - (ROW_UNITS.expiry + W_EXPIRY_UNITS + 2 * SP)) < 1e-9,
+  && Math.abs(ROW_UNITS.score - (ROW_UNITS.plan + W_PLAN_UNITS + 3 * SP)) < 1e-9
+  && Math.abs(ROW_UNITS.expiry - (ROW_UNITS.score + W_SCORE_UNITS + 2 * SP)) < 1e-9,
   JSON.stringify(ROW_UNITS));
-const probe = rowWidth({ mark: '❌', name: 'nemotron-3.5-lightning', plan: 'ZZ', resetIn: '1h 33', score: '9999' });
+const probe = rowWidth({ mark: '❌', name: 'nemotron-3.5-lightning', plan: 'ZZ', resetIn: '1h 33', score: '48' });
 const planIdx = probe.indexOf('ZZ');
 const expIdx = probe.indexOf('1h 33');
-const scoreIdx = probe.indexOf('9999');
+const scoreIdx = probe.indexOf('48');
 const upto = (i) => widthUnits(probe.slice(0, i));
 check('the plan column starts at the name column’s width, whatever the name',
   planIdx > 0 && upto(planIdx) >= ROW_UNITS.plan - 1e-9 && upto(planIdx) < ROW_UNITS.plan + SP,
   `${upto(planIdx).toFixed(4)} vs ${ROW_UNITS.plan}`);
-check('the countdown starts at its own offset, three spaces clear of the plan',
-  expIdx > planIdx && upto(expIdx) >= ROW_UNITS.expiry - 1e-9 && upto(expIdx) < ROW_UNITS.expiry + SP
-  && probe.slice(0, expIdx).endsWith('   '),
-  `${upto(expIdx).toFixed(4)} vs ${ROW_UNITS.expiry}; gap ${JSON.stringify(probe.slice(planIdx, expIdx))}`);
-check('the benchmark starts at its own offset',
-  scoreIdx > expIdx && upto(scoreIdx) >= ROW_UNITS.score - 1e-9 && upto(scoreIdx) < ROW_UNITS.score + SP,
-  `${upto(scoreIdx).toFixed(4)} vs ${ROW_UNITS.score}`);
+check('the benchmark starts at its own offset, three spaces clear of the plan',
+  scoreIdx > planIdx && upto(scoreIdx) >= ROW_UNITS.score - 1e-9 && upto(scoreIdx) < ROW_UNITS.score + SP
+  && probe.slice(0, scoreIdx).endsWith('   '),
+  `${upto(scoreIdx).toFixed(4)} vs ${ROW_UNITS.score}; gap ${JSON.stringify(probe.slice(planIdx, scoreIdx))}`);
+check('the countdown sits last, at its own offset',
+  expIdx > scoreIdx && upto(expIdx) >= ROW_UNITS.expiry - 1e-9 && upto(expIdx) < ROW_UNITS.expiry + SP,
+  `${upto(expIdx).toFixed(4)} vs ${ROW_UNITS.expiry}`);
 const shortRow = row({ name: 'hy3', plan: 'OC' });
 const shortPlanIdx = shortRow.indexOf('OC');
 const shortUpto = widthUnits(shortRow.slice(0, shortPlanIdx));
@@ -201,7 +201,7 @@ check('fitCells finishes a line by DISPLAY CELLS, for the monospace table',
   && dispWidth(fitCells('ab')) === COPY_WIDTH);
 check('the table row keeps the AA prefix and the three-space gap in characters',
   rowCopy({ mark: '❌', name: 'Cline Muse 1.3 Cont', plan: 'CL', score: 'AA48.5', resetIn: '2h 31' })
-    .includes('CL   2h 31') && rowCopy({ mark: '❌', name: 'x', plan: 'CL', score: 'AA48', resetIn: '—' }).includes('AA48'),
+    .includes('CL   AA48.5') && rowCopy({ mark: '❌', name: 'x', plan: 'CL', score: 'AA48', resetIn: '—' }).includes('AA48'),
   JSON.stringify(rowCopy({ mark: '❌', name: 'x', plan: 'CL', score: 'AA48', resetIn: '—' })));
 check('the monospace table finishes in cells, so a row and its header share an edge',
   (() => {
@@ -228,7 +228,7 @@ check('the reset is the compact countdown, never an absolute timestamp',
 check('an unpublished benchmark prints the em dash, never an empty column',
   /score: benchmarkLabel\(model\) \|\| '—'/.test(botSrc));
 check('the buttons share one column order with the table',
-  /plan, three spaces, countdown, benchmark/.test(botSrc));
+  /plan, three spaces, benchmark, countdown last/.test(botSrc));
 
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
