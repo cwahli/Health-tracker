@@ -1900,7 +1900,7 @@ export function loadFreeLaneLedger({ stateDir = null, tablePath = null, sessionP
 }
 
 /** `cline:...` / `gemini:...` / provider-prefixed refs → route candidates. */
-function routeCandidates(ref) {
+export function routeCandidates(ref) {
   const raw = String(ref ?? "").trim();
   if (!raw) return [];
   if (raw.startsWith("cline:")) return [{ provider: "cline", model: raw.slice("cline:".length) }];
