@@ -467,7 +467,7 @@ export async function getFleetTickets({ env = process.env, root = REPO_ROOT, ref
                 return c >= 0 && vals[c] !== undefined ? String(vals[c]).trim() : '';
               };
 
-              const idVal = getByName('id') || getByName('key') || String(idx + 1);
+              const idVal = getByName('key') || getByName('id') || getByName('#') || String(idx + 1);
               return {
                 id: idVal,
                 originalRequest: getByName('Original request') || getByName('goal') || getByName('title') || '—',
@@ -477,7 +477,7 @@ export async function getFleetTickets({ env = process.env, root = REPO_ROOT, ref
                 status: getByName('Status') || 'Pending',
                 completionProof: getByName('Completion proof') || getByName('proof') || '—',
                 completionGate: getByName('Completion gate') || getByName('gate') || '—',
-                lastActivity: getByName('last_activity') || getByName('built_at') || '—',
+                lastActivity: getByName('last_activity') || getByName('last activity') || getByName('built_at') || '—',
               };
             });
 

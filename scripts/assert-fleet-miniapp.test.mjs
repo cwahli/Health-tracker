@@ -541,3 +541,16 @@ test('VM pane shows one row per live opencode session with model and working mar
 
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
+
+test('ticket projection follows the live sheet headers (key, LAST ACTIVITY)', async () => {
+  resetFleetStateForTest();
+  const { getFleetTickets: liveTickets } = await import('./lib/fleet-status.mjs');
+  const tickets = await liveTickets({ refresh: true });
+  assert.ok(tickets.length > 0, 'live sheet must project rows');
+  for (const t of tickets) {
+    // 'key' holds the ticket identity (spec:/req:/card:/sync:…); a bare row index means the id lookup missed.
+    assert.match(t.id, /^(spec:|req:|card:|task:|proj:|sync:|bug-|fleet-|meal-|sheet-)/i, `ticket id keeps sheet key, got ${t.id}`);
+    // 'LAST ACTIVITY' header carries the timestamp; a dash means the lookup missed.
+    assert.notEqual(t.lastActivity, '—', `lastActivity projected for ${t.id}`);
+  }
+});
