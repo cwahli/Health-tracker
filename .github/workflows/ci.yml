@@ -294,6 +294,19 @@ jobs:
       - name: PM role gate (assert-pm-role)
         run: node scripts/assert-pm-role.test.mjs
 
+      # The group surfaces ran nowhere in CI, which is how #458 merged green
+      # while main was red: two bots were seated as health_analyst and two as
+      # test_planner, and assert-health-group — the sensor that refuses exactly
+      # that — was only ever run by hand. A sensor nobody runs is a comment.
+      # assert-tax-group prints one SKIP line on a runner (the operator's books
+      # are not in git); a skip is visible, a green line it never earned is not.
+      - name: Group seats gate (health + tax)
+        run: |
+          node scripts/assert-health-group.test.mjs
+          node scripts/assert-tax-group.test.mjs
+          node scripts/assert-chat-scope.test.mjs
+          node scripts/assert-project-registry-parity.mjs
+
       - name: Token sync gate (assert-sync-tokens)
         run: node scripts/assert-sync-tokens.test.mjs
 
