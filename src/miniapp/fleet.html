@@ -80,6 +80,16 @@
   }
   .tabbar .masthead .title-group { display: flex; align-items: center; gap: 8px; }
   .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981; }
+  .btn-refresh {
+    background: #1e293b; border: 1px solid #334155; color: #93c5fd;
+    border-radius: 6px; padding: 2px 7px; font-size: 13px; cursor: pointer;
+    line-height: 1.2; display: inline-flex; align-items: center; justify-content: center;
+    transition: background 0.15s, transform 0.15s; user-select: none;
+  }
+  .btn-refresh:hover { background: #334155; }
+  .btn-refresh:active { transform: scale(0.92); }
+  .btn-refresh.spinning { animation: spin 0.8s linear infinite; pointer-events: none; opacity: 0.7; }
+  @keyframes spin { 100% { transform: rotate(360deg); } }
   .tabbar .tabs { display: inline-flex; }
   .tabbar .tabs label {
     cursor: pointer; padding: 6px 12px; font-size: 12.5px; font-weight: 600;
@@ -113,6 +123,7 @@
       <div class="title-group">
         <span class="live-dot" id="live-indicator" title="Connected"></span>
         <h1>Fleet</h1>
+        <button id="btn-refresh" class="btn-refresh" title="Refresh state" aria-label="Refresh state">🔄</button>
       </div>
       <div class="tabs">
         <label for="btabs-vw-0" id="tab-label-tickets">Tickets (<span id="count-tickets">0</span>)</label>
@@ -263,6 +274,24 @@
     }, 50);
   }
 
+  function formatTimeAgo(isoString) {
+    if (!isoString) return '<span class="empty-cell">—</span>';
+    try {
+      var dt = new Date(isoString);
+      var now = new Date();
+      var diffMs = now - dt;
+      if (isNaN(diffMs) || diffMs < 0) diffMs = 0;
+      var mins = Math.floor(diffMs / 60000);
+      var timeStr = dt.toTimeString().slice(0, 5);
+      if (mins < 1) return timeStr + ' (now)';
+      if (mins < 60) return timeStr + ' (' + mins + 'm)';
+      var hrs = Math.floor(mins / 60);
+      return timeStr + ' (' + hrs + 'h)';
+    } catch (e) {
+      return esc(isoString.slice(11, 19));
+    }
+  }
+
   function renderTerms() {
     var tb = document.getElementById('body-terms');
     if (!tb) return;
@@ -280,7 +309,7 @@
         '<td>' + renderStatusBadge(m.status) + '</td>' +
         '<td>' + esc(m.task) + '</td>' +
         '<td>' + linkedLink + '</td>' +
-        '<td>' + esc(m.updatedAt ? m.updatedAt.slice(11, 19) : '') + '</td>' +
+        '<td>' + formatTimeAgo(m.updatedAt) + '</td>' +
         '</tr>';
     }).join('');
     tb.innerHTML = html;
@@ -322,7 +351,7 @@
     renderBots();
   }
 
-  function fetchState() {
+  function fetchState(cb) {
     var url = '/fleet/api/state' + location.search;
     fetch(url, { headers: { 'Accept': 'application/json' } })
       .then(function (res) { return res.json(); })
@@ -332,11 +361,26 @@
           var ind = document.getElementById('live-indicator');
           if (ind) ind.style.background = '#10b981';
         }
+        if (typeof cb === 'function') cb();
       })
       .catch(function () {
         var ind = document.getElementById('live-indicator');
         if (ind) ind.style.background = '#ef4444';
+        if (typeof cb === 'function') cb();
       });
+  }
+
+  // Hook manual refresh button
+  var btnRef = document.getElementById('btn-refresh');
+  if (btnRef) {
+    btnRef.addEventListener('click', function () {
+      btnRef.classList.add('spinning');
+      fetchState(function () {
+        setTimeout(function () {
+          btnRef.classList.remove('spinning');
+        }, 350);
+      });
+    });
   }
 
   // Initial fetch

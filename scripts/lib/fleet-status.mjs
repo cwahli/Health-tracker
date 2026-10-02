@@ -94,10 +94,50 @@ export function getFleetNodes(opts = {}) {
     }
   } catch {}
 
+  const allTickets = Array.isArray(opts?.tickets) ? opts.tickets : fleetTicketsCache.rows;
+  const activeTickets = (allTickets || []).filter(
+    (t) => String(t.status || '').trim().toLowerCase() === 'in progress'
+  );
+
+  function findActiveTicket(targetLoc) {
+    const l = targetLoc.toLowerCase();
+    return activeTickets.find((t) => {
+      const owner = String(t.owner || '').toLowerCase();
+      const atParts = owner.split('@');
+      const target = (atParts[1] || '').trim();
+      if (l === 'mac') return target === 'mac' || target.includes('mac');
+      if (l === 'vm') return target === 'vm' || target === 'vps-france' || target.includes('vps');
+      if (l === 'grok vm') return target === 'grok' || target === 'grok-vps' || target.includes('grok');
+      if (l === 'collab') return target === 'collab' || target.includes('collab');
+      if (l === 'mobile') return target === 'mobile' || target.includes('termux') || target.includes('phone');
+      return false;
+    });
+  }
+
   // Iterate over known default locations
   for (const loc of DEFAULT_LOCATIONS) {
     seenLocations.add(loc);
     const beat = fleetNodeHeartbeats.get(loc);
+
+    // 1. PM Sheet binding: If a ticket is 'In progress' for this location, agent is actively WORKING
+    const activeTicket = findActiveTicket(loc);
+    if (activeTicket) {
+      const ownerAgent = String(activeTicket.owner || '').split('@')[0].trim();
+      const agent = ownerAgent || beat?.agent || 'Active Agent';
+      const task = String(activeTicket.originalRequest || activeTicket.workDoneSoFar || 'In progress')
+        .replace(/[\r\n\t]+/g, ' ')
+        .slice(0, 240);
+      result.push({
+        location: loc,
+        agent,
+        status: 'working',
+        task,
+        ticketKey: activeTicket.id,
+        updatedAt: beat?.updatedAt || new Date(now).toISOString(),
+      });
+      continue;
+    }
+
     if (!beat) {
       let fallback = null;
       if (loc === 'VM') {
@@ -138,14 +178,26 @@ export function getFleetNodes(opts = {}) {
           const hostKey = loc === 'Grok VM' ? 'grok' : loc.toLowerCase();
           const ws = workerStatus(hostKey, { home: opts.home || os.homedir(), now });
           if (ws && ws.reachable) {
-            fallback = {
-              location: loc,
-              agent: loc === 'Grok VM' ? 'Grok Worker' : `${loc} Worker`,
-              status: 'idle',
-              task: ws.standin ? 'Worker connected (standin)' : 'Worker connected',
-              ticketKey: '',
-              updatedAt: ws.lastSeen || new Date(now).toISOString(),
-            };
+            if (ws.standin) {
+              // Standin is a local mock process on VPS, not real connected hardware
+              fallback = {
+                location: loc,
+                agent: '—',
+                status: 'offline',
+                task: 'Offline (mock standin)',
+                ticketKey: '',
+                updatedAt: null,
+              };
+            } else {
+              fallback = {
+                location: loc,
+                agent: loc === 'Grok VM' ? 'Grok Worker' : `${loc} Worker`,
+                status: 'idle',
+                task: 'Worker connected (waiting for prompt)',
+                ticketKey: '',
+                updatedAt: ws.lastSeen || new Date(now).toISOString(),
+              };
+            }
           }
         } catch {}
       }
@@ -178,7 +230,7 @@ export function getFleetNodes(opts = {}) {
       location: beat.location,
       agent: beat.agent,
       status,
-      task: status === 'offline' ? 'Offline (lease expired)' : beat.task,
+      task: status === 'offline' ? 'Offline (no reporter activity)' : beat.task,
       ticketKey: beat.ticketKey,
       updatedAt: beat.updatedAt,
     });
