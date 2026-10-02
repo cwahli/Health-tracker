@@ -7,3 +7,4 @@
 {"op": "attempt", "tag_id": "tag_mugujw64_8cp01q", "state": "in_fix", "flags": {}, "hyp": "Make `node scripts/bugctl.mjs packet --id <n> --format text` print the server's", "result": "start", "at": "2026-09-25T11:03:21.108Z"}
 {"op": "attempt", "tag_id": "tag_mugujw64_8cp01q", "state": "verifying", "flags": {}, "hyp": "Make `node scripts/bugctl.mjs packet --id <n> --format text` print the server's", "result": "committed", "at": "2026-09-25T11:11:06.447Z"}
 {"op": "verify", "tag_id": "tag_mugujw64_8cp01q", "state": "done", "flags": {}, "result": "green", "at": "2026-09-25T11:22:17.876Z"}
+{"op":"repro","tag_id":"tag_mumoqgwj_ao16t2","state":"new","flags":{"needs_repro":true},"repro_status":"needed","at":"2026-10-02T16:03:56.446Z"}
