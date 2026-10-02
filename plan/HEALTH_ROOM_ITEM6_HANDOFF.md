@@ -23,6 +23,13 @@ open). The health-room lane through item 6 is fully merged:
 (#478, fleet) has self-closed, so the queue is open. Full evidence for the last drop:
 `specs/active/HEALTH-GROUP-5.md`.
 
+**PM-sheet row:** `spec:health-room-live-answers` (Owner `Buffy (Codebuff) (high) @ mac`,
+Status `Assigned`, branch `agent/health-room-item6-handoff`, all nine SHAs in the `github`
+column, and the remaining work in `What's left to do`). The seven older rows this agent also
+owns — `spec:ANALYST-1`, `spec:BOT-CONTEXT-1`, `spec:DOCTOR-1`, `spec:DOCTOR-2`,
+`spec:RESEARCH-1..3` — were re-verified against main on 2 Oct (gate green, see below) and
+each now carries one concrete next step instead of "owner to confirm".
+
 **This handoff itself** lives on branch `agent/health-room-item6-handoff` off
 `origin/main`, path `plan/HEALTH_ROOM_ITEM6_HANDOFF.md`.
 
@@ -255,6 +262,18 @@ verify the default branch is still `main`.
   `tmp-gemini-probe.mjs`, `tmp-ask-typo-probe2.mjs`, `/home/ubuntu/box-restart.sh`,
   `/home/ubuntu/item6-tree`. Locally: the `tmp/hg6` worktree, branch
   `agent/health-group-5` (merged; remote may still list it), `tmp/*.mjs` probes.
+- **The PM sheet is only writable from the box** (vps-france). This Mac has system ruby
+  2.6 without `google-apis-sheets_v4`, and no `~/.claude/.google/token.json`; the box has
+  both. So `ruby ~/.agents/skills/do-github-sync/scripts/sheet_row.rb` is copied over and
+  run there (`scp` + `ssh` with the same key flags as the rest of this file). Read-only
+  helpers worth re-creating: a row dumper, a full-text dumper, and a duplicate/stub
+  checker.
+- **Do not run seven `sheet_row.rb` updates back to back without checking.** On 2 Oct a
+  batch of seven left `spec:DOCTOR-1` duplicated (the old row archived but not deleted)
+  and `spec:DOCTOR-2` overwritten to a stub with only note + todo — a delete landed on the
+  neighbouring row. Repaired in place with a targeted script (assert the row, then either
+  delete that one row or rewrite it with `update_spreadsheet_value`, never insert). After
+  any batch, run the duplicate/stub check before moving on.
 - One typo probe message did reach the user's chat (message_id 1581, chat 6218257274)
   and was self-deleted (`{"ok":true,"result":true}`) — if you send anything to the
   user's chat, delete it the same way.
