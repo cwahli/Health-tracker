@@ -1,6 +1,6 @@
 ---
 id: dispatch-cli-flag
-status: locked
+status: done
 class: BIND_MISS
 skill: verify
 edit_mode: patch
@@ -84,3 +84,5 @@ actually accepts, so a dispatch starts an agent instead of exiting immediately.
    shows no `--dir`.
 2. `git diff --name-only` ⊆ allowed_files
 3. Gate command exits 0.
+
+<!-- closed 2026-10-02: bash -n green and the --print-plan output carries no --dir; the fix that stopped every coder dispatch dying at launch is on main -->

@@ -1,6 +1,6 @@
 ---
 id: RED-MAIN-1
-status: locked
+status: done
 class: FAIL_OPEN_MERGE
 edit_mode: patch
 skill: debug-contract
@@ -130,3 +130,5 @@ and the operator has one explicit, recorded way to land the fix anyway.
 - Only `main`'s head is read. A red verification that a later merge superseded is
   invisible by design — `cancelled` cannot be distinguished from "we stopped
   caring", so it is treated as unknown.
+
+<!-- closed 2026-10-02: gates assert-auto-merge 89/89 and assert-main-verify 17/17 green; the override path was exercised on #422 -->

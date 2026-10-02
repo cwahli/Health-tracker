@@ -1,6 +1,6 @@
 ---
 id: bbox-fallback-passthrough
-status: locked
+status: done
 class: APPLY_MISS
 skill: food-calc
 edit_mode: patch
@@ -87,3 +87,5 @@ scout item's own `boundingBox2D` onto the `itemsBreakdown` row they build.
 1. Both test files assert the box is carried when present and null when absent.
 2. `git diff --name-only` ⊆ allowed_files
 3. The named gate exits 0.
+
+<!-- closed 2026-10-02: both named test files green (44/44); the fallback carries each dish boundingBox2D and nulls it when absent -->

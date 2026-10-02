@@ -1,6 +1,6 @@
 ---
 id: PM-1
-status: locked
+status: done
 class: fleet-has-no-project-manager
 edit_mode: patch
 skill: debug-contract
@@ -146,3 +146,5 @@ host-only steps instead of pretending to run them.
   `userbotState()` reports "the module is not installed" here while CI (which
   runs `npm ci`) would report the missing `api_id`. The sensor asserts on the
   facts that hold on both hosts.
+
+<!-- closed 2026-10-02: gate assert-pm-role 47/47 green on main; the PM seat was taken and answered live on @ht_vm3_bot and @VM_19485_bot (2026-10-02) -->

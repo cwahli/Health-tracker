@@ -1,6 +1,6 @@
 ---
 id: external-health
-status: locked
+status: done
 skill: data-plane
 edit_mode: patch
 allowed_files:
@@ -119,3 +119,5 @@ blank scaffolding for that later pass.
   the next `--verify` read the new dump.
 - `--status` reads the last artifact: what is still wrong, how fresh the data is,
   what is next, and that no document is published yet.
+
+<!-- closed 2026-10-02: PR #397 merged; all six named gates green on main (external-health, registry parity, command scope, bot-clone, bot-host, tsc) -->
