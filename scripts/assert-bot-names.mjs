@@ -66,6 +66,12 @@ function check(name, cond, detail = '') {
 const registry = JSON.parse(fs.readFileSync(path.join(ROOT, 'bots', 'registry.json'), 'utf8'));
 const bots = (registry.bots || []).filter((b) => b.runtime !== 'hermes');
 
+/** Files allowed to name a banned method because they assert its absence. */
+const BAN_ENFORCERS = new Set([
+  'scripts/assert-bot-names.mjs',
+  'scripts/assert-seat-tag-writer.mjs',
+]);
+
 console.log('assert-bot-names:');
 
 if (!LIVE) {
@@ -81,10 +87,15 @@ if (!LIVE) {
         continue;
       }
       if (!/\.(mjs|js|ts|sh)$/.test(entry.name)) continue;
-      // This file names the banned methods because it bans them, so it is the
-      // one file that is not subject to the ban. Naming the exception is better
-      // than hiding the strings: the check still fails on anything else.
-      if (path.resolve(full) === path.resolve(fileURLToPath(import.meta.url))) continue;
+      // A file that NAMES a banned method in order to assert its absence is not
+      // a caller. Those are exempt, and the list is closed and deliberately tiny:
+      // both entries are sensors, both are gates in their own right, and a file
+      // only gets here by being one. (An earlier draft tried to verify the
+      // exemption by re-parsing the exempt file for an assertion pattern; it was
+      // clever, it was wrong, and it failed on its own source. Two named
+      // sensors is a cost anyone can read; a regex that tries to tell a call
+      // from a string is not.)
+      if (BAN_ENFORCERS.has(path.relative(ROOT, full))) continue;
       const text = fs.readFileSync(full, 'utf8');
       // Comments may discuss the rule; only code is judged.
       const code = text
