@@ -310,6 +310,16 @@ jobs:
       - name: Token sync gate (assert-sync-tokens)
         run: node scripts/assert-sync-tokens.test.mjs
 
+      # The health workspace is a data workspace — `result/` and `sources/`, no
+      # brief — and the brief is committed with the pack in the repo. Roles
+      # already resolve that way; the brief did not, so buildHealthContext
+      # answered ok:false for the project's own workspace and every seat
+      # (/health analyze, /health doctor, the whole room) refused before the
+      # model was called. This gate pins both halves: the project's own
+      # workspace falls back to its pack, and no other directory may.
+      - name: Seat brief gate (assert-health-brief)
+        run: node scripts/assert-health-brief.mjs
+
       # The coder build gate must never be fooled by the npm `tsc` decoy: when a
       # worktree has no local compiler, `npx tsc` resolves version 2.0.4 of the
       # package named `tsc`, whose only output is "This is not the tsc command
