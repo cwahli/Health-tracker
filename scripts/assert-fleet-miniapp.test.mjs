@@ -247,3 +247,36 @@ test('gateway /fleet routes: landing, auth, app, state, and heartbeat', async ()
     server.close();
   }
 });
+
+test('getFleetNodes binds PM ticket In progress to working status with task sentence', () => {
+  resetFleetStateForTest();
+  const t0 = 10000000;
+  const mockTickets = [
+    {
+      id: 'spec:fleet-refine',
+      originalRequest: 'Refine fleet telemetry with PM sync and refresh button',
+      owner: 'Antigravity (Gemini 3.8 Flash High) @ mac',
+      status: 'In progress',
+    },
+    {
+      id: 'spec:vm-idle',
+      originalRequest: 'Previous VM task',
+      owner: 'Muse Spark @ vps-france',
+      status: 'Assigned',
+    },
+  ];
+
+  const nodes = getFleetNodes({ now: t0, tickets: mockTickets });
+  const mac = nodes.find((n) => n.location === 'Mac');
+  assert.ok(mac);
+  assert.equal(mac.status, 'working');
+  assert.equal(mac.task, 'Refine fleet telemetry with PM sync and refresh button');
+  assert.equal(mac.ticketKey, 'spec:fleet-refine');
+  assert.equal(mac.agent, 'Antigravity (Gemini 3.8 Flash High)');
+
+  const vm = nodes.find((n) => n.location === 'VM');
+  assert.ok(vm);
+  // VM has no 'In progress' ticket, so it falls back to idle
+  assert.equal(vm.status, 'idle');
+});
+

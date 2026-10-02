@@ -557,8 +557,7 @@ export function resetFleetStateForTest() {
 }
 
 export function getFleetNodes(opts = {}) {
-  const now = typeof opts === 'number' ? opts : (opts?.now || Date.now());
-  return getFleetNodesStatus(now);
+  return getFleetNodesStatus(opts);
 }
 
 export function broadcastFleetEvent(event, data) {
@@ -938,7 +937,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         getFleetTickets({ env, root: REPO_ROOT }),
         getFleetBots({ root: REPO_ROOT }),
       ]);
-      const terminals = getFleetNodes();
+      const terminals = getFleetNodes({ tickets });
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify({ ok: true, tickets, terminals, bots, generatedAt: new Date().toISOString() }));
     }
@@ -968,7 +967,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         getFleetTickets({ env, root: REPO_ROOT }),
         getFleetBots({ root: REPO_ROOT }),
       ]).then(([tickets, bots]) => {
-        const terminals = getFleetNodes();
+        const terminals = getFleetNodes({ tickets });
         res.write(`event: state\ndata: ${JSON.stringify({ tickets, terminals, bots })}\n\n`);
       }).catch(() => {});
       return;
