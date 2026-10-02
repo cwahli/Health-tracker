@@ -1,0 +1,16 @@
+{
+  "slug": "fleet-miniapp",
+  "node": "builder-end",
+  "at": "2026-10-02T11:18:09.261Z",
+  "git": {
+    "head": "0e472a431a8b2e5fd0b63360d37d27e479a78e1b",
+    "stashCommit": "4a1180147bff8ff22d63fc62c2d223e4d7ca25d4"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/fleet-miniapp.md"
+  ]
+}
