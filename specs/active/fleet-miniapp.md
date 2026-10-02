@@ -1,6 +1,6 @@
 ---
 id: fleet-miniapp
-status: locked
+status: completed
 skill: sync-jobs
 edit_mode: patch
 allowed_files:
@@ -132,3 +132,21 @@ npx tsc --noEmit
 
 - Allowed: `scripts/tui-gateway.mjs`, `scripts/bot-host.mjs`, `scripts/lib/commands.mjs`, `src/miniapp/fleet.html`, `scripts/mac-fleet-beat.mjs`, `scripts/assert-fleet-miniapp.test.mjs`.
 - Frozen: YAML list at top of packet.
+
+---
+
+## Landed Implementation (PR #475, #481, #482)
+
+- Landed commits `35511a8a`, `2c016419`, `073cdc29` on `main`:
+  1. **Sheet Claim vs Worker Liveness:** `getFleetNodes` derives status badge strictly from reporter heartbeat/presence. Sheet `In progress` rows populate `ticketKey` as clickable chips/links. If task sentence is empty, displays `'Sentence missing'`.
+  2. **Freshness Windows:** 15-minute window (`FLEET_STALE_TTL_MS`) retains reported phase (`working` or `idle`). After 15 minutes of silence, transitions to `stale` (amber badge). `offline` is strictly reserved for explicit disconnect, standin mocks (`standin: true`), or no reporter.
+  3. **Location Mapping:** Explicit token mapping (`matchesLocation`) ensures `grok-vps` only matches `Grok VM`, never `VM`. Multiple active claims on one pane trigger `multiClaim: true` and display a `multi-claim` chip.
+  4. **Mock Stand-in Honesty:** Both `Collab` and `Grok VM` standin processes on VPS are reported as `offline` (`'Offline (mock standin)'`).
+  5. **Anti-Spoofing & Auth:** `POST /fleet/api/heartbeat` rejects unauthenticated beats with 401, and rejects mismatched locations with 403.
+  6. **On-Demand Refresh:** Refresh button in `src/miniapp/fleet.html` fetches `/fleet/api/state?refresh=1`, bypassing the 15-second cache shield in `fleet-status.mjs`.
+  7. **Sensors:** `scripts/assert-fleet-miniapp.test.mjs` (11/11 pass), `scripts/assert-tui-gateway.test.mjs` (131/131 pass), `scripts/assert-health-group.test.mjs` (118/118 pass).
+
+## Next Handoff Actions for Cold Agent
+
+1. **Next Roadmap Target:** `R-15 — omni-agent lanes` in [`plan/ROADMAP.md`](file:///Users/chiwah/src/Health-tracker/plan/ROADMAP.md) (contract packet in [`specs/active/r15-omni-agent-lanes.md`](file:///Users/chiwah/src/Health-tracker/specs/active/r15-omni-agent-lanes.md)).
+2. **Observability Verification:** Telegram Mini-App `/fleet` in `@HealthTrackerVmBot` is live; on-device screenshots can be captured directly from Telegram to confirm real phone rendering.
