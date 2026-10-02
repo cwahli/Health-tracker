@@ -2785,6 +2785,24 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'fleet': {
+      // Dynamic fleet dashboard (Mini App). Same web_app button + initData door
+      // as /tui, /bugs, and /forge: served by the gateway under /fleet/.
+      const fleetGatewayUrl = readTuiUrl();
+      if (!fleetGatewayUrl) {
+        await api.sendMessage(chatId, '📋 Fleet dashboard is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /fleet again.');
+        return;
+      }
+      const fleetUrl = `${fleetGatewayUrl}/fleet/?bot=${config.id}`;
+      await api.sendMessage(chatId, [
+        '📋 *Fleet Dashboard*',
+        'Live tickets from PM sheet, terminal panes across all locations (Mac, VM, Mobile, Collab), and fleet bot activity.',
+      ].join('\n'), {
+        reply_markup: { inline_keyboard: [[{ text: '📋 Open Fleet Dashboard', web_app: { url: fleetUrl } }]] },
+      });
+      return;
+    }
+
     case 'debug': {
       const location = workLocation();
       const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });

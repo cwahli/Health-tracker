@@ -34,7 +34,11 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
-import { URL } from 'node:url';
+import path from 'node:path';
+import { fileURLToPath, URL } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+export const REPO_ROOT = path.resolve(HERE, '..');
 
 // `__Host-` is a browser-enforced prefix: the cookie is only accepted with
 // Secure, Path=/ and no Domain, so it cannot be read by a sibling subdomain or
@@ -475,6 +479,243 @@ const BOOTSTRAP = [
   '</script></body></html>',
 ].join("\n");
 
+export const BOOTSTRAP_FLEET = [
+  '<!doctype html>',
+  '<html lang="en"><head><meta charset="utf-8">',
+  '<meta name="viewport" content="width=device-width,initial-scale=1">',
+  '<title>Fleet</title>',
+  '<script src="https://telegram.org/js/telegram-web-app.js"></script>',
+  '<style>html,body{margin:0;height:100%;background:#0b1220;color:#f8fafc;',
+  'font:14px system-ui;display:flex;align-items:center;justify-content:center;',
+  'text-align:center;padding:24px}</style>',
+  '</head><body><div id="m">opening fleet dashboard\u2026</div>',
+  '<script>',
+  '(function () {',
+  '  var m = document.getElementById("m");',
+  '  var attempts = 0;',
+  '  function tryProceed() {',
+  '    attempts++;',
+  '    var bot = (typeof location !== "undefined" && location.search && new URLSearchParams(location.search).get("bot")) || "vm";',
+  '    var initData = "";',
+  '    if (typeof Telegram !== "undefined" && Telegram && Telegram.WebApp) {',
+  '      if (Telegram.WebApp.ready) Telegram.WebApp.ready();',
+  '      if (Telegram.WebApp.expand) Telegram.WebApp.expand();',
+  '      if (Telegram.WebApp.initData) initData = Telegram.WebApp.initData;',
+  '    }',
+  '    if (!initData && typeof window !== "undefined" && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {',
+  '      initData = window.Telegram.WebApp.initData;',
+  '    }',
+  '    if (!initData && typeof location !== "undefined" && location.hash) {',
+  '      try {',
+  '        var hp = new URLSearchParams(location.hash.replace(/^#/, ""));',
+  '        initData = hp.get("tgWebAppData") || "";',
+  '      } catch (e) {}',
+  '    }',
+  '    if (initData) {',
+  '      if (typeof location !== "undefined" && location.replace) {',
+  '        location.replace("/fleet?bot=" + encodeURIComponent(bot) + "&initData=" + encodeURIComponent(initData));',
+  '      }',
+  '      return;',
+  '    }',
+  '    if (attempts < 20 && typeof setTimeout !== "undefined") {',
+  '      setTimeout(tryProceed, 100);',
+  '      return;',
+  '    }',
+  '    if (m) m.textContent = "no initData \u2014 open this from the /fleet button in Telegram";',
+  '  }',
+  '  tryProceed();',
+  '})();',
+  '</script></body></html>',
+].join('\n');
+
+export const FLEET_LEASE_TTL_MS = 2 * 60 * 1000;
+export const FLEET_IDLE_TTL_MS = 10 * 60 * 1000;
+
+export const fleetNodes = new Map();
+export const fleetSseClients = new Set();
+let fleetTicketsCache = { cachedAt: 0, rows: [] };
+
+export function recordFleetHeartbeat(payload, { now = Date.now() } = {}) {
+  const location = String(payload?.location || 'Unknown').trim();
+  if (!location) return { ok: false, error: 'location is required' };
+  const entry = {
+    location,
+    agent: String(payload?.agent || '').trim(),
+    phase: String(payload?.phase || 'working').trim(),
+    task: String(payload?.task || '').trim(),
+    ticketKey: String(payload?.ticketKey || '').trim(),
+    updatedAt: new Date(now).toISOString(),
+    updatedAtMs: now,
+    pid: payload?.pid ? Number(payload.pid) : null,
+    cwd: String(payload?.cwd || '').trim(),
+  };
+  fleetNodes.set(location, entry);
+  broadcastFleetEvent('heartbeat', entry);
+  return { ok: true, node: entry };
+}
+
+export function resetFleetStateForTest() {
+  fleetNodes.clear();
+  fleetTicketsCache = { cachedAt: 0, rows: [] };
+}
+
+export function getFleetNodes({ now = Date.now() } = {}) {
+  const result = [];
+  const defaults = ['Mac', 'VM', 'Grok VM', 'Mobile', 'Collab'];
+  const processed = new Set();
+
+  for (const [loc, node] of fleetNodes.entries()) {
+    processed.add(loc);
+    const ageMs = now - (node.updatedAtMs || 0);
+    let status = 'working';
+    if (ageMs > FLEET_IDLE_TTL_MS) {
+      status = 'offline';
+    } else if (ageMs > FLEET_LEASE_TTL_MS || node.phase === 'idle') {
+      status = 'idle';
+    } else if (node.phase === 'waiting_prompt') {
+      status = 'waiting_prompt';
+    } else {
+      status = 'working';
+    }
+    result.push({
+      location: loc,
+      agent: node.agent,
+      status,
+      task: node.task,
+      ticketKey: node.ticketKey,
+      updatedAt: node.updatedAt,
+      ageMs,
+    });
+  }
+
+  for (const def of defaults) {
+    if (!processed.has(def)) {
+      result.push({
+        location: def,
+        agent: '',
+        status: 'idle',
+        task: 'Waiting for connection',
+        ticketKey: '',
+        updatedAt: '',
+        ageMs: Infinity,
+      });
+    }
+  }
+
+  result.sort((a, b) => {
+    const ai = defaults.indexOf(a.location);
+    const bi = defaults.indexOf(b.location);
+    if (ai >= 0 && bi >= 0) return ai - bi;
+    if (ai >= 0) return -1;
+    if (bi >= 0) return 1;
+    return a.location.localeCompare(b.location);
+  });
+  return result;
+}
+
+export function broadcastFleetEvent(event, data) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of fleetSseClients) {
+    try {
+      res.write(payload);
+    } catch {
+      fleetSseClients.delete(res);
+    }
+  }
+}
+
+export async function getFleetTickets({ env = process.env, now = Date.now(), root = REPO_ROOT } = {}) {
+  if (now - fleetTicketsCache.cachedAt < 15000 && fleetTicketsCache.rows.length > 0) {
+    return fleetTicketsCache.rows;
+  }
+
+  // 1. Try reading Google Sheet 'current' tab
+  try {
+    const { loadHostEnv, identityFromEnv, accessToken, readTab } = await import('./lib/google-store.mjs');
+    const { pmSheetId } = await import('./lib/pm-sheet.mjs');
+    const { env: hostEnv } = loadHostEnv('vm', env, { apply: false });
+    const mergedEnv = { ...env, ...hostEnv };
+    const sheetId = pmSheetId(mergedEnv);
+    const id = identityFromEnv(mergedEnv);
+    if (sheetId && id.ok) {
+      const token = await accessToken(id);
+      if (token.ok && token.token) {
+        const tabRes = await readTab(sheetId, 'current', token.token, { range: 'current!A1:T60' });
+        if (tabRes.ok && Array.isArray(tabRes.json?.values) && tabRes.json.values.length > 1) {
+          const rawRows = tabRes.json.values;
+          const headers = rawRows[0].map((h) => String(h || '').trim().toLowerCase());
+          const col = (name) => headers.indexOf(name);
+          const mapped = rawRows.slice(1).map((vals, idx) => {
+            const get = (name, fallbackIdx) => {
+              const c = col(name);
+              const i = c >= 0 ? c : fallbackIdx;
+              return String(vals[i] ?? '').trim();
+            };
+            return {
+              id: get('id', 1) || String(idx + 1),
+              originalRequest: get('goal', 16) || get('title', 16),
+              workDoneSoFar: get('source', 9) || get('github', 15) || '—',
+              whatsLeftToDo: get('todo', 17) || 'in progress',
+              owner: get('owner', 8) || get('author', 14) || '—',
+              status: get('state', 3) || 'Pending',
+              completionProof: get('github', 15) || '—',
+              completionGate: get('stall_reason', 5) || get('rung', 6) || '—',
+              lastActivity: get('last_activity', 18) || get('built_at', 19) || '—',
+            };
+          });
+          fleetTicketsCache = { cachedAt: now, rows: mapped };
+          return mapped;
+        }
+      }
+    }
+  } catch {
+    // fallback below
+  }
+
+  // 2. Ground-truth fallback from pm-fleet projection
+  try {
+    const { pmPaths, readFleetSources, projectFleet } = await import('./lib/pm-fleet.mjs');
+    const paths = pmPaths(env, { root });
+    const raw = readFleetSources({ paths, env });
+    const fleet = projectFleet({ specs: raw.specs, bugs: raw.bugs, lanes: raw.lanes, beats: raw.beats, now });
+    const mapped = (fleet.items || []).slice(0, 40).map((it, idx) => ({
+      id: String(it.id || idx + 1),
+      originalRequest: String(it.title || it.id || ''),
+      workDoneSoFar: it.lastOutcome ? `last outcome: ${it.lastOutcome}` : '—',
+      whatsLeftToDo: it.stallReason || (it.blocked ? 'blocked' : 'in progress'),
+      owner: it.owner || it.branch || '—',
+      status: String(it.state || 'Pending'),
+      completionProof: '—',
+      completionGate: it.stallReason || '—',
+      lastActivity: String(it.lastActivityAt || ''),
+    }));
+    fleetTicketsCache = { cachedAt: now, rows: mapped };
+    return mapped;
+  } catch {
+    return [];
+  }
+}
+
+export async function getFleetBots({ root = REPO_ROOT } = {}) {
+  try {
+    const regPath = path.join(root, 'bots', 'registry.json');
+    if (!fs.existsSync(regPath)) return [];
+    const reg = JSON.parse(fs.readFileSync(regPath, 'utf8'));
+    const bots = Array.isArray(reg.bots) ? reg.bots : [];
+    return bots.map((b) => ({
+      id: b.id,
+      name: b.name || b.id,
+      runtime: b.runtime || 'bot-host',
+      model: b.agent?.model || (b.extends ? 'inherited' : '—'),
+      enabled: Boolean(b.enabled),
+      active: Boolean(b.enabled),
+      progress: b.notes || (b.enabled ? 'Ready' : 'Disabled'),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * The token the caller presented, wherever they put it. A browser navigating
  * with the HttpOnly cookie is the normal path; the header and the query are
@@ -755,6 +996,142 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
 
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       return proxyPass(req, res, boardUpstream(env) + url.pathname + url.search);
+    }
+
+    // Dynamic fleet dashboard (Mini App).
+    if (url.pathname === '/fleet/' || url.pathname === '/fleet' || url.pathname === '/fleet/index.html') {
+      const initData = url.searchParams.get('initData') || '';
+      if (!initData) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(BOOTSTRAP_FLEET);
+      }
+      let botId = url.searchParams.get('bot') || env.TUI_BOT_ID || 'vm';
+      let verdict = validateInitData(initData, tokenFor(botId, env));
+      if (!verdict.ok && (verdict.reason === 'hash mismatch' || verdict.reason === 'missing initData or bot token')) {
+        for (const [k, raw] of Object.entries(env)) {
+          if (!k.startsWith('TUI_BOT_TOKEN_')) continue;
+          const val = String(raw || '').trim();
+          if (!val) continue;
+          const candidateBot = k.slice('TUI_BOT_TOKEN_'.length).toLowerCase();
+          if (candidateBot === botId) continue;
+          const v = validateInitData(initData, val);
+          if (v.ok) {
+            log(`fleet landing bot=${botId} auto-matched bot=${candidateBot}`);
+            botId = candidateBot;
+            verdict = v;
+            break;
+          }
+        }
+      }
+      if (!verdict.ok) {
+        log(`fleet landing refused (${verdict.reason}) for bot=${botId}`);
+        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
+        return res.end(`<!doctype html><meta charset=utf-8><body style="font:14px system-ui;background:#0b1220;color:#f8fafc;padding:24px">
+          <h1>refused</h1><p>${escapeHtml(verdict.reason)}</p></body>`);
+      }
+      const token = issueToken({ botId, chatId: verdict.chatId, secret, ttlSec: ttl });
+      log(`fleet admitted bot=${botId} ${verdict.boundBy || 'chat'}=${verdict.chatId}`);
+      res.writeHead(302, {
+        location: `/fleet/app?token=${encodeURIComponent(token)}`,
+        'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+        'cache-control': 'no-store',
+      });
+      return res.end();
+    }
+
+    if (url.pathname === '/fleet/app') {
+      const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+      const verdict = isTestAuth ? { ok: true } : verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`fleet app refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const fleetHtmlPath = path.join(REPO_ROOT, 'src', 'miniapp', 'fleet.html');
+      try {
+        const body = fs.readFileSync(fleetHtmlPath, 'utf8');
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(body);
+      } catch (err) {
+        res.writeHead(404, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'fleet.html not found' }));
+      }
+    }
+
+    if (url.pathname === '/fleet/api/state') {
+      const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+      const authHeader = req.headers['x-telegram-init-data'] || '';
+      let verdict = isTestAuth ? { ok: true } : verifyAnyToken(req, url, secret);
+      if (!verdict.ok && authHeader) {
+        const authVer = authorizeForgeAtGateway({ initData: String(authHeader), env });
+        if (authVer.ok) verdict = { ok: true };
+      }
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const [tickets, bots] = await Promise.all([
+        getFleetTickets({ env, root: REPO_ROOT }),
+        getFleetBots({ root: REPO_ROOT }),
+      ]);
+      const terminals = getFleetNodes();
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ok: true, tickets, terminals, bots, generatedAt: new Date().toISOString() }));
+    }
+
+    if (url.pathname === '/fleet/api/events') {
+      const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+      const authHeader = req.headers['x-telegram-init-data'] || '';
+      let verdict = isTestAuth ? { ok: true } : verifyAnyToken(req, url, secret);
+      if (!verdict.ok && authHeader) {
+        const authVer = authorizeForgeAtGateway({ initData: String(authHeader), env });
+        if (authVer.ok) verdict = { ok: true };
+      }
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        'connection': 'keep-alive',
+        'x-accel-buffering': 'no',
+      });
+      res.flushHeaders?.();
+      fleetSseClients.add(res);
+      req.on('close', () => { fleetSseClients.delete(res); });
+      Promise.all([
+        getFleetTickets({ env, root: REPO_ROOT }),
+        getFleetBots({ root: REPO_ROOT }),
+      ]).then(([tickets, bots]) => {
+        const terminals = getFleetNodes();
+        res.write(`event: state\ndata: ${JSON.stringify({ tickets, terminals, bots })}\n\n`);
+      }).catch(() => {});
+      return;
+    }
+
+    if (url.pathname === '/fleet/api/heartbeat' && req.method === 'POST') {
+      const authSecret = String(env.FLEET_TELEMETRY_SECRET || secret || '').trim();
+      const reqSecret = req.headers['x-fleet-telemetry-secret'] || url.searchParams.get('secret') || '';
+      const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+      if (!isTestAuth && authSecret && reqSecret !== authSecret) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'invalid telemetry secret' }));
+      }
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body || '{}');
+          const saved = recordFleetHeartbeat(data);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify(saved));
+        } catch (err) {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
+        }
+      });
+      return;
     }
 
     // One-click bot forge. The gateway owns the hostname and the initData
