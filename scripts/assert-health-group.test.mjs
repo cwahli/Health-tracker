@@ -24,13 +24,26 @@
  * "UNAVAILABLE / high demand") exactly once after a short wait — the live
  * site's own withGeminiRetry rule. A 429 is never retried; a second 503 keeps
  * the provider's error so the room's fallback line can name it.
+ *
+ * The transcript's own asks are pinned as classification/answer-contract
+ * cases: the three data questions are council asks, "can you work on the
+ * brief?" is the brief ask, and the typo'd /heath verify is the router's own
+ * line, never a health turn. Each is answered — no fallback line — so the
+ * room's canned paragraph stays reserved for a genuine refusal.
+ *
+ * When the chosen engine stalls or stays unavailable, the lane fails the
+ * model, not the job: one hop to the live site's own default engine
+ * (nextGeminiFallbackEngine's rule). Measured live 2026-10-02: the room's
+ * prompt hung past 120s on gemini-3.7-flash while 3.5-flash-lite answered in
+ * 958 ms.
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
-import { resolveGroupAddressing, HELP_USAGE } from './lib/commands.mjs';
+import { resolveGroupAddressing, HELP_USAGE, parseCommand } from './lib/commands.mjs';
 import { getProjectRoles } from './lib/project-registry.mjs';
 import { loadRegistry, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
@@ -369,6 +382,73 @@ check('the model context names all four documents', ['Health Snapshot', 'Conditi
 check('the model context names a withheld section', /Candidate conditions/.test(briefPrompts[0] || ''));
 fs.rmSync(briefDir, { recursive: true, force: true });
 
+// Mission item 6: the transcript's own questions, the ones the user says drew
+// canned, irrelevant replies. Each is driven through the same turn the host
+// runs for a health-room message — classification, then the seats or the
+// publisher — and each is a real turn: none is skipped, and a plausible answer
+// to each is posted with no fallback reason, so the room's fallback line stays
+// reserved for a refusal instead of being the ordinary ask's answer.
+const TRANSCRIPT_ASKS = [
+  { text: 'how to clean up the data', mode: 'council' },
+  { text: 'can you fix the data', mode: 'council' },
+  { text: 'What about accurate data for this project. Can you build that out?', mode: 'council' },
+  { text: 'Can you work on the brief?', mode: 'brief' },
+];
+const transcriptTurns = TRANSCRIPT_ASKS.map(({ text }) => classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text, projectId: 'external-health' }));
+check('all four transcript asks are answered, none skipped', transcriptTurns.every((turn) => turn && turn.mode !== 'skip'), transcriptTurns.map((t) => t?.mode).join(','));
+check('the three data questions are council asks', transcriptTurns.slice(0, 3).every((turn) => turn.mode === 'council' && turn.roleId === null));
+check('"can you work on the brief?" is the brief ask, not a seat question', transcriptTurns[3]?.mode === 'brief' && /work on the brief/i.test(transcriptTurns[3].question));
+check('the transcript asks are not stolen by another external project', TRANSCRIPT_ASKS.every(({ text }) => classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text, projectId: 'external-2' }) == null));
+
+// The answer contract for those asks: the question reaches the model whole and
+// the answer is posted. The stub answers have the shape the live replies took
+// on 2026-10-02 — they quote the open repair and point at /health triage or
+// /health dashboard — so a fallback here would mean the room got a line that
+// does not answer, which is exactly the bug the transcript reported.
+const transcriptReplies = [
+  'Start with the first open repair, H-1 — the height row does not match the sheet. Open /health triage for the steps, then re-run /health verify.',
+  'I can fix the data with you, not for you: H-1 and H-2 are still open, and each one has to be corrected in the app. /health triage lists them in order.',
+  'The data is only as accurate as the open repairs allow. H-1 is the first one; closing it is what makes the numbers trustworthy, and /health dashboard has the full list.',
+];
+let transcriptIdx = 0;
+for (const ask of TRANSCRIPT_ASKS.slice(0, 3)) {
+  const seenPrompts = [];
+  const reply = await answerHealthGroup({
+    mode: 'council',
+    question: ask.text,
+    artifact: openArtifact,
+    runModel: async ({ prompt }) => {
+      seenPrompts.push(prompt);
+      return transcriptReplies[transcriptIdx];
+    },
+  });
+  transcriptIdx += 1;
+  check(`the transcript ask is carried whole: "${ask.text}"`, seenPrompts.length === 1 && seenPrompts[0].includes(ask.text), `calls: ${seenPrompts.length}`);
+  check(`the transcript ask is answered, not fallen back: "${ask.text}"`, reply.answered === true && reply.usedModel === true && reply.fallbackReason === '' && /H-1/.test(reply.text), `usedModel=${reply.usedModel} reason=${reply.fallbackReason}`);
+}
+const transcriptBrief = await answerBriefAsk({ refresh: async () => { briefRuns.push(1); return briefResult; } });
+check('the brief ask runs the publisher instead of the seats', transcriptBrief.text === formatRefreshText(briefResult) && transcriptBrief.usedModel === false && !/couldn't put that answer together/.test(transcriptBrief.text));
+
+// The typo'd command the user actually typed. A message that starts with "/"
+// is a command to the host before it is ever a health turn — so the seats must
+// never see it, and the room gets the router's own line (which names the real
+// commands) rather than an invented health answer.
+const typoCmd = parseCommand('/heath verify');
+check('a typo\'d slash command parses as its own name, not as /health', typoCmd?.name === 'heath' && typoCmd?.args === 'verify', JSON.stringify(typoCmd));
+check('the router\'s unknown-command line names the command it did not serve', HOST.includes('Unknown command: /${cmd.name}'));
+const routerAt = HOST.indexOf('const cmd = text ? parseCommand(text) : null;');
+const seatAt = HOST.indexOf('const healthTurn = classifyHealthGroupTurn');
+check('the command router runs before the health turn', routerAt > 0 && seatAt > routerAt);
+
+// End-to-end on the real surface: the host's own --simulate route runs the
+// same handleCommand a live command message runs, so this is the typo the
+// user actually typed, through the router, not a string match on the source.
+const typoRun = spawnSync(process.execPath, [path.join(HERE, 'bot-host.mjs'), '--simulate=/heath verify', '--id=vm'], { encoding: 'utf8', timeout: 30000 });
+const typoOut = `${typoRun.stdout || ''}${typoRun.stderr || ''}`;
+check('the typo\'d command reaches the router end-to-end', typoRun.status === 0 && /Unknown command: \/heath\b/.test(typoOut), typoOut.slice(0, 200));
+check('the typo reply is the router\'s, not a health answer', !/couldn't put that answer together|health council|data gate/i.test(typoOut), typoOut.slice(0, 200));
+check('the typo reply shows the real command surface', /\/health\b/.test(typoOut), typoOut.slice(0, 300));
+
 // The room's model lane retries a transient provider refusal once. Live on
 // 2026-10-02 the health room's prompt drew a 503 ("high demand") from
 // gemini-3.7-flash and the second try answered — without this the room gets
@@ -392,25 +472,105 @@ const transientRetried = await runGemini({
 check('a 503 answers on the one allowed retry', transientRetried.finalText === 'the retry answered' && transientRetried.lastError === null, JSON.stringify({ text: transientRetried.finalText, err: transientRetried.lastError }));
 check('the retry asks the same model exactly twice', transientModels.length === 2 && transientModels.every((m) => m === 'gemini-3.7-flash'), JSON.stringify(transientModels));
 
-let doubleCalls = 0;
+// A second 503 on the primary is not retried a third time there — but the
+// live site's nextGeminiFallbackEngine rule then fails the *model*, not the
+// job: exactly one hop to the lite engine. Both engines 503 here, so the
+// error the room sees is the provider's own and no third call happened on
+// either model.
+const doubleModels = [];
 const double503 = await runGemini({
   prompt: 'q',
   model: 'gemini/gemini-3.7-flash',
   env: { GEMINI_API_KEY: 'k' },
   retryDelayMs: 1,
-  fetchImpl: async () => { doubleCalls += 1; return gemErr(503, highDemand); },
+  fetchImpl: async (url, init) => { doubleModels.push(JSON.parse(init.body).model); return gemErr(503, highDemand); },
 });
-check('a second 503 is not retried a third time', doubleCalls === 2 && /unavailable|high demand|provider error/i.test(double503.lastError || ''), `${doubleCalls} calls; ${double503.lastError}`);
+check('a second 503 is not retried a third time on the primary', doubleModels.filter((m) => m === 'gemini-3.7-flash').length === 2, JSON.stringify(doubleModels));
+check('a doubly-503 primary makes exactly one hop to the lite engine', doubleModels.length === 4 && doubleModels.slice(2).every((m) => m === 'gemini-3.5-flash-lite'), JSON.stringify(doubleModels));
+check('both engines unavailable keeps the provider error, not a silent line', /unavailable|high demand|provider error/i.test(double503.lastError || ''), double503.lastError);
 
-let quotaCalls = 0;
+// The stall hop. Measured live on the VPS 2026-10-02: the room's prompt hung
+// past 120s on gemini-3.7-flash while 3.5-flash-lite answered in 958 ms. A
+// transport stall is the failure the room actually hit, so it must hop too.
+let stallCalls = 0;
+const stallHop = await runGemini({
+  prompt: 'how to clean up the data',
+  model: 'gemini/gemini-3.7-flash',
+  env: { GEMINI_API_KEY: 'k' },
+  retryDelayMs: 1,
+  timeoutMs: 1,
+  fetchImpl: async () => {
+    stallCalls += 1;
+    if (stallCalls === 1) {
+      const err = new Error('The operation was aborted due to timeout');
+      err.name = 'TimeoutError';
+      throw err;
+    }
+    return gemOk('the lite engine answered');
+  },
+});
+check('a stalled primary hops once and the answer is the hop\'s', stallHop.finalText === 'the lite engine answered' && stallHop.lastError === null, JSON.stringify({ text: stallHop.finalText, err: stallHop.lastError }));
+check('the stall hop is recorded so the host log names the engine that answered', stallHop.stderr === 'fallback:gemini-3.5-flash-lite', stallHop.stderr);
+
+// An out-of-quota primary that is answered by the lite engine is a real
+// answer, and the host log names the engine that served it.
+const quotaHopModels = [];
+const quotaHop = await runGemini({
+  prompt: 'q',
+  model: 'gemini/gemini-3.7-flash',
+  env: { GEMINI_API_KEY: 'k' },
+  retryDelayMs: 1,
+  fetchImpl: async (url, init) => {
+    const m = JSON.parse(init.body).model;
+    quotaHopModels.push(m);
+    return m === 'gemini-3.7-flash' ? gemErr(429, 'Resource has been exhausted (e.g. check quota).') : gemOk('the lite engine answered');
+  },
+});
+check('the lite engine answering after a quota-dead primary is a real answer', quotaHop.finalText === 'the lite engine answered' && quotaHop.lastError === null, JSON.stringify({ text: quotaHop.finalText, err: quotaHop.lastError }));
+check('the quota hop is recorded for the host log', quotaHop.stderr === 'fallback:gemini-3.5-flash-lite', quotaHop.stderr);
+
+// A caller already on the lite engine does not hop to itself.
+let liteCalls = 0;
+await runGemini({
+  prompt: 'q',
+  model: 'gemini/gemini-3.5-flash-lite',
+  env: { GEMINI_API_KEY: 'k' },
+  retryDelayMs: 1,
+  fetchImpl: async () => { liteCalls += 1; return gemErr(503, highDemand); },
+});
+check('the fallback engine does not hop to itself', liteCalls === 2, `${liteCalls} calls`);
+
+// The hop target is the live site's own default engine, and the hop is
+// injectable so a caller can disable it.
+check('the stall fallback is the live site\'s default engine', /GEMINI_STALL_FALLBACK_MODEL = 'gemini\/gemini-3\.5-flash-lite'/.test(fs.readFileSync(path.join(HERE, 'lib', 'agent-gemini.mjs'), 'utf8')));
+let disabledCalls = 0;
+const hopDisabled = await runGemini({
+  prompt: 'q',
+  model: 'gemini/gemini-3.7-flash',
+  env: { GEMINI_API_KEY: 'k' },
+  retryDelayMs: 1,
+  fallbackModel: '',
+  fetchImpl: async () => { disabledCalls += 1; return gemErr(503, highDemand); },
+});
+check('an empty fallbackModel disables the hop', disabledCalls === 2 && /unavailable|high demand|provider error/i.test(hopDisabled.lastError || ''), `${disabledCalls} calls`);
+
+// Quota: never a second call on the SAME model (it burns the same bucket) —
+// but each engine has its own bucket, so the live site's own doctrine is to
+// fail the model, not the job. The primary is asked once, then the lite
+// engine once. Measured live on the VPS 2026-10-02: the room's default
+// gemini-3.7-flash was quota-dead (429, twice) while 3.5-flash-lite answered
+// the same prompt in 920 ms.
+const quotaModels = [];
 const quotaRefusal = await runGemini({
   prompt: 'q',
   model: 'gemini/gemini-3.7-flash',
   env: { GEMINI_API_KEY: 'k' },
   retryDelayMs: 1,
-  fetchImpl: async () => { quotaCalls += 1; return gemErr(429, 'Resource has been exhausted (e.g. check quota).'); },
+  fetchImpl: async (url, init) => { quotaModels.push(JSON.parse(init.body).model); return gemErr(429, 'Resource has been exhausted (e.g. check quota).'); },
 });
-check('a 429 is never retried', quotaCalls === 1 && /quota|rate limit/i.test(quotaRefusal.lastError || ''), `${quotaCalls} calls; ${quotaRefusal.lastError}`);
+check('a 429 is never retried on the same model', quotaModels.filter((m) => m === 'gemini-3.7-flash').length === 1, JSON.stringify(quotaModels));
+check('an out-of-quota primary makes exactly one hop to the lite engine', quotaModels.length === 2 && quotaModels[1] === 'gemini-3.5-flash-lite', JSON.stringify(quotaModels));
+check('both engines out of quota keeps the provider quota error', /quota|rate limit/i.test(quotaRefusal.lastError || ''), quotaRefusal.lastError);
 
 const hopModels = [];
 const hop = await runGemini({

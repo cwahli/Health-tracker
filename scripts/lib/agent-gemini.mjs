@@ -9,9 +9,11 @@
  *
  * Live-site parity (server.ts getGeminiApiKey / callUnifiedLLM /
  * server_gemini_retry.ts): same key chain, same quota vocabulary (429 is never
- * auto-retried — it burns the shared 15/min bucket), same single 404 fallback
- * to gemini-2.5-flash, and the same one-extra-try rule for a 503-class
- * "UNAVAILABLE / high demand" answer (withGeminiRetry). Transport differs on purpose: the live site uses the
+ * auto-retried on the same model — it burns the same bucket), same single 404
+ * fallback to gemini-2.5-flash, the same one-extra-try rule for a 503-class
+ * "UNAVAILABLE / high demand" answer (withGeminiRetry), and the same
+ * fail-the-model-not-the-job hop when the chosen engine stalls, stays
+ * unavailable, or is out of quota (nextGeminiFallbackEngine). Transport differs on purpose: the live site uses the
  * @google/genai SDK, but its deps (google-auth-library) are not installed in
  * the bot runtimes (VPS bot-host / phone / collab), so this lane speaks the
  * first-party OpenAI-compatible REST endpoint with plain fetch (zero deps).
@@ -42,6 +44,19 @@ export const GEMINI_DEFAULT_TIMEOUT_MS = 300000;
 export const GEMINI_FALLBACK_MODEL = 'gemini-2.5-flash';
 
 /**
+ * Live-site parity, failover half (server_gemini_retry.ts
+ * nextGeminiFallbackEngine): when the chosen engine stalls or stays
+ * UNAVAILABLE, the live site fails the *model*, not the job — one hop to its
+ * lite engine, never a second hop, and never on a quota error. The target is
+ * the live site's own default engine (DEFAULT_GEMINI_ENGINE). Measured on the
+ * VPS 2026-10-02: the health room's 2.8k-char prompt hung past 120 s on
+ * gemini-3.7-flash — twice — while gemini-3.5-flash-lite answered the same
+ * prompt in 958 ms. Without the hop the room gets its fallback line for a
+ * question the lane could answer.
+ */
+export const GEMINI_STALL_FALLBACK_MODEL = 'gemini/gemini-3.5-flash-lite';
+
+/**
  * Live-site parity, retry half (server_gemini_retry.ts withGeminiRetry): a
  * 503-class transient — the provider answering "UNAVAILABLE / high demand" —
  * gets exactly one extra try after a short wait. A 429 is never retried: it
@@ -59,6 +74,30 @@ export function isGeminiTransient(status, body) {
   if (code === 502 || code === 503 || code === 504) return true;
   const text = typeof body === 'string' ? body : JSON.stringify(body || {});
   return /unavailable|high demand/i.test(text);
+}
+
+/**
+ * The provider's quota answer (429 / RESOURCE_EXHAUSTED / "exceeded your
+ * current quota"). Distinct from isGeminiTransient on purpose: quota is never
+ * a reason to try the *same* model again (it burns the same bucket), but it is
+ * the live site's own reason to fail the *model* — server_gemini_retry.ts
+ * noteGeminiQuota + nextGeminiFallbackEngine, whose cooldown text tells the
+ * operator the other engine "has a separate quota".
+ */
+export function isGeminiQuota(status, body) {
+  const code = Number(status) || 0;
+  if (code === 429) return true;
+  const text = typeof body === 'string' ? body : JSON.stringify(body || {});
+  return /quota|rate.?limit|too many requests|resource exhausted|free.?limit|exhausted/i.test(text);
+}
+
+/**
+ * Whether another engine is worth one try: transient (stall/unavailable) or
+ * quota. Quota is included because each engine has its own bucket — the room's
+ * default model being out of quota says nothing about the lite engine.
+ */
+export function isGeminiHopWorthy(status, body) {
+  return isGeminiTransient(status, body) || isGeminiQuota(status, body);
 }
 
 function pickKey(scope) {
@@ -147,6 +186,7 @@ export async function runGemini({
   env,
   fetchImpl = fetch,
   retryDelayMs = GEMINI_RETRY_DELAY_MS,
+  fallbackModel = GEMINI_STALL_FALLBACK_MODEL,
 } = {}) {
   const fail = (lastError, code = -1) => ({
     code,
@@ -170,6 +210,9 @@ export async function runGemini({
   if (!apiModel) {
     return fail(`Unknown gemini model: ${model}. Use /freemodel to pick from the list.`);
   }
+  // Unknown or empty disables the hop; a caller on the lite engine itself
+  // never hops to itself.
+  const stallFallback = geminiModelId(fallbackModel);
   const systemText = String(system ?? '').trim();
   const messages = systemText ? [{ role: 'system', content: systemText }] : [];
   messages.push({ role: 'user', content: text });
@@ -215,13 +258,36 @@ export async function runGemini({
     return attempt;
   };
   let fellBack = '';
-  let attempt = await postTryingTransientOnce(apiModel);
+  let triedModel = apiModel;
+  let attempt = await postTryingTransientOnce(triedModel);
+  // One hop when the primary stalls, stays unavailable, or is out of quota —
+  // the live site's nextGeminiFallbackEngine rule: fail the model, not the
+  // job. Quota is a hop reason, not a retry reason: a 429 on the primary is
+  // never re-asked on the primary (same bucket), but the other engine has its
+  // own. Never a second hop, and never when the primary already is the
+  // fallback.
+  if (
+    stallFallback &&
+    stallFallback !== triedModel &&
+    (attempt.transportError || (!attempt.res?.ok && isGeminiHopWorthy(attempt.res?.status, attempt.data)))
+  ) {
+    const why = attempt.transportError
+      ? 'stalled'
+      : isGeminiQuota(attempt.res.status, attempt.data)
+        ? `answered ${attempt.res.status} (out of quota)`
+        : `answered ${attempt.res.status} (unavailable)`;
+    console.warn(`[agent-gemini] "${triedModel}" ${why} — one hop to "${stallFallback}" (live-site parity).`);
+    triedModel = stallFallback;
+    attempt = await postTryingTransientOnce(triedModel);
+    if (!attempt.transportError && attempt.res?.ok) fellBack = triedModel;
+  }
   if (attempt.transportError) return fail(attempt.transportError);
   // Live-site parity: one 404 hop to gemini-2.5-flash (callUnifiedLLMInternal).
-  if (!attempt.res.ok && Number(attempt.res.status) === 404 && apiModel !== GEMINI_FALLBACK_MODEL) {
-    console.warn(`[agent-gemini] Model "${apiModel}" 404 — falling back to "${GEMINI_FALLBACK_MODEL}" (live-site parity).`);
-    fellBack = ` (answered by fallback ${GEMINI_FALLBACK_MODEL})`;
-    attempt = await postTryingTransientOnce(GEMINI_FALLBACK_MODEL);
+  if (!attempt.res.ok && Number(attempt.res.status) === 404 && triedModel !== GEMINI_FALLBACK_MODEL) {
+    console.warn(`[agent-gemini] Model "${triedModel}" 404 — falling back to "${GEMINI_FALLBACK_MODEL}" (live-site parity).`);
+    triedModel = GEMINI_FALLBACK_MODEL;
+    attempt = await postTryingTransientOnce(triedModel);
+    if (!attempt.transportError && attempt.res?.ok) fellBack = triedModel;
     if (attempt.transportError) return fail(attempt.transportError);
   }
   const { res, data } = attempt;
@@ -245,7 +311,7 @@ export async function runGemini({
     sessionID: null,
     finalText,
     lastError: null,
-    stderr: fellBack ? `fallback:${GEMINI_FALLBACK_MODEL}` : '',
+    stderr: fellBack ? `fallback:${fellBack}` : '',
     usage: { cost: 0, tokens: total ? { total } : null },
   };
 }
