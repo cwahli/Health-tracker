@@ -424,6 +424,47 @@ export function journeyToOutcomes(
   return [...jOuts, ...invOuts];
 }
 
+/**
+ * Can this case honestly claim to be green?
+ *
+ * `all_green` is a CACHED column on the case row, written only by the create,
+ * replay and analyze routes and never recomputed on read. That makes it stale by
+ * construction the moment an outcome changes without a replay following it — and
+ * it has been, on a live row.
+ *
+ * Case 329881c4 ("Incorrect nutrition labdl") carried an enabled outcome
+ * `user_0_Sainsbury_oat_is_about_3` with `pass: false`, while the same row
+ * reported `all_green: true, pass_count: 2, fail_count: 0`. The timestamps say why:
+ * the outcome was last touched 2026-09-29 and the scores were last computed
+ * 2026-08-14, 46 days earlier. So a user-reported complaint sat recorded as
+ * FAILING on a case the board showed as GREEN, and nothing ever noticed, because
+ * every reader trusted the cached column.
+ *
+ * Read-time reconciliation is the fix rather than another write, because a
+ * write-time change cannot repair rows that were already written wrong, and
+ * because this is the last place the claim is actually made to a reader.
+ *
+ * Deliberately narrow: this can only ever take green AWAY, never grant it. A
+ * case with no outcomes, or with none failing, keeps whatever it cached. Adding
+ * the converse rule here would flip cases whose outcomes were never evaluated,
+ * which is a different decision and needs its own evidence.
+ *
+ * @returns the reconciled boolean, plus whether it had to contradict the cache.
+ */
+export function effectiveAllGreen(
+  cachedAllGreen: boolean | number | null | undefined,
+  outcomes: GoldenOutcome[] | null | undefined
+): { allGreen: boolean; contradictedCache: boolean } {
+  const cached = cachedAllGreen === 1 || cachedAllGreen === true;
+  if (!cached) return { allGreen: false, contradictedCache: false };
+
+  const list = Array.isArray(outcomes) ? outcomes : [];
+  const failing = list.filter((o) => o && o.enabled !== false && o.pass === false);
+  if (failing.length === 0) return { allGreen: true, contradictedCache: false };
+
+  return { allGreen: false, contradictedCache: true };
+}
+
 export function scoreboardSummary(
   outcomes: GoldenOutcome[],
   misses?: string[]

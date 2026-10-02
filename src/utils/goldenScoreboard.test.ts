@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { GoldenOutcome } from './goldenScoreboard';
 import {
   parseKnownFails,
   parseTensions,
@@ -15,6 +16,7 @@ import {
   goldenSlug,
   statsFromJourney,
   splitExtraIssueText,
+  effectiveAllGreen,
 } from './goldenScoreboard';
 
 const picnicLog = `
@@ -284,5 +286,82 @@ wrap was scaled to scout guess`
       },
     });
     expect(problems.join('\n')).toMatch(/Stream stalled/i);
+  });
+});
+
+/**
+ * A case row can carry an enabled outcome with pass=false while the cached
+ * all_green column still says true. That happened on a live row: case 329881c4
+ * held outcome `user_0_Sainsbury_oat_is_about_3` with pass=false and reported
+ * all_green=true / fail_count=0, so a user-reported complaint sat recorded as
+ * FAILING on a case every reader believed was GREEN. The scores were last
+ * computed 2026-08-14; the outcome was last touched 2026-09-29.
+ *
+ * all_green is a cached column written only by create/replay/analyze and never
+ * recomputed on read, so it is stale by construction once an outcome changes
+ * without a replay. The reader has to reconcile.
+ */
+describe('effectiveAllGreen — a cached green cannot outrank a failing outcome', () => {
+  const outcome = (o: Partial<GoldenOutcome>): GoldenOutcome =>
+    ({ id: 'o', label: '', pass: true, source: 'user', ...o }) as GoldenOutcome;
+
+  it('refuses green when an enabled outcome is failing (the live case, field for field)', () => {
+    const r = effectiveAllGreen(true, [
+      outcome({ id: 'user_0_Sainsbury_oat_is_about_3', pass: false, enabled: true, source: 'user' }),
+    ]);
+    expect(r.allGreen).toBe(false);
+    expect(r.contradictedCache).toBe(true);
+  });
+
+  it('refuses green for a numeric 1 as well as a boolean true', () => {
+    // D1 hands back 0/1 integers, so a truthiness-only guard would miss this.
+    expect(effectiveAllGreen(1, [outcome({ pass: false })])).toEqual({
+      allGreen: false,
+      contradictedCache: true,
+    });
+  });
+
+  it('keeps green when every outcome passes', () => {
+    const r = effectiveAllGreen(true, [outcome({ pass: true }), outcome({ id: 'b', pass: true })]);
+    expect(r.allGreen).toBe(true);
+    expect(r.contradictedCache).toBe(false);
+  });
+
+  it('keeps green when there are no outcomes at all', () => {
+    // Deliberately NOT the converse rule: a case whose outcomes were never
+    // evaluated keeps its cached state rather than being flipped blind.
+    expect(effectiveAllGreen(true, []).allGreen).toBe(true);
+    expect(effectiveAllGreen(true, null).allGreen).toBe(true);
+    expect(effectiveAllGreen(true, undefined).allGreen).toBe(true);
+  });
+
+  it('ignores a disabled failing outcome', () => {
+    // Disabled means "not being asserted", which is different from "asserted and
+    // failing". Failing it here would make every intentionally-parked case red.
+    const r = effectiveAllGreen(true, [outcome({ pass: false, enabled: false })]);
+    expect(r.allGreen).toBe(true);
+    expect(r.contradictedCache).toBe(false);
+  });
+
+  it('cannot grant green that was never cached', () => {
+    // It may only take green away. Otherwise a case could be promoted by the
+    // reader, which is the promotion path's job and not this function's.
+    for (const cached of [false, 0, null, undefined]) {
+      expect(effectiveAllGreen(cached, []).allGreen).toBe(false);
+      expect(effectiveAllGreen(cached, []).contradictedCache).toBe(false);
+    }
+  });
+
+  it('stays red when the cache is already red, without claiming a contradiction', () => {
+    const r = effectiveAllGreen(false, [outcome({ pass: false })]);
+    expect(r.allGreen).toBe(false);
+    expect(r.contradictedCache).toBe(false);
+  });
+
+  it('tolerates a malformed outcomes array rather than throwing to the caller', () => {
+    // A reader must not 500 because one row is dirty; that would turn a reporting
+    // bug into an outage and hide every other case on the board.
+    const dirty = [null, undefined, outcome({ pass: false })] as unknown as GoldenOutcome[];
+    expect(effectiveAllGreen(true, dirty).allGreen).toBe(false);
   });
 });
