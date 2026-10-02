@@ -1054,6 +1054,10 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
           }
 
           const saved = recordFleetHeartbeat(data);
+          if (!saved.ok) {
+            res.writeHead(400, { 'content-type': 'application/json' });
+            return res.end(JSON.stringify(saved));
+          }
           res.writeHead(200, { 'content-type': 'application/json' });
           return res.end(JSON.stringify(saved));
         } catch (err) {

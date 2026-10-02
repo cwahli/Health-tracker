@@ -12,7 +12,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
   createGateway,
@@ -413,14 +416,14 @@ test('heartbeat endpoint enforces authentication and rejects spoofed locations',
     });
     assert.equal(badSecretRes.status, 401);
 
-    // 3. Valid global secret admits
+    // 3. Valid global secret admits (agent identifies the model — required)
     const validRes = await fetch(`${base}/fleet/api/heartbeat`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         'x-fleet-telemetry-secret': secret,
       },
-      body: JSON.stringify({ location: 'Mac', phase: 'working', task: 'Valid global secret' }),
+      body: JSON.stringify({ location: 'Mac', agent: 'Probe Agent', phase: 'working', task: 'Valid global secret' }),
     });
     assert.equal(validRes.status, 200);
 
@@ -439,3 +442,95 @@ test('heartbeat endpoint enforces authentication and rejects spoofed locations',
   }
 });
 
+
+test('heartbeat without agent is refused and never stored', async () => {
+  resetFleetStateForTest();
+  const t0 = 10000000;
+
+  // Unit level: no agent and no model → refused
+  const noAgent = recordFleetHeartbeat({ location: 'Mac', phase: 'working', task: 'Agent-less probe' }, { now: t0 });
+  assert.equal(noAgent.ok, false);
+  assert.equal(noAgent.error, 'missing agent');
+
+  // Explicit "Unknown" is not an identity either
+  const unknown = recordFleetHeartbeat({ location: 'Mac', agent: 'Unknown', phase: 'working' }, { now: t0 });
+  assert.equal(unknown.ok, false);
+
+  // Nothing stored: Mac pane stays off the reporter path
+  const nodes = getFleetNodes({ now: t0 });
+  const mac = nodes.find((n) => n.location === 'Mac');
+  assert.notEqual(mac.agent, 'Unknown');
+
+  // HTTP level: authenticated but agent-less → 400, not 200
+  const secret = 'gateway-secret-telemetry-444';
+  const handle = createGateway({ env: { FLEET_TELEMETRY_SECRET: secret } });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/fleet/api/heartbeat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-telemetry-secret': secret },
+      body: JSON.stringify({ location: 'Mac', phase: 'working', task: 'Agent-less probe' }),
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    server.close();
+  }
+});
+
+test('beats older than 60m read offline instead of stale forever', () => {
+  resetFleetStateForTest();
+  const t0 = 10000000;
+
+  recordFleetHeartbeat({
+    location: 'Mac',
+    agent: 'Antigravity (Gemini 3.8 Flash High)',
+    phase: 'working',
+    task: 'Session ended without disconnect',
+  }, { now: t0 });
+
+  // 20m: stale, last phase kept
+  let nodes = getFleetNodes({ now: t0 + 20 * 60 * 1000 });
+  assert.equal(nodes.find((n) => n.location === 'Mac').status, 'stale');
+
+  // 61m: reporter gone → offline, no badge, no sentence
+  nodes = getFleetNodes({ now: t0 + 61 * 60 * 1000 });
+  const mac = nodes.find((n) => n.location === 'Mac');
+  assert.equal(mac.status, 'offline');
+  assert.equal(mac.lastPhase, 'offline');
+  assert.equal(mac.agent, '—');
+  assert.equal(mac.task, 'No reporter (last beat expired)');
+});
+
+test('VM pane reflects live opencode sessions with model', async () => {
+  resetFleetStateForTest();
+  const t0 = 10000000;
+  const { DatabaseSync } = await import('node:sqlite');
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-vm-'));
+  const dbPath = path.join(tmpHome, 'opencode.db');
+  const db = new DatabaseSync(dbPath);
+  db.exec(`create table session_v2 (id text, model text, directory text, title text, time_updated integer, time_archived integer)`);
+  db.exec(`create table session_message (session_id text, type text, time_created integer, data text)`);
+  const ins = db.prepare(`insert into session_v2 (id, model, directory, title, time_updated, time_archived) values (?, ?, ?, ?, ?, ?)`);
+  const msg = db.prepare(`insert into session_message (session_id, type, time_created, data) values (?, ?, ?, ?)`);
+  ins.run('ses_working', JSON.stringify({ id: 'space-bunny-free', providerID: 'opencode' }), '/home/ubuntu', 'Meal QA audit', t0 - 2 * 60 * 1000, null);
+  msg.run('ses_working', 'assistant', t0 - 60 * 1000, JSON.stringify({ time: { created: 1, streamed: 2 } }));
+  ins.run('ses_idle', JSON.stringify({ id: 'muse-spark', providerID: 'opencode-go' }), '/home/ubuntu/src/Health-tracker', 'None', t0 - 5 * 60 * 1000, null);
+  msg.run('ses_idle', 'idle', t0 - 4 * 60 * 1000, JSON.stringify({ time: { created: 1 }, outcome: 'succeeded' }));
+  ins.run('ses_old', JSON.stringify({ id: 'old-model', providerID: 'opencode' }), '/home/ubuntu', 'Cold session', t0 - 30 * 60 * 1000, null);
+  ins.run('ses_arch', JSON.stringify({ id: 'archived-model', providerID: 'opencode' }), '/home/ubuntu', 'Archived', t0 - 1 * 60 * 1000, t0);
+  db.close();
+
+  const nodes = getFleetNodes({ now: t0, home: tmpHome, vmOpencodeDb: dbPath });
+  const vm = nodes.find((n) => n.location === 'VM');
+  assert.ok(vm);
+  assert.equal(vm.status, 'working');
+  assert.equal(vm.agent, 'opencode/space-bunny-free (+1)');
+  assert.ok(vm.task.includes('1/2 working'));
+  assert.ok(vm.task.includes('Meal QA audit [space-bunny-free] ●'));
+  assert.ok(vm.task.includes('Health-tracker [muse-spark] ○'));
+  assert.ok(!vm.task.includes('old-model'));
+  assert.ok(!vm.task.includes('archived-model'));
+
+  fs.rmSync(tmpHome, { recursive: true, force: true });
+});
