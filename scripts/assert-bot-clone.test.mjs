@@ -206,7 +206,17 @@ test('a missing master is reported, not thrown', () => {
 
 test('the per-bot allowlist stays small and explicit', async () => {
   // A grown allowlist is how "the master supplies it" quietly stops being true.
-  assert.ok(PER_BOT_KEYS.size <= 15, `allowlist grew to ${PER_BOT_KEYS.size} keys — justify it in review`);
+  //
+  // 15 -> 18, confirmed by the operator 2026-10-02 (AGENTS.md §3: this file is
+  // protected when it changes what "pass" means). The three added keys are SEAT
+  // IDENTITY, not capability, and none of them changes what a bot can do:
+  //   agent.healthRole  which health-council chair this bot is
+  //   agent.taxRole     which tax seat (maker / checker) this bot is
+  //   agent.homeProject which project it treats as home
+  // A capability key would change this floor: any key a bot could use to be
+  // BETTER at something (tools, progress, flood control, model routing) has no
+  // business here.
+  assert.ok(PER_BOT_KEYS.size <= 18, `allowlist grew to ${PER_BOT_KEYS.size} keys — justify it in review`);
   assert.ok(PER_BOT_KEYS.has('telegram'));
   assert.ok(!PER_BOT_KEYS.has('progress.maxChars'), 'flood control must stay inherited');
   // `agent.model` is the single documented exception: checker independence
