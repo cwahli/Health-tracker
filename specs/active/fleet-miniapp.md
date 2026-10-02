@@ -10,6 +10,7 @@ allowed_files:
   - src/miniapp/fleet.html
   - scripts/mac-fleet-beat.mjs
   - scripts/assert-fleet-miniapp.test.mjs
+  - scripts/lib/fleet-status.mjs
 frozen_files:
   - src/App.tsx
   - src/components/LogChat.tsx

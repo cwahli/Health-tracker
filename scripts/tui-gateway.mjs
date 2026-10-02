@@ -528,89 +528,37 @@ export const BOOTSTRAP_FLEET = [
   '</script></body></html>',
 ].join('\n');
 
+import {
+  getFleetTickets as getFleetTicketsStatus,
+  recordFleetHeartbeat as recordFleetHeartbeatStatus,
+  getFleetNodes as getFleetNodesStatus,
+  getFleetBots as getFleetBotsStatus,
+  resetFleetState as resetFleetStateStatus,
+  FLEET_CACHE_TTL_MS,
+} from './lib/fleet-status.mjs';
+
+export { FLEET_CACHE_TTL_MS };
+
 export const FLEET_LEASE_TTL_MS = 2 * 60 * 1000;
 export const FLEET_IDLE_TTL_MS = 10 * 60 * 1000;
 
-export const fleetNodes = new Map();
 export const fleetSseClients = new Set();
-let fleetTicketsCache = { cachedAt: 0, rows: [] };
 
-export function recordFleetHeartbeat(payload, { now = Date.now() } = {}) {
-  const location = String(payload?.location || 'Unknown').trim();
-  if (!location) return { ok: false, error: 'location is required' };
-  const entry = {
-    location,
-    agent: String(payload?.agent || '').trim(),
-    phase: String(payload?.phase || 'working').trim(),
-    task: String(payload?.task || '').trim(),
-    ticketKey: String(payload?.ticketKey || '').trim(),
-    updatedAt: new Date(now).toISOString(),
-    updatedAtMs: now,
-    pid: payload?.pid ? Number(payload.pid) : null,
-    cwd: String(payload?.cwd || '').trim(),
-  };
-  fleetNodes.set(location, entry);
-  broadcastFleetEvent('heartbeat', entry);
-  return { ok: true, node: entry };
+export function recordFleetHeartbeat(payload, opts = {}) {
+  const res = recordFleetHeartbeatStatus(payload, opts);
+  if (res.ok && res.node) {
+    broadcastFleetEvent('heartbeat', res.node);
+  }
+  return res;
 }
 
 export function resetFleetStateForTest() {
-  fleetNodes.clear();
-  fleetTicketsCache = { cachedAt: 0, rows: [] };
+  resetFleetStateStatus();
 }
 
-export function getFleetNodes({ now = Date.now() } = {}) {
-  const result = [];
-  const defaults = ['Mac', 'VM', 'Grok VM', 'Mobile', 'Collab'];
-  const processed = new Set();
-
-  for (const [loc, node] of fleetNodes.entries()) {
-    processed.add(loc);
-    const ageMs = now - (node.updatedAtMs || 0);
-    let status = 'working';
-    if (ageMs > FLEET_IDLE_TTL_MS) {
-      status = 'offline';
-    } else if (ageMs > FLEET_LEASE_TTL_MS || node.phase === 'idle') {
-      status = 'idle';
-    } else if (node.phase === 'waiting_prompt') {
-      status = 'waiting_prompt';
-    } else {
-      status = 'working';
-    }
-    result.push({
-      location: loc,
-      agent: node.agent,
-      status,
-      task: node.task,
-      ticketKey: node.ticketKey,
-      updatedAt: node.updatedAt,
-      ageMs,
-    });
-  }
-
-  for (const def of defaults) {
-    if (!processed.has(def)) {
-      result.push({
-        location: def,
-        agent: '',
-        status: 'idle',
-        task: 'Waiting for connection',
-        ticketKey: '',
-        updatedAt: '',
-        ageMs: Infinity,
-      });
-    }
-  }
-
-  result.sort((a, b) => {
-    const ai = defaults.indexOf(a.location);
-    const bi = defaults.indexOf(b.location);
-    if (ai >= 0 && bi >= 0) return ai - bi;
-    if (ai >= 0) return -1;
-    if (bi >= 0) return 1;
-    return a.location.localeCompare(b.location);
-  });
-  return result;
+export function getFleetNodes(opts = {}) {
+  const now = typeof opts === 'number' ? opts : (opts?.now || Date.now());
+  return getFleetNodesStatus(now);
 }
 
 export function broadcastFleetEvent(event, data) {
@@ -624,96 +572,12 @@ export function broadcastFleetEvent(event, data) {
   }
 }
 
-export async function getFleetTickets({ env = process.env, now = Date.now(), root = REPO_ROOT } = {}) {
-  if (now - fleetTicketsCache.cachedAt < 15000 && fleetTicketsCache.rows.length > 0) {
-    return fleetTicketsCache.rows;
-  }
-
-  // 1. Try reading Google Sheet 'current' tab
-  try {
-    const { loadHostEnv, identityFromEnv, accessToken, readTab } = await import('./lib/google-store.mjs');
-    const { pmSheetId } = await import('./lib/pm-sheet.mjs');
-    const { env: hostEnv } = loadHostEnv('vm', env, { apply: false });
-    const mergedEnv = { ...env, ...hostEnv };
-    const sheetId = pmSheetId(mergedEnv);
-    const id = identityFromEnv(mergedEnv);
-    if (sheetId && id.ok) {
-      const token = await accessToken(id);
-      if (token.ok && token.token) {
-        const tabRes = await readTab(sheetId, 'current', token.token, { range: 'current!A1:T60' });
-        if (tabRes.ok && Array.isArray(tabRes.json?.values) && tabRes.json.values.length > 1) {
-          const rawRows = tabRes.json.values;
-          const headers = rawRows[0].map((h) => String(h || '').trim().toLowerCase());
-          const col = (name) => headers.indexOf(name);
-          const mapped = rawRows.slice(1).map((vals, idx) => {
-            const get = (name, fallbackIdx) => {
-              const c = col(name);
-              const i = c >= 0 ? c : fallbackIdx;
-              return String(vals[i] ?? '').trim();
-            };
-            return {
-              id: get('id', 1) || String(idx + 1),
-              originalRequest: get('goal', 16) || get('title', 16),
-              workDoneSoFar: get('source', 9) || get('github', 15) || '—',
-              whatsLeftToDo: get('todo', 17) || 'in progress',
-              owner: get('owner', 8) || get('author', 14) || '—',
-              status: get('state', 3) || 'Pending',
-              completionProof: get('github', 15) || '—',
-              completionGate: get('stall_reason', 5) || get('rung', 6) || '—',
-              lastActivity: get('last_activity', 18) || get('built_at', 19) || '—',
-            };
-          });
-          fleetTicketsCache = { cachedAt: now, rows: mapped };
-          return mapped;
-        }
-      }
-    }
-  } catch {
-    // fallback below
-  }
-
-  // 2. Ground-truth fallback from pm-fleet projection
-  try {
-    const { pmPaths, readFleetSources, projectFleet } = await import('./lib/pm-fleet.mjs');
-    const paths = pmPaths(env, { root });
-    const raw = readFleetSources({ paths, env });
-    const fleet = projectFleet({ specs: raw.specs, bugs: raw.bugs, lanes: raw.lanes, beats: raw.beats, now });
-    const mapped = (fleet.items || []).slice(0, 40).map((it, idx) => ({
-      id: String(it.id || idx + 1),
-      originalRequest: String(it.title || it.id || ''),
-      workDoneSoFar: it.lastOutcome ? `last outcome: ${it.lastOutcome}` : '—',
-      whatsLeftToDo: it.stallReason || (it.blocked ? 'blocked' : 'in progress'),
-      owner: it.owner || it.branch || '—',
-      status: String(it.state || 'Pending'),
-      completionProof: '—',
-      completionGate: it.stallReason || '—',
-      lastActivity: String(it.lastActivityAt || ''),
-    }));
-    fleetTicketsCache = { cachedAt: now, rows: mapped };
-    return mapped;
-  } catch {
-    return [];
-  }
+export async function getFleetTickets(opts = {}) {
+  return getFleetTicketsStatus(opts);
 }
 
-export async function getFleetBots({ root = REPO_ROOT } = {}) {
-  try {
-    const regPath = path.join(root, 'bots', 'registry.json');
-    if (!fs.existsSync(regPath)) return [];
-    const reg = JSON.parse(fs.readFileSync(regPath, 'utf8'));
-    const bots = Array.isArray(reg.bots) ? reg.bots : [];
-    return bots.map((b) => ({
-      id: b.id,
-      name: b.name || b.id,
-      runtime: b.runtime || 'bot-host',
-      model: b.agent?.model || (b.extends ? 'inherited' : '—'),
-      enabled: Boolean(b.enabled),
-      active: Boolean(b.enabled),
-      progress: b.notes || (b.enabled ? 'Ready' : 'Disabled'),
-    }));
-  } catch {
-    return [];
-  }
+export async function getFleetBots(opts = {}) {
+  return getFleetBotsStatus(opts);
 }
 
 /**

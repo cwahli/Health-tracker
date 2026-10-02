@@ -2787,7 +2787,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'fleet': {
       // Dynamic fleet dashboard (Mini App). Same web_app button + initData door
-      // as /tui, /bugs, and /forge: served by the gateway under /fleet/.
+      // as /tui, /bugs, and /forge: served by the gateway under /fleet/. Scoped
+      // to the VM bot: it owns the fleet projection.
+      const FLEET_BOTS = ['vm'];
+      if (!FLEET_BOTS.includes(config.id)) {
+        await api.sendMessage(chatId, '📋 The fleet dashboard lives on the VM bot — ask it for /fleet and it will hand you the button.');
+        return;
+      }
       const fleetGatewayUrl = readTuiUrl();
       if (!fleetGatewayUrl) {
         await api.sendMessage(chatId, '📋 Fleet dashboard is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /fleet again.');

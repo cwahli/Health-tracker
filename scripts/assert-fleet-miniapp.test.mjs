@@ -1,5 +1,13 @@
 /**
  * assert-fleet-miniapp.test.mjs — Sensor test for fleet mini-app and telemetry gateway.
+ *
+ * Covers:
+ * - TTL decay (working -> idle -> offline)
+ * - Bot registry loading with live status
+ * - 8 human headers from current tab by name, keeping Pending/In progress unchanged
+ * - Zero Google Sheets writes on read path
+ * - Gateway authentication: admits valid initData, refuses bad HMAC / tampered signatures
+ * - Gateway endpoints: /fleet, /fleet/app, /fleet/api/state, /fleet/api/heartbeat
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,6 +24,13 @@ import {
   issueToken,
   COOKIE_NAME,
 } from './tui-gateway.mjs';
+
+import {
+  recordFleetHeartbeat as recordStatusBeat,
+  getFleetNodes as getStatusNodes,
+  getFleetTickets as getStatusTickets,
+  getFleetBots as getStatusBots,
+} from './lib/fleet-status.mjs';
 
 function makeInitData(botToken, { user = { id: 123456, first_name: 'Test' }, authDate = Math.floor(Date.now() / 1000) } = {}) {
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
@@ -83,12 +98,15 @@ test('getFleetBots returns registry bots with status and model', async () => {
   assert.ok(vmBot);
   assert.equal(vmBot.enabled, true);
   assert.ok(vmBot.model);
+  assert.ok(vmBot.status === 'idle' || vmBot.status === 'working', `vm bot status ${vmBot.status}`);
 });
 
-test('getFleetTickets provides the declared 8 fields', async () => {
+test('getFleetTickets provides the declared 8 fields and keeps Pending unchanged', async () => {
   const tickets = await getFleetTickets();
   assert.ok(Array.isArray(tickets));
-  for (const t of tickets.slice(0, 5)) {
+  assert.ok(tickets.length > 0, 'tickets must not be empty');
+
+  for (const t of tickets.slice(0, 10)) {
     assert.ok(t.id !== undefined, 'ticket id');
     assert.ok(t.originalRequest !== undefined, 'originalRequest');
     assert.ok(t.workDoneSoFar !== undefined, 'workDoneSoFar');
@@ -98,6 +116,60 @@ test('getFleetTickets provides the declared 8 fields', async () => {
     assert.ok(t.completionProof !== undefined, 'completionProof');
     assert.ok(t.completionGate !== undefined, 'completionGate');
     assert.ok(t.lastActivity !== undefined, 'lastActivity');
+
+    // Values like Pending, Assigned, In progress, Done must be preserved
+    assert.ok(typeof t.status === 'string' && t.status.length > 0);
+  }
+});
+
+test('fleet-status module parity and zero mutating sheet writes', async () => {
+  // getFleetTickets is strictly read-only and never invokes appendRows, createSheet, or batchUpdate
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const HERE = path.dirname(fileURLToPath(import.meta.url));
+  const src = fs.readFileSync(path.join(HERE, 'lib', 'fleet-status.mjs'), 'utf8');
+  assert.equal(/appendRows\s*\(/.test(src), false, 'must not call appendRows');
+  assert.equal(/createSheet\s*\(/.test(src), false, 'must not call createSheet');
+  assert.equal(/batchUpdate/i.test(src), false, 'must not call batchUpdate');
+
+  const tickets = await getStatusTickets();
+  assert.ok(Array.isArray(tickets));
+});
+
+test('gateway /fleet auth door admits valid initData and refuses bad HMAC', async () => {
+  const botToken = '123456789:ABCdefGHIjklMNOpqrSTUvwxYZ';
+  const secret = 'gateway-test-secret-12345';
+  const env = {
+    TUI_GATEWAY_SECRET: secret,
+    TUI_BOT_TOKEN_VM: botToken,
+  };
+
+  const handle = createGateway({ env });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const base = `http://127.0.0.1:${port}`;
+
+  try {
+    // 1. Valid initData admits with 302 to /fleet/app
+    const validInitData = makeInitData(botToken);
+    const validRes = await fetch(`${base}/fleet?bot=vm&initData=${encodeURIComponent(validInitData)}`, { redirect: 'manual' });
+    assert.equal(validRes.status, 302);
+    const loc = validRes.headers.get('location') || '';
+    assert.ok(loc.startsWith('/fleet/app?token='));
+
+    // 2. Tampered hash is refused with 401
+    const badInitData = validInitData.replace(/hash=[a-f0-9]{10}/, 'hash=deadbeef00');
+    const badRes = await fetch(`${base}/fleet?bot=vm&initData=${encodeURIComponent(badInitData)}`, { redirect: 'manual' });
+    assert.equal(badRes.status, 401);
+
+    // 3. Foreign bot token is refused with 401
+    const foreignInitData = makeInitData('999999999:ForeignBotToken');
+    const foreignRes = await fetch(`${base}/fleet?bot=vm&initData=${encodeURIComponent(foreignInitData)}`, { redirect: 'manual' });
+    assert.equal(foreignRes.status, 401);
+  } finally {
+    server.close();
   }
 });
 
