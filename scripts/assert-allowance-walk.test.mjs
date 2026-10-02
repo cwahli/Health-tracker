@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { usableTurnLanes, stampDepleted, ensureBotLedger } from './lib/free-lanes.mjs';
+import { usableTurnLanes, stampDepleted, ensureBotLedger, sortFreemodelTierRows, freemodelDisplayTier } from './lib/free-lanes.mjs';
 import { selectTurnLanes, routeKeySkipped, stickyModelAfterTurn } from './bot-host.mjs';
 import { tierForModel, catalogRank } from './lib/free-catalogs.mjs';
 
@@ -157,6 +157,56 @@ try {
     stickyModelAfterTurn({ chatModel: '', answeredModel: 'b', answered: true }) === null
     && stickyModelAfterTurn({ chatModel: 'a', answeredModel: '', answered: true }) === null);
 
+  // 5f. /freemodel order inside one tier: usable by rating desc, then unusable
+  // by earliest reset. Rating is benchmark AA desc (rank breaks ties), so
+  // AA48 outranks AA41 outranks AA39.5 even though rank 1 belongs to AA39.5.
+  const srows = sortFreemodelTierRows([
+    { model: 'tokenharbor/deepseek-v4.1-flash:free', pref: 5, selectable: true },
+    { model: 'opencode/mimo-v2.6-flash-free', pref: 3, selectable: true },
+    { model: 'opencode/muse-spark-1.3-contributor-free', pref: 1, selectable: true },
+    { model: 'opencode/late-reset', pref: 2, selectable: false, depleted: true, resetAt: now + 5 * 3600 * 1000 },
+    { model: 'opencode/early-reset', pref: 4, selectable: false, depleted: true, resetAt: now + 1 * 3600 * 1000 },
+  ]);
+  check('usable rows come first, ordered AA48 > AA41 > AA39.5',
+    srows[0].model === 'opencode/muse-spark-1.3-contributor-free'
+    && srows[1].model === 'opencode/mimo-v2.6-flash-free'
+    && srows[2].model === 'tokenharbor/deepseek-v4.1-flash:free');
+  check('unusable rows come last, earliest reset first',
+    srows[3].model === 'opencode/early-reset' && srows[4].model === 'opencode/late-reset');
+  check('Standard/ Light titles are location-scoped',
+    freemodelDisplayTier('high', 'vps') === 'VPS Standard model'
+    && freemodelDisplayTier('light', 'vps') === 'VPS Light model');
+
+  // 5g. Same-type failover: a depleted Standard lane walks to the next usable
+  // Standard lane, never onto Light — and a Light lane never jumps up.
+  const tierTable = {
+    lanes: [
+      { provider: 'opencode', model: 'opencode/muse-spark-1.3-contributor-free', pref: 1, status: 'available', tg: true },
+      { provider: 'opencode', model: 'opencode/mimo-v2.6-flash-free', pref: 2, status: 'available', tg: true },
+      { provider: 'opencode', model: 'cloudflare/@cf/qwen/qwen3.8-27b', pref: 3, status: 'available', tg: true },
+      { provider: 'opencode', model: 'cloudflare/@cf/zai-org/glm-4.7-flash', pref: 4, status: 'available', tg: true },
+    ],
+  };
+  const { dir: tierDir } = ensureBotLedger('tier-bot');
+  fs.writeFileSync(path.join(tierDir, 'free-lane-table.json'), JSON.stringify(tierTable, null, 2));
+  stampDepleted({
+    stateDir: tierDir,
+    provider: 'opencode',
+    model: 'opencode/muse-spark-1.3-contributor-free',
+    errText: '429 Too Many Requests, try again in 3h',
+    depletedUntil: now + 3 * 3600 * 1000,
+    countdownHint: '3h',
+  });
+  const tierChoice = selectTurnLanes({ botId: 'tier-bot', model: 'opencode/muse-spark-1.3-contributor-free', fallback: 'opencode/muse-spark-1.3-contributor-free' });
+  check('a depleted Standard lane fails over inside Standard first', tierChoice.models[0] === 'opencode/mimo-v2.6-flash-free');
+  check('and every Standard lane comes before any Light lane',
+    tierChoice.models.indexOf('opencode/mimo-v2.6-flash-free') !== -1
+    && tierChoice.models.indexOf('opencode/mimo-v2.6-flash-free') < tierChoice.models.findIndex((m) => /cloudflare/i.test(m)));
+  const lightKeep = selectTurnLanes({ botId: 'tier-bot', model: 'opencode/cloudflare/@cf/qwen/qwen3.8-27b', fallback: 'opencode/muse-spark-1.3-contributor-free' });
+  check('a usable Light lane stays first', lightKeep.models[0] === 'opencode/cloudflare/@cf/qwen/qwen3.8-27b');
+  check('and Light lanes come before any Standard fallback',
+    lightKeep.models.findIndex((m) => /cloudflare.*glm/i.test(m)) < lightKeep.models.findIndex((m) => /mimo/i.test(m)));
+
   // 6. A host with no ledger keeps the old chain, so a fresh install is unchanged.
   const bare = selectTurnLanes({ botId: 'brand-new-bot', model: 'zen/muse', fallback: 'zen/nemotron' });
   check('a fresh bot still gets a usable chain', bare.models.length > 0);
@@ -178,11 +228,12 @@ try {
   fs.rmSync(home, { recursive: true, force: true });
 }
 
-// Coding lanes before light ones. The bot writes code, so a turn that fails over
-// from a coding model must not land on a light model while a coding lane is free —
-// pref order alone let a light model with a low pref number take the turn over.
-check('the walk orders coding lanes before light ones',
-  /rank\(a\) - rank\(b\)/.test(botWalkSrc) && /walkTierRank/.test(botWalkSrc));
+// Same-type first: a depleted Standard lane walks to the next usable Standard
+// lane in /freemodel order (rating first), stepping across to Light only when
+// its own tier is dry — and Light likewise stays Light-first. The list and the
+// walk share the within-tier order.
+check('the walk puts the depleted lane\u2019s own tier first',
+  /tierOf\(l\) === currentGroup/.test(botWalkSrc) && /freemodelRatingOf/.test(botWalkSrc));
 check('a light lane is still reachable as a last resort',
   /degradedToLight/.test(botWalkSrc) && !/codingLeft === 0\) return/.test(botWalkSrc));
 // QS-2 wants the switch visible in the chat, not only in the log: the walk
@@ -208,7 +259,7 @@ check('a displaced headline names the running lane, not the dead one',
 // catalog at all and that the three models this host actually runs resolve the
 // way the catalog says. MiMo V2.6 and DeepSeek V4.1 are ranked under a
 // coding-capable tool; Muse Spark 1.3 Contributor is rank 2, high.
-check('the walk reads the catalog for its tier order', /walkTierRank\(l\.model\)/.test(botWalkSrc));
+check('the walk reads the catalog for its tier pin and its rating order', /tierForModel\(l\.model\)/.test(botWalkSrc) && /freemodelRatingOf\(/.test(botWalkSrc));
 check('the models this host runs resolve the way the catalog says',
   tierForModel('deepseek-v4.1-flash').tier === 'high'
   && tierForModel('muse-spark-1.3-contributor').tier === 'high'

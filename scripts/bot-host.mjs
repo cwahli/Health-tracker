@@ -100,6 +100,9 @@ import {
   isConnectionFailure,
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
+  freemodelDisplayTier,
+  sortFreemodelTierRows,
+  freemodelRatingOf,
 } from './lib/free-lanes.mjs';
 import { recordTurn, storeStatus, flushTurns } from './lib/turn-store.mjs';
 import { ensureTurnLog, makeSends, writerFor } from './lib/google-writer.mjs';
@@ -1034,10 +1037,11 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   // the same Token Harbor collapse and the same no-credential exclusion. This
   // command used to run its own dedupe over the catalog, and two notions of "the
   // same model" drifted by one row for four rounds. One list, one count.
-  // The same list /allowance renders, in the same tier-group order, from the same
-  // helper — so the two commands cannot disagree about which models exist, what
-  // order they are in, or which pool each one belongs to.
-  const tierGroups = groupRowsByTier(canonical || []);
+  // Within each tier group the rows are ordered for use, not for storage:
+  // usable first by rating (benchmark AA desc, catalog rank asc, pref asc),
+  // then unusable by earliest reset. The turn's same-tier failover walks this
+  // same order, so the list and the failover cannot disagree.
+  const tierGroups = groupRowsByTier(canonical || []).map((g) => ({ ...g, rows: sortFreemodelTierRows(g.rows) }));
   const rows = tierGroups.flatMap((g) => g.rows);
   // A catalogued model with no lane row AT ALL is still reported, never dropped.
   // The test is against the TABLE, not against the canonical list: a superseded
@@ -1082,15 +1086,15 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
             return at ? ` (reset in ${at})` : '';
           })()}`
         : r.reason || 'not available');
+  // The message is titles, not prose: one location-scoped Standard/Light title
+  // line with the counts, then the current lane, then at most one footer line
+  // for what cannot be used. The old three-line "Free models at …" brief is
+  // gone; the models are the keyboard below.
+  const titleOf = (g) => `${freemodelDisplayTier(g.tier, location || 'vps')} (${g.rows.length})`;
   const lines = [
-    `Free models${location0} — tap a button below (❌ = not usable right now; the first message auto-fails over to the next free lane).`,
-    'Depleted lanes are marked ❌ and stay tappable, so a tap can tell you what to use instead.',
-    'Token Harbor / Cloudflare / Gemini taps run through OpenCode. Freebuff is terminal-only — no chat turn.',
-    '',
     listed.length
-      ? `Total: ${listed.length} · ${usable.length} usable${unusable.length ? ` · ${unusable.length} not usable ❌` : ''}${noCredential.length ? ` · ${noCredential.length} with no ledger row` : ''}${needsSetup.length ? ` · ${needsSetup.length} need setup` : ''} · current: ${current || 'default'}`
+      ? `${tierGroups.map(titleOf).join(' · ')} · current: ${current || 'default'}`
       : 'No free models are installed and authenticated on this host.',
-    tierBreakdown(tierGroups, ' · '),
   ];
   // One short footer line — never a second per-model list.
   const footer = [];
@@ -1125,12 +1129,12 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   const seen = new Set();
   const buttons = [];
   for (const g of tierGroups) {
-    // A keyboard has no subheadings, so the breakdown is a row of its own: the same
-    // label and the same count /allowance prints above the section, from the same
-    // groupRowsByTier() result. `noop` is the callback the router already uses for a
-    // non-actionable keyboard row, and the tap handler answers it silently.
+    // A keyboard has no subheadings, so the tier title is a row of its own:
+    // `VPS Standard model (10)` — location-scoped, with the group's count.
+    // `noop` is the callback the router already uses for a non-actionable
+    // keyboard row, and the tap handler answers it silently.
     if (tierGroups.length > 1) {
-      buttons.push({ text: headingWidth(`${g.label} (${g.rows.length})`), data: 'noop', header: true });
+      buttons.push({ text: headingWidth(`${freemodelDisplayTier(g.tier, location || 'vps')} (${g.rows.length})`), data: 'noop', header: true });
     }
   for (const r of g.rows) {
     const label = r.laneLabel || r.label;
@@ -1141,7 +1145,7 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     // number at all — never a neighbour's.
     const model = r.lane?.model || r.model || r.ref || '';
     // The button says what the /allowance row says, in the same column order —
-    // mark, name, plan, three spaces, countdown, benchmark — but padded by
+    // mark, name, plan, three spaces, benchmark, countdown last — but padded by
     // *rendered width* instead of by character count: the client fits pixels in a
     // proportional font and middle-elides whatever passes its ~415px cut-off, so
     // 72 characters rendered anywhere from 386px to 465px and half the keyboard
@@ -3798,20 +3802,32 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   const currentSkipped = skipped.find(sameRoute) || routeKeySkipped({ model, current, session: ledger.session || {}, now });
   const fallbackLanes = lanes.filter((l) => !sameRoute(l));
 
-  // Coding lanes first, light ones last. The bot exists to write code, so a turn
-  // that fails over from a coding model must not land on a light one while a coding
-  // lane is still free — the list was ordered by pref alone, and a light model with
-  // a low pref number would take over the turn. Light lanes stay reachable as a last
-  // resort, because failing a turn outright is worse than a weaker answer, and
-  // `degradedToLight` says when that is what happened.
-  // Tier order comes from the catalog (QS-6): high first, then models the
-  // catalog does not rank, then light. Light lanes stay reachable as a last
-  // resort, and the reply says so when a coding turn ends up on one.
-  const rank = (l) => walkTierRank(l.model);
-  const orderedLanes = [...fallbackLanes].sort((a, b) => rank(a) - rank(b) || (Number(a.pref) || 0) - (Number(b.pref) || 0));
+  // Same-type first: a depleted Standard lane walks to the next usable Standard
+  // lane in /freemodel order, a depleted Light lane to the next usable Light
+  // lane. Within the tier the order is the list's order — rating first
+  // (benchmark AA desc, catalog rank asc, pref asc) — because the list is
+  // already sorted that way, the walk and the keyboard agree about what is
+  // next. Only when its own tier is dry does the walk step across to another
+  // tier (tier order, then rating): failing a turn outright while a lane of
+  // the other pool sits free is worse than a weaker answer, and
+  // `degradedToLight` says when a coding turn did exactly that.
   const currentGroup = (tierForModel(freemodelRefToRoute(model).model || model).tier) || 'unlisted';
-  const codingLeft = orderedLanes.filter((l) => rank(l) === 0).length;
-  const lightLeft = orderedLanes.filter((l) => rank(l) === 2).length;
+  const tierOf = (l) => ((tierForModel(l.model).tier) || 'unlisted');
+  const rateOf = (m) => freemodelRatingOf(m || '');
+  const byRating = (a, b) => {
+    const ra = rateOf(a.model);
+    const rb = rateOf(b.model);
+    if (rb.aa !== ra.aa) return rb.aa - ra.aa;
+    if (ra.rank !== rb.rank) return ra.rank - rb.rank;
+    return (Number(a.pref) || 0) - (Number(b.pref) || 0);
+  };
+  const byTierThenRating = (a, b) => (walkTierRank(a.model) - walkTierRank(b.model)) || byRating(a, b);
+  const orderedLanes = model
+    ? [...fallbackLanes].filter((l) => tierOf(l) === currentGroup).sort(byRating)
+      .concat([...fallbackLanes].filter((l) => tierOf(l) !== currentGroup).sort(byTierThenRating))
+    : [...fallbackLanes].sort(byTierThenRating);
+  const codingLeft = orderedLanes.filter((l) => tierOf(l) === 'high').length;
+  const lightLeft = orderedLanes.filter((l) => tierOf(l) === 'light').length;
 
   if (!model && !orderedLanes.length) {
     const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
