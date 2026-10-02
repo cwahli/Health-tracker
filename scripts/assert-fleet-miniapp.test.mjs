@@ -502,7 +502,7 @@ test('beats older than 60m read offline instead of stale forever', () => {
   assert.equal(mac.task, 'No reporter (last beat expired)');
 });
 
-test('VM pane reflects live opencode sessions with model', async () => {
+test('VM pane shows one row per live opencode session with model and working marker', async () => {
   resetFleetStateForTest();
   const t0 = 10000000;
   const { DatabaseSync } = await import('node:sqlite');
@@ -521,16 +521,23 @@ test('VM pane reflects live opencode sessions with model', async () => {
   ins.run('ses_arch', JSON.stringify({ id: 'archived-model', providerID: 'opencode' }), '/home/ubuntu', 'Archived', t0 - 1 * 60 * 1000, t0);
   db.close();
 
-  const nodes = getFleetNodes({ now: t0, home: tmpHome, vmOpencodeDb: dbPath });
-  const vm = nodes.find((n) => n.location === 'VM');
-  assert.ok(vm);
-  assert.equal(vm.status, 'working');
-  assert.equal(vm.agent, 'opencode/space-bunny-free (+1)');
-  assert.ok(vm.task.includes('1/2 working'));
-  assert.ok(vm.task.includes('Meal QA audit [space-bunny-free] ●'));
-  assert.ok(vm.task.includes('Health-tracker [muse-spark] ○'));
-  assert.ok(!vm.task.includes('old-model'));
-  assert.ok(!vm.task.includes('archived-model'));
+  // One row per session: no aggregate sentence, each row carries its own model.
+  const tickets = [{ id: 'spec:vm-claim', owner: 'Some Agent @ vps-france', status: 'In progress' }];
+  const nodes = getFleetNodes({ now: t0, home: tmpHome, vmOpencodeDb: dbPath, tickets });
+  const vmRows = nodes.filter((n) => n.location === 'VM');
+  assert.equal(vmRows.length, 2);
+  assert.equal(vmRows[0].agent, 'opencode/space-bunny-free');
+  assert.equal(vmRows[0].status, 'working');
+  assert.equal(vmRows[0].task, 'Meal QA audit');
+  assert.equal(vmRows[1].agent, 'opencode/muse-spark');
+  assert.equal(vmRows[1].status, 'idle');
+  assert.equal(vmRows[1].task, 'Health-tracker');
+  assert.ok(!vmRows.some((r) => r.task.includes('working:')));
+  assert.ok(!vmRows.some((r) => r.task.includes('old-model') || r.task.includes('archived-model')));
+
+  // The sheet claim attaches once, to the first row.
+  assert.equal(vmRows[0].ticketKey, 'spec:vm-claim');
+  assert.equal(vmRows[1].ticketKey, '');
 
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });

@@ -60,13 +60,14 @@ function sqliteDriver() {
 }
 
 /**
- * Live opencode CLI sessions on this host (same machine the gateway runs on).
- * Pure shape in, display strings out — tested with a fixture DB, never the live one.
+ * One row per live opencode session on the VM host — never an aggregate:
+ * the user asked for one agent per row, so each session carries its own
+ * model, working marker and title.
  * Each row may carry lastType/lastCompleted from its newest session_message:
  * a streaming assistant message (no completed stamp) means working.
  */
-export function summarizeVmSessions(rows) {
-  const live = (Array.isArray(rows) ? rows : []).map((r) => {
+export function vmSessionRows(rows, { now = Date.now() } = {}) {
+  return (Array.isArray(rows) ? rows : []).map((r) => {
     let modelId = '';
     try {
       const m = typeof r.model === 'string' ? JSON.parse(r.model) : (r.model || {});
@@ -74,19 +75,24 @@ export function summarizeVmSessions(rows) {
     } catch {
       modelId = String(r.model || '').trim();
     }
+    if (!modelId) return null;
     const dir = String(r.directory || '').trim();
     const title = String(r.title || '').trim();
     const label = title && title.toLowerCase() !== 'none' ? title : (dir.split('/').pop() || dir);
     const streaming = String(r.lastType || '') === 'assistant' && (r.lastCompleted === null || r.lastCompleted === undefined);
-    return { modelId, label, working: streaming || String(r.lastType || '') === 'user' };
-  }).filter((s) => s.modelId);
-  if (!live.length) return null;
-  const working = live.filter((s) => s.working);
-  const head = live[0].modelId;
-  const agent = live.length > 1 ? `opencode/${head} (+${live.length - 1})` : `opencode/${head}`;
-  const mark = (s) => `${s.label} [${s.modelId}] ${s.working ? '●' : '○'}`;
-  const task = `${working.length}/${live.length} working: ` + live.slice(0, 3).map(mark).join('; ');
-  return { agent, task: task.slice(0, 240) };
+    const working = streaming || String(r.lastType || '') === 'user';
+    return {
+      location: 'VM',
+      agent: `opencode/${modelId}`,
+      status: working ? 'working' : 'idle',
+      lastPhase: working ? 'working' : 'idle',
+      task: label,
+      ticketKey: '',
+      multiClaim: false,
+      claimedTickets: [],
+      updatedAt: r.timeUpdated ? new Date(Number(r.timeUpdated)).toISOString() : new Date(now).toISOString(),
+    };
+  }).filter(Boolean);
 }
 
 /** Recent unarchived opencode sessions from the local opencode.db (best-effort). */
@@ -99,7 +105,7 @@ export function readVmOpencodeSessions({ home = os.homedir(), now = Date.now(), 
     const conn = new DatabaseSync(db, { readOnly: true });
     try {
       const rows = conn.prepare(
-        `select s.model, s.directory, s.title,
+        `select s.model, s.directory, s.title, s.time_updated as timeUpdated,
           (select m.type from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastType,
           (select m.data from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastData
         from session_v2 s where s.time_archived is null and s.time_updated > ? order by s.time_updated desc limit 5`
@@ -317,18 +323,6 @@ export function getFleetNodes(opts = {}) {
               }
             }
           }
-          if (!isWorking) {
-            // Telegram leases miss opencode CLI/TUI sessions on this same host.
-            // They carry the one thing the pane was missing: the model.
-            const summary = summarizeVmSessions(
-              readVmOpencodeSessions({ home, now, dbPath: opts.vmOpencodeDb || null })
-            );
-            if (summary) {
-              isWorking = true;
-              activeBot = summary.agent;
-              activeDetail = summary.task;
-            }
-          }
           agent = activeBot;
           status = isWorking ? 'working' : 'idle';
           lastPhase = status;
@@ -404,6 +398,26 @@ export function getFleetNodes(opts = {}) {
   for (const loc of DEFAULT_LOCATIONS) {
     seenLocations.add(loc);
     const beat = fleetNodeHeartbeats.get(loc);
+    // VM is one pane but many agents: every live opencode session is its own
+    // row (one agent per row), never an aggregate sentence. The sheet claim
+    // attaches to the first row so the ticket chip still links the pane.
+    if (loc === 'VM' && !beat) {
+      const sessionRows = vmSessionRows(
+        readVmOpencodeSessions({ home: opts.home || os.homedir(), now, dbPath: opts.vmOpencodeDb || null }),
+        { now }
+      );
+      if (sessionRows.length) {
+        const matchingTickets = activeTickets.filter((t) => matchesLocation(loc, t.owner));
+        const claimedKeys = matchingTickets.map((t) => t.id);
+        result.push(...sessionRows.map((row, i) => ({
+          ...row,
+          ticketKey: i === 0 ? claimedKeys.join(', ') : '',
+          multiClaim: i === 0 && claimedKeys.length > 1,
+          claimedTickets: i === 0 ? claimedKeys : [],
+        })));
+        continue;
+      }
+    }
     result.push(resolveNode(loc, beat));
   }
 
