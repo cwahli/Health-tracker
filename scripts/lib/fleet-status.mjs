@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 import { workerStatus } from './worker-presence.mjs';
 
@@ -23,6 +24,11 @@ export const REPO_ROOT = path.resolve(HERE, '..', '..');
 export const FLEET_CACHE_TTL_MS = 15000;
 export const DEFAULT_LOCATIONS = ['Mac', 'VM', 'Grok VM', 'Mobile', 'Collab'];
 export const FLEET_STALE_TTL_MS = 15 * 60 * 1000;
+// A beat this old means its reporter is gone (process ended, machine offline):
+// the pane returns to offline instead of showing stale forever.
+export const FLEET_OFFLINE_TTL_MS = 60 * 60 * 1000;
+// Freshness window for live VM opencode CLI sessions in the VM fallback.
+export const VM_OPENCODE_WINDOW_MS = 15 * 60 * 1000;
 
 let fleetTicketsCache = { cachedAt: 0, rows: [] };
 const fleetNodeHeartbeats = new Map();
@@ -36,11 +42,96 @@ export function fleetBeatsDir() {
   return dir;
 }
 
+/** Disk file backing one location's beat (same sanitization as the writer). */
+export function beatFilePath(location) {
+  return path.join(fleetBeatsDir(), `${String(location || '').toLowerCase().replace(/[^a-z0-9_-]/g, '_')}.json`);
+}
+
+let _DatabaseSync = null;
+let _sqliteTried = false;
+function sqliteDriver() {
+  if (!_sqliteTried) {
+    _sqliteTried = true;
+    try {
+      _DatabaseSync = createRequire(import.meta.url)('node:sqlite').DatabaseSync;
+    } catch {}
+  }
+  return _DatabaseSync;
+}
+
+/**
+ * Live opencode CLI sessions on this host (same machine the gateway runs on).
+ * Pure shape in, display strings out — tested with a fixture DB, never the live one.
+ * Each row may carry lastType/lastCompleted from its newest session_message:
+ * a streaming assistant message (no completed stamp) means working.
+ */
+export function summarizeVmSessions(rows) {
+  const live = (Array.isArray(rows) ? rows : []).map((r) => {
+    let modelId = '';
+    try {
+      const m = typeof r.model === 'string' ? JSON.parse(r.model) : (r.model || {});
+      modelId = String(m.id || '').trim();
+    } catch {
+      modelId = String(r.model || '').trim();
+    }
+    const dir = String(r.directory || '').trim();
+    const title = String(r.title || '').trim();
+    const label = title && title.toLowerCase() !== 'none' ? title : (dir.split('/').pop() || dir);
+    const streaming = String(r.lastType || '') === 'assistant' && (r.lastCompleted === null || r.lastCompleted === undefined);
+    return { modelId, label, working: streaming || String(r.lastType || '') === 'user' };
+  }).filter((s) => s.modelId);
+  if (!live.length) return null;
+  const working = live.filter((s) => s.working);
+  const head = live[0].modelId;
+  const agent = live.length > 1 ? `opencode/${head} (+${live.length - 1})` : `opencode/${head}`;
+  const mark = (s) => `${s.label} [${s.modelId}] ${s.working ? '●' : '○'}`;
+  const task = `${working.length}/${live.length} working: ` + live.slice(0, 3).map(mark).join('; ');
+  return { agent, task: task.slice(0, 240) };
+}
+
+/** Recent unarchived opencode sessions from the local opencode.db (best-effort). */
+export function readVmOpencodeSessions({ home = os.homedir(), now = Date.now(), windowMs = VM_OPENCODE_WINDOW_MS, dbPath = null } = {}) {
+  try {
+    const DatabaseSync = sqliteDriver();
+    if (!DatabaseSync) return [];
+    const db = dbPath || path.join(home, '.local', 'share', 'opencode', 'opencode.db');
+    if (!fs.existsSync(db)) return [];
+    const conn = new DatabaseSync(db, { readOnly: true });
+    try {
+      const rows = conn.prepare(
+        `select s.model, s.directory, s.title,
+          (select m.type from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastType,
+          (select m.data from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastData
+        from session_v2 s where s.time_archived is null and s.time_updated > ? order by s.time_updated desc limit 5`
+      ).all(now - windowMs);
+      for (const r of rows) {
+        try {
+          const d = typeof r.lastData === 'string' ? JSON.parse(r.lastData) : null;
+          r.lastCompleted = d && d.time ? (d.time.completed ?? null) : null;
+        } catch {
+          r.lastCompleted = null;
+        }
+      }
+      return rows;
+    } finally {
+      try { conn.close(); } catch {}
+    }
+  } catch {
+    return [];
+  }
+}
+
 /** Record a distributed heartbeat from a machine/agent pane. */
 export function recordFleetHeartbeat(data, { now = Date.now() } = {}) {
   if (!data || typeof data !== 'object') return { ok: false, error: 'invalid payload' };
   const location = String(data.location || 'Unknown').trim();
-  const agent = String(data.agent || data.model || 'Unknown').trim();
+  // The pane renders agent verbatim, so an agent-less beat would paint
+  // "Unknown" as if it were a model. Refuse it instead of storing it.
+  const rawAgent = String(data.agent || data.model || '').trim();
+  if (!rawAgent || rawAgent.toLowerCase() === 'unknown' || rawAgent === '—') {
+    return { ok: false, error: 'missing agent' };
+  }
+  const agent = rawAgent;
   const phase = String(data.phase || data.status || 'working').trim();
   const task = String(data.task || data.sentence || '').slice(0, 240);
   const ticketKey = String(data.ticketKey || data.ticket || '').trim();
@@ -60,7 +151,7 @@ export function recordFleetHeartbeat(data, { now = Date.now() } = {}) {
 
   // Persist to local disk cache
   try {
-    const filePath = path.join(fleetBeatsDir(), `${location.toLowerCase().replace(/[^a-z0-9_-]/g, '_')}.json`);
+    const filePath = beatFilePath(location);
     fs.writeFileSync(filePath, JSON.stringify(record, null, 2), 'utf8');
   } catch {}
 
@@ -177,7 +268,17 @@ export function getFleetNodes(opts = {}) {
         task = beat.task || 'Offline (explicit disconnect)';
       } else {
         const ageMs = Math.max(0, now - (beat.updatedAtMs || 0));
-        if (ageMs > FLEET_STALE_TTL_MS) {
+        if (ageMs > FLEET_OFFLINE_TTL_MS) {
+          // Reporter gone (process ended, machine offline): back to offline
+          // instead of a stale badge forever. Drop the evidence both places.
+          status = 'offline';
+          lastPhase = 'offline';
+          task = 'No reporter (last beat expired)';
+          agent = '—';
+          updatedAt = null;
+          try { fleetNodeHeartbeats.delete(beat.location); } catch {}
+          try { fs.unlinkSync(beatFilePath(beat.location)); } catch {}
+        } else if (ageMs > FLEET_STALE_TTL_MS) {
           status = 'stale';
           task = beat.task ? beat.task : `Last: ${reportedPhase}`;
         } else {
@@ -214,6 +315,18 @@ export function getFleetNodes(opts = {}) {
                   }
                 } catch {}
               }
+            }
+          }
+          if (!isWorking) {
+            // Telegram leases miss opencode CLI/TUI sessions on this same host.
+            // They carry the one thing the pane was missing: the model.
+            const summary = summarizeVmSessions(
+              readVmOpencodeSessions({ home, now, dbPath: opts.vmOpencodeDb || null })
+            );
+            if (summary) {
+              isWorking = true;
+              activeBot = summary.agent;
+              activeDetail = summary.task;
             }
           }
           agent = activeBot;
