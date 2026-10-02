@@ -250,8 +250,7 @@
         "tokenEnv": "OPENCODE_BOT_TOKEN"
       },
       "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-opencode",
-        "healthRole": "test_planner"
+        "playwrightOutputDir": "/tmp/bot-host-shots-opencode"
       }
     },
     {
@@ -265,8 +264,7 @@
         "tokenEnv": "ANDROID_OPENCODE_BOT_TOKEN"
       },
       "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-android",
-        "healthRole": "health_analyst"
+        "playwrightOutputDir": "/tmp/bot-host-shots-android"
       }
     },
     {
