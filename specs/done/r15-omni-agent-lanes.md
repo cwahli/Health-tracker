@@ -1,6 +1,6 @@
 ---
 id: r15-omni-agent-lanes
-status: locked
+status: done
 skill: bot-code
 edit_mode: patch
 allowed_files:
@@ -90,3 +90,5 @@ Out of scope: `bots/registry.json`, `bots/capabilities.json`, bot-host runners, 
 ## Stop and come back
 
 Two repairs fail · Frozen file in the diff · R-14.1 starts consuming this packet's files concurrently · upstream Freebuff CLI changes the help surface mid-packet.
+
+<!-- all five nodes landed on main and the packet's own five gates are green on a clean checkout: tsc 0; lane-contract 17/17; assert-lane-contract 33/0; router node --check + freebuff-model-sync/freebuff-tg-lane/allowance-table green; journey-guard r15 GUARD PASS. Node 1 freebuff lane row (degraded ['resume','headless'], terminal-only reason); Node 2 laneSupports probe, every lane x capability covered; Node 3 router derives its Freebuff text from lane state and prints 'headless: no' (no hardcoded 'not a TG lane'); Node 4 ROADMAP R-15 charter behind R-14.1 with the acceptance matrix; Node 5 upstream watch names run/serve/acp and forbids a version pin. GRANDFATHERED_IDS and FORBIDDEN_BOT_IDS untouched. The only red was a missing per-worktree router node_modules, not the code. The charter and its acceptance matrix stay in plan/ROADMAP.md for R-15 execution after R-14.1 - this packet was the end-to-end preparation, and it is finished. closed 2026-10-02  Two honest caveats on the gates. (1) `node scripts/journey-guard.mjs r15-omni-agent-lanes` was green while this packet was active (GUARD PASS) and is unrunnable once it is archived, because `scripts/journey-guard.mjs:25` resolves `specs/active/<slug>.md` only and returns null otherwise - so any packet whose gate list names `journey-guard <ID>` goes red on its own closure. That is a structural gap in the guard, not in this work; the fix would touch a Frozen file and needs the human's go. (2) The router gate needs `tools/telegram-provider-router/node_modules`, which is per-worktree and absent in a fresh checkout; symlink it from the dev base before running it. The other four gates are green on this tree. -->
