@@ -112,11 +112,31 @@ export function toTelegramCommands() {
  * lands on the button. Pure (tested in tests/bot-host.test.ts); add new
  * payloads here, not as `case` branches in bot-host.mjs.
  */
+/**
+ * Spellings that route to a published command without being one.
+ *
+ * Kept out of BOT_COMMANDS on purpose: the popup and /help list what this bot
+ * does, and two names for one screen is one too many there. A reader who types
+ * the near-miss gets the screen, not a menu telling them they got it wrong.
+ */
+export const COMMAND_ALIASES = {
+  freemodels: 'freemodel',
+};
+
 export function resolveCommandName(cmd) {
-  if (String(cmd?.name || '').toLowerCase() === 'start'
+  const name = String(cmd?.name || '').toLowerCase();
+  if (name === 'start'
     && String(cmd?.args || '').trim().toLowerCase() === 'bugs') {
     return 'bugs';
   }
+  // The plural is the spelling a reader actually types. `/freemodels` reached the
+  // switch as its own name, matched no case, and came back "Unknown command" with
+  // the whole menu — a wall of text instead of the one screen they asked for. The
+  // singular stays the published name (it is the one in the popup and in /help);
+  // this only makes the near-miss land on the same handler. Aliases live here
+  // rather than as a second `case` so the command-parity gate still sees one
+  // command, not two.
+  if (COMMAND_ALIASES[name]) return COMMAND_ALIASES[name];
   return cmd?.name;
 }
 

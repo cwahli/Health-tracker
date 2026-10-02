@@ -37,6 +37,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   BOT_COMMANDS,
+  COMMAND_ALIASES,
   COMMAND_NAMES,
   HIDDEN_COMMANDS,
   HELP_USAGE,
@@ -157,6 +158,23 @@ const failures = (() => {
     }
   } catch (err) {
     extra.push({ kind: 'bad-role', command: '', detail: `roles.json unreadable: ${String(err?.message || err).slice(0, 200)}` });
+  }
+  const canonicalSet = new Set(COMMAND_NAMES);
+// An alias must point at a command that EXISTS and is published. The failure
+  // this covers is real: `/freemodels` (plural, the spelling a reader types)
+  // matched no case and came back "Unknown command" plus the whole menu — the
+  // opposite of the one screen that was asked for. An alias that silently rots
+  // into pointing at nothing is the same failure with a shorter name.
+  for (const [alias, target] of Object.entries(COMMAND_ALIASES)) {
+    if (!canonicalSet.has(target)) {
+      extra.push({ kind: 'dangling-alias', command: alias, detail: `/${alias} routes to /${target}, which is not a published command.` });
+    }
+    if (canonicalSet.has(alias)) {
+      extra.push({ kind: 'alias-is-published', command: alias, detail: `/${alias} is in BOT_COMMANDS as well as COMMAND_ALIASES — one name, one place.` });
+    }
+    if (!help.includes(`/${target}`)) {
+      extra.push({ kind: 'alias-target-missing-from-help', command: alias, detail: `/${alias} routes to /${target}, which helpText() does not list.` });
+    }
   }
   return [...extra, ...audit({
     canonical: [...COMMAND_NAMES],
