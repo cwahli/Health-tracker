@@ -519,19 +519,24 @@ test('VM pane shows one row per live opencode session with model and working mar
   msg.run('ses_idle', 'idle', t0 - 4 * 60 * 1000, JSON.stringify({ time: { created: 1 }, outcome: 'succeeded' }));
   ins.run('ses_old', JSON.stringify({ id: 'old-model', providerID: 'opencode' }), '/home/ubuntu', 'Cold session', t0 - 30 * 60 * 1000, null);
   ins.run('ses_arch', JSON.stringify({ id: 'archived-model', providerID: 'opencode' }), '/home/ubuntu', 'Archived', t0 - 1 * 60 * 1000, t0);
+  // Row clock stale but the message stream is fresh: a turn still generating.
+  ins.run('ses_stream', JSON.stringify({ id: 'stream-model', providerID: 'opencode' }), '/home/ubuntu', 'Slow stream', t0 - 40 * 60 * 1000, null);
+  msg.run('ses_stream', 'assistant', t0 - 2 * 60 * 1000, JSON.stringify({ time: { created: 1, streamed: 2 } }));
   db.close();
 
   // One row per session: no aggregate sentence, each row carries its own model.
   const tickets = [{ id: 'spec:vm-claim', owner: 'Some Agent @ vps-france', status: 'In progress' }];
   const nodes = getFleetNodes({ now: t0, home: tmpHome, vmOpencodeDb: dbPath, tickets });
   const vmRows = nodes.filter((n) => n.location === 'VM');
-  assert.equal(vmRows.length, 2);
+  assert.equal(vmRows.length, 3);
   assert.equal(vmRows[0].agent, 'opencode/space-bunny-free');
   assert.equal(vmRows[0].status, 'working');
   assert.equal(vmRows[0].task, 'Meal QA audit');
   assert.equal(vmRows[1].agent, 'opencode/muse-spark');
   assert.equal(vmRows[1].status, 'idle');
   assert.equal(vmRows[1].task, 'Health-tracker');
+  assert.equal(vmRows[2].agent, 'opencode/stream-model');
+  assert.equal(vmRows[2].status, 'working');
   assert.ok(!vmRows.some((r) => r.task.includes('working:')));
   assert.ok(!vmRows.some((r) => r.task.includes('old-model') || r.task.includes('archived-model')));
 

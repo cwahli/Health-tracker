@@ -90,12 +90,15 @@ export function vmSessionRows(rows, { now = Date.now() } = {}) {
       ticketKey: '',
       multiClaim: false,
       claimedTickets: [],
-      updatedAt: r.timeUpdated ? new Date(Number(r.timeUpdated)).toISOString() : new Date(now).toISOString(),
+      updatedAt: r.lastSeenMs ? new Date(Number(r.lastSeenMs)).toISOString() : (r.timeUpdated ? new Date(Number(r.timeUpdated)).toISOString() : new Date(now).toISOString()),
     };
   }).filter(Boolean);
 }
 
-/** Recent unarchived opencode sessions from the local opencode.db (best-effort). */
+/** Recent unarchived opencode sessions from the local opencode.db (best-effort).
+ * Freshness is the latest activity of either clock: the session row
+ * (moves on step completion) or its message stream (moves while a turn is
+ * still generating). A long streaming turn must not vanish mid-turn. */
 export function readVmOpencodeSessions({ home = os.homedir(), now = Date.now(), windowMs = VM_OPENCODE_WINDOW_MS, dbPath = null } = {}) {
   try {
     const DatabaseSync = sqliteDriver();
@@ -107,9 +110,11 @@ export function readVmOpencodeSessions({ home = os.homedir(), now = Date.now(), 
       const rows = conn.prepare(
         `select s.model, s.directory, s.title, s.time_updated as timeUpdated,
           (select m.type from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastType,
-          (select m.data from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastData
-        from session_v2 s where s.time_archived is null and s.time_updated > ? order by s.time_updated desc limit 5`
-      ).all(now - windowMs);
+          (select m.data from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastData,
+          (select max(m.time_created) from session_message m where m.session_id = s.id) as lastMsgMs
+        from session_v2 s where s.time_archived is null order by s.time_updated desc limit 10`
+      ).all();
+      const fresh = [];
       for (const r of rows) {
         try {
           const d = typeof r.lastData === 'string' ? JSON.parse(r.lastData) : null;
@@ -117,8 +122,13 @@ export function readVmOpencodeSessions({ home = os.homedir(), now = Date.now(), 
         } catch {
           r.lastCompleted = null;
         }
+        const seen = Math.max(Number(r.timeUpdated || 0), Number(r.lastMsgMs || 0));
+        if (now - seen > windowMs) continue;
+        r.lastSeenMs = seen;
+        fresh.push(r);
+        if (fresh.length >= 5) break;
       }
-      return rows;
+      return fresh;
     } finally {
       try { conn.close(); } catch {}
     }
