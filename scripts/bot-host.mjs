@@ -4110,6 +4110,35 @@ export function tuiStatusLine(botId, sessionId) {
   return `tui: ${who} · ${use}${age}${sess}`;
 }
 
+/**
+ * The health room's brief ask — "work on the brief", "update the documents".
+ *
+ * It is not a question for the seats and not a slash command: it runs the same
+ * publisher `/health refresh` runs and the room gets the same reply. While the
+ * gate is open the drafts publish and the analysis stays withheld — the refresh
+ * already decides that, so there is no refusal line to add here. A refresh that
+ * cannot run keeps its own stage and reason, and says nothing was invented.
+ * `refresh` is injectable so the sensor can drive the turn with a fixture run.
+ */
+export async function answerBriefAsk({ projectId = 'external-health', botId = '', refresh } = {}) {
+  const run = typeof refresh === 'function' ? refresh : () => runHealthRefresh({ projectId, botId });
+  let res;
+  try {
+    res = await run();
+  } catch (err) {
+    return { answered: true, usedModel: false, text: `❌ Working the brief failed: ${err.message}`, fallbackReason: `brief failed: ${err.message}` };
+  }
+  if (!res?.ok) {
+    return {
+      answered: true,
+      usedModel: false,
+      text: `❌ The brief could not be worked (${res?.stage || 'unknown'}): ${res?.error || 'the publisher gave no reason'}`,
+      fallbackReason: `brief refused: ${res?.stage || 'unknown'}`,
+    };
+  }
+  return { answered: true, usedModel: false, text: formatRefreshText(res), markdown: true };
+}
+
 async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0 }) {
   // Same boundary rule as handleCallback: one String type for chat ids
   // everywhere downstream, so disk round-trips stop invalidating sessions.
@@ -4196,32 +4225,43 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     let reply;
     let typing;
     try {
-      const artifact = readHealthVerify(workspace);
-      const gate = artifact && gateFromArtifact(artifact);
-      if (gate?.total > 0 && typeof api.sendChatAction === 'function') {
-        const ping = () => {
-          const pending = api.sendChatAction(chatId, 'typing');
-          if (pending && typeof pending.catch === 'function') pending.catch(() => {});
-        };
-        ping();
-        typing = setInterval(ping, 4000);
-        typing.unref?.();
+      if (healthTurn.mode === 'brief') {
+        // A brief ask is not a question for the seats: it runs the publisher,
+        // under the same busy guard, and the room gets the refresh reply.
+        await api.sendMessage(
+          chatId,
+          '📄 *Working on the brief — verify first, then update the four documents in place...*',
+          { parse_mode: 'Markdown' },
+        ).catch(() => {});
+        reply = await answerBriefAsk({ projectId: 'external-health', botId: config.id });
+      } else {
+        const artifact = readHealthVerify(workspace);
+        const gate = artifact && gateFromArtifact(artifact);
+        if (gate?.total > 0 && typeof api.sendChatAction === 'function') {
+          const ping = () => {
+            const pending = api.sendChatAction(chatId, 'typing');
+            if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+          };
+          ping();
+          typing = setInterval(ping, 4000);
+          typing.unref?.();
+        }
+        reply = await answerHealthGroup({
+          ...healthTurn,
+          workspace,
+          runModel: async ({ prompt }) => {
+            const { runGemini } = await import('./lib/agent-gemini.mjs');
+            const res = await runGemini({
+              prompt,
+              model: process.env.COUNCIL_MODEL || 'gemini/gemini-3.7-flash',
+              timeoutMs: 120000,
+            });
+            const out = String(res?.finalText || '').trim();
+            if (!out) throw new Error(res?.lastError || 'the model returned no text');
+            return out;
+          },
+        });
       }
-      reply = await answerHealthGroup({
-        ...healthTurn,
-        workspace,
-        runModel: async ({ prompt }) => {
-          const { runGemini } = await import('./lib/agent-gemini.mjs');
-          const res = await runGemini({
-            prompt,
-            model: process.env.COUNCIL_MODEL || 'gemini/gemini-3.7-flash',
-            timeoutMs: 120000,
-          });
-          const out = String(res?.finalText || '').trim();
-          if (!out) throw new Error(res?.lastError || 'the model returned no text');
-          return out;
-        },
-      });
     } catch (err) {
       await api.sendMessage(chatId, `The health seats did not finish: ${err.message}`).catch(() => {});
       return;
@@ -4232,7 +4272,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     if (reply?.fallbackReason) {
       console.log(`[${config.id}] health group ${healthTurn.mode}${healthTurn.roleId ? ` ${healthTurn.roleId}` : ''} fell back: ${reply.fallbackReason}`);
     }
-    if (reply?.text) await api.sendMessage(chatId, reply.text).catch(() => {});
+    if (reply?.text) {
+      await api.sendMessage(chatId, reply.text, reply.markdown ? { parse_mode: 'Markdown' } : undefined).catch(() => {});
+    }
     if (reply?.answered) {
       if (healthTurn.mode === 'seat') forgetTaxGroup(taxWorkspace, chatId);
       recordActiveThread(chatId, {

@@ -10,6 +10,11 @@
  * one reply. A room question is one shared answer. A named seat answers from
  * its own chair with what the council would agree. Acknowledgements stay quiet.
  *
+ * A brief ask — "work on the brief", "update the documents" — is neither: it
+ * runs the publisher and the room gets the refresh reply. A question that just
+ * mentions the brief is a normal answer, and the brief's own state (last
+ * refresh, the four documents, what is withheld) rides along as facts.
+ *
  * The data gate still bounds the answer. While it is open the model may talk
  * about the open repairs and must not name a disease, a drug, or a number
  * the repairs do not already contain. A lab test may be named only when the
@@ -22,7 +27,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { gateFromArtifact } from './health/docs.mjs';
+import { DOC_SPECS, DOCS_FILE, REFRESH_FILE, gateFromArtifact, loadDocsRegistry } from './health/docs.mjs';
 import { digestVerify } from './health/context.mjs';
 
 export const HEALTH_SEAT_ORDER = [
@@ -90,6 +95,18 @@ export function isHealthAsk(text) {
 }
 
 /**
+ * An explicit ask to work the brief itself — "work on the brief", "update the
+ * documents", "refresh the docs". A brief ask is not a question for the seats:
+ * it runs the publisher, so it gets its own turn kind. A question that merely
+ * mentions the documents ("what do the documents say") stays a council ask.
+ */
+const BRIEF_ASK = /\b(?:work on|update|refresh|renew|redo|bring)\b(?!\s+me\b)[\s\w-]{0,24}?\b(?:brief|documents|docs|document)\b/i;
+
+export function isBriefAsk(text) {
+  return BRIEF_ASK.test(plainQuestion(text));
+}
+
+/**
  * What this group message should do, after addressing has already picked a bot.
  * `null` means the normal turn. `skip` means this bot was addressed and the
  * text is not a question.
@@ -108,6 +125,7 @@ export function classifyHealthGroupTurn({ kind, addr, text, projectId, taxChat }
   const healthChat = !projectId || projectId === 'health-tracker' || projectId === 'external-health';
   if (addr.isBroadcast && healthChat && projectId !== 'chiwah-tax') {
     if (!isHealthAsk(question)) return { mode: 'skip' };
+    if (isBriefAsk(question)) return { mode: 'brief', roleId: null, question };
     return { mode: 'council', roleId: null, question };
   }
   return null;
@@ -212,8 +230,57 @@ function openContext(artifact) {
   ].join('\n');
 }
 
+/**
+ * The brief's own state, as facts for the model context: when the documents
+ * were last refreshed, what the four documents are, and which sections the
+ * publisher is holding back. Facts only — the seats still do the talking — so
+ * questions ABOUT the brief can be answered without guessing.
+ */
+export function readBriefState(workspace) {
+  const result = path.join(String(workspace || ''), 'result');
+  const state = { refresh: null, registry: null };
+  try {
+    state.refresh = JSON.parse(fs.readFileSync(path.join(result, REFRESH_FILE), 'utf8'));
+  } catch { state.refresh = null; }
+  try {
+    state.registry = loadDocsRegistry(path.join(result, DOCS_FILE));
+  } catch { state.registry = null; }
+  return state;
+}
+
+function briefContext(brief) {
+  if (!brief) return '';
+  const r = brief.refresh;
+  const registry = brief.registry || {};
+  const lines = ['Brief state. Facts from the workspace — quote them, do not rewrite them:'];
+  if (r) {
+    lines.push(`- last refresh: ${r.at || 'unknown'} (${r.mode || 'unknown'} mode) — created ${r.counts?.created ?? '?'} · updated ${r.counts?.updated ?? '?'} · skipped ${r.counts?.skipped ?? '?'} · failed ${r.counts?.failed ?? '?'}`);
+  } else {
+    lines.push('- last refresh: none recorded in this workspace');
+  }
+  lines.push(`- documents: ${DOC_SPECS.map((spec) => {
+    const doc = registry.docs?.[spec.key];
+    if (!doc) return `${spec.title} — no write recorded`;
+    return `${spec.title} — written ${doc.at || 'unknown'}${Number.isFinite(doc.open) ? `, ${doc.open} open at the write` : ''}`;
+  }).join('; ')}`);
+  if (r) {
+    const refused = Array.isArray(r.refused) ? r.refused : [];
+    lines.push(refused.length ? `- analysis withheld: ${refused.join('; ')}` : '- analysis withheld: none');
+    const why = [];
+    if (r.gate && r.gate.allowed === false) why.push(`the data gate is open (${(r.gate.open || []).join(', ') || 'open items'})`);
+    if (r.gate?.stale) why.push('the verify snapshot is past its renewal window');
+    if (r.gate?.doctor?.blocked) why.push("the Doctor's report blocks the analysis");
+    if (r.gate?.doctor?.unreadable) why.push("the Doctor's receipt does not read");
+    if (r.citationRefusals?.length) why.push(`${r.citationRefusals.length} citation(s) were refused in document 4`);
+    if (why.length) lines.push(`- why: ${why.join('; ')}`);
+  } else {
+    lines.push('- analysis withheld: nothing has been published from this workspace yet');
+  }
+  return lines.join('\n');
+}
+
 /** One prompt. The seats collaborate in the text. One model call posts it. */
-export function healthAnswerPrompt({ mode, roleId, question, artifact, refusal = '' } = {}) {
+export function healthAnswerPrompt({ mode, roleId, question, artifact, refusal = '', brief = null } = {}) {
   const gate = gateFromArtifact(artifact);
   const asked = plainQuestion(question);
   const who = mode === 'council'
@@ -250,6 +317,7 @@ export function healthAnswerPrompt({ mode, roleId, question, artifact, refusal =
     ...rules,
     '',
     gate.allowed ? closedContext(artifact) : openContext(artifact),
+    ...(brief ? ['', briefContext(brief)] : []),
     '',
     `Question: ${asked}`,
   ].join('\n');
@@ -333,6 +401,7 @@ function clipReply(text) {
  */
 export async function answerHealthGroup({ mode, roleId, question, workspace, artifact = undefined, runModel } = {}) {
   const loaded = artifact !== undefined ? artifact : readHealthVerify(workspace);
+  const brief = workspace ? readBriefState(workspace) : null;
   const gate = loaded ? gateFromArtifact(loaded) : null;
   const canModel = Boolean(gate?.total) && typeof runModel === 'function';
   if (mode !== 'council' && !HEALTH_SEAT_IDS.includes(roleId)) {
@@ -349,7 +418,7 @@ export async function answerHealthGroup({ mode, roleId, question, workspace, art
 
   let raw = '';
   try {
-    raw = await ask(healthAnswerPrompt({ mode, roleId, question, artifact: loaded }));
+    raw = await ask(healthAnswerPrompt({ mode, roleId, question, artifact: loaded, brief }));
   } catch (err) {
     const reason = `model failed: ${err.message}`;
     return { answered: true, usedModel: false, text: clipReply(fallbackLine(reason)), fallbackReason: reason };
@@ -361,7 +430,7 @@ export async function answerHealthGroup({ mode, roleId, question, workspace, art
   // own reason, so the model can rewrite instead of the room getting a canned
   // paragraph that never answers.
   try {
-    raw = await ask(healthAnswerPrompt({ mode, roleId, question, artifact: loaded, refusal: verdict.reason }));
+    raw = await ask(healthAnswerPrompt({ mode, roleId, question, artifact: loaded, refusal: verdict.reason, brief }));
   } catch (err) {
     const reason = `model failed: ${err.message}`;
     return { answered: true, usedModel: false, text: clipReply(fallbackLine(reason)), fallbackReason: reason };

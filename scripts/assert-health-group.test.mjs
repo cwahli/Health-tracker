@@ -14,8 +14,14 @@
  * test, a condition, or a new number goes back to the model once with the
  * checker's reason; only a second refusal falls back to one short line that
  * names the reason. The host logs that reason.
+ *
+ * A brief ask — "work on the brief", "update the documents" — is its own
+ * kind: it runs the publisher under the same busy guard the seats use, and the
+ * room gets the refresh reply (drafts publish, analysis withheld). Questions
+ * about the brief see its state as facts in the model context.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,6 +37,8 @@ import {
   formatHealthGroupReply,
   isHealthAsk,
 } from './lib/health-group.mjs';
+import { formatRefreshText } from './health-runner.mjs';
+import { answerBriefAsk } from './bot-host.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOST = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
@@ -115,6 +123,19 @@ check('thanks to a named seat is skipped', seatThanks?.mode === 'skip');
 check('a named seat is a seat turn even in another project', seat?.mode === 'seat' && seat.roleId === 'test_planner');
 check('a bare question in another external project is not stolen', otherProject == null);
 check('a tax room is not answered as the health council', taxRoom == null);
+
+// Plan item 3: an explicit brief ask is its own turn kind. A question that
+// merely mentions the documents stays a council ask.
+const briefAsk = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'can you work on the brief?', projectId: 'health-tracker' });
+const briefRefresh = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'please refresh the docs when you can', projectId: 'health-tracker' });
+const briefUpdate = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'update the documents', projectId: 'external-health' });
+const docsQuestion = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'what do the documents say about my test plan?', projectId: 'health-tracker' });
+const briefTax = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'update the documents', projectId: 'chiwah-tax', taxChat: true });
+check('a brief ask is its own kind', briefAsk?.mode === 'brief' && briefAsk.roleId === null && /work on the brief/.test(briefAsk.question));
+check('refresh the docs is a brief ask', briefRefresh?.mode === 'brief');
+check('update the documents is a brief ask', briefUpdate?.mode === 'brief');
+check('a question about the documents stays a council ask', docsQuestion?.mode === 'council');
+check('a tax room does not get a brief turn', briefTax == null);
 
 const openArtifact = {
   at: '2026-10-01T00:00:00Z',
@@ -258,6 +279,73 @@ const noModel = await answerHealthGroup({
 });
 check('an open gate without a model names that reason', noModel.usedModel === false && /no council model is wired to answer/.test(noModel.text) && noModel.fallbackReason === 'no council model');
 
+// A brief ask runs the publisher and returns its reply — this is the function
+// the bot-host health turn calls. The fixture is the refresh result's shape.
+const briefRuns = [];
+const briefResult = {
+  ok: true,
+  paths: { result: '/workspace/result' },
+  artifact: {
+    at: '2026-10-02T10:00:00Z',
+    projectId: 'external-health',
+    folderId: 'folder-real',
+    mode: 'draft',
+    dryRun: false,
+    gate: { allowed: false, open: ['H-1', 'H-4'], stale: false },
+    refused: ['Candidate conditions', 'Order of business'],
+    citationRefusals: [],
+    counts: { created: 0, updated: 4, skipped: 0, failed: 0 },
+    receipts: [
+      { key: 'snapshot', title: 'Health Snapshot', action: 'update', docId: 'doc-1', refused: 0 },
+      { key: 'conditions', title: 'Conditions & Actions', action: 'update', docId: 'doc-2', refused: 0 },
+      { key: 'test_plan', title: 'Test Plan', action: 'update', docId: 'doc-3', refused: 0 },
+      { key: 'insights', title: 'Medical Insights', action: 'update', docId: 'doc-4', refused: 0 },
+    ],
+    verify: { at: '2026-10-02T10:00:00Z', sheet: 'sheet.xlsx', fixList: { closed: 0, open: 8, waived: 0 } },
+  },
+};
+const briefReply = await answerBriefAsk({
+  refresh: async () => { briefRuns.push(1); return briefResult; },
+});
+check('the brief turn runs the publisher once', briefRuns.length === 1, `runs: ${briefRuns.length}`);
+check('the brief reply is the real refresh text', briefReply.text === formatRefreshText(briefResult) && /drafts published, analysis withheld/.test(briefReply.text));
+check('the brief turn does not run the seats', briefReply.usedModel === false && briefReply.answered === true);
+const briefRefused = await answerBriefAsk({ refresh: async () => ({ ok: false, stage: 'config', error: 'no documents folder — set HEALTH_DOCS_FOLDER' }) });
+check('a refused refresh keeps its stage and never a fallback line', /could not be worked \(config\)/.test(briefRefused.text) && !/couldn't put that answer together/.test(briefRefused.text) && briefRefused.fallbackReason === 'brief refused: config');
+
+// The brief's own state reaches the model context as facts, so a question
+// about the brief is answered from the workspace, not from memory.
+const briefDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-brief-state-'));
+fs.mkdirSync(path.join(briefDir, 'result'), { recursive: true });
+fs.writeFileSync(path.join(briefDir, 'result', 'health-refresh.json'), JSON.stringify({
+  at: '2026-10-02T09:30:00Z',
+  mode: 'draft',
+  counts: { created: 0, updated: 4, skipped: 0, failed: 0 },
+  gate: { allowed: false, open: ['H-1', 'H-4'], stale: false },
+  refused: ['Candidate conditions', 'Order of business'],
+}));
+fs.writeFileSync(path.join(briefDir, 'result', 'health-docs.json'), JSON.stringify({
+  updatedAt: '2026-10-02T09:30:00Z',
+  docs: {
+    snapshot: { id: 'd1', title: 'Health Snapshot', at: '2026-10-02T09:30:00Z', open: 8 },
+    conditions: { id: 'd2', title: 'Conditions & Actions', at: '2026-10-02T09:30:00Z', open: 8 },
+    test_plan: { id: 'd3', title: 'Test Plan', at: '2026-10-02T09:30:00Z', open: 8 },
+    insights: { id: 'd4', title: 'Medical Insights', at: '2026-10-02T09:30:00Z', open: 8 },
+  },
+}));
+const briefPrompts = [];
+await answerHealthGroup({
+  mode: 'council',
+  question: 'what does the brief say right now?',
+  artifact: openArtifact,
+  workspace: briefDir,
+  runModel: async ({ prompt }) => { briefPrompts.push(prompt); return 'The brief facts are in the context above.'; },
+});
+check('the model context carries the last refresh time', /2026-10-02T09:30:00Z/.test(briefPrompts[0] || ''));
+check('the model context names all four documents', ['Health Snapshot', 'Conditions & Actions', 'Test Plan', 'Medical Insights'].every((t) => (briefPrompts[0] || '').includes(t)));
+check('the model context names a withheld section', /Candidate conditions/.test(briefPrompts[0] || ''));
+fs.rmSync(briefDir, { recursive: true, force: true });
+
 const normalized = normalizeConfig(planner);
 check('normalizeConfig keeps the health seat', normalized.agent.healthRole === 'test_planner');
 
@@ -267,6 +355,12 @@ check('the group gate still comes before the health reply', gateAt > 0 && health
 check('the handler passes the dedicated seat list', HOST.includes('dedicatedRoleIds'));
 check('the handler answers with answerHealthGroup', HOST.includes('answerHealthGroup'));
 check('the handler logs the fallback reason', HOST.includes('fallbackReason'));
+const busyAt = HOST.indexOf('if (busy.has(chatId))', healthAt);
+const briefAt = HOST.indexOf("healthTurn.mode === 'brief'", healthAt);
+const releaseAt = HOST.indexOf('busy.delete(chatId)', briefAt);
+check('the brief branch sits under the same busy guard as the seats', healthAt > 0 && busyAt > healthAt && briefAt > busyAt);
+check('the brief turn runs the publisher and releases the guard', HOST.includes('answerBriefAsk({ projectId') && releaseAt > briefAt);
+check('the brief reply goes out as markdown', HOST.includes("reply.markdown ? { parse_mode: 'Markdown' }"));
 
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
