@@ -448,12 +448,17 @@ try {
   check('and the supersession score has one home, in free-lanes, reading the catalog',
     /scoreOf = laneScoreFromCatalog/.test(lanesSrc) && /from '.\/free-catalogs.mjs'/.test(lanesSrc)
     && !/scoreOf: modelScore/.test(paritySrc) && !/function modelScore\(/.test(paritySrc));
+  // A row whose provider has no credential leaves the list. It used to also print a
+  // "needs setup:" footer line naming it; there is no body to print it in any more,
+  // so what has to hold is the exclusion itself, on both surfaces.
   check('and no-credential rows leave the list on both surfaces',
-    /const needsSetup = rows\.filter\(\(r\) => r\.needsSetup\)/.test(paritySrc) && /needs setup: /.test(paritySrc));
+    /const listed = rows\.filter\(\(r\) => !r\.needsSetup\)/.test(paritySrc));
 
   // 7. /freemodel's body must not contradict /allowance.
   const read = (p) => fs.readFileSync(path.join(HERE, p), 'utf8');
   const botSrc = read('bot-host.mjs');
+  // Scoped to the /freemodel formatter: /setup legitimately prints a bullet per gap.
+  const fmBody = (botSrc.slice(botSrc.indexOf('function formatFreemodelWithDepletion'), botSrc.indexOf('/** Usable rows the ledger has no record for')) || '');
   // The rows are the canonical list in the canonical tier-group order — the same
   // helper /allowance groups with — not a second membership of the same models.
   // Within each group /freemodel sorts for use (usable by rating, unusable by
@@ -463,8 +468,38 @@ try {
     /freemodelDisplayTier\(g\.tier, location \|\| 'vps'\)/.test(botSrc) && /data: 'noop', header: true/.test(botSrc));
   check('and a heading is a real noop, not a model named noop',
     /const payload = want === 'noop' \? 'noop' : `\$\{kind\}:\$\{want\}`/.test(read('lib/commands.mjs')));
-  check('the body carries the Standard/Light titles as one line',
-    /freemodelDisplayTier\(g\.tier, location \|\| 'vps'\)/.test(botSrc) && /current: \$\{current/.test(botSrc));
+  // The body is NOTHING. The titles, the totals and the "not usable" footer all
+  // used to sit above the keyboard as a prose summary of it — a second copy of
+  // the same list in a different vocabulary, and six lines of it on a phone
+  // before the first button. The keyboard is the message now, so the body is the
+  // one invisible character Telegram will accept as a non-empty send.
+  // The character is pinned, not left to taste. U+200B looked like the answer and
+  // was not: Telegram strips it and answers "text must be non-empty", which took
+  // /freemodel down entirely. U+2060 survives the check and draws nothing.
+  check('the body is nothing at all — the keyboard is the whole message',
+    /export const FREEMODEL_EMPTY_BODY = '\\u2060';/.test(botSrc)
+    && /return \{ text: FREEMODEL_EMPTY_BODY, buttons, rows, usable, unusable \};/.test(botSrc)
+    && !/const lines = \[/.test(fmBody),
+    'the formatter must not build body lines');
+  // And it must be one the API has been shown to ACCEPT, because reading as blank
+  // and counting as text are different questions to Telegram. These are the ones
+  // measured rejected on 2026-10-02 (each sent to the live API and the reply
+  // recorded); naming them is what stops the next person re-picking U+200B.
+  // If this fails, /freemodel is a silent 400 in every chat.
+  check('the body character is one Telegram accepts as non-empty',
+    (() => {
+      // Written as code points, not as literals: these characters are invisible
+      // in an editor and in a diff, which is exactly how U+200B got shipped.
+      const REJECTED = [0x20, 0x200b, 0xfeff, 0x2800, 0x3164]
+        .map((cp) => String.fromCodePoint(cp));
+      try {
+        const m = /export const FREEMODEL_EMPTY_BODY = '\\u([0-9A-Fa-f]{4})'/.exec(botSrc);
+        return Boolean(m) && !REJECTED.includes(String.fromCodePoint(parseInt(m[1], 16)));
+      } catch {
+        return false;
+      }
+    })(),
+    'REJECTED by the API: U+0020, U+200B, U+FEFF, U+2800, U+3164');
   check('and the per-button tier word is gone, now that the heading says it',
     !/tierWord/.test(botSrc));
 
@@ -484,14 +519,16 @@ try {
   check('/freemodel no longer claims everything is available', !/all selectable lanes look available/.test(codeOnly));
   check('/freemodel writes its own header, not the raw catalog count', /const header = formatFreeModelText/ .test(botSrc) === false);
   check('the header counts rows with no ledger row separately', /with no ledger row/.test(botSrc));
-  // The message is titles, not prose: one Standard/Light title line with the
-  // counts, then the current lane — the old "Free models at …" brief is gone.
-  check('/freemodel titles the Standard/Light groups with counts', /Standard model \(/.test(botSrc) && /current: \$\{current/.test(botSrc));
+  // The titles are keyboard heading rows now, not a line of body text, and the
+  // current lane is not printed at all — there is nowhere to print it.
+  check('/freemodel titles the Standard/Light groups as heading rows, not as a body line',
+    /buttons\.push\(\{ text: headingWidth\(`\$\{freemodelDisplayTier\(g\.tier, location \|\| 'vps'\)/.test(botSrc) && !/current: \$\{current/.test(botSrc));
   check('/freemodel never prints the old location brief', !/Free models\$\{location0\}/.test(botSrc));
-  // The reason is still shown, on one line, rather than as a second per-model list.
-  check('/freemodel still says why a row is unusable, on one line', /not usable: /.test(botSrc) && /\(reset in /.test(botSrc));
-  // Scoped to the /freemodel formatter: /setup legitimately prints a bullet per gap.
-  const fmBody = (botSrc.slice(botSrc.indexOf('function formatFreemodelWithDepletion'), botSrc.indexOf('/** Usable rows the ledger has no record for')) || '');
+  // The reason a row cannot be used is on the row's own button — the ❌ mark and
+  // the compact reset countdown — rather than in a footer that listed the same
+  // models again. Nothing is lost; it just stops being said twice.
+  check('/freemodel says why a row is unusable on its own button, not in a footer list',
+    /resetIn: resetSource \? formatResetIn\(resetSource, now\)/.test(botSrc) && !/not usable: /.test(botSrc));
   check('and the /freemodel body carries no per-model bullet list', !/lines\.push\(`• /.test(fmBody) && !/Not selectable right now:/.test(fmBody));
   check('and it does not repeat the counts in a second footer', !/Allowance \(per-host ledger\)/.test(botSrc));
   // Depleted lanes stay tappable, exactly as the router does, so a tap can answer
@@ -558,7 +595,11 @@ try {
       && /lines\.push\(fitCells\(/.test(src)
       && /line: fitCells\(rowCopy\(\{ mark: ok \? "✅" : "❌"/.test(src);
   })());
-  check('and the message ends with the terminator', /lines\.push\('-'\)/.test(botSrc));
+  // /freemodel's body has no lines and therefore nothing to terminate: it never
+  // assembles a body at all. /allowance still has its own block, terminated by
+  // fitCopy's own dash.
+  check('and /freemodel has no lines to terminate, because it has no body',
+    !/lines\.push\('-'\)/.test(botSrc) && !/lines\.map\(/.test(botSrc));
 
   check('/freemodel sends its body as HTML, which is what makes it monospace', /parse_mode: 'HTML'/.test(botSrc));
   // One block for the whole message: the preamble is folded into the allowance text's

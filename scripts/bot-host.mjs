@@ -85,7 +85,6 @@ import {
   headingWidth,
   shortModelName,
   buildAllowanceTextForBots,
-  escHtml,
   formatResetIn,
   renderFreeLaneTableHtml,
   ensureBotLedger,
@@ -1005,26 +1004,51 @@ async function sendHtml(api, chatId, html) {
  * The /freemodel reply, in the router's shape.
  *
  * The router already solved this and its source says why: the per-model list is
- * the KEYBOARD, the message is a short header plus one total line, and anything
- * unavailable is "one short footer line — never a second per-model list". This
- * command was doing the opposite: 49 bullets in the body, the same 49 as
- * buttons, then a footer repeating the counts — a second list of the same models
- * in a different wording, with catalog labels on one side and the table's labels
- * on the other, so /freemodel and /allowance showed the same models as two
- * different lists.
+ * the KEYBOARD, and the message carries no second copy of it. This command was
+ * doing the opposite, twice over: 49 bullets in the body, the same 49 as buttons,
+ * then a footer repeating the counts — a second list of the same models in a
+ * different wording, with catalog labels on one side and the table's labels on
+ * the other, so /freemodel and /allowance showed the same models as two different
+ * lists. Trimming that to a header plus counts did not fix it either: the text was
+ * still a summary of the keyboard sitting above it, and on a phone it was six
+ * lines of it before the first button.
  *
- * So the models are the buttons (one row each, labelled exactly as /allowance
- * labels them, ❌ when the row cannot be used, and still tappable so a tap can
- * answer "depleted, pick this instead" the way the router's do), and the body is
- * a header, a total, and at most one footer line for what has no credential.
- * `returns.buttons` is the keyboard, built from the same projection /allowance
- * renders, so the two commands cannot disagree about a row.
+ * So the models ARE the buttons and nothing else: one row each, labelled exactly
+ * as /allowance labels them, ❌ when the row cannot be used, and still tappable so
+ * a tap can answer "depleted, pick this instead" the way the router's do. The
+ * message body is one zero-width character, because Telegram rejects an empty
+ * `sendMessage` and the keyboard has no message of its own to hang off. Counts
+ * live on `returns.usable` / `returns.unusable` for callers that want them.
+ * `returns.buttons` is built from the same projection /allowance renders, so the
+ * two commands cannot disagree about a row.
  */
-/** The same groups /allowance heads its sections with, as one readable line. */
-function tierBreakdown(groups, sep) {
-  const parts = (groups || []).filter((g) => g.rows.length).map((g) => `${g.label} ${g.rows.length}`);
-  return parts.length > 1 ? parts.join(sep) : '';
-}
+
+/**
+ * The /freemodel message body: one WORD JOINER (U+2060).
+ *
+ * Telegram rejects `sendMessage` with an empty string ("Bad Request: message text
+ * is non-empty"), and an inline keyboard has to hang off a message — so the
+ * message needs one character that renders as nothing. Which characters count is
+ * decided by the API, not by what looks blank, and the obvious ones are wrong.
+ * Measured against the live API on 2026-10-02, each sent and deleted:
+ *
+ *   " " space                          REJECTED  text must be non-empty
+ *   U+200B ZERO WIDTH SPACE            REJECTED  text must be non-empty
+ *   U+FEFF ZERO WIDTH NO-BREAK SPACE   REJECTED  text must be non-empty
+ *   U+2800 BRAILLE PATTERN BLANK       REJECTED  text must be non-empty
+ *   U+3164 HANGUL FILLER               REJECTED  MESSAGE_EMPTY
+ *   U+00AD SOFT HYPHEN                 accepted
+ *   U+034F COMBINING GRAPHEME JOINER   accepted
+ *   U+FFA0 HALFWIDTH HANGUL FILLER     accepted (but it RENDERS as a blank box)
+ *   U+2060 WORD JOINER                 accepted, and renders as nothing
+ *
+ * U+200B was shipped here first and broke /freemodel outright: every reply came
+ * back 400 and the reader saw no keyboard and no message. U+2060 is a zero-width
+ * format character, so it survives the API's emptiness check and draws nothing.
+ * Exported so the sensor can assert the body is the keyboard's alone — and named,
+ * so the next person does not go re-derive this from guesswork.
+ */
+export const FREEMODEL_EMPTY_BODY = '\u2060';
 
 export function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [] } = {}) {
   const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
@@ -1063,59 +1087,16 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   // way /allowance drops it from its table and names the variable underneath. It was
   // six rows here, which is why the two commands disagreed about the total even with
   // one canonical list.
-  const needsSetup = rows.filter((r) => r.needsSetup);
   const listed = rows.filter((r) => !r.needsSetup);
   const unusableOf = (r) => r.selectable === false || r.depleted || r.ended || r.terminalOnly;
   const usable = listed.filter((r) => !unusableOf(r));
   const unusable = listed.filter(unusableOf);
-  const noCredential = listed.filter((r) => r.inLedger === false);
-  const location0 = location ? ` at ${location}` : '';
-  // The same compact reset /allowance prints ("reset in 12h 34"), not the long
-  // label. The projection's resetLabel spells out the vendor countdown and an
-  // absolute timestamp with a timezone, which is a paragraph inside a one-line
-  // footer.
   const now = Date.now();
-  const why = (r) => (r.ended
-    ? 'promotion ended'
-    : r.terminalOnly
-      ? 'terminal only'
-      : r.depleted
-        ? `depleted${(() => {
-            const compact = r.resetAt ? formatResetIn(r.resetAt, now) : '';
-            const at = compact && compact !== '-' ? compact : (r.resetIn && r.resetIn !== '-' ? r.resetIn : '');
-            return at ? ` (reset in ${at})` : '';
-          })()}`
-        : r.reason || 'not available');
-  // The message is titles, not prose: one location-scoped Standard/Light title
-  // line with the counts, then the current lane, then at most one footer line
-  // for what cannot be used. The old three-line "Free models at …" brief is
-  // gone; the models are the keyboard below.
-  const titleOf = (g) => `${freemodelDisplayTier(g.tier, location || 'vps')} (${g.rows.length})`;
-  const lines = [
-    listed.length
-      ? `${tierGroups.map(titleOf).join(' · ')} · current: ${current || 'default'}`
-      : 'No free models are installed and authenticated on this host.',
-  ];
-  // One short footer line — never a second per-model list.
-  const footer = [];
-  if (noCredential.length) {
-    footer.push(`no ledger row: ${noCredential.slice(0, 4).map((r) => r.label).join(', ')}${noCredential.length > 4 ? `, +${noCredential.length - 4} more` : ''}`);
-  }
-  if (needsSetup.length) {
-    footer.push(`needs setup: ${needsSetup.slice(0, 3).map((r) => `${r.label} (${r.setupReason || r.reason || 'provider not set up'})`).join('; ')}${needsSetup.length > 3 ? `; +${needsSetup.length - 3} more` : ''}`);
-  }
-  if (unusable.length) {
-    footer.push(`not usable: ${unusable.slice(0, 4).map((r) => `${r.label} (${why(r)})`).join('; ')}${unusable.length > 4 ? `; +${unusable.length - 4} more` : ''}`);
-  }
-  if (footer.length) lines.push(footer.join(' — '));
-  // The same ledger table /allowance prints, from the same helper, so the two
-  // commands show the same rows in the same order with the same counts. It is a
-  // monospace block because that is the only left-aligned, column-true rendering
-  // Telegram offers; an inline button cannot be aligned at all.
-  // The list is NOT repeated in the message: it is the keyboard. A button carries the
-  // same copy /allowance prints for that row, at the same width, so the two surfaces
-  // say one thing rather than two versions of it.
-  lines.push('-');
+  // The list is NOT in the message: it IS the keyboard. A button carries the same
+  // copy /allowance prints for that row, at the same width, so the two surfaces
+  // say one thing rather than two versions of it. Nothing is repeated above them,
+  // so the body is FREEMODEL_EMPTY_BODY and the counts live on the return value.
+  //
   // One button per row, the way the router builds its /freemodel keyboard: a
   // provider tag, the model's own name, and ❌ when the row cannot be used. The tag
   // is the same plan code /allowance prints in its Plan column, which is what makes
@@ -1176,16 +1157,13 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     buttons.push({ text: rated, data: route, ref: route });
   }
   }
-  // The plain lines are escaped here and the shared table arrives already escaped,
-  // because the message now goes out with parse_mode HTML — which is what turns the
-  // table monospace and left-aligned. Without the parse mode the <code> tags showed
-  // up as literal text, and without escaping a label containing & or < would fail the
-  // whole send.
-  // The list is not repeated here. It is the keyboard, and every button carries the
-  // same copy /allowance prints for that row — so the body is the short brief (what
-  // this list is, how many rows, which are not usable) and the buttons are the rows.
-  const body = lines.map((l) => escHtml(l)).join('\n');
-  return { text: body, buttons, rows, usable, unusable };
+  // The body is a zero-width word joiner, not an empty string: Telegram rejects
+  // `sendMessage` with empty text ("Bad Request: message text is non-empty"), and
+  // an inline keyboard needs a message to hang off. See FREEMODEL_EMPTY_BODY for
+  // which "blank" characters the API actually accepts — U+200B does not, and
+  // shipping it took /freemodel down for every reader.
+  // Counts are still returned for callers that want them.
+  return { text: FREEMODEL_EMPTY_BODY, buttons, rows, usable, unusable };
 }
 
 /** Usable rows the ledger has no record for: honest, not hidden. */
@@ -3582,10 +3560,14 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
       const { annotated } = getAnnotatedFreeModels(caches, config.id);
       const selectable = annotated.filter((a) => a.selectable !== false);
       const available = selectable.filter((a) => !a.depleted);
+      // `.text`, not the whole result: this call site handed editMessageText the
+      // return object, which Telegram renders as the literal "[object Object]" in
+      // the body. Unreachable today (nothing builds a kind:'fmp' keyboard), but it
+      // is the same /freemodel body and it was wrong.
       await api.editMessageText(chatId, messageId, formatFreemodelWithDepletion(entries, annotated, {
         current: eff.model,
         location: workLocation(),
-      }), {
+      }).text, {
         parse_mode: 'HTML',
         reply_markup: modelKeyboard(
           (available.length ? available : selectable).map((entry) => ({ text: entry.label, data: entry.ref })),

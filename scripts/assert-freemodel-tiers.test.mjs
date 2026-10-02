@@ -36,7 +36,7 @@ console.log('assert-freemodel-tiers (QS-6/QS-7)\n');
 
 const host = await import(path.join(__dirname, 'bot-host.mjs'));
 const { scoreLabelFor, tierForModel, benchmarkLabel } = await import(path.join(__dirname, 'lib', 'free-catalogs.mjs'));
-const { groupRowsByTier, headingWidth, widthUnits, COPY_UNITS, shortModelName } = await import(path.join(__dirname, 'lib', 'free-lanes.mjs'));
+const { groupRowsByTier, headingWidth, widthUnits, COPY_UNITS, shortModelName, freemodelDisplayTier, sortFreemodelTierRows } = await import(path.join(__dirname, 'lib', 'free-lanes.mjs'));
 const ADV_SPACE = widthUnits(' ');
 const { formatFreemodelWithDepletion } = host;
 check('the formatter is exported for the sensor', typeof formatFreemodelWithDepletion === 'function');
@@ -51,9 +51,16 @@ const rows = [
   { label: 'Freebuff lane', lane: { model: 'deepseek-v4-flash' }, model: 'freebuff/deepseek-v4-flash', ref: 'freebuff/deepseek-v4-flash', plan: 'FB', selectable: true, terminalOnly: true, inLedger: true },
 ];
 const out = formatFreemodelWithDepletion([], [], { current: 'x', location: 'vps', canonical: rows, tableLanes: [] });
+// The body is the keyboard and nothing else. It has to be non-empty (Telegram
+// rejects an empty sendMessage) and it has to be invisible, or the summary of the
+// keyboard is back above the keyboard as a second copy of the same list.
 const text = out.text;
-check('the header and total survive the tier projection',
-  text.includes('Free models at vps') && /Total: 5 · 3 usable/.test(text), text.split('\n')[4] || '');
+const INVISIBLE = new RegExp(host.FREEMODEL_EMPTY_BODY, 'g');
+check('the body is the keyboard alone — nothing but the invisible placeholder',
+  text === host.FREEMODEL_EMPTY_BODY
+  && text.replace(INVISIBLE, '') === ''
+  && !/Free models|Total:|not usable|current:|usable|depleted|reset in/.test(text),
+  JSON.stringify(text));
 
 const btns = out.buttons;
 const btnText = (b) => (typeof b === 'string' ? b : b.text);
@@ -64,8 +71,14 @@ const labelOf = (r) => r.laneLabel || r.label;
 const nameOf = (r) => shortModelName(r.lane || { label: labelOf(r) });
 
 // 2. order: the keyboard follows the catalogs' own grouping, one heading per
-// non-empty group with the same label and count /allowance prints above it.
-const groups = groupRowsByTier(rows);
+// non-empty group. The heading is the location-scoped TIER TITLE —
+// `VPS Standard model (10)` — not the internal group label, because that is what
+// the reader sees and the internal name ("coding-agent capable") is not copy.
+// Within a group the rows are ordered for USE (usable by rating first, then
+// unusable by earliest reset), because that is the order the formatter walks and
+// the same order the turn's failover takes. The sensor walks the formatter's own
+// order, or it would be asserting the catalog's storage order instead.
+const groups = groupRowsByTier(rows).map((g) => ({ ...g, rows: sortFreemodelTierRows(g.rows) }));
 check('the keyboard has one button per row plus the group headings',
   groups.length > 1 && btns.length === rows.length + groups.length,
   `${btns.length} buttons for ${rows.length} rows / ${groups.length} groups`);
@@ -75,7 +88,7 @@ const seenHeadings = [];
 for (const g of groups) {
   const heading = btnText(btns[cursor]);
   seenHeadings.push(heading);
-  if (heading !== headingWidth(`${g.label} (${g.rows.length})`)) orderOk = false;
+  if (heading !== headingWidth(`${freemodelDisplayTier(g.tier, 'vps')} (${g.rows.length})`)) orderOk = false;
   cursor += 1;
   for (const r of g.rows) {
     if (!btnText(btns[cursor]).includes(nameOf(r))) orderOk = false;
