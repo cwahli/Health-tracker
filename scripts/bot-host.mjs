@@ -4229,6 +4229,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       if (typing) clearInterval(typing);
       busy.delete(chatId);
     }
+    if (reply?.fallbackReason) {
+      console.log(`[${config.id}] health group ${healthTurn.mode}${healthTurn.roleId ? ` ${healthTurn.roleId}` : ''} fell back: ${reply.fallbackReason}`);
+    }
     if (reply?.text) await api.sendMessage(chatId, reply.text).catch(() => {});
     if (reply?.answered) {
       if (healthTurn.mode === 'seat') forgetTaxGroup(taxWorkspace, chatId);
