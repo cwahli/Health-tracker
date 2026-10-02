@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { usableTurnLanes, stampDepleted, ensureBotLedger } from './lib/free-lanes.mjs';
-import { selectTurnLanes } from './bot-host.mjs';
+import { selectTurnLanes, routeKeySkipped, stickyModelAfterTurn } from './bot-host.mjs';
 import { tierForModel, catalogRank } from './lib/free-catalogs.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -114,6 +114,49 @@ try {
   check('and the chat is told why', /depleted/.test(String(depletedChoice.displaced?.why)));
   check('and it moves to a lane that is open', depletedChoice.models.length > 0);
 
+  // 5d. A depleted stamp on a route with NO table lane row still displaces.
+  // Live 2026-10-02: cline:cline-free/deepseek-v4.1-flash was stamped depleted
+  // yet every next turn announced it as the starting lane again, because the
+  // current-lane check only looked at projected table rows. The ghost lane is
+  // deliberately absent from the table below.
+  const { dir: dir3 } = ensureBotLedger('route-key-bot');
+  fs.writeFileSync(path.join(dir3, 'free-lane-table.json'), JSON.stringify(table, null, 2));
+  stampDepleted({
+    stateDir: dir3,
+    provider: 'cline',
+    model: 'cline-free/ghost-model',
+    errText: '429 Daily free limit reached, try again in 5h',
+    depletedUntil: now + 5 * 3600 * 1000,
+    countdownHint: '5h',
+  });
+  const ghost = selectTurnLanes({ botId: 'route-key-bot', model: 'cline:cline-free/ghost-model', fallback: 'zen/muse' });
+  check('a stamped route with no lane row is still displaced', !ghost.models.includes('cline:cline-free/ghost-model'));
+  check('and the chat is told why', /depleted/.test(String(ghost.displaced?.why)));
+  check('and the turn still has a lane to run on', ghost.models.length > 0);
+  const ghostKey = routeKeySkipped({
+    model: 'cline:cline-free/ghost-model',
+    current: { provider: 'cline', model: 'cline-free/ghost-model' },
+    session: JSON.parse(fs.readFileSync(path.join(dir3, 'session.json'), 'utf8')),
+    now,
+  });
+  check('the route-key fallback names the stamp', /depleted/.test(String(ghostKey?.why)));
+  // After the reset passes the same lane is selectable again.
+  const renewed = selectTurnLanes({ botId: 'route-key-bot', model: 'cline:cline-free/ghost-model', fallback: 'zen/muse', now: now + 6 * 3600 * 1000 });
+  check('an expired stamp stops displacing', renewed.displaced === null);
+  check('the renewed lane runs first again', renewed.models[0] === 'cline:cline-free/ghost-model');
+
+  // 5e. Sticky failover decision: the chat stays on the lane that answered.
+  check('an answered turn sticks to the lane that answered',
+    stickyModelAfterTurn({ chatModel: 'cline:cline-free/deepseek-v4.1-flash', answeredModel: 'opencode/muse-spark-1.3-contributor-free', answered: true })
+    === 'opencode/muse-spark-1.3-contributor-free');
+  check('no stick when the chat model itself answered',
+    stickyModelAfterTurn({ chatModel: 'a', answeredModel: 'a', answered: true }) === null);
+  check('no stick when nothing was answered',
+    stickyModelAfterTurn({ chatModel: 'a', answeredModel: 'b', answered: false }) === null);
+  check('no stick on empty refs',
+    stickyModelAfterTurn({ chatModel: '', answeredModel: 'b', answered: true }) === null
+    && stickyModelAfterTurn({ chatModel: 'a', answeredModel: '', answered: true }) === null);
+
   // 6. A host with no ledger keeps the old chain, so a fresh install is unchanged.
   const bare = selectTurnLanes({ botId: 'brand-new-bot', model: 'zen/muse', fallback: 'zen/nemotron' });
   check('a fresh bot still gets a usable chain', bare.models.length > 0);
@@ -151,6 +194,16 @@ check('and that line quotes the ledger reason, never a raw provider envelope',
   /is \$\{why\} — this turn ran on/.test(botWalkSrc) && /const why = stamp && !reason\.includes\(stamp\)/.test(botWalkSrc));
 check('and the turn is told when it dropped to a light model',
   /no coding lane is free right now/.test(botWalkSrc));
+// Sticky failover (2026-10-02: a depleted auto-switch was re-announced as the
+// starting lane on every next turn): the current-lane check falls back to the
+// route key when the table has no row, and an answered turn persists the lane
+// that answered.
+check('the current-lane check falls back to the stamped route key',
+  /routeKeySkipped\(\{/.test(botWalkSrc));
+check('an answered turn sticks to the lane that answered',
+  /stickyModelAfterTurn\(\{/.test(botWalkSrc) && /autoSwitchedFrom/.test(botWalkSrc));
+check('a displaced headline names the running lane, not the dead one',
+  /headlineForLane\(laneChoice\.chose\)/.test(botWalkSrc));
 // The tier is the catalog's, so what is asserted here is that the walk reads the
 // catalog at all and that the three models this host actually runs resolve the
 // way the catalog says. MiMo V2.6 and DeepSeek V4.1 are ranked under a

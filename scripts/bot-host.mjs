@@ -91,6 +91,9 @@ import {
   ensureBotLedger,
   stampDepleted,
   freemodelRefToRoute,
+  routeCandidates,
+  liveRecForRoutes,
+  defaultResetLabel,
   usableTurnLanes,
   projectLanes,
   soonestResetAmongDepleted,
@@ -3700,6 +3703,53 @@ async function collectInboundMedia(api, message, config) {
 }
 
 /**
+ * Route-key fallback for the current-lane check: a stamped depleted route with
+ * no table lane row (a catalog model the pref-doc table predates, or a spelling
+ * the projection missed) must still displace. Without this the turn retries a
+ * lane the ledger already knows is spent, every message until reset — live on
+ * 2026-10-02, when `cline:cline-free/deepseek-v4.1-flash` was stamped depleted
+ * yet every next turn announced it as the starting lane again. Returns a
+ * skipped-shaped record, or null when no live stamp covers this route. Expired
+ * stamps return null, so the lane is selectable again after renewal.
+ */
+export function routeKeySkipped({ model, current, session, now = Date.now() } = {}) {
+  try {
+    if (!model || !current?.provider || !current?.model) return null;
+    const hit = liveRecForRoutes(routeCandidates(model), session || {}, now);
+    if (!hit?.rec) return null;
+    const untilMs = Number(hit.rec.depletedUntil || 0);
+    const resetLabel = Number.isFinite(untilMs) && untilMs > 0
+      ? defaultResetLabel(untilMs, hit.rec.countdownHint || '')
+      : null;
+    return {
+      provider: current.provider,
+      model: current.model,
+      label: current.model,
+      why: resetLabel ? `depleted until ${resetLabel}` : 'depleted',
+      until: untilMs || null,
+      resetLabel,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sticky failover decision: the chat asked for `chatModel` but the answer came
+ * from `answeredModel`. Returns the model the chat should stay on, or null when
+ * nothing should change (same lane, no answer, or nothing to compare). The
+ * caller persists the return value so the next turn starts on the working lane
+ * instead of retrying a lane the ledger already knows is spent. Exported for
+ * unit tests.
+ */
+export function stickyModelAfterTurn({ chatModel, answeredModel, answered }) {
+  const from = String(chatModel || '');
+  const on = String(answeredModel || '');
+  if (!answered || !from || !on || on === from) return null;
+  return on;
+}
+
+/**
  * The lanes this turn may use, in order, from this host's own ledger.
  *
  * The old chain was [chat model, bot default]: two fixed entries, so a lane the
@@ -3745,7 +3795,7 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
     const tail = (v) => String(v || '').replace(/^[^/]+\//, '').replace(/:free$/i, '');
     return row.model === current.model || (row.provider === current.provider && tail(row.model) === tail(current.model));
   };
-  const currentSkipped = skipped.find(sameRoute);
+  const currentSkipped = skipped.find(sameRoute) || routeKeySkipped({ model, current, session: ledger.session || {}, now });
   const fallbackLanes = lanes.filter((l) => !sameRoute(l));
 
   // Coding lanes first, light ones last. The bot exists to write code, so a turn
@@ -4342,6 +4392,17 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       : addr?.isBroadcast
         ? `Council Coordinator (${providerLabelForModel(eff.model)})`
         : providerLabelForModel(eff.model);
+    // Headline for the lane actually running, mirroring the role prefix above —
+    // so a displaced or failed-over turn never keeps announcing the dead lane
+    // it started on. The construction above stays untouched (landed work).
+    const headlineForLane = (lane) => {
+      const base = addr?.roleId
+        ? String(addr.roleId).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+        : addr?.isBroadcast
+          ? 'Council Coordinator'
+          : '';
+      return base ? `${base} (${providerLabelForModel(lane)})` : providerLabelForModel(lane);
+    };
     renderer.setHeadline({
       providerLabel: roleHeadlineLabel,
       modelLabel: eff.model || '',
@@ -4761,10 +4822,19 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       //
       // `why` is the ledger's own reason ("depleted until <stamp>"), never a raw
       // provider envelope, so this line cannot become the failure QS-2 forbids.
+      // The headline was painted with the chat's (dead) model before the ledger
+      // was read — repoint it at the lane actually running, and say the chat
+      // stays there: without the stick the next turn announces the dead lane
+      // as its starting model again, every message until reset.
+      try {
+        renderer.setHeadline({ providerLabel: headlineForLane(laneChoice.chose), modelLabel: laneChoice.chose });
+      } catch {
+        // a UI hiccup must never break failover
+      }
       if (!laneChoice.degradedToLight) {
         await api.sendMessage(
           chatId,
-          `🔀 \`${eff.model}\` is ${why} — this turn ran on \`${laneChoice.chose}\` instead.`,
+          `🔀 \`${eff.model}\` is ${why} — this turn ran on \`${laneChoice.chose}\` instead, and the chat stays on \`${laneChoice.chose}\` until you switch back.`,
         ).catch(() => {});
       }
       // A coding turn that can only be served by a light model is said out loud.
@@ -4822,6 +4892,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         const candidate = parseModelRef(model);
         observerContext = { model, attempt, surface: candidate.surface, provider: candidate.surface };
         if (observer) observer.write('run_start', {}, observerContext);
+        // A mid-turn failover (ledger missed it, the lane died at runtime)
+        // must move the headline too, or the progress line keeps naming the
+        // dead lane while another one does the work.
+        try {
+          renderer.setHeadline({ providerLabel: headlineForLane(model), modelLabel: model });
+        } catch {
+          // a UI hiccup must never break failover
+        }
       },
       onAttemptComplete: ({ result: attemptResult, aborted }) => {
         observerTerminalWritten = true;
@@ -4923,7 +5001,28 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       renderer.status = 'aborted';
       await renderer.deliver('Aborted.');
     } else {
-      const usageText = await noteUsage({ chatId, result, eff, config, caches, totals, lastUsage });
+      // Sticky failover: the chat asked for eff.model but the answer came from
+      // another lane (ledger displacement above, or a mid-turn failover the
+      // ledger only learned about via this turn's stamp). Point the chat at the
+      // lane that actually answered so the next turn starts there instead of
+      // announcing — and displacing — the dead lane again, every message until
+      // reset. The previous choice is kept as autoSwitchedFrom for a one-tap
+      // switchback after renewal. Bookkeeping must never break delivery.
+      const stickTo = stickyModelAfterTurn({
+        chatModel: eff.model,
+        answeredModel: lastAttemptModel,
+        answered: Boolean(String(result?.finalText || '').trim()),
+      });
+      const usageText = await noteUsage({ chatId, result, eff: stickTo ? { ...eff, model: stickTo } : eff, config, caches, totals, lastUsage });
+      if (stickTo) {
+        try {
+          setPref(prefs, chatId, { model: stickTo, autoSwitchedFrom: eff.model, autoSwitchedAt: new Date().toISOString() });
+          savePrefs(config.id, prefs);
+          console.log(`[${config.id}] chat ${chatId} stuck to ${stickTo} (was ${eff.model})`);
+        } catch {
+          // fall through to delivery
+        }
+      }
       if (handoff) {
         const kept = prefFor(prefs, chatId);
         delete kept.handoff;
