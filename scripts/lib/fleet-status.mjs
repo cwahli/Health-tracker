@@ -15,6 +15,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { workerStatus } from './worker-presence.mjs';
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..', '..');
 
@@ -72,28 +74,87 @@ export function getFleetNodes(opts = {}) {
   const result = [];
   const seenLocations = new Set();
 
-  // Load from disk if in-memory map is empty
-  if (fleetNodeHeartbeats.size === 0) {
-    try {
-      const dir = fleetBeatsDir();
-      if (fs.existsSync(dir)) {
-        for (const file of fs.readdirSync(dir)) {
-          if (file.endsWith('.json')) {
-            try {
-              const content = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
-              if (content.location) fleetNodeHeartbeats.set(content.location, content);
-            } catch {}
-          }
+  // Reload from disk cache if files are present
+  try {
+    const dir = fleetBeatsDir();
+    if (fs.existsSync(dir)) {
+      for (const file of fs.readdirSync(dir)) {
+        if (file.endsWith('.json')) {
+          try {
+            const content = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+            if (content.location) {
+              const existing = fleetNodeHeartbeats.get(content.location);
+              if (!existing || (content.updatedAtMs || 0) >= (existing.updatedAtMs || 0)) {
+                fleetNodeHeartbeats.set(content.location, content);
+              }
+            }
+          } catch {}
         }
       }
-    } catch {}
-  }
+    }
+  } catch {}
 
   // Iterate over known default locations
   for (const loc of DEFAULT_LOCATIONS) {
     seenLocations.add(loc);
     const beat = fleetNodeHeartbeats.get(loc);
     if (!beat) {
+      let fallback = null;
+      if (loc === 'VM') {
+        try {
+          const home = opts.home || os.homedir();
+          const botHostStateDir = path.join(home, '.local', 'state', 'bot-host');
+          if (fs.existsSync(botHostStateDir)) {
+            let isWorking = false;
+            let activeDetail = '';
+            let activeBot = 'VM Bot (@VM_19485_bot)';
+            for (const botId of ['vm', 'vm2', 'vm3', 'vm4', 'vm5', 'vm6', 'android', 'opencode']) {
+              const leaseFile = path.join(botHostStateDir, botId, 'leases.json');
+              if (fs.existsSync(leaseFile)) {
+                try {
+                  const raw = JSON.parse(fs.readFileSync(leaseFile, 'utf8'));
+                  const leases = Array.isArray(raw) ? raw : Object.values(raw || {});
+                  if (leases.length > 0) {
+                    isWorking = true;
+                    activeDetail = `Turn in progress (${botId})`;
+                    activeBot = `${botId} bot`;
+                    break;
+                  }
+                } catch {}
+              }
+            }
+            fallback = {
+              location: 'VM',
+              agent: activeBot,
+              status: isWorking ? 'working' : 'idle',
+              task: isWorking ? activeDetail : 'Ready (polling Telegram)',
+              ticketKey: '',
+              updatedAt: new Date(now).toISOString(),
+            };
+          }
+        } catch {}
+      } else if (loc === 'Grok VM' || loc === 'Collab' || loc === 'Mobile') {
+        try {
+          const hostKey = loc === 'Grok VM' ? 'grok' : loc.toLowerCase();
+          const ws = workerStatus(hostKey, { home: opts.home || os.homedir(), now });
+          if (ws && ws.reachable) {
+            fallback = {
+              location: loc,
+              agent: loc === 'Grok VM' ? 'Grok Worker' : `${loc} Worker`,
+              status: 'idle',
+              task: ws.standin ? 'Worker connected (standin)' : 'Worker connected',
+              ticketKey: '',
+              updatedAt: ws.lastSeen || new Date(now).toISOString(),
+            };
+          }
+        } catch {}
+      }
+
+      if (fallback) {
+        result.push(fallback);
+        continue;
+      }
+
       result.push({
         location: loc,
         agent: '—',

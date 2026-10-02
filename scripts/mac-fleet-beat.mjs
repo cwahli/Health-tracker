@@ -81,10 +81,15 @@ async function main() {
 
   if (once) return;
 
-  // Keep lease alive every 45s while process runs
+  // Keep lease alive every 30s while process runs
   setInterval(async () => {
-    await sendMacHeartbeat({ agent, task, phase, ticketKey, gatewayUrl });
-  }, 45 * 1000).unref?.();
+    const r = await sendMacHeartbeat({ agent, task, phase, ticketKey, gatewayUrl });
+    if (r.ok) {
+      console.log(`[mac-fleet-beat] Heartbeat refreshed at ${new Date().toISOString()}`);
+    } else {
+      console.warn(`[mac-fleet-beat] Heartbeat refresh failed: ${r.error}`);
+    }
+  }, 30 * 1000);
 
   await new Promise(() => {});
 }
