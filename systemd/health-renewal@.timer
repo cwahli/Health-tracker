@@ -1,0 +1,14 @@
+[Unit]
+Description=Monthly renewal of the health brief's four documents (%i)
+Documentation=file:///home/ubuntu/deploy/Health-tracker/specs/active/HEALTH-RENEWAL-1.md
+
+[Timer]
+# The charter's cadence: the Insights document renews monthly. Persistent so a
+# fire missed while the box was down happens once at the next boot; the runner
+# itself decides whether anything is due, so an early fire is a no-op.
+OnCalendar=monthly
+Persistent=true
+Unit=health-renewal@%i.service
+
+[Install]
+WantedBy=timers.target
