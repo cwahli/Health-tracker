@@ -319,6 +319,14 @@ jobs:
       - name: Dispatch toolchain gate (assert-dispatch-toolchain)
         run: node scripts/assert-dispatch-toolchain.mjs
 
+      # A bot's name is the bot's name. In-progress seat work on a serving tree
+      # renamed four bots to their health chairs (vm2 read "Data Steward") so the
+      # @ menu would resolve @research, which overwrites how the operator
+      # identifies those bots everywhere else in Telegram. Operator rule
+      # 2026-10-02: the seat is the in-group tag, never the name.
+      - name: Bot identity gate (nothing renames a bot)
+        run: node scripts/assert-bot-names.mjs
+
       # A test that drives the real dispatcher must not post to the operator's
       # chat. It did: every run of bugPackFixtures put real "[Orchestrator]
       # Dispatch rejected for BUG-TEST" messages in that chat, which read as a
