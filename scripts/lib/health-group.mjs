@@ -14,8 +14,10 @@
  * about the open repairs and must not name a disease, a drug, or a number
  * the repairs do not already contain. A lab test may be named only when the
  * repairs already name it (e.g. quoting H-7's HbA1c line). A reply that breaks
- * that rule, or a model that fails, falls back to a short line from the
- * verify artifact. Nothing here edits the app.
+ * that rule goes back to the model once with the checker's own reason and is
+ * rewritten; only a second refusal — or a call that fails — falls back to one
+ * short line naming the reason, so the room never gets a canned paragraph.
+ * Nothing here edits the app.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -127,87 +129,73 @@ function itemLine(item) {
   return detail ? `${item.id} ${item.title}: ${detail}` : `${item.id} ${item.title}`;
 }
 
-function gateSentence(gate) {
-  return `The data gate is open (${gate.open.length}: ${gate.open.join(', ')}).`;
-}
-
-function askKind(question) {
-  const t = plainQuestion(question);
-  if (/\bhow\b|\bsteps\b|\bwhere do i\b|\bwhat do i\b/i.test(t)) return 'how';
-  if (/\b(fix|clean|repair|correct|edit)\b/i.test(t)) return 'fix';
-  if (/\b(list|every item|all items|show the items|what(?:'s| is) open)\b/i.test(t)) return 'list';
-  return 'status';
-}
-
-function firstRepair(items) {
-  const item = items[0];
-  if (!item) return 'the first open item';
-  const detail = clip(item.detail || '', DETAIL_CAP);
-  return detail ? `${item.id} ${item.title}: ${detail}` : `${item.id} ${item.title}`;
-}
-
-function listText(items) {
-  if (!items.length) return '- (the artifact lists no open item)';
-  return items.map((item) => `- ${itemLine(item)}`).join('\n');
-}
-
 function seatName(roleId) {
   return HEALTH_SEAT_ORDER.find((seat) => seat.id === roleId)?.name || 'the health council';
 }
 
-/** Short safe line used when the model is missing, fails, or breaks the gate. */
-function seatOpenText(roleId, artifact, question) {
-  const gate = gateFromArtifact(artifact);
-  const items = openItems(artifact);
-  const kind = askKind(question);
-  const first = firstRepair(items);
-  const gateLine = gateSentence(gate);
-  if (kind === 'list') return `${gateLine}\n\n${listText(items)}`;
-  if (kind === 'fix') {
-    return `No. I can't edit the app from this chat. ${gateLine} The sheet wins. Change ${first} in the app, then run /health verify.`;
-  }
-  if (kind === 'how') {
-    return `In the app, do this first: ${first}. ${gateLine} I can't edit those rows from here. Run /health verify after it.`;
-  }
-  const lead = {
-    data_steward: `The rows are not verified. ${gateLine} Next is ${first}.`,
-    health_analyst: `No risk and no condition yet. ${gateLine} Analysis waits until those items are closed or waived.`,
-    test_planner: `No test is worth naming. ${gateLine} The gap is ${first}, not a missing panel.`,
-    research_lead: `No paper yet. ${gateLine} A citation would treat an unreconciled number as a finding.`,
-    safety_reviewer: `No clinical claim while the gate is open. ${gateLine}`,
-    doctor: `Nothing to check. ${gateLine} The analyst has not published a claim.`,
-  }[roleId] || `${gateLine} Next is ${first}.`;
-  return lead;
+/**
+ * How a refusal reads. The retry tells the model which value or rule to drop;
+ * the fallback tells the room why no answer came. A refused number is never
+ * repeated in the fallback text — only in the reason the caller logs.
+ */
+function refusalNote(reason) {
+  const r = String(reason || '');
+  const number = /^number\s+(\S+)$/.exec(r);
+  if (number) return `the number ${number[1]} is not in the record or the question`;
+  const notes = {
+    empty: 'it was empty',
+    noise: 'it carried tool or thinking noise',
+    uid: 'it repeated a profile uid',
+    dump: 'it was a seat-by-seat dump, not one answer',
+    condition: 'it named a condition the record does not state',
+    drug: 'it named a drug the record does not state',
+    test: 'it named a lab test the repairs do not state',
+    advice: 'it advised a test or a prescription',
+    unsupported: 'it named something the record does not state',
+  };
+  return notes[r] || `it broke the record rule (${r})`;
 }
 
-function councilOpenText(artifact, question) {
-  const gate = gateFromArtifact(artifact);
-  const items = openItems(artifact);
-  const kind = askKind(question);
-  const first = firstRepair(items);
-  const gateLine = gateSentence(gate);
-  if (kind === 'list') return `${gateLine}\n\n${listText(items)}`;
-  if (kind === 'fix' || kind === 'how') {
-    return `No. The record has to be fixed in the app, not from this chat. ${gateLine} Start with ${first}. Then run /health verify.`;
-  }
-  return `No health status yet. ${gateLine} Start with ${first}. Not a habit and not a new test. Ask again when /health verify says 0 open.`;
+function refusalPhrase(reason) {
+  const r = String(reason || '');
+  if (/^model failed:/.test(r)) return 'the model call failed';
+  if (/^number\s+\S+$/.test(r)) return 'a draft used a number the record does not state';
+  const phrases = {
+    empty: 'a draft was empty',
+    noise: 'a draft carried tool or thinking noise',
+    uid: 'a draft repeated a profile uid',
+    dump: 'a draft was a seat dump, not one answer',
+    condition: 'a draft named a condition the record does not state',
+    drug: 'a draft named a drug the record does not state',
+    test: 'a draft named a lab test the repairs do not state',
+    advice: 'a draft advised a test or a prescription',
+    unsupported: 'a draft named something the record does not state',
+    'no council model': 'no council model is wired to answer',
+  };
+  return phrases[r] || 'the record check refused the draft';
+}
+
+/** The one short line the room gets when no answer survived the record check. */
+function fallbackLine(reason) {
+  return `I couldn't put that answer together just now — ${refusalPhrase(reason)}. Nothing was invented in its place.`;
 }
 
 function missingText() {
   return "I can't see a verify artifact in the health workspace, so I won't guess at a gap, a risk, or a test. Send /health verify in this chat, then ask again.";
 }
 
-/** The safe reply with no model. `null` means the gate is closed and only a model may answer. */
-export function formatHealthGroupReply({ mode, roleId, question, artifact } = {}) {
+/**
+ * The fallback with no model, or after both drafts are refused. It names the
+ * reason in one short line: an open gate is not a status paragraph, and a
+ * refused draft is not an answer.
+ */
+export function formatHealthGroupReply({ artifact, reason = 'no council model' } = {}) {
   if (!artifact) return missingText();
   const gate = gateFromArtifact(artifact);
   if (!gate.total) {
     return "The verify artifact has no fix-list items, so nothing proves the gate is closed. I won't guess at a gap or a test. Run /health verify and ask again.";
   }
-  if (!gate.allowed) {
-    return mode === 'council' ? councilOpenText(artifact, question) : seatOpenText(roleId, artifact, question);
-  }
-  return null;
+  return fallbackLine(reason);
 }
 
 function closedContext(artifact) {
@@ -225,7 +213,7 @@ function openContext(artifact) {
 }
 
 /** One prompt. The seats collaborate in the text. One model call posts it. */
-export function healthAnswerPrompt({ mode, roleId, question, artifact } = {}) {
+export function healthAnswerPrompt({ mode, roleId, question, artifact, refusal = '' } = {}) {
   const gate = gateFromArtifact(artifact);
   const asked = plainQuestion(question);
   const who = mode === 'council'
@@ -253,6 +241,9 @@ export function healthAnswerPrompt({ mode, roleId, question, artifact } = {}) {
       'If the question cannot be answered until those repairs close, say that in a sentence that still responds to what they asked.',
       'Do not dump every open repair unless they asked for the list.',
     ];
+  if (refusal) {
+    rules.push(`Your previous draft was refused: ${refusalNote(refusal)} — rewrite the same answer without it, keep answering the question, and add no new claim.`);
+  }
   return [
     ...who,
     'Reply in plain sentences. Two to six sentences. No title, no "You asked", and no mention of tools or thinking.',
@@ -333,40 +324,49 @@ function clipReply(text) {
 
 /**
  * One group reply. `runModel({ roleId, prompt })` is one call: `council` for
- * a room question, or the seat id when that seat was named. The call answers
- * the question the user asked. While the gate is open, a reply that names a
- * disease, a drug, a test, or a new number is discarded and the short repair
- * line is sent instead. A failed call does the same. It never throws into the
- * website coder.
+ * a room question, or the seat id when that seat was named. A reply the record
+ * check refuses is not dropped: it goes back to the model once, with the
+ * checker's own reason, to be rewritten. Only a second refusal — or a call
+ * that fails — falls back to one short line naming the reason, and
+ * `fallbackReason` carries that reason (or the thrown error) so the host can
+ * log it. It never throws into the website coder.
  */
 export async function answerHealthGroup({ mode, roleId, question, workspace, artifact = undefined, runModel } = {}) {
   const loaded = artifact !== undefined ? artifact : readHealthVerify(workspace);
-  const fallback = formatHealthGroupReply({ mode, roleId, question, artifact: loaded });
   const gate = loaded ? gateFromArtifact(loaded) : null;
   const canModel = Boolean(gate?.total) && typeof runModel === 'function';
   if (mode !== 'council' && !HEALTH_SEAT_IDS.includes(roleId)) {
     return { answered: false, usedModel: false, text: `No health seat matches ${roleId || mode}.` };
   }
   if (!canModel) {
-    return {
-      answered: true,
-      usedModel: false,
-      text: clipReply(fallback || 'The data gate is closed, and this turn has no model configured. Nothing was invented in its place.'),
-    };
+    const reason = !loaded ? 'no verify artifact' : !gate?.total ? 'no fix-list items' : 'no council model';
+    return { answered: true, usedModel: false, text: clipReply(formatHealthGroupReply({ artifact: loaded, reason })), fallbackReason: reason };
   }
+  const ask = async (prompt) => String(await runModel({
+    roleId: mode === 'council' ? 'council' : roleId,
+    prompt,
+  }) || '').trim();
+
   let raw = '';
   try {
-    raw = String(await runModel({
-      roleId: mode === 'council' ? 'council' : roleId,
-      prompt: healthAnswerPrompt({ mode, roleId, question, artifact: loaded }),
-    }) || '').trim();
-  } catch {
-    raw = '';
+    raw = await ask(healthAnswerPrompt({ mode, roleId, question, artifact: loaded }));
+  } catch (err) {
+    const reason = `model failed: ${err.message}`;
+    return { answered: true, usedModel: false, text: clipReply(fallbackLine(reason)), fallbackReason: reason };
   }
-  const verdict = acceptHealthReply(raw, { artifact: loaded, question });
-  if (!verdict.ok) {
-    const safe = fallback || 'The seats could not answer that without adding something the record does not say. Nothing was invented in its place.';
-    return { answered: true, usedModel: false, text: clipReply(safe) };
+  let verdict = acceptHealthReply(raw, { artifact: loaded, question });
+  if (verdict.ok) return { answered: true, usedModel: true, text: clipReply(raw), fallbackReason: '' };
+
+  // One recoverable retry: the same question and context, plus the checker's
+  // own reason, so the model can rewrite instead of the room getting a canned
+  // paragraph that never answers.
+  try {
+    raw = await ask(healthAnswerPrompt({ mode, roleId, question, artifact: loaded, refusal: verdict.reason }));
+  } catch (err) {
+    const reason = `model failed: ${err.message}`;
+    return { answered: true, usedModel: false, text: clipReply(fallbackLine(reason)), fallbackReason: reason };
   }
-  return { answered: true, usedModel: true, text: clipReply(raw) };
+  verdict = acceptHealthReply(raw, { artifact: loaded, question });
+  if (verdict.ok) return { answered: true, usedModel: true, text: clipReply(raw), fallbackReason: '' };
+  return { answered: true, usedModel: false, text: clipReply(fallbackLine(verdict.reason)), fallbackReason: verdict.reason };
 }

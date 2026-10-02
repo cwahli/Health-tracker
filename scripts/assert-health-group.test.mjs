@@ -11,8 +11,9 @@
  *
  * Any real question is answered in one reply. The seats work it out together
  * inside that reply. While the data gate is open, a model answer that names a
- * test, a condition, or a new number is dropped and the short repair line is
- * sent instead.
+ * test, a condition, or a new number goes back to the model once with the
+ * checker's reason; only a second refusal falls back to one short line that
+ * names the reason. The host logs that reason.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -125,26 +126,14 @@ const openArtifact = {
     ],
   },
 };
-const plannerReply = formatHealthGroupReply({
-  mode: 'seat',
-  roleId: 'test_planner',
-  question: forPlanner.cleanText,
-  artifact: openArtifact,
-});
-check('the planner names the open gate', /data gate is open \(2: H-1, H-2\)/.test(plannerReply), plannerReply.slice(0, 240));
-check('the planner names the first repair', /H-1/.test(plannerReply));
-check('the planner does not prescribe a test', !/hs-CRP|vitamin D|I recommend|order this|you should test/i.test(plannerReply), plannerReply);
-check('the planner does not name a condition', !/diabetes|cardiovascular|hypertension|prediabetes/i.test(plannerReply));
-
-const councilReply = formatHealthGroupReply({ mode: 'council', question: roomQuery, artifact: openArtifact });
-check('an open council answer is one short status', councilReply.startsWith('No health status yet') && /data gate is open \(2: H-1, H-2\)/.test(councilReply) && /H-1/.test(councilReply), councilReply.slice(0, 240));
-check('an open council answer does not repeat every seat', !/Seats, in order|1\. Data Steward/.test(councilReply));
-check('the council answer does not prescribe a test', !/hs-CRP|vitamin D|I recommend|order this/i.test(councilReply));
-const fixReply = formatHealthGroupReply({ mode: 'seat', roleId: 'data_steward', question: '@VM2_19485_bot how to clean up the data', artifact: openArtifact });
-check('a cleanup question says where to edit and does not echo the mention', /In the app, do this first: H-1/.test(fixReply) && !/@VM2_19485_bot|You asked:|Open fix list:/.test(fixReply), fixReply.slice(0, 240));
-const cannot = formatHealthGroupReply({ mode: 'seat', roleId: 'data_steward', question: 'Can you fix the data', artifact: openArtifact });
-check('a fix request is a no, without the full list', cannot.startsWith('No.') && !/Open fix list:|You asked:/.test(cannot), cannot.slice(0, 240));
-check('a missing artifact refuses instead of guessing', /won't guess/.test(formatHealthGroupReply({ mode: 'seat', roleId: 'test_planner', question: 'gaps?', artifact: null })));
+const noModelFallback = formatHealthGroupReply({ artifact: openArtifact });
+check('a model-less fallback is one short line that names the reason', /no council model is wired to answer/.test(noModelFallback) && noModelFallback.length < 220 && !noModelFallback.includes('\n'), noModelFallback.slice(0, 240));
+check('the old canned paragraphs are gone', !/no health status yet|not a habit|ask again when|open fix list:|you asked:|in the app, do this first/i.test(noModelFallback), noModelFallback.slice(0, 240));
+check('the fallback does not prescribe a test', !/hs-CRP|vitamin D|I recommend|order this|you should test/i.test(noModelFallback), noModelFallback);
+check('the fallback does not name a condition', !/diabetes|cardiovascular|hypertension|prediabetes/i.test(noModelFallback));
+const refusedFallback = formatHealthGroupReply({ artifact: openArtifact, reason: 'condition' });
+check('a refused draft falls back to the short line, not a status paragraph', /couldn't put that answer together/.test(refusedFallback) && /condition the record does not state/.test(refusedFallback) && !/H-1|data gate is open/i.test(refusedFallback), refusedFallback.slice(0, 240));
+check('a missing artifact refuses instead of guessing', /won't guess/.test(formatHealthGroupReply({ artifact: null })));
 
 const calls = [];
 const closedArtifact = {
@@ -195,14 +184,37 @@ const odd = await answerHealthGroup({
 });
 check('any question is answered from the repairs', odd.usedModel === true && /height does not match the sheet/.test(odd.text));
 
+const retryCalls = [];
+const retried = await answerHealthGroup({
+  mode: 'council',
+  question: roomQuery,
+  artifact: openArtifact,
+  runModel: async ({ prompt }) => {
+    retryCalls.push(prompt);
+    return retryCalls.length === 1
+      ? 'You have prediabetes. I recommend a vitamin D test.'
+      : 'The height row is the open repair H-1: height does not match the sheet. Fix it in the app, then run /health verify.';
+  },
+});
+check('a refused first draft is retried, not dropped', retryCalls.length === 2, `model calls: ${retryCalls.length}`);
+const retryPrompt = retryCalls[1] || '';
+check('the retry carries the same question and the checker\'s reason', retryPrompt.includes(roomQuery) && /previous draft was refused/i.test(retryPrompt) && /condition the record does not state/i.test(retryPrompt));
+check('the rewritten draft answers the question', retried.usedModel === true && /H-1/.test(retried.text));
+check('a recovered reply carries no fallback reason', !retried.fallbackReason);
+check('the checker names why that reply is refused', acceptHealthReply('You have prediabetes. I recommend a vitamin D test.', { artifact: openArtifact, question: roomQuery }).reason === 'condition');
+
+const rejectedCalls = [];
 const rejected = await answerHealthGroup({
   mode: 'council',
   question: roomQuery,
   artifact: openArtifact,
-  runModel: async () => 'You have prediabetes. I recommend a vitamin D test.',
+  runModel: async () => {
+    rejectedCalls.push(1);
+    return 'You have prediabetes. I recommend a vitamin D test.';
+  },
 });
-check('a diagnosis or a named test is dropped', rejected.usedModel === false && /data gate is open/.test(rejected.text) && !/prediabetes|vitamin D/i.test(rejected.text));
-check('the checker names why that reply is refused', acceptHealthReply('You have prediabetes. I recommend a vitamin D test.', { artifact: openArtifact, question: roomQuery }).reason === 'condition');
+check('a second refusal falls back to one short line', rejected.usedModel === false && /couldn't put that answer together/.test(rejected.text) && !/prediabetes|vitamin D/i.test(rejected.text));
+check('the fallback reason is the checker\'s own', rejected.fallbackReason === 'condition' && rejectedCalls.length === 2, `reason: ${rejected.fallbackReason}, calls: ${rejectedCalls.length}`);
 
 const invented = await answerHealthGroup({
   mode: 'council',
@@ -210,7 +222,8 @@ const invented = await answerHealthGroup({
   artifact: openArtifact,
   runModel: async () => 'Your score is 42 and the gate is open on H-1.',
 });
-check('an invented number is dropped', invented.usedModel === false && !/\b42\b/.test(invented.text));
+check('an invented number is dropped from the text', invented.usedModel === false && !/\b42\b/.test(invented.text));
+check('the invented number survives only in the fallback reason', invented.fallbackReason === 'number 42', invented.fallbackReason);
 
 const quoted = await answerHealthGroup({
   mode: 'seat',
@@ -234,7 +247,8 @@ const thrown = await answerHealthGroup({
     throw new Error('lane down');
   },
 });
-check('a model failure falls back without the error', thrown.usedModel === false && /data gate is open/.test(thrown.text) && !/lane down/.test(thrown.text));
+check('a model failure falls back without leaking the error', thrown.usedModel === false && /couldn't put that answer together/.test(thrown.text) && /model call failed/.test(thrown.text) && !/lane down/.test(thrown.text));
+check('the thrown error is surfaced for the log', thrown.fallbackReason === 'model failed: lane down', thrown.fallbackReason);
 
 const noModel = await answerHealthGroup({
   mode: 'seat',
@@ -242,7 +256,7 @@ const noModel = await answerHealthGroup({
   question: forPlanner.cleanText,
   artifact: openArtifact,
 });
-check('an open gate without a model stays on the repair line', noModel.usedModel === false && /data gate is open/.test(noModel.text));
+check('an open gate without a model names that reason', noModel.usedModel === false && /no council model is wired to answer/.test(noModel.text) && noModel.fallbackReason === 'no council model');
 
 const normalized = normalizeConfig(planner);
 check('normalizeConfig keeps the health seat', normalized.agent.healthRole === 'test_planner');
@@ -252,6 +266,7 @@ const healthAt = HOST.indexOf('const healthTurn = classifyHealthGroupTurn');
 check('the group gate still comes before the health reply', gateAt > 0 && healthAt > gateAt);
 check('the handler passes the dedicated seat list', HOST.includes('dedicatedRoleIds'));
 check('the handler answers with answerHealthGroup', HOST.includes('answerHealthGroup'));
+check('the handler logs the fallback reason', HOST.includes('fallbackReason'));
 
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
