@@ -324,6 +324,15 @@ jobs:
       # @ menu would resolve @research, which overwrites how the operator
       # identifies those bots everywhere else in Telegram. Operator rule
       # 2026-10-02: the seat is the in-group tag, never the name.
+      # The seat tag writer. A Telegram custom title can only exist on an admin,
+      # so writing one means promoting the member — a decision about what a bot
+      # may DO in that group. The writer refuses without rights the caller states
+      # explicitly, previews by default, and never demotes anyone by sending a
+      # minimal admin record. 36 cases, all against fixtures: no network, no
+      # group, nothing it could mutate even if it tried.
+      - name: Seat tag writer gate (tag, never a rename, never an invented right)
+        run: node scripts/assert-seat-tag-writer.mjs
+
       - name: Bot identity gate (nothing renames a bot)
         run: node scripts/assert-bot-names.mjs
 
