@@ -1,30 +1,30 @@
-# Work queue (generated 2026-10-01T12:24:55Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
+# Work queue (generated 2026-10-02T11:51:20Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
 
-## Ready to merge (0)
+## Ready to merge (1)
 
-_Empty._
+- #455 `agent/health-snapshot-clean` — fix(health): workable snapshot, remove personal board (owner: Grok 4.7 (High) vps; behind main: 18)
 
 ## In flight (0)
 
 _Empty — everything open is unblocked._
 
-## Unowned carry-over (8)
+## Unowned carry-over (9)
 
-- plan/MEAL_QA_LOOP.md#scheduling (named by merged #450; live notes)
-- AI_HANDOVER.md#status (named by merged #448; live notes)
-- specs/active/bbox-fallback-passthrough.md#done-when (named by merged #447; live notes)
-- specs/active/card-19.md#done-when (named by merged #441; live notes)
-- specs/active/DOCTOR-2.md#left (named by merged #439; live notes)
-- specs/active/ANALYST-1.md#left (named by merged #437; live notes)
-- specs/active/ANALYST-1.md#left (named by merged #436; live notes)
-- specs/active/RESEARCH-3.md#left (named by merged #435; live notes)
+- specs/active/HEALTH-GROUP-4.md#left (named by merged #472; live notes)
+- specs/active/HEALTH-GROUP-4.md#left (named by merged #471; live notes)
+- specs/active/HEALTH-GROUP-3.md#left (named by merged #470; live notes)
+- specs/active/HEALTH-GROUP-2.md#left (named by merged #469; live notes)
+- specs/active/HEALTH-GROUP-1.md#left (named by merged #468; live notes)
+- specs/active/HEALTH-GROUP-1.md#left (named by merged #467; live notes)
+- agent/freemodel-list (named by merged #465; branch gone, no follow-up)
+- agent/quota-sticky (named by merged #462; branch gone, no follow-up)
+- `plan/MEAL_QA_LOOP.md#scheduling` (named by merged #460; live notes)
 
-## Dangling pointers (6)
+## Dangling pointers (5)
 
-- decide (named by merged #449; resolves to nothing)
-- after (named by merged #446; resolves to nothing)
-- merge, (named by merged #445; resolves to nothing)
-- merge, (named by merged #442; resolves to nothing)
-- rescue (named by merged #440; resolves to nothing)
-- merge, (named by merged #438; resolves to nothing)
+- merge, (named by merged #473; resolves to nothing)
+- merge, (named by merged #464; resolves to nothing)
+- merge, (named by merged #463; resolves to nothing)
+- merge, (named by merged #461; resolves to nothing)
+- merge, (named by merged #459; resolves to nothing)
 

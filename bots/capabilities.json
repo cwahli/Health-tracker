@@ -204,6 +204,7 @@
         "tui": true,
         "bugs": false,
         "forge": false,
+        "fleet": false,
         "routerOnly": ["switch", "unlock"],
         "aliases": ["think"]
       }

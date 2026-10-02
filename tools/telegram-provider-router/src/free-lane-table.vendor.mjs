@@ -27,7 +27,7 @@
  * python3 render. Safe to import from tests (point TG_ROUTER_STATE_DIR at a
  * throwaway dir; nothing here touches the live box unless asked to).
  */
-import { catalogScore, tierForModel, benchmarkLabel } from './free-catalogs.mjs';
+import { catalogScore, tierForModel, benchmarkLabel, benchmarkFor, catalogRank } from './free-catalogs.mjs';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -1087,18 +1087,20 @@ export function fitCells(line) {
 
 /**
  * The columns of a row, in the reader's order and widths: the name in 30, two
- * spaces, the plan in 2, THREE spaces, the reset in 15, two spaces, the
- * benchmark in 7. One builder for both surfaces, so neither can pick a different
+ * spaces, the plan in 2, THREE spaces, the benchmark in 7, two spaces, the
+ * reset in 15. One builder for both surfaces, so neither can pick a different
  * order or a different width for the same column — that drift is how a button and
  * its own row stopped lining up.
  *
- * The gap after the plan code is three, not one: with a single space the reader
- * saw `OC 5h 36` and read the countdown as part of the plan. Columns start at
- * character 2 (name), 34 (plan), 39 (reset), 56 (benchmark), and the row is 63
- * characters before the finisher pads it to 72 with a dash last.
+ * The reset sits last, against the dash finisher: the reader asked for the
+ * countdown where the `-` is, at the end. The gap after the plan code is three,
+ * not one: with a single space the reader saw `OC 5h 36` and read the countdown
+ * as part of the plan. Columns start at character 2 (name), 34 (plan),
+ * 39 (benchmark), 48 (reset), and the row is 63 characters before the finisher
+ * pads it to 72 with a dash last.
  */
 export function colsCopy({ name = "", plan = "", resetIn = "—", score = "" } = {}) {
-  return `${padChars(name, MODEL_NAME_MAX)}  ${padChars(plan, W_PLAN)}   ${padChars(resetIn, W_EXPIRY)}  ${padChars(score, W_SCORE)}`;
+  return `${padChars(name, MODEL_NAME_MAX)}  ${padChars(plan, W_PLAN)}   ${padChars(score, W_SCORE)}  ${padChars(resetIn, W_EXPIRY)}`;
 }
 
 /**
@@ -1282,8 +1284,8 @@ export const COPY_UNITS = 24.0;
 /** Where each column starts on a button, in em (mark + space + name, etc.). */
 export const ROW_UNITS = {
   plan: W_HEAD_UNITS + 2 * SP,
-  expiry: W_HEAD_UNITS + 2 * SP + W_PLAN_UNITS + 3 * SP,
-  score: W_HEAD_UNITS + 2 * SP + W_PLAN_UNITS + 3 * SP + W_EXPIRY_UNITS + 2 * SP,
+  score: W_HEAD_UNITS + 2 * SP + W_PLAN_UNITS + 3 * SP,
+  expiry: W_HEAD_UNITS + 2 * SP + W_PLAN_UNITS + 3 * SP + W_SCORE_UNITS + 2 * SP,
 };
 
 /** Pad a string with ASCII spaces until it is `n` em wide. */
@@ -1306,15 +1308,15 @@ export function fitWidth(line) {
 
 /**
  * One button row, in the reader's order: mark, name, two spaces, plan, THREE
- * spaces, countdown, two spaces, benchmark — every column padded by rendered
- * width, the line finished by rendered width. The benchmark arrives as `AA48`
- * from benchmarkLabel() and loses the prefix here: the buttons have no header
- * row to hang it on, and those two glyphs are most of what pushed a row past
- * the client's cut-off. The monospace table keeps them.
+ * spaces, benchmark, two spaces, countdown last against the dash — every column
+ * padded by rendered width, the line finished by rendered width. The benchmark
+ * arrives as `AA48` from benchmarkLabel() and loses the prefix here: the buttons
+ * have no header row to hang it on, and those two glyphs are most of what pushed
+ * a row past the client's cut-off. The monospace table keeps them.
  */
 export function rowWidth({ mark = " ", name = "", plan = "", score = "", resetIn = "—" } = {}) {
   const bench = String(score).replace(/^AA/, "");
-  const line = `${padUnits(`${mark} ${name}`, W_HEAD_UNITS)}  ${padUnits(plan, W_PLAN_UNITS)}   ${padUnits(resetIn, W_EXPIRY_UNITS)}  ${padUnits(bench, W_SCORE_UNITS)}`;
+  const line = `${padUnits(`${mark} ${name}`, W_HEAD_UNITS)}  ${padUnits(plan, W_PLAN_UNITS)}   ${padUnits(bench, W_SCORE_UNITS)}  ${padUnits(resetIn, W_EXPIRY_UNITS)}`;
   return fitWidth(line);
 }
 
@@ -1681,6 +1683,64 @@ export function groupRowsByTier(rows, { tierOf = null } = {}) {
   return TIER_GROUPS.map((g) => ({ ...g, rows: buckets.get(g.tier) })).filter((g) => g.rows.length > 0);
 }
 
+/**
+ * Display name for a tier group on the /freemodel keyboard: location-scoped,
+ * Standard vs Light. `high` (coding-agent-capable) renders as
+ * e.g. `VPS Standard model`, `light` as `VPS Light model`. /allowance keeps the
+ * catalog labels; only /freemodel renames, per the reader's ask.
+ */
+export function freemodelDisplayTier(tier, location = "vps") {
+  const loc = String(location || "vps").toUpperCase();
+  if (tier === "high") return `${loc} Standard model`;
+  if (tier === "light") return `${loc} Light model`;
+  return `${loc} Unlisted model`;
+}
+
+/** Numeric rating for /freemodel ordering: benchmark AA desc, catalog rank asc. */
+export function freemodelRatingOf(modelRef) {
+  try {
+    const b = benchmarkFor(modelRef || "");
+    const aa = b && b.published && typeof b.aa === "number" ? b.aa : -1;
+    const { rank } = catalogRank(modelRef || "") || {};
+    return { aa, rank: Number.isFinite(rank) ? rank : Infinity };
+  } catch {
+    return { aa: -1, rank: Infinity };
+  }
+}
+
+/** True when a /freemodel row cannot be used right now. */
+export function freemodelRowUnusable(r) {
+  return r?.selectable === false || r?.depleted || r?.ended || r?.terminalOnly;
+}
+
+/**
+ * Order rows inside one tier group for /freemodel: usable first by rating
+ * (benchmark AA desc, catalog rank asc, pref asc), then unusable by earliest
+ * reset (resetAt asc, nulls last, pref asc). The turn's same-tier failover
+ * walks this order, so the list and the failover cannot disagree.
+ */
+export function sortFreemodelTierRows(rows) {
+  const avail = [];
+  const unav = [];
+  for (const r of rows || []) (freemodelRowUnusable(r) ? unav : avail).push(r);
+  const ratingOf = (r) => freemodelRatingOf(r?.lane?.model || r?.model || r?.ref || "");
+  const prefOf = (r) => Number(r?.pref ?? r?.lane?.pref ?? Infinity);
+  avail.sort((a, b) => {
+    const ra = ratingOf(a);
+    const rb = ratingOf(b);
+    if (rb.aa !== ra.aa) return rb.aa - ra.aa;
+    if (ra.rank !== rb.rank) return ra.rank - rb.rank;
+    return prefOf(a) - prefOf(b);
+  });
+  unav.sort((a, b) => {
+    const at = Number(a?.resetAt) || Infinity;
+    const bt = Number(b?.resetAt) || Infinity;
+    if (at !== bt) return at - bt;
+    return prefOf(a) - prefOf(b);
+  });
+  return [...avail, ...unav];
+}
+
 export function canonicalAllowanceLanes({ table, lanes = null, session = null, readiness = null, now = Date.now(), location = "", scoreOf = laneScoreFromCatalog, supersede = true } = {}) {
   if (!table || !Array.isArray(table.lanes)) return [];
   const projection = projectLanes(table, session, { now, location, readiness });
@@ -1903,7 +1963,7 @@ export function loadFreeLaneLedger({ stateDir = null, tablePath = null, sessionP
 }
 
 /** `cline:...` / `gemini:...` / provider-prefixed refs → route candidates. */
-function routeCandidates(ref) {
+export function routeCandidates(ref) {
   const raw = String(ref ?? "").trim();
   if (!raw) return [];
   if (raw.startsWith("cline:")) return [{ provider: "cline", model: raw.slice("cline:".length) }];

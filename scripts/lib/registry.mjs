@@ -214,6 +214,9 @@ export function normalizeConfig(bot, { defaultWorkspace = process.cwd() } = {}) 
       sharedSkills: Array.isArray(bot.agent?.sharedSkills) ? bot.agent.sharedSkills : [],
       playwrightOutputDir: bot.agent?.playwrightOutputDir || '',
       smallModel: bot.agent?.smallModel,
+      healthRole: bot.agent?.healthRole || '',
+      taxRole: bot.agent?.taxRole || '',
+      homeProject: bot.agent?.homeProject || '',
     },
     progress: {
       mode: bot.progress?.mode || 'concise',

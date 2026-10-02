@@ -31,6 +31,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { KNOWN_PROJECTS } from '../project-registry.mjs';
 import { DOCS_FILE, gateFromArtifact, loadDocsRegistry, validateAnalysisSections } from './docs.mjs';
 import { RESEARCH_LOG } from './research.mjs';
 
@@ -193,7 +194,49 @@ export function renderSourcesInventory(dir, entries) {
  * or no brief/charter in it); missing artifacts land in `absent` instead, because
  * they are findings the seat should report, not reasons to stay silent.
  */
-export function buildHealthContext(workspace, { now = new Date() } = {}) {
+/**
+ * Where the brief actually lives.
+ *
+ * This workspace is a *data* workspace: it holds `result/` and `sources/` and
+ * nothing else, and the brief is committed with the pack in the repo. Roles
+ * already resolve that way — the registry prefers the repo copy of `roles/` and
+ * treats a workspace copy as a mirror it only checks for drift — so the brief
+ * follows the same rule. Looking only in the workspace refused every seat on a
+ * workspace that never had a copy to begin with, which is most of them.
+ *
+ * The fallback is deliberately narrow. It applies only when the workspace *is*
+ * the project's own registered workspace, so the project's charter can only ever
+ * reach the project's own seats; pointing the lane at some other directory still
+ * refuses, because borrowing a mandate from an unrelated pack is the exact
+ * failure this reader exists to prevent. Within the workspace, a local copy
+ * still wins: if an operator put one there, that is the one they mean.
+ */
+function resolveBrief(ws, projectId, registry) {
+  const project = registry?.[projectId];
+  const own = project && project.workspace && path.resolve(project.workspace) === path.resolve(ws);
+  const dirs = [ws];
+  if (own && project.templateDir) dirs.push(project.templateDir);
+  for (const dir of dirs) {
+    for (const name of BRIEF_FILES) {
+      const abs = path.join(dir, name);
+      try {
+        if (!fs.statSync(abs).isFile()) continue;
+      } catch {
+        continue;
+      }
+      return { file: abs, inWorkspace: dir === ws };
+    }
+  }
+  return null;
+}
+
+/**
+ * Exported for the gate. `registry` is injectable so the rule can be proved
+ * against fixtures rather than against whichever home directory the run has.
+ */
+export const __briefResolver = resolveBrief;
+
+export function buildHealthContext(workspace, { now = new Date(), projectId = 'external-health', registry = KNOWN_PROJECTS } = {}) {
   const at = now.toISOString();
   const ws = String(workspace || '');
   const sections = [];
@@ -217,16 +260,16 @@ export function buildHealthContext(workspace, { now = new Date() } = {}) {
   }
 
   // --- the brief: the seats' mandate, and the only refusal that stops a turn.
-  const briefRel = BRIEF_FILES.find((f) => {
-    try {
-      return fs.statSync(path.join(ws, f)).isFile();
-    } catch {
-      return false;
-    }
-  });
-  if (briefRel) {
-    const st = fs.statSync(path.join(ws, briefRel));
-    add('brief', 'The brief', briefRel, st.mtime.toISOString(), fs.readFileSync(path.join(ws, briefRel), 'utf8'));
+  const brief = resolveBrief(ws, projectId, registry);
+  if (brief) {
+    const st = fs.statSync(brief.file);
+    add(
+      'brief',
+      brief.inWorkspace ? 'The brief' : 'The brief (the pack in the repo — this workspace holds the data)',
+      brief.inWorkspace ? path.basename(brief.file) : brief.file,
+      st.mtime.toISOString(),
+      fs.readFileSync(brief.file, 'utf8'),
+    );
   } else {
     const why = `no brief or charter in ${ws} (looked for ${BRIEF_FILES.join(', ')}) — a seat that cannot see the brief must not run`;
     refuses.push(why);

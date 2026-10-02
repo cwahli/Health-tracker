@@ -8,8 +8,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { usableTurnLanes, stampDepleted, ensureBotLedger } from './lib/free-lanes.mjs';
-import { selectTurnLanes } from './bot-host.mjs';
+import { usableTurnLanes, stampDepleted, ensureBotLedger, sortFreemodelTierRows, freemodelDisplayTier } from './lib/free-lanes.mjs';
+import { selectTurnLanes, routeKeySkipped, stickyModelAfterTurn } from './bot-host.mjs';
 import { tierForModel, catalogRank } from './lib/free-catalogs.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -114,6 +114,99 @@ try {
   check('and the chat is told why', /depleted/.test(String(depletedChoice.displaced?.why)));
   check('and it moves to a lane that is open', depletedChoice.models.length > 0);
 
+  // 5d. A depleted stamp on a route with NO table lane row still displaces.
+  // Live 2026-10-02: cline:cline-free/deepseek-v4.1-flash was stamped depleted
+  // yet every next turn announced it as the starting lane again, because the
+  // current-lane check only looked at projected table rows. The ghost lane is
+  // deliberately absent from the table below.
+  const { dir: dir3 } = ensureBotLedger('route-key-bot');
+  fs.writeFileSync(path.join(dir3, 'free-lane-table.json'), JSON.stringify(table, null, 2));
+  stampDepleted({
+    stateDir: dir3,
+    provider: 'cline',
+    model: 'cline-free/ghost-model',
+    errText: '429 Daily free limit reached, try again in 5h',
+    depletedUntil: now + 5 * 3600 * 1000,
+    countdownHint: '5h',
+  });
+  const ghost = selectTurnLanes({ botId: 'route-key-bot', model: 'cline:cline-free/ghost-model', fallback: 'zen/muse' });
+  check('a stamped route with no lane row is still displaced', !ghost.models.includes('cline:cline-free/ghost-model'));
+  check('and the chat is told why', /depleted/.test(String(ghost.displaced?.why)));
+  check('and the turn still has a lane to run on', ghost.models.length > 0);
+  const ghostKey = routeKeySkipped({
+    model: 'cline:cline-free/ghost-model',
+    current: { provider: 'cline', model: 'cline-free/ghost-model' },
+    session: JSON.parse(fs.readFileSync(path.join(dir3, 'session.json'), 'utf8')),
+    now,
+  });
+  check('the route-key fallback names the stamp', /depleted/.test(String(ghostKey?.why)));
+  // After the reset passes the same lane is selectable again.
+  const renewed = selectTurnLanes({ botId: 'route-key-bot', model: 'cline:cline-free/ghost-model', fallback: 'zen/muse', now: now + 6 * 3600 * 1000 });
+  check('an expired stamp stops displacing', renewed.displaced === null);
+  check('the renewed lane runs first again', renewed.models[0] === 'cline:cline-free/ghost-model');
+
+  // 5e. Sticky failover decision: the chat stays on the lane that answered.
+  check('an answered turn sticks to the lane that answered',
+    stickyModelAfterTurn({ chatModel: 'cline:cline-free/deepseek-v4.1-flash', answeredModel: 'opencode/muse-spark-1.3-contributor-free', answered: true })
+    === 'opencode/muse-spark-1.3-contributor-free');
+  check('no stick when the chat model itself answered',
+    stickyModelAfterTurn({ chatModel: 'a', answeredModel: 'a', answered: true }) === null);
+  check('no stick when nothing was answered',
+    stickyModelAfterTurn({ chatModel: 'a', answeredModel: 'b', answered: false }) === null);
+  check('no stick on empty refs',
+    stickyModelAfterTurn({ chatModel: '', answeredModel: 'b', answered: true }) === null
+    && stickyModelAfterTurn({ chatModel: 'a', answeredModel: '', answered: true }) === null);
+
+  // 5f. /freemodel order inside one tier: usable by rating desc, then unusable
+  // by earliest reset. Rating is benchmark AA desc (rank breaks ties), so
+  // AA48 outranks AA41 outranks AA39.5 even though rank 1 belongs to AA39.5.
+  const srows = sortFreemodelTierRows([
+    { model: 'tokenharbor/deepseek-v4.1-flash:free', pref: 5, selectable: true },
+    { model: 'opencode/mimo-v2.6-flash-free', pref: 3, selectable: true },
+    { model: 'opencode/muse-spark-1.3-contributor-free', pref: 1, selectable: true },
+    { model: 'opencode/late-reset', pref: 2, selectable: false, depleted: true, resetAt: now + 5 * 3600 * 1000 },
+    { model: 'opencode/early-reset', pref: 4, selectable: false, depleted: true, resetAt: now + 1 * 3600 * 1000 },
+  ]);
+  check('usable rows come first, ordered AA48 > AA41 > AA39.5',
+    srows[0].model === 'opencode/muse-spark-1.3-contributor-free'
+    && srows[1].model === 'opencode/mimo-v2.6-flash-free'
+    && srows[2].model === 'tokenharbor/deepseek-v4.1-flash:free');
+  check('unusable rows come last, earliest reset first',
+    srows[3].model === 'opencode/early-reset' && srows[4].model === 'opencode/late-reset');
+  check('Standard/ Light titles are location-scoped',
+    freemodelDisplayTier('high', 'vps') === 'VPS Standard model'
+    && freemodelDisplayTier('light', 'vps') === 'VPS Light model');
+
+  // 5g. Same-type failover: a depleted Standard lane walks to the next usable
+  // Standard lane, never onto Light — and a Light lane never jumps up.
+  const tierTable = {
+    lanes: [
+      { provider: 'opencode', model: 'opencode/muse-spark-1.3-contributor-free', pref: 1, status: 'available', tg: true },
+      { provider: 'opencode', model: 'opencode/mimo-v2.6-flash-free', pref: 2, status: 'available', tg: true },
+      { provider: 'opencode', model: 'cloudflare/@cf/qwen/qwen3.8-27b', pref: 3, status: 'available', tg: true },
+      { provider: 'opencode', model: 'cloudflare/@cf/zai-org/glm-4.7-flash', pref: 4, status: 'available', tg: true },
+    ],
+  };
+  const { dir: tierDir } = ensureBotLedger('tier-bot');
+  fs.writeFileSync(path.join(tierDir, 'free-lane-table.json'), JSON.stringify(tierTable, null, 2));
+  stampDepleted({
+    stateDir: tierDir,
+    provider: 'opencode',
+    model: 'opencode/muse-spark-1.3-contributor-free',
+    errText: '429 Too Many Requests, try again in 3h',
+    depletedUntil: now + 3 * 3600 * 1000,
+    countdownHint: '3h',
+  });
+  const tierChoice = selectTurnLanes({ botId: 'tier-bot', model: 'opencode/muse-spark-1.3-contributor-free', fallback: 'opencode/muse-spark-1.3-contributor-free' });
+  check('a depleted Standard lane fails over inside Standard first', tierChoice.models[0] === 'opencode/mimo-v2.6-flash-free');
+  check('and every Standard lane comes before any Light lane',
+    tierChoice.models.indexOf('opencode/mimo-v2.6-flash-free') !== -1
+    && tierChoice.models.indexOf('opencode/mimo-v2.6-flash-free') < tierChoice.models.findIndex((m) => /cloudflare/i.test(m)));
+  const lightKeep = selectTurnLanes({ botId: 'tier-bot', model: 'opencode/cloudflare/@cf/qwen/qwen3.8-27b', fallback: 'opencode/muse-spark-1.3-contributor-free' });
+  check('a usable Light lane stays first', lightKeep.models[0] === 'opencode/cloudflare/@cf/qwen/qwen3.8-27b');
+  check('and Light lanes come before any Standard fallback',
+    lightKeep.models.findIndex((m) => /cloudflare.*glm/i.test(m)) < lightKeep.models.findIndex((m) => /mimo/i.test(m)));
+
   // 6. A host with no ledger keeps the old chain, so a fresh install is unchanged.
   const bare = selectTurnLanes({ botId: 'brand-new-bot', model: 'zen/muse', fallback: 'zen/nemotron' });
   check('a fresh bot still gets a usable chain', bare.models.length > 0);
@@ -135,11 +228,12 @@ try {
   fs.rmSync(home, { recursive: true, force: true });
 }
 
-// Coding lanes before light ones. The bot writes code, so a turn that fails over
-// from a coding model must not land on a light model while a coding lane is free —
-// pref order alone let a light model with a low pref number take the turn over.
-check('the walk orders coding lanes before light ones',
-  /rank\(a\) - rank\(b\)/.test(botWalkSrc) && /walkTierRank/.test(botWalkSrc));
+// Same-type first: a depleted Standard lane walks to the next usable Standard
+// lane in /freemodel order (rating first), stepping across to Light only when
+// its own tier is dry — and Light likewise stays Light-first. The list and the
+// walk share the within-tier order.
+check('the walk puts the depleted lane\u2019s own tier first',
+  /tierOf\(l\) === currentGroup/.test(botWalkSrc) && /freemodelRatingOf/.test(botWalkSrc));
 check('a light lane is still reachable as a last resort',
   /degradedToLight/.test(botWalkSrc) && !/codingLeft === 0\) return/.test(botWalkSrc));
 // QS-2 wants the switch visible in the chat, not only in the log: the walk
@@ -151,11 +245,21 @@ check('and that line quotes the ledger reason, never a raw provider envelope',
   /is \$\{why\} — this turn ran on/.test(botWalkSrc) && /const why = stamp && !reason\.includes\(stamp\)/.test(botWalkSrc));
 check('and the turn is told when it dropped to a light model',
   /no coding lane is free right now/.test(botWalkSrc));
+// Sticky failover (2026-10-02: a depleted auto-switch was re-announced as the
+// starting lane on every next turn): the current-lane check falls back to the
+// route key when the table has no row, and an answered turn persists the lane
+// that answered.
+check('the current-lane check falls back to the stamped route key',
+  /routeKeySkipped\(\{/.test(botWalkSrc));
+check('an answered turn sticks to the lane that answered',
+  /stickyModelAfterTurn\(\{/.test(botWalkSrc) && /autoSwitchedFrom/.test(botWalkSrc));
+check('a displaced headline names the running lane, not the dead one',
+  /headlineForLane\(laneChoice\.chose\)/.test(botWalkSrc));
 // The tier is the catalog's, so what is asserted here is that the walk reads the
 // catalog at all and that the three models this host actually runs resolve the
 // way the catalog says. MiMo V2.6 and DeepSeek V4.1 are ranked under a
 // coding-capable tool; Muse Spark 1.3 Contributor is rank 2, high.
-check('the walk reads the catalog for its tier order', /walkTierRank\(l\.model\)/.test(botWalkSrc));
+check('the walk reads the catalog for its tier pin and its rating order', /tierForModel\(l\.model\)/.test(botWalkSrc) && /freemodelRatingOf\(/.test(botWalkSrc));
 check('the models this host runs resolve the way the catalog says',
   tierForModel('deepseek-v4.1-flash').tier === 'high'
   && tierForModel('muse-spark-1.3-contributor').tier === 'high'

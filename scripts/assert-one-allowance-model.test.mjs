@@ -448,23 +448,23 @@ try {
   check('and the supersession score has one home, in free-lanes, reading the catalog',
     /scoreOf = laneScoreFromCatalog/.test(lanesSrc) && /from '.\/free-catalogs.mjs'/.test(lanesSrc)
     && !/scoreOf: modelScore/.test(paritySrc) && !/function modelScore\(/.test(paritySrc));
-  check('and no-credential rows leave the count on both surfaces',
-    /const needsSetup = rows\.filter\(\(r\) => r\.needsSetup\)/.test(paritySrc) && /need setup/.test(paritySrc) && /needsSetup\.length \? ` · \$\{needsSetup\.length\} need setup`/.test(paritySrc));
+  check('and no-credential rows leave the list on both surfaces',
+    /const needsSetup = rows\.filter\(\(r\) => r\.needsSetup\)/.test(paritySrc) && /needs setup: /.test(paritySrc));
 
   // 7. /freemodel's body must not contradict /allowance.
   const read = (p) => fs.readFileSync(path.join(HERE, p), 'utf8');
   const botSrc = read('bot-host.mjs');
   // The rows are the canonical list in the canonical tier-group order — the same
-  // helper /allowance groups with — not a second ordering of the same models.
-  // The breakdown has to match, not just the order: the keyboard carries a heading
-  // row per group with the same label and count /allowance prints above the section,
-  // from the same groupRowsByTier() result.
-  check('/freemodel heads each tier group with the same label and count',
-    /buttons\.push\(\{ text: headingWidth\(`\$\{g\.label\} \(\$\{g\.rows\.length\}\)`\), data: 'noop', header: true \}\)/.test(botSrc));
+  // helper /allowance groups with — not a second membership of the same models.
+  // Within each group /freemodel sorts for use (usable by rating, unusable by
+  // reset); the keyboard carries a location-scoped Standard/Light heading row
+  // per group with the group's count, from the same groupRowsByTier() result.
+  check('/freemodel heads each tier group with a Standard/Light title and count',
+    /freemodelDisplayTier\(g\.tier, location \|\| 'vps'\)/.test(botSrc) && /data: 'noop', header: true/.test(botSrc));
   check('and a heading is a real noop, not a model named noop',
     /const payload = want === 'noop' \? 'noop' : `\$\{kind\}:\$\{want\}`/.test(read('lib/commands.mjs')));
-  check('the body carries the same breakdown as one line',
-    /function tierBreakdown\(groups, sep\)/.test(botSrc) && /tierBreakdown\(tierGroups, ' · '\)/.test(botSrc));
+  check('the body carries the Standard/Light titles as one line',
+    /freemodelDisplayTier\(g\.tier, location \|\| 'vps'\)/.test(botSrc) && /current: \$\{current/.test(botSrc));
   check('and the per-button tier word is gone, now that the heading says it',
     !/tierWord/.test(botSrc));
 
@@ -484,8 +484,10 @@ try {
   check('/freemodel no longer claims everything is available', !/all selectable lanes look available/.test(codeOnly));
   check('/freemodel writes its own header, not the raw catalog count', /const header = formatFreeModelText/ .test(botSrc) === false);
   check('the header counts rows with no ledger row separately', /with no ledger row/.test(botSrc));
-  // The router's wording: a total, and how many are not usable.
-  check('/freemodel totals the rows the way the router does', /Total: \$\{listed\.length\}/.test(botSrc) && /not usable ❌/.test(botSrc));
+  // The message is titles, not prose: one Standard/Light title line with the
+  // counts, then the current lane — the old "Free models at …" brief is gone.
+  check('/freemodel titles the Standard/Light groups with counts', /Standard model \(/.test(botSrc) && /current: \$\{current/.test(botSrc));
+  check('/freemodel never prints the old location brief', !/Free models\$\{location0\}/.test(botSrc));
   // The reason is still shown, on one line, rather than as a second per-model list.
   check('/freemodel still says why a row is unusable, on one line', /not usable: /.test(botSrc) && /\(reset in /.test(botSrc));
   // Scoped to the /freemodel formatter: /setup legitimately prints a bullet per gap.

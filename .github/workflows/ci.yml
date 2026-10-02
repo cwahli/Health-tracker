@@ -294,8 +294,31 @@ jobs:
       - name: PM role gate (assert-pm-role)
         run: node scripts/assert-pm-role.test.mjs
 
+      # The group surfaces ran nowhere in CI, which is how #458 merged green
+      # while main was red: two bots were seated as health_analyst and two as
+      # test_planner, and assert-health-group — the sensor that refuses exactly
+      # that — was only ever run by hand. A sensor nobody runs is a comment.
+      # assert-tax-group prints one SKIP line on a runner (the operator's books
+      # are not in git); a skip is visible, a green line it never earned is not.
+      - name: Group seats gate (health + tax)
+        run: |
+          node scripts/assert-health-group.test.mjs
+          node scripts/assert-tax-group.test.mjs
+          node scripts/assert-chat-scope.test.mjs
+          node scripts/assert-project-registry-parity.mjs
+
       - name: Token sync gate (assert-sync-tokens)
         run: node scripts/assert-sync-tokens.test.mjs
+
+      # The health workspace is a data workspace — `result/` and `sources/`, no
+      # brief — and the brief is committed with the pack in the repo. Roles
+      # already resolve that way; the brief did not, so buildHealthContext
+      # answered ok:false for the project's own workspace and every seat
+      # (/health analyze, /health doctor, the whole room) refused before the
+      # model was called. This gate pins both halves: the project's own
+      # workspace falls back to its pack, and no other directory may.
+      - name: Seat brief gate (assert-health-brief)
+        run: node scripts/assert-health-brief.mjs
 
       # The coder build gate must never be fooled by the npm `tsc` decoy: when a
       # worktree has no local compiler, `npx tsc` resolves version 2.0.4 of the
@@ -305,6 +328,30 @@ jobs:
       # no retry could fix). Executed here so the sensor is a gate, not decor.
       - name: Dispatch toolchain gate (assert-dispatch-toolchain)
         run: node scripts/assert-dispatch-toolchain.mjs
+
+      # A bot's name is the bot's name. In-progress seat work on a serving tree
+      # renamed four bots to their health chairs (vm2 read "Data Steward") so the
+      # @ menu would resolve @research, which overwrites how the operator
+      # identifies those bots everywhere else in Telegram. Operator rule
+      # 2026-10-02: the seat is the in-group tag, never the name.
+      # The seat tag writer. A Telegram custom title can only exist on an admin,
+      # so writing one means promoting the member — a decision about what a bot
+      # may DO in that group. The writer refuses without rights the caller states
+      # explicitly, previews by default, and never demotes anyone by sending a
+      # minimal admin record. 36 cases, all against fixtures: no network, no
+      # group, nothing it could mutate even if it tried.
+      - name: Seat tag writer gate (tag, never a rename, never an invented right)
+        run: node scripts/assert-seat-tag-writer.mjs
+
+      - name: Bot identity gate (nothing renames a bot)
+        run: node scripts/assert-bot-names.mjs
+
+      # A test that drives the real dispatcher must not post to the operator's
+      # chat. It did: every run of bugPackFixtures put real "[Orchestrator]
+      # Dispatch rejected for BUG-TEST" messages in that chat, which read as a
+      # pipeline incident and were a fixture's deliberate refusal.
+      - name: Dispatch quiet gate (a test must not post to the chat)
+        run: node scripts/assert-dispatch-quiet.mjs
 
       # The merge gate that protects this branch. `auto-merge` used to merge PRs
       # whose required checks had FAILED (#340 raced ahead of CI; #346 landed with

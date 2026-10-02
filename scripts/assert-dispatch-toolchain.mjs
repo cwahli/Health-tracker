@@ -229,5 +229,25 @@ process.stdout.write('assert-dispatch-toolchain: the coder build gate cannot be 
     r.status === 0, out.trim().split('\n').filter(Boolean).slice(-4).join(' | '));
 }
 
+// Same pattern for the lifecycle sensor: the logic under test is bash inside
+// run-coding-dispatch.sh, so it lives in a bash script and is invoked from here
+// rather than as a new ci.yml step.
+//
+// This one is worth watching: against the unfixed dispatcher it leaks the very
+// loop it tests for, so the child is given a bounded timeout. An orphaned loop
+// holds its inherited stdout open, and without the timeout the gate HANGS on a
+// red result instead of reporting it — which burns a runner and says nothing.
+{
+  const sensor = path.join(HERE, 'assert-dispatch-lifecycle.sh');
+  const r = spawnSync('bash', [sensor], {
+    encoding: 'utf8', cwd: ROOT, timeout: 120000, killSignal: 'SIGKILL',
+  });
+  const out = `${r.stdout || ''}${r.stderr || ''}`;
+  check('a dispatch reaps its typing loop and re-checks a closed card',
+    r.status === 0,
+    r.error ? `sensor timed out or failed to run: ${r.error.message}`
+      : out.trim().split('\n').filter(Boolean).slice(-5).join(' | '));
+}
+
 process.stdout.write(`assert-dispatch-toolchain: ${pass} pass, ${fail} fail\n`);
 process.exit(fail === 0 ? 0 : 1);

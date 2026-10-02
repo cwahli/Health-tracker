@@ -25,6 +25,7 @@ export const BOT_COMMANDS = [
   { command: 'thinking', description: 'Pick the thinking level (variant)' },
   { command: 'tui', description: 'Open the opencode TUI for this conversation (Mini App)' },
   { command: 'bugs', description: 'Open the shared bug board (Mini App)' },
+  { command: 'fleet', description: 'Open the live fleet dashboard (Mini App)' },
   { command: 'forge', description: 'Create a new bot, one click (Mini App)' },
   { command: 'debug', description: 'Show the active work-session debug view' },
   { command: 'handoff', description: 'Checkpoint this work session for continuation' },
@@ -86,6 +87,7 @@ export const HELP_USAGE = {
     ],
   },
   bugs: { args: '', text: 'open the shared bug board (Mini App button)' },
+  fleet: { args: '', text: 'open the live fleet dashboard across all machines (Mini App button)' },
   forge: { args: '', text: 'create a new bot in one click (Mini App forge)' },
   debug: { args: '', text: 'show the active work-session debug view' },
   handoff: { args: '', text: 'checkpoint this work session for continuation' },
@@ -94,7 +96,7 @@ export const HELP_USAGE = {
   project: { args: '[name]', text: 'view or switch project (/project external 1)' },
   council: { args: '[stage]', text: 'run a council stage by name or number (all | run | status)' },
   role: { args: '[name]', text: 'switch bot role (/role accountant) or project persona (/role legal)' },
-  health: { args: '[sub]', text: 'health coach: verify · ingest · refresh · analyze · readiness · research · doctor · status' },
+  health: { args: '[sub]', text: 'health coach: verify · ingest · refresh · analyze · readiness · research · doctor · status · triage · dashboard' },
   tax: { args: '[sub]', text: 'Chiwah LTD tax: snapshot · sweep · status · deadlines · saving · doc' },
   location: { args: '[name]', text: 'show or switch compute location / quota pool' },
 };
@@ -205,6 +207,16 @@ export const KNOWN_COUNCIL_ROLES = {
     id: 'doctor',
     name: 'Doctor',
     aliases: ['doctor', 'dr', 'doc', 'audit', 'auditor'],
+  },
+  tax_accountant: {
+    id: 'tax_accountant',
+    name: 'Tax Accountant',
+    aliases: ['tax accountant', 'tax_accountant', 'accountant', 'maker', 'companies house', 'company house'],
+  },
+  tax_verifier: {
+    id: 'tax_verifier',
+    name: 'Tax Verifier',
+    aliases: ['tax verifier', 'tax_verifier', 'verifier', 'checker'],
   },
   lifestyle: {
     id: 'health_analyst',
@@ -355,11 +367,30 @@ export function clearAllActiveThreads() {
   activeThreads.clear();
 }
 
+/**
+ * The coordinator adopts a named seat only when no enabled bot owns it.
+ *
+ * `dedicatedRoleIds` is the per-seat list (the live fleet). `hasDedicatedRoleBots:
+ * false` is the older single-bot switch: the coordinator adopts every seat.
+ * Passing neither leaves the coordinator quiet, which is what the bare addressing
+ * tests rely on.
+ */
+function masterAdoptsUnownedRole(roleId, isMaster, opts) {
+  if (!isMaster || !roleId || roleId === 'all') return false;
+  if (Array.isArray(opts.dedicatedRoleIds)) return !opts.dedicatedRoleIds.includes(roleId);
+  return opts.hasDedicatedRoleBots === false;
+}
+
 export function resolveGroupAddressing(message, self, opts = {}) {
   const rawText = String(message?.text || message?.caption || '').trim();
   const username = String(self?.username || '').replace(/^@/, '').toLowerCase();
   const id = Number(self?.id) || 0;
   const myRole = String(opts.role || self?.role || '').toLowerCase();
+  const myRoles = new Set(
+    [myRole, ...(Array.isArray(opts.roles) ? opts.roles : [])]
+      .map((role) => String(role || '').toLowerCase())
+      .filter(Boolean),
+  );
   const myName = String(opts.name || self?.name || '').toLowerCase();
   const isMaster = Boolean(opts.isMaster || self?.isMaster || self?.id === 'vm');
   const now = Number(opts.now) || Date.now();
@@ -414,10 +445,10 @@ export function resolveGroupAddressing(message, self, opts = {}) {
     const matchedIndex = extracted.roles.findIndex((r) => {
       const rId = r.roleId;
       const rName = r.roleName.toLowerCase();
-      return (myRole && myRole === rId) ||
+      return (myRoles.has(rId)) ||
         (myName && myName.includes(rName)) ||
         (username && username.includes(rId.replace(/_/g, ''))) ||
-        (isMaster && opts.hasDedicatedRoleBots === false);
+        masterAdoptsUnownedRole(rId, isMaster, opts);
     });
 
     if (matchedIndex !== -1) {
@@ -517,9 +548,10 @@ export function resolveGroupAddressing(message, self, opts = {}) {
           return { addressed: false, roleId: null, isBroadcast: false, cleanText: rawText, jointRoles: [], turnOrder: 0, delayMs: 0 };
         }
       } else {
-        const botMatchesThread = (thread.roleId && myRole && myRole === thread.roleId) ||
+        const botMatchesThread = (thread.roleId && myRoles.has(thread.roleId)) ||
           (thread.botId && (String(id) === String(thread.botId) || username === String(thread.botId).toLowerCase())) ||
-          (isMaster && opts.hasDedicatedRoleBots === false && (!thread.botId || String(thread.botId) === String(id)));
+          (opts.hasDedicatedRoleBots === false && isMaster && (!thread.botId || String(thread.botId) === String(id))) ||
+          (Array.isArray(opts.dedicatedRoleIds) && masterAdoptsUnownedRole(thread.roleId, isMaster, opts));
         if (botMatchesThread) {
           return {
             addressed: true,

@@ -91,12 +91,18 @@ import {
   ensureBotLedger,
   stampDepleted,
   freemodelRefToRoute,
+  routeCandidates,
+  liveRecForRoutes,
+  defaultResetLabel,
   usableTurnLanes,
   projectLanes,
   soonestResetAmongDepleted,
   isConnectionFailure,
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
+  freemodelDisplayTier,
+  sortFreemodelTierRows,
+  freemodelRatingOf,
 } from './lib/free-lanes.mjs';
 import { recordTurn, storeStatus, flushTurns } from './lib/turn-store.mjs';
 import { ensureTurnLog, makeSends, writerFor } from './lib/google-writer.mjs';
@@ -152,6 +158,7 @@ import {
 import { claimFiles, releaseFiles, listLocks, extractFiles } from './lib/file-locks.mjs';
 import {
   KNOWN_PROJECTS,
+  bindRegistryBot,
   getChatProject,
   getChatRole,
   switchChatProject,
@@ -166,6 +173,19 @@ import {
 } from './lib/project-registry.mjs';
 import { runPmCommand } from './lib/pm-run.mjs';
 import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-runner.mjs';
+import { classifyHealthGroupTurn, answerHealthGroup, dedicatedHealthRoleIds, readHealthVerify } from './lib/health-group.mjs';
+import { gateFromArtifact } from './lib/health/docs.mjs';
+import {
+  answerTaxGroup,
+  classifyTaxGroupTurn,
+  dedicatedTaxRoleIds,
+  forgetTaxGroup,
+  isTaxGroupChat,
+  readTaxSnapshot,
+  rememberTaxGroup,
+  taxDeskBotId,
+  TAX_PROJECT_ID,
+} from './lib/tax-group.mjs';
 // The Personal Health Coach's data loop. `/health` is deliberately not gated on
 // the chat's active project: the command names its own project, so a verify can
 // be run from any chat, and the reply says which one it read.
@@ -1017,10 +1037,11 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   // the same Token Harbor collapse and the same no-credential exclusion. This
   // command used to run its own dedupe over the catalog, and two notions of "the
   // same model" drifted by one row for four rounds. One list, one count.
-  // The same list /allowance renders, in the same tier-group order, from the same
-  // helper — so the two commands cannot disagree about which models exist, what
-  // order they are in, or which pool each one belongs to.
-  const tierGroups = groupRowsByTier(canonical || []);
+  // Within each tier group the rows are ordered for use, not for storage:
+  // usable first by rating (benchmark AA desc, catalog rank asc, pref asc),
+  // then unusable by earliest reset. The turn's same-tier failover walks this
+  // same order, so the list and the failover cannot disagree.
+  const tierGroups = groupRowsByTier(canonical || []).map((g) => ({ ...g, rows: sortFreemodelTierRows(g.rows) }));
   const rows = tierGroups.flatMap((g) => g.rows);
   // A catalogued model with no lane row AT ALL is still reported, never dropped.
   // The test is against the TABLE, not against the canonical list: a superseded
@@ -1065,15 +1086,15 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
             return at ? ` (reset in ${at})` : '';
           })()}`
         : r.reason || 'not available');
+  // The message is titles, not prose: one location-scoped Standard/Light title
+  // line with the counts, then the current lane, then at most one footer line
+  // for what cannot be used. The old three-line "Free models at …" brief is
+  // gone; the models are the keyboard below.
+  const titleOf = (g) => `${freemodelDisplayTier(g.tier, location || 'vps')} (${g.rows.length})`;
   const lines = [
-    `Free models${location0} — tap a button below (❌ = not usable right now; the first message auto-fails over to the next free lane).`,
-    'Depleted lanes are marked ❌ and stay tappable, so a tap can tell you what to use instead.',
-    'Token Harbor / Cloudflare / Gemini taps run through OpenCode. Freebuff is terminal-only — no chat turn.',
-    '',
     listed.length
-      ? `Total: ${listed.length} · ${usable.length} usable${unusable.length ? ` · ${unusable.length} not usable ❌` : ''}${noCredential.length ? ` · ${noCredential.length} with no ledger row` : ''}${needsSetup.length ? ` · ${needsSetup.length} need setup` : ''} · current: ${current || 'default'}`
+      ? `${tierGroups.map(titleOf).join(' · ')} · current: ${current || 'default'}`
       : 'No free models are installed and authenticated on this host.',
-    tierBreakdown(tierGroups, ' · '),
   ];
   // One short footer line — never a second per-model list.
   const footer = [];
@@ -1108,12 +1129,12 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   const seen = new Set();
   const buttons = [];
   for (const g of tierGroups) {
-    // A keyboard has no subheadings, so the breakdown is a row of its own: the same
-    // label and the same count /allowance prints above the section, from the same
-    // groupRowsByTier() result. `noop` is the callback the router already uses for a
-    // non-actionable keyboard row, and the tap handler answers it silently.
+    // A keyboard has no subheadings, so the tier title is a row of its own:
+    // `VPS Standard model (10)` — location-scoped, with the group's count.
+    // `noop` is the callback the router already uses for a non-actionable
+    // keyboard row, and the tap handler answers it silently.
     if (tierGroups.length > 1) {
-      buttons.push({ text: headingWidth(`${g.label} (${g.rows.length})`), data: 'noop', header: true });
+      buttons.push({ text: headingWidth(`${freemodelDisplayTier(g.tier, location || 'vps')} (${g.rows.length})`), data: 'noop', header: true });
     }
   for (const r of g.rows) {
     const label = r.laneLabel || r.label;
@@ -1124,7 +1145,7 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     // number at all — never a neighbour's.
     const model = r.lane?.model || r.model || r.ref || '';
     // The button says what the /allowance row says, in the same column order —
-    // mark, name, plan, three spaces, countdown, benchmark — but padded by
+    // mark, name, plan, three spaces, benchmark, countdown last — but padded by
     // *rendered width* instead of by character count: the client fits pixels in a
     // proportional font and middle-elides whatever passes its ~415px cut-off, so
     // 72 characters rendered anywhere from 386px to 465px and half the keyboard
@@ -2764,6 +2785,30 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'fleet': {
+      // Dynamic fleet dashboard (Mini App). Same web_app button + initData door
+      // as /tui, /bugs, and /forge: served by the gateway under /fleet/. Scoped
+      // to the VM bot: it owns the fleet projection.
+      const FLEET_BOTS = ['vm'];
+      if (!FLEET_BOTS.includes(config.id)) {
+        await api.sendMessage(chatId, '📋 The fleet dashboard lives on the VM bot — ask it for /fleet and it will hand you the button.');
+        return;
+      }
+      const fleetGatewayUrl = readTuiUrl();
+      if (!fleetGatewayUrl) {
+        await api.sendMessage(chatId, '📋 Fleet dashboard is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /fleet again.');
+        return;
+      }
+      const fleetUrl = `${fleetGatewayUrl}/fleet/?bot=${config.id}`;
+      await api.sendMessage(chatId, [
+        '📋 *Fleet Dashboard*',
+        'Live tickets from PM sheet, terminal panes across all locations (Mac, VM, Mobile, Collab), and fleet bot activity.',
+      ].join('\n'), {
+        reply_markup: { inline_keyboard: [[{ text: '📋 Open Fleet Dashboard', web_app: { url: fleetUrl } }]] },
+      });
+      return;
+    }
+
     case 'debug': {
       const location = workLocation();
       const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
@@ -2958,6 +3003,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
             '• `/role pm take` — Take the Project Manager seat (fleet, ladder, sheet, nudges)',
             '• `/role pm` — Fleet projection · `/role pm status` — read-only plus adopted role',
             '• `/role pm run` — One PM cycle: project, nudge, record · `/role pm sheet` — record rows now',
+            '• `/role pm table` — Progress as a real table (rollup fence + sortable grid, per the telegram-tables skill)',
             '• `/role check <name>` — Inspect role mandate & instructions',
             '• `/role add <id> <name> : <instructions>` — Add a new dynamic role',
             '• `/role remove <id>` — Delete a role · `/role reset` — back to general mode',
@@ -3685,6 +3731,53 @@ async function collectInboundMedia(api, message, config) {
 }
 
 /**
+ * Route-key fallback for the current-lane check: a stamped depleted route with
+ * no table lane row (a catalog model the pref-doc table predates, or a spelling
+ * the projection missed) must still displace. Without this the turn retries a
+ * lane the ledger already knows is spent, every message until reset — live on
+ * 2026-10-02, when `cline:cline-free/deepseek-v4.1-flash` was stamped depleted
+ * yet every next turn announced it as the starting lane again. Returns a
+ * skipped-shaped record, or null when no live stamp covers this route. Expired
+ * stamps return null, so the lane is selectable again after renewal.
+ */
+export function routeKeySkipped({ model, current, session, now = Date.now() } = {}) {
+  try {
+    if (!model || !current?.provider || !current?.model) return null;
+    const hit = liveRecForRoutes(routeCandidates(model), session || {}, now);
+    if (!hit?.rec) return null;
+    const untilMs = Number(hit.rec.depletedUntil || 0);
+    const resetLabel = Number.isFinite(untilMs) && untilMs > 0
+      ? defaultResetLabel(untilMs, hit.rec.countdownHint || '')
+      : null;
+    return {
+      provider: current.provider,
+      model: current.model,
+      label: current.model,
+      why: resetLabel ? `depleted until ${resetLabel}` : 'depleted',
+      until: untilMs || null,
+      resetLabel,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sticky failover decision: the chat asked for `chatModel` but the answer came
+ * from `answeredModel`. Returns the model the chat should stay on, or null when
+ * nothing should change (same lane, no answer, or nothing to compare). The
+ * caller persists the return value so the next turn starts on the working lane
+ * instead of retrying a lane the ledger already knows is spent. Exported for
+ * unit tests.
+ */
+export function stickyModelAfterTurn({ chatModel, answeredModel, answered }) {
+  const from = String(chatModel || '');
+  const on = String(answeredModel || '');
+  if (!answered || !from || !on || on === from) return null;
+  return on;
+}
+
+/**
  * The lanes this turn may use, in order, from this host's own ledger.
  *
  * The old chain was [chat model, bot default]: two fixed entries, so a lane the
@@ -3730,23 +3823,35 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
     const tail = (v) => String(v || '').replace(/^[^/]+\//, '').replace(/:free$/i, '');
     return row.model === current.model || (row.provider === current.provider && tail(row.model) === tail(current.model));
   };
-  const currentSkipped = skipped.find(sameRoute);
+  const currentSkipped = skipped.find(sameRoute) || routeKeySkipped({ model, current, session: ledger.session || {}, now });
   const fallbackLanes = lanes.filter((l) => !sameRoute(l));
 
-  // Coding lanes first, light ones last. The bot exists to write code, so a turn
-  // that fails over from a coding model must not land on a light one while a coding
-  // lane is still free — the list was ordered by pref alone, and a light model with
-  // a low pref number would take over the turn. Light lanes stay reachable as a last
-  // resort, because failing a turn outright is worse than a weaker answer, and
-  // `degradedToLight` says when that is what happened.
-  // Tier order comes from the catalog (QS-6): high first, then models the
-  // catalog does not rank, then light. Light lanes stay reachable as a last
-  // resort, and the reply says so when a coding turn ends up on one.
-  const rank = (l) => walkTierRank(l.model);
-  const orderedLanes = [...fallbackLanes].sort((a, b) => rank(a) - rank(b) || (Number(a.pref) || 0) - (Number(b.pref) || 0));
+  // Same-type first: a depleted Standard lane walks to the next usable Standard
+  // lane in /freemodel order, a depleted Light lane to the next usable Light
+  // lane. Within the tier the order is the list's order — rating first
+  // (benchmark AA desc, catalog rank asc, pref asc) — because the list is
+  // already sorted that way, the walk and the keyboard agree about what is
+  // next. Only when its own tier is dry does the walk step across to another
+  // tier (tier order, then rating): failing a turn outright while a lane of
+  // the other pool sits free is worse than a weaker answer, and
+  // `degradedToLight` says when a coding turn did exactly that.
   const currentGroup = (tierForModel(freemodelRefToRoute(model).model || model).tier) || 'unlisted';
-  const codingLeft = orderedLanes.filter((l) => rank(l) === 0).length;
-  const lightLeft = orderedLanes.filter((l) => rank(l) === 2).length;
+  const tierOf = (l) => ((tierForModel(l.model).tier) || 'unlisted');
+  const rateOf = (m) => freemodelRatingOf(m || '');
+  const byRating = (a, b) => {
+    const ra = rateOf(a.model);
+    const rb = rateOf(b.model);
+    if (rb.aa !== ra.aa) return rb.aa - ra.aa;
+    if (ra.rank !== rb.rank) return ra.rank - rb.rank;
+    return (Number(a.pref) || 0) - (Number(b.pref) || 0);
+  };
+  const byTierThenRating = (a, b) => (walkTierRank(a.model) - walkTierRank(b.model)) || byRating(a, b);
+  const orderedLanes = model
+    ? [...fallbackLanes].filter((l) => tierOf(l) === currentGroup).sort(byRating)
+      .concat([...fallbackLanes].filter((l) => tierOf(l) !== currentGroup).sort(byTierThenRating))
+    : [...fallbackLanes].sort(byTierThenRating);
+  const codingLeft = orderedLanes.filter((l) => tierOf(l) === 'high').length;
+  const lightLeft = orderedLanes.filter((l) => tierOf(l) === 'light').length;
 
   if (!model && !orderedLanes.length) {
     const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
@@ -4029,6 +4134,35 @@ export function tuiStatusLine(botId, sessionId) {
   return `tui: ${who} · ${use}${age}${sess}`;
 }
 
+/**
+ * The health room's brief ask — "work on the brief", "update the documents".
+ *
+ * It is not a question for the seats and not a slash command: it runs the same
+ * publisher `/health refresh` runs and the room gets the same reply. While the
+ * gate is open the drafts publish and the analysis stays withheld — the refresh
+ * already decides that, so there is no refusal line to add here. A refresh that
+ * cannot run keeps its own stage and reason, and says nothing was invented.
+ * `refresh` is injectable so the sensor can drive the turn with a fixture run.
+ */
+export async function answerBriefAsk({ projectId = 'external-health', botId = '', refresh } = {}) {
+  const run = typeof refresh === 'function' ? refresh : () => runHealthRefresh({ projectId, botId });
+  let res;
+  try {
+    res = await run();
+  } catch (err) {
+    return { answered: true, usedModel: false, text: `❌ Working the brief failed: ${err.message}`, fallbackReason: `brief failed: ${err.message}` };
+  }
+  if (!res?.ok) {
+    return {
+      answered: true,
+      usedModel: false,
+      text: `❌ The brief could not be worked (${res?.stage || 'unknown'}): ${res?.error || 'the publisher gave no reason'}`,
+      fallbackReason: `brief refused: ${res?.stage || 'unknown'}`,
+    };
+  }
+  return { answered: true, usedModel: false, text: formatRefreshText(res), markdown: true };
+}
+
 async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0 }) {
   // Same boundary rule as handleCallback: one String type for chat ids
   // everywhere downstream, so disk round-trips stop invalidating sessions.
@@ -4040,12 +4174,32 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   }
   // Five bots can share one group only if each answers solely when addressed.
   // Direct chats skip this entirely: everything there is for this bot.
-  const isMasterBot = config.id === 'vm' || Boolean(config.isMaster);
+  let fleetBots = [];
+  try {
+    fleetBots = loadRegistry(registryFileInUse()).bots;
+  } catch {
+    fleetBots = [];
+  }
+  const dedicatedRoleIds = [
+    ...dedicatedHealthRoleIds(fleetBots),
+    ...dedicatedTaxRoleIds(fleetBots),
+  ];
+  const taxWorkspace = KNOWN_PROJECTS[TAX_PROJECT_ID].workspace;
+  const deskId = taxDeskBotId(fleetBots, 'vm');
+  const isTaxDesk = config.id === deskId;
+  const myRoles = [config.agent?.healthRole, config.agent?.taxRole].filter(Boolean);
+  // The tax desk is a coordinator in its own supergroup, the same way vm is
+  // the coordinator for the health seats. Both can be admins of one group;
+  // the chat binding decides which council a bare question belongs to.
+  const isMasterBot = config.id === 'vm' || Boolean(config.isMaster) || isTaxDesk;
   const addr = resolveGroupAddressing(message, config.me, {
-    role: config.role || config.agent?.role || null,
+    role: myRoles[0] || config.role || config.agent?.role || null,
+    roles: myRoles,
     name: config.name,
     isMaster: isMasterBot,
     allowGroupBroadcast: true,
+    hasDedicatedRoleBots: dedicatedRoleIds.length > 0,
+    dedicatedRoleIds,
   });
   if (chatKind(message) === 'group' && !addr.addressed) {
     return;
@@ -4062,6 +4216,154 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId, kind: chatKind(message) });
     return;
   }
+
+  // A named health seat, or a bare question to the room, is answered here.
+  // It does not fall through to the website coder: that turn can edit the
+  // repo and does not see the verify artifact. One model call answers the
+  // question. A room question is one joint answer. A named seat answers that
+  // question. The other bots stay quiet.
+  const storedProjectId = getChatProject(chatId).id;
+  // The tax desk's home is the tax supergroup. A chat that has never been
+  // switched still looks like health-tracker, and this bot must not answer
+  // that room as the health council.
+  const deskHome = isTaxDesk
+    && config.agent?.homeProject === TAX_PROJECT_ID
+    && storedProjectId === 'health-tracker';
+  const taxChat = storedProjectId === TAX_PROJECT_ID || isTaxGroupChat(taxWorkspace, chatId) || deskHome;
+  const healthTurn = classifyHealthGroupTurn({
+    kind: chatKind(message),
+    addr,
+    text,
+    projectId: storedProjectId,
+    taxChat,
+  });
+  if (healthTurn?.mode === 'skip') return;
+  if (healthTurn) {
+    if (busy.has(chatId)) {
+      await api.sendMessage(chatId, 'Still working through the seats. Ask again when that answer is in the chat.');
+      return;
+    }
+    busy.add(chatId);
+    const workspace = KNOWN_PROJECTS['external-health'].workspace;
+    console.log(`[${config.id}] health group ${healthTurn.mode}${healthTurn.roleId ? ` ${healthTurn.roleId}` : ''}`);
+    let reply;
+    let typing;
+    try {
+      if (healthTurn.mode === 'brief') {
+        // A brief ask is not a question for the seats: it runs the publisher,
+        // under the same busy guard, and the room gets the refresh reply.
+        await api.sendMessage(
+          chatId,
+          '📄 *Working on the brief — verify first, then update the four documents in place...*',
+          { parse_mode: 'Markdown' },
+        ).catch(() => {});
+        reply = await answerBriefAsk({ projectId: 'external-health', botId: config.id });
+      } else {
+        const artifact = readHealthVerify(workspace);
+        const gate = artifact && gateFromArtifact(artifact);
+        if (gate?.total > 0 && typeof api.sendChatAction === 'function') {
+          const ping = () => {
+            const pending = api.sendChatAction(chatId, 'typing');
+            if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+          };
+          ping();
+          typing = setInterval(ping, 4000);
+          typing.unref?.();
+        }
+        reply = await answerHealthGroup({
+          ...healthTurn,
+          workspace,
+          runModel: async ({ prompt }) => {
+            const { runGemini } = await import('./lib/agent-gemini.mjs');
+            const res = await runGemini({
+              prompt,
+              model: process.env.COUNCIL_MODEL || 'gemini/gemini-3.7-flash',
+              timeoutMs: 120000,
+            });
+            const out = String(res?.finalText || '').trim();
+            if (!out) throw new Error(res?.lastError || 'the model returned no text');
+            return out;
+          },
+        });
+      }
+    } catch (err) {
+      await api.sendMessage(chatId, `The health seats did not finish: ${err.message}`).catch(() => {});
+      return;
+    } finally {
+      if (typing) clearInterval(typing);
+      busy.delete(chatId);
+    }
+    if (reply?.fallbackReason) {
+      console.log(`[${config.id}] health group ${healthTurn.mode}${healthTurn.roleId ? ` ${healthTurn.roleId}` : ''} fell back: ${reply.fallbackReason}`);
+    }
+    if (reply?.text) {
+      await api.sendMessage(chatId, reply.text, reply.markdown ? { parse_mode: 'Markdown' } : undefined).catch(() => {});
+    }
+    if (reply?.answered) {
+      if (healthTurn.mode === 'seat') forgetTaxGroup(taxWorkspace, chatId);
+      recordActiveThread(chatId, {
+        roleId: healthTurn.roleId || null,
+        botId: config.me?.id || config.id,
+        isCouncil: healthTurn.mode === 'council',
+        jointRoles: addr?.jointRoles || [],
+        timestamp: Date.now(),
+      });
+    }
+    return;
+  }
+
+  // Same shape as the health room, for the tax seats. A named seat answers
+  // alone. A bare question in the tax supergroup is one consolidated reply
+  // after the accountant and the verifier, in that order. No slash command.
+  const taxProjectId = deskHome ? TAX_PROJECT_ID : storedProjectId;
+  const taxHome = taxProjectId === TAX_PROJECT_ID || taxChat;
+  const taxTurn = classifyTaxGroupTurn({
+    kind: chatKind(message),
+    addr,
+    text,
+    projectId: taxProjectId,
+    taxChat: taxHome,
+    isDesk: isTaxDesk,
+  });
+  if (taxTurn?.mode === 'skip') return;
+  if (taxTurn) {
+    if (busy.has(chatId)) {
+      await api.sendMessage(chatId, 'Still working through the tax seats. Ask again when that answer is in the chat.');
+      return;
+    }
+    busy.add(chatId);
+    console.log(`[${config.id}] tax group ${taxTurn.mode}${taxTurn.roleId ? ` ${taxTurn.roleId}` : ''}`);
+    let reply;
+    try {
+      // A seat mention answers in any room without binding it: only the
+      // desk's room answer makes this chat a tax supergroup. Otherwise one
+      // @accountant mention in the health room would steal its bare questions.
+      if (taxTurn.mode === 'council') rememberTaxGroup(taxWorkspace, chatId);
+      reply = answerTaxGroup({
+        ...taxTurn,
+        workspace: taxWorkspace,
+        snapshot: readTaxSnapshot(taxWorkspace),
+      });
+    } catch (err) {
+      await api.sendMessage(chatId, `The tax seats did not finish: ${err.message}`).catch(() => {});
+      return;
+    } finally {
+      busy.delete(chatId);
+    }
+    if (reply?.text) await api.sendMessage(chatId, reply.text).catch(() => {});
+    if (reply?.answered) {
+      recordActiveThread(chatId, {
+        roleId: taxTurn.roleId || null,
+        botId: config.me?.id || config.id,
+        isCouncil: taxTurn.mode === 'council',
+        jointRoles: addr?.jointRoles || [],
+        timestamp: Date.now(),
+      });
+    }
+    return;
+  }
+  if (chatKind(message) === 'group' && addr.isBroadcast && taxHome && !isTaxDesk) return;
+  if (chatKind(message) === 'group' && addr.isBroadcast && isTaxDesk && config.id !== 'vm' && !taxHome) return;
 
   if (busy.has(chatId)) {
     // Direct phone interaction: a message sent mid-run queues as a follow-up
@@ -4175,6 +4477,17 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       : addr?.isBroadcast
         ? `Council Coordinator (${providerLabelForModel(eff.model)})`
         : providerLabelForModel(eff.model);
+    // Headline for the lane actually running, mirroring the role prefix above —
+    // so a displaced or failed-over turn never keeps announcing the dead lane
+    // it started on. The construction above stays untouched (landed work).
+    const headlineForLane = (lane) => {
+      const base = addr?.roleId
+        ? String(addr.roleId).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+        : addr?.isBroadcast
+          ? 'Council Coordinator'
+          : '';
+      return base ? `${base} (${providerLabelForModel(lane)})` : providerLabelForModel(lane);
+    };
     renderer.setHeadline({
       providerLabel: roleHeadlineLabel,
       modelLabel: eff.model || '',
@@ -4594,10 +4907,19 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       //
       // `why` is the ledger's own reason ("depleted until <stamp>"), never a raw
       // provider envelope, so this line cannot become the failure QS-2 forbids.
+      // The headline was painted with the chat's (dead) model before the ledger
+      // was read — repoint it at the lane actually running, and say the chat
+      // stays there: without the stick the next turn announces the dead lane
+      // as its starting model again, every message until reset.
+      try {
+        renderer.setHeadline({ providerLabel: headlineForLane(laneChoice.chose), modelLabel: laneChoice.chose });
+      } catch {
+        // a UI hiccup must never break failover
+      }
       if (!laneChoice.degradedToLight) {
         await api.sendMessage(
           chatId,
-          `🔀 \`${eff.model}\` is ${why} — this turn ran on \`${laneChoice.chose}\` instead.`,
+          `🔀 \`${eff.model}\` is ${why} — this turn ran on \`${laneChoice.chose}\` instead, and the chat stays on \`${laneChoice.chose}\` until you switch back.`,
         ).catch(() => {});
       }
       // A coding turn that can only be served by a light model is said out loud.
@@ -4655,6 +4977,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         const candidate = parseModelRef(model);
         observerContext = { model, attempt, surface: candidate.surface, provider: candidate.surface };
         if (observer) observer.write('run_start', {}, observerContext);
+        // A mid-turn failover (ledger missed it, the lane died at runtime)
+        // must move the headline too, or the progress line keeps naming the
+        // dead lane while another one does the work.
+        try {
+          renderer.setHeadline({ providerLabel: headlineForLane(model), modelLabel: model });
+        } catch {
+          // a UI hiccup must never break failover
+        }
       },
       onAttemptComplete: ({ result: attemptResult, aborted }) => {
         observerTerminalWritten = true;
@@ -4756,7 +5086,28 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       renderer.status = 'aborted';
       await renderer.deliver('Aborted.');
     } else {
-      const usageText = await noteUsage({ chatId, result, eff, config, caches, totals, lastUsage });
+      // Sticky failover: the chat asked for eff.model but the answer came from
+      // another lane (ledger displacement above, or a mid-turn failover the
+      // ledger only learned about via this turn's stamp). Point the chat at the
+      // lane that actually answered so the next turn starts there instead of
+      // announcing — and displacing — the dead lane again, every message until
+      // reset. The previous choice is kept as autoSwitchedFrom for a one-tap
+      // switchback after renewal. Bookkeeping must never break delivery.
+      const stickTo = stickyModelAfterTurn({
+        chatModel: eff.model,
+        answeredModel: lastAttemptModel,
+        answered: Boolean(String(result?.finalText || '').trim()),
+      });
+      const usageText = await noteUsage({ chatId, result, eff: stickTo ? { ...eff, model: stickTo } : eff, config, caches, totals, lastUsage });
+      if (stickTo) {
+        try {
+          setPref(prefs, chatId, { model: stickTo, autoSwitchedFrom: eff.model, autoSwitchedAt: new Date().toISOString() });
+          savePrefs(config.id, prefs);
+          console.log(`[${config.id}] chat ${chatId} stuck to ${stickTo} (was ${eff.model})`);
+        } catch {
+          // fall through to delivery
+        }
+      }
       if (handoff) {
         const kept = prefFor(prefs, chatId);
         delete kept.handoff;
@@ -4793,7 +5144,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     if (storeFacts.outcome === 'answered') {
       recordActiveThread(chatId, {
         roleId: activeRole || addr?.roleId || null,
-        botId: config.id,
+        botId: config.me?.id || config.id,
         isCouncil: Boolean(addr?.isBroadcast),
         jointRoles: addr?.jointRoles || [],
         timestamp: Date.now(),
@@ -5004,6 +5355,8 @@ async function main() {
   }
   const bot = getBot(registry, args.id);
   const config = normalizeConfig(bot, { defaultWorkspace: REPO_ROOT });
+  // Private-chat roles are per bot. Bind before any command or turn reads them.
+  bindRegistryBot(config.id);
   if (config.runtime !== 'bot-host' && config.runtime !== 'device') {
     throw new Error(
       `Bot "${config.id}" has runtime "${config.runtime}" — it is not run by bot-host`,

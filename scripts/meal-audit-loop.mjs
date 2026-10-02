@@ -404,6 +404,114 @@ export function runComparison(bundleDir, { actualPath, skip = false } = {}) {
   };
 }
 
+/**
+ * The comparator's own statement of what went wrong FIRST, read back off the
+ * comparison it wrote.
+ *
+ * Read from the file rather than threaded through runCompare's return on
+ * purpose. runCompare already returns `comparisonPath`, so the value is one read
+ * away, and returning it would mean rewriting a line that landed work owns
+ * (5b11c1db) for no gain — the no-undo gate is right to object to that, and the
+ * behaviour wanted here is a refusal, not a wider return shape.
+ *
+ * @returns {string|null} e.g. 'turn_mismatch', or null when absent/unreadable.
+ */
+export function primaryCodeOf(comparisonPath) {
+  try {
+    return JSON.parse(fs.readFileSync(comparisonPath, 'utf8')).primaryCode || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Is this comparison grounded well enough to file cards from?
+ *
+ * A nutrient-drift card says "the product computed the wrong number". That claim
+ * is only meaningful if the number it is measured against is real. Two ways it
+ * is not, both observed on Meal-prawn-ham-01 on 2026-10-01:
+ *
+ *   1. THE GROUND TRUTH IS DEGENERATE. expected.json and meal_result.json both
+ *      declared estimatedWeightGrams: 0 while declaring calories: 13.2 — energy
+ *      over zero mass, which is not a small error, it is not a number. The
+ *      ~14 g portion was evidently known (13.2 kcal at 94 kcal/100 g is 14.0 g)
+ *      and simply written as 0. The same bundle declared expectedDishCount: 1
+ *      while its own title named two items, and photos/ was empty.
+ *   2. THE PRIMARY FAILURE IS A TURN MISMATCH. comparison.json reported
+ *      verdict DIVERGED with primaryCode turn_mismatch (expected dishCount 1,
+ *      actual 2) — the harness ran a different turn than the one the truth
+ *      describes. Every nutrient delta in that comparison is then measured
+ *      against the wrong meal, not merely an imprecise one.
+ *
+ * The loop filed 13 nutrient-drift cards from that one comparison, all
+ * `packed`/`queue: ready` and therefore dispatchable, while its own guard had
+ * already refused the pass with "ground truth incomplete for a core nutrient".
+ * An agent picking one up would have been told to make the Nutrient Compiler
+ * reproduce a 0 g / 13.2 kcal meal.
+ *
+ * So this runs BEFORE anything is filed. It refuses; it never repairs. An
+ * unsourced weight or nutrient is not guessed — a ground truth that has to be
+ * invented to make a card pass is exactly the fabrication this refuses
+ * elsewhere, and here it would be baked into product code.
+ *
+ * @returns {{refuse: boolean, reasons: string[]}}
+ */
+export function auditGrounding(bundleDir, cmp = null) {
+  const reasons = [];
+
+  const expectedPath = path.join(bundleDir, 'expected.json');
+  let expected = null;
+  try { expected = JSON.parse(fs.readFileSync(expectedPath, 'utf8')); } catch { /* reported below */ }
+  if (!expected) {
+    reasons.push(`ground truth unreadable: ${expectedPath}`);
+  } else {
+    // (1a) Energy or macros over zero declared mass.
+    const items = Array.isArray(expected.expectedItems) ? expected.expectedItems : [];
+    const mealTotals = expected.finalMealTotals || expected.mealTotals || {};
+    const mass = items.length
+      ? items.reduce((s, it) => s + Number(it.estimatedWeightGrams || 0), 0)
+      : Number(mealTotals.weight || 0);
+    const energy = Number(mealTotals.calories || 0);
+    if (mass === 0 && (energy > 0 || Object.values(mealTotals).some((v) => Number(v) > 0))) {
+      reasons.push(
+        `declared weight is 0 g while the ground truth declares non-zero totals `
+        + `(calories ${energy}) — kcal per gram is undefined, so no nutrient delta against it is meaningful`,
+      );
+    }
+    // (1b) The item count must agree with the count the bundle itself claims.
+    for (const pass of expected.passes || []) {
+      if (pass.expectedDishCount == null) continue;
+      if (Number(pass.expectedDishCount) !== items.length) {
+        reasons.push(
+          `expectedDishCount ${pass.expectedDishCount} disagrees with `
+          + `expectedItems.length ${items.length}`,
+        );
+      }
+    }
+    // (1c) No photo means the truth cannot be re-derived from the bundle.
+    const photosDir = path.join(bundleDir, 'photos');
+    if (fs.existsSync(photosDir)) {
+      const photos = fs.readdirSync(photosDir).filter((f) => !f.startsWith('.'));
+      const claimsPhoto = items.length > 0
+        && items.some((it) => Array.isArray(it.boundingBox2D) && it.boundingBox2D.length === 4);
+      if (photos.length === 0 && claimsPhoto) {
+        reasons.push('expectedItems carry boundingBox2D but photos/ is empty — the truth cannot be re-derived from this bundle');
+      }
+    }
+  }
+
+  // (2) The comparison's own primary failure decides what the deltas mean.
+  const primaryCode = cmp?.primaryCode || null;
+  if (primaryCode === 'turn_mismatch') {
+    reasons.push(
+      'comparison primaryCode is turn_mismatch — the harness ran a different turn than the '
+      + 'ground truth describes, so every nutrient delta in it is measured against the wrong meal',
+    );
+  }
+
+  return { refuse: reasons.length > 0, reasons };
+}
+
 /** Stage 4 — file cards via the Phase 2 bridge. */
 export function fileTickets(bundleDir, { actualPath, dryRun }) {
   const args = [`--bundle=${bundleDir}`, '--json'];
@@ -715,6 +823,23 @@ async function main() {
     }
 
     // --- DIVERGED / FAIL: file one card per finding
+    //
+    // ...but only if the comparison is grounded. A nutrient-drift card claims the
+    // product computed a wrong number, which is meaningless if the number it is
+    // measured against is not real. Meal-prawn-ham-01 filed 13 such cards off a
+    // single comparison whose ground truth declared 0 g and 13.2 kcal at once.
+    // Refuse here, before anything is created, and name the field that is missing.
+    const grounding = auditGrounding(bundle.bundleDir, { primaryCode: primaryCodeOf(cmp.comparisonPath) });
+    rec.stages.grounding = grounding;
+    if (grounding.refuse) {
+      rec.error = `ungrounded comparison, no cards filed: ${grounding.reasons.join('; ')}`;
+      rec.outcome = 'ungrounded_no_cards';
+      hardFailure = true;
+      console.error(`[Loop] ${rec.error}`);
+      results.push(rec);
+      continue;
+    }
+
     const filed = fileTickets(bundle.bundleDir, { actualPath: o.actual, dryRun: o.dryRun });
     rec.stages.tickets = { ok: filed.ok, status: filed.status, posted: filed.plan?.posted?.length || 0 };
     if (!filed.ok) {

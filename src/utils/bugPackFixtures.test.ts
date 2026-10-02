@@ -210,9 +210,14 @@ describe('packForDispatch (BOT-20)', () => {
     expect(res.issues).toContain('expected required');
   });
 
+  // `--no-notify` on every invocation below. This file drives the REAL dispatcher
+  // to prove its refusals, and the dispatcher posts to the operator's Telegram
+  // chat: without the flag, every run of this file put real
+  // "[Orchestrator] Dispatch rejected for BUG-TEST" messages in that chat. The
+  // exit codes and stderr this file asserts on are unchanged by it.
   it('run-coding-dispatch.sh rejects vague tasks with non-zero exit', () => {
     try {
-      execFileSync('bash', [dispatchScript, '--task=Fix X', '--bug-id=BUG-TEST'], {
+      execFileSync('bash', [dispatchScript, '--task=Fix X', '--bug-id=BUG-TEST', '--no-notify'], {
         cwd: root,
         encoding: 'utf8',
         stdio: 'pipe',
@@ -234,6 +239,7 @@ describe('packForDispatch (BOT-20)', () => {
         '--expected=7.7g',
         '--bug-id=BUG-8449',
         '--print-plan',
+        '--no-notify',
       ],
       {
         cwd: root,
@@ -261,6 +267,7 @@ describe('packForDispatch (BOT-20)', () => {
         `--work-item=${workItemJson}`,
         '--bug-id=BUG-8449',
         '--print-plan',
+        '--no-notify',
       ],
       {
         cwd: root,
