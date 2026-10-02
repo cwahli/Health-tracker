@@ -517,6 +517,27 @@ function shortProviderModel(model) {
 }
 
 /**
+ * Chat-facing lane name: the routing ref without its surface prefix and
+ * without internal variant markers. `cline:cline-free/deepseek-v4.1-flash`
+ * → `deepseek-v4.1-flash`, `tokenharbor/deepseek-v4.1-flash:free` →
+ * `tokenharbor/deepseek-v4.1-flash` (the vendor dir stays because the
+ * headline provider for that bar reads OpenCode), `opencode/space-bunny-free`
+ * → `space-bunny-free`. Plain ids pass through untouched, so unit-test
+ * lanes like `m1` render exactly as before. Display only — routing still
+ * uses the full ref.
+ */
+export function chatLaneName(ref) {
+  const r = freemodelRefToRoute(ref || '');
+  let s = String(r.model || ref || '').trim();
+  s = s.replace(/^cline-free\//i, '').replace(/:free$/i, '');
+  if (r.provider && s.toLowerCase().startsWith(`${String(r.provider).toLowerCase()}/`)) {
+    const rest = s.slice(String(r.provider).length + 1);
+    if (!/^tokenharbor\//i.test(s)) s = rest;
+  }
+  return s || String(ref || '');
+}
+
+/**
  * Which tool the /tui terminal should launch for this chat, and what it may
  * claim. The table itself lives in lib/tui-surface.mjs so the bot, the attach
  * script and the sensors cannot disagree about it.
@@ -1414,8 +1435,10 @@ export class ProgressRenderer {
       const gist = compressReasoning(event.text, { maxChars: this.maxChars });
       // Drop compressor fragments (".", "/", "check", "at", ":") and repeats:
       // each accepted gist would otherwise become its own chat message.
+      // Single-word reasoning shards ("anywhere") also read as nonsense on the
+      // `Thinking:` line, so a gist needs at least two words to be shown.
       const clean = gist.trim();
-      if (!clean || clean.length < 8 || clean === this.thinking) return;
+      if (!clean || clean.length < 12 || clean.split(/\s+/).length < 2 || clean === this.thinking) return;
       this.thinking = gist;
       this.status = 'thinking';
       this._schedule();
@@ -3978,10 +4001,12 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
       }
       // Quota envelopes (Cline's INFERENCE_CAP_ERROR JSON) stay in the
       // ledger/observer log; the chat line carries the short verdict only.
+      // Non-quota failures are one collapsed line, capped — never the raw
+      // multi-line error with its model-id echo.
       const short = isQuotaOrLimitError(raw)
         ? `free limit hit${parseRetryAfter(raw) ? ` (${parseRetryAfter(raw)})` : ''}`
-        : raw.slice(0, 200);
-      const line = `🔀 *${from}* failed (${short.slice(0, 200)}) — switching to *${to}*…`;
+        : raw.split('\n')[0].replace(/\s+/g, ' ').trim().slice(0, 120) || 'error';
+      const line = `🔀 *${chatLaneName(from)}* failed (${short.slice(0, 200)}) — switching to *${chatLaneName(to)}*…`;
       try {
         if (typeof onSwitchNotify === 'function') {
           onSwitchNotify(line);
@@ -4467,7 +4492,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     };
     renderer.setHeadline({
       providerLabel: roleHeadlineLabel,
-      modelLabel: eff.model || '',
+      modelLabel: chatLaneName(eff.model) || '',
     });
     // Paint the headline now (starting… 0s) so the chat sees the turn begin
     // at once; the old lazy path left only bare typing until the first
@@ -4868,12 +4893,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       return;
     }
     if (laneChoice.displaced) {
-      // The ledger's reason usually already carries its own reset stamp
-      // ("depleted until 2026-09-26T11:59:11Z (from vendor countdown …)"), so
-      // appending the reset label again produced "… until X until X".
-      const stamp = laneChoice.displaced.resetLabel;
+      // Chat copy carries the compact countdown, never the ledger's absolute
+      // stamp: "depleted until 2026-10-03T04:30:29Z (default TTL, no countdown
+      // in vendor text) / Sat 11:30 WIB" is a log line, not a chat line (live
+      // 2026-10-03). Lane names go through chatLaneName for the same reason —
+      // no surface prefixes, no :free markers.
       const reason = String(laneChoice.displaced.why || '');
-      const why = stamp && !reason.includes(stamp) ? `${reason} until ${stamp}` : reason;
+      const why = laneChoice.displaced.until
+        ? `depleted (reset in ${formatResetIn(laneChoice.displaced.until, Date.now())})`
+        : reason.split('\n')[0].replace(/\s+/g, ' ').trim().slice(0, 160) || 'not available';
       console.log(`[${config.id}] lane ${eff.model} not selectable (${why}); using ${laneChoice.chose}`);
       // QS-2: "the same prompt completes on the next lane with a user-visible
       // switch line naming failed lane -> next lane". The walk did exactly that
@@ -4889,14 +4917,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       // stays there: without the stick the next turn announces the dead lane
       // as its starting model again, every message until reset.
       try {
-        renderer.setHeadline({ providerLabel: headlineForLane(laneChoice.chose), modelLabel: laneChoice.chose });
+        renderer.setHeadline({ providerLabel: headlineForLane(laneChoice.chose), modelLabel: chatLaneName(laneChoice.chose) });
       } catch {
         // a UI hiccup must never break failover
       }
       if (!laneChoice.degradedToLight) {
         await api.sendMessage(
           chatId,
-          `🔀 \`${eff.model}\` is ${why} — this turn ran on \`${laneChoice.chose}\` instead, and the chat stays on \`${laneChoice.chose}\` until you switch back.`,
+          `🔀 \`${chatLaneName(eff.model)}\` is ${why} — this turn ran on \`${chatLaneName(laneChoice.chose)}\` instead, and the chat stays on \`${chatLaneName(laneChoice.chose)}\` until you switch back.`,
         ).catch(() => {});
       }
       // A coding turn that can only be served by a light model is said out loud.
@@ -4906,7 +4934,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         console.log(`[${config.id}] no coding lane left; degraded to a light model (${laneChoice.chose})`);
         await api.sendMessage(
           chatId,
-          `⚠️ \`${eff.model}\` is ${laneChoice.displaced.why}, and no coding lane is free right now — this turn runs on the light model \`${laneChoice.chose}\`. Code may be weaker than usual.`
+          `⚠️ \`${chatLaneName(eff.model)}\` is ${why}, and no coding lane is free right now — this turn runs on the light model \`${chatLaneName(laneChoice.chose)}\`. Code may be weaker than usual.`
         ).catch(() => {});
       }
     }
@@ -4958,7 +4986,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         // must move the headline too, or the progress line keeps naming the
         // dead lane while another one does the work.
         try {
-          renderer.setHeadline({ providerLabel: headlineForLane(model), modelLabel: model });
+          renderer.setHeadline({ providerLabel: headlineForLane(model), modelLabel: chatLaneName(model) });
         } catch {
           // a UI hiccup must never break failover
         }

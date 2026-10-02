@@ -240,9 +240,10 @@ check('a light lane is still reachable as a last resort',
 // displaced a depleted lane on 2026-09-26 06:51Z, answered on the next lane, and
 // the chat was told nothing.
 check('a displaced lane is announced to the chat, not just logged',
-  /this turn ran on \\`\$\{laneChoice\.chose\}\\` instead/.test(botWalkSrc));
-check('and that line quotes the ledger reason, never a raw provider envelope',
-  /is \$\{why\} — this turn ran on/.test(botWalkSrc) && /const why = stamp && !reason\.includes\(stamp\)/.test(botWalkSrc));
+  /this turn ran on \\`\$\{chatLaneName\(laneChoice\.chose\)\}\\` instead/.test(botWalkSrc));
+check('and that line quotes the compact countdown, never the absolute stamp',
+  /is \$\{why\} — this turn ran on/.test(botWalkSrc) && /const why = laneChoice\.displaced\.until/.test(botWalkSrc)
+  && /formatResetIn\(laneChoice\.displaced\.until/.test(botWalkSrc) && !/until \$\{stamp\}/.test(botWalkSrc));
 check('and the turn is told when it dropped to a light model',
   /no coding lane is free right now/.test(botWalkSrc));
 // Sticky failover (2026-10-02: a depleted auto-switch was re-announced as the
