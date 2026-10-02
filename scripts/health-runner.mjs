@@ -885,6 +885,35 @@ export function formatRefreshText(result) {
   return lines.join('\n');
 }
 
+/**
+ * The health room's brief ask — "work on the brief", "update the documents".
+ *
+ * It is not a question for the seats and not a slash command: it runs the same
+ * publisher `/health refresh` runs and the room gets the same reply. While the
+ * gate is open the drafts publish and the analysis stays withheld — the refresh
+ * already decides that, so there is no refusal line to add here. A refresh that
+ * cannot run keeps its own stage and reason, and says nothing was invented.
+ * `refresh` is injectable so the sensor can drive the turn with a fixture run.
+ */
+export async function answerBriefAsk({ projectId = DEFAULT_PROJECT, botId = '', refresh } = {}) {
+  const run = typeof refresh === 'function' ? refresh : () => runHealthRefresh({ projectId, botId });
+  let res;
+  try {
+    res = await run();
+  } catch (err) {
+    return { answered: true, usedModel: false, text: `❌ Working the brief failed: ${err.message}`, fallbackReason: `brief failed: ${err.message}` };
+  }
+  if (!res?.ok) {
+    return {
+      answered: true,
+      usedModel: false,
+      text: `❌ The brief could not be worked (${res?.stage || 'unknown'}): ${res?.error || 'the publisher gave no reason'}`,
+      fallbackReason: `brief refused: ${res?.stage || 'unknown'}`,
+    };
+  }
+  return { answered: true, usedModel: false, text: formatRefreshText(res), markdown: true };
+}
+
 /** The Telegram reply for the analysis entry point. */
 export function formatAnalyzeText(result) {
   if (!result.ok) {

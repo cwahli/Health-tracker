@@ -189,7 +189,7 @@ import {
 // The Personal Health Coach's data loop. `/health` is deliberately not gated on
 // the chat's active project: the command names its own project, so a verify can
 // be run from any chat, and the reply says which one it read.
-import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText } from './health-runner.mjs';
+import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText, answerBriefAsk } from './health-runner.mjs';
 // "Can a seat actually run?" — the readiness check reads the context a seat
 // would be handed plus this host's credentials, and reports what is missing
 // instead of letting a turn start on an empty context.
@@ -4196,32 +4196,43 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     let reply;
     let typing;
     try {
-      const artifact = readHealthVerify(workspace);
-      const gate = artifact && gateFromArtifact(artifact);
-      if (gate?.total > 0 && typeof api.sendChatAction === 'function') {
-        const ping = () => {
-          const pending = api.sendChatAction(chatId, 'typing');
-          if (pending && typeof pending.catch === 'function') pending.catch(() => {});
-        };
-        ping();
-        typing = setInterval(ping, 4000);
-        typing.unref?.();
+      if (healthTurn.mode === 'brief') {
+        // A brief ask is not a question for the seats: it runs the publisher,
+        // under the same busy guard, and the room gets the refresh reply.
+        await api.sendMessage(
+          chatId,
+          '📄 *Working on the brief — verify first, then update the four documents in place...*',
+          { parse_mode: 'Markdown' },
+        ).catch(() => {});
+        reply = await answerBriefAsk({ projectId: 'external-health', botId: config.id });
+      } else {
+        const artifact = readHealthVerify(workspace);
+        const gate = artifact && gateFromArtifact(artifact);
+        if (gate?.total > 0 && typeof api.sendChatAction === 'function') {
+          const ping = () => {
+            const pending = api.sendChatAction(chatId, 'typing');
+            if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+          };
+          ping();
+          typing = setInterval(ping, 4000);
+          typing.unref?.();
+        }
+        reply = await answerHealthGroup({
+          ...healthTurn,
+          workspace,
+          runModel: async ({ prompt }) => {
+            const { runGemini } = await import('./lib/agent-gemini.mjs');
+            const res = await runGemini({
+              prompt,
+              model: process.env.COUNCIL_MODEL || 'gemini/gemini-3.7-flash',
+              timeoutMs: 120000,
+            });
+            const out = String(res?.finalText || '').trim();
+            if (!out) throw new Error(res?.lastError || 'the model returned no text');
+            return out;
+          },
+        });
       }
-      reply = await answerHealthGroup({
-        ...healthTurn,
-        workspace,
-        runModel: async ({ prompt }) => {
-          const { runGemini } = await import('./lib/agent-gemini.mjs');
-          const res = await runGemini({
-            prompt,
-            model: process.env.COUNCIL_MODEL || 'gemini/gemini-3.7-flash',
-            timeoutMs: 120000,
-          });
-          const out = String(res?.finalText || '').trim();
-          if (!out) throw new Error(res?.lastError || 'the model returned no text');
-          return out;
-        },
-      });
     } catch (err) {
       await api.sendMessage(chatId, `The health seats did not finish: ${err.message}`).catch(() => {});
       return;
@@ -4232,7 +4243,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     if (reply?.fallbackReason) {
       console.log(`[${config.id}] health group ${healthTurn.mode}${healthTurn.roleId ? ` ${healthTurn.roleId}` : ''} fell back: ${reply.fallbackReason}`);
     }
-    if (reply?.text) await api.sendMessage(chatId, reply.text).catch(() => {});
+    if (reply?.text) {
+      await api.sendMessage(chatId, reply.text, reply.markdown ? { parse_mode: 'Markdown' } : undefined).catch(() => {});
+    }
     if (reply?.answered) {
       if (healthTurn.mode === 'seat') forgetTaxGroup(taxWorkspace, chatId);
       recordActiveThread(chatId, {
