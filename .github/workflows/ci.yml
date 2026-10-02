@@ -319,6 +319,13 @@ jobs:
       - name: Dispatch toolchain gate (assert-dispatch-toolchain)
         run: node scripts/assert-dispatch-toolchain.mjs
 
+      # A test that drives the real dispatcher must not post to the operator's
+      # chat. It did: every run of bugPackFixtures put real "[Orchestrator]
+      # Dispatch rejected for BUG-TEST" messages in that chat, which read as a
+      # pipeline incident and were a fixture's deliberate refusal.
+      - name: Dispatch quiet gate (a test must not post to the chat)
+        run: node scripts/assert-dispatch-quiet.mjs
+
       # The merge gate that protects this branch. `auto-merge` used to merge PRs
       # whose required checks had FAILED (#340 raced ahead of CI; #346 landed with
       # `tsc + named gates` red in both runs). The sensor drives the decision

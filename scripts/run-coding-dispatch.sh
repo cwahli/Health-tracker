@@ -32,7 +32,27 @@ cd "$REPO_DIR"
 
 HERMES_DIR="${HERMES_DIR:-${HOME}/.hermes}"
 AUDIT_LOG="${HERMES_DIR}/dispatch_audit.log"
-TELEGRAM_SCRIPT="${REPO_DIR}/scripts/telegram-send.sh"
+# Two seams, in order: TELEGRAM_SCRIPT_OVERRIDE (this change; a sensor points
+# it at a stub) and an inherited TELEGRAM_SCRIPT (scripts/assert-dispatch-
+# lifecycle.sh exports one to count the typing pings). The default is last.
+TELEGRAM_SCRIPT="${TELEGRAM_SCRIPT_OVERRIDE:-${TELEGRAM_SCRIPT:-${REPO_DIR}/scripts/telegram-send.sh}}"
+
+# Every notice this script sends goes through tg_send() below, and every tg_send
+# goes through this switch. `--no-notify` (or DISPATCH_NOTIFY=0) is how a caller
+# that is not a real dispatch — a test driving this script to prove its refusals,
+# a dry run, a batch replay — stops posting to the operator's chat.
+#
+# The tests in src/utils/bugPackFixtures.test.ts shell out to THIS script with a
+# deliberately vague `--task` to prove packCheck rejects it. Before the switch
+# existed, each run of that file posted real "[Orchestrator] Dispatch rejected
+# for BUG-TEST" messages to the live chat, which is what that chat was showing.
+DISPATCH_NOTIFY="${DISPATCH_NOTIFY:-1}"
+
+# The single sender. Every telegram-send.sh call in this file is routed here.
+tg_send() {
+  [ "${DISPATCH_NOTIFY:-1}" = "1" ] || return 0
+  bash "$TELEGRAM_SCRIPT" "$@" 2>/dev/null || true
+}
 DISPATCH_LOCK_DIR="${HERMES_DIR}/dispatch_locks"
 DISPATCH_ACTIVE_DIR="${HERMES_DIR}/dispatch_active"
 # Legacy single-file lock (pre-parallel). Kept as read-only fallback so an
@@ -222,7 +242,7 @@ except Exception: print("")' 2>/dev/null || true)
       fi
     fi
     if [ -n "$tool" ] && [ -n "$bug_id" ]; then
-      bash "$TELEGRAM_SCRIPT" --profile="${HERMES_PROFILE:-orchestrator}" \
+      tg_send --profile="${HERMES_PROFILE:-orchestrator}" \
         --text="🛑 *[Orchestrator]* Stopped agent '*$tool*' on \`$bug_id\`.
 • Process terminated (PID ${pid:-?}).
 • That run's worktree reverted; other agents keep working.
@@ -306,7 +326,7 @@ TICKET_ATTEMPT_OPEN=0
 for arg in "$@"; do
   case $arg in
     --help|-h)
-      echo "Usage: $0 [--work-item=JSON|FILE] [--ticket=#n] [--page=...] [--observed=...] [--expected=...] [--screenshot=...] [--criteria=...] [--bug-id='...'] [--category='...'] [--tool=auto|opencode|cline|grok|agy] [--model=...] [--thinking=high|low|none|auto] [--cascade] [--verify=true|false|auto] [--profile=orchestrator] [--area=name] [--files=a,b] [--foreground] [--print-plan]"
+      echo "Usage: $0 [--no-notify] [--work-item=JSON|FILE] [--ticket=#n] [--page=...] [--observed=...] [--expected=...] [--screenshot=...] [--criteria=...] [--bug-id='...'] [--category='...'] [--tool=auto|opencode|cline|grok|agy] [--model=...] [--thinking=high|low|none|auto] [--cascade] [--verify=true|false|auto] [--profile=orchestrator] [--area=name] [--files=a,b] [--foreground] [--print-plan]"
       echo ""
       echo "  --ticket=#n   V-30.4 packet-driven dispatch: the packed card packet is the"
       echo "                prompt source (plan posted first, attempt rows at start/end,"
@@ -343,6 +363,7 @@ for arg in "$@"; do
     --worktree=*)                DISPATCH_WORKTREE="${arg#*=}" ;; # advanced: reuse an existing checkout
     --foreground)                FOREGROUND=1 ;;
     --print-plan)                PRINT_PLAN=1 ;;
+    --no-notify)                 DISPATCH_NOTIFY=0 ;;
     *)
       if [ -z "$TASK" ]; then TASK="$arg"; fi
       ;;
@@ -382,7 +403,7 @@ PACK_RAW=$(node "$PACK_HELPER" dispatch "$@" 2>&1) || {
   echo "[Dispatcher] Rejected: inbound defect report failed packCheck:" >&2
   echo "$PACK_RAW" >&2
   if [ -f "$TELEGRAM_SCRIPT" ]; then
-    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" \
+    tg_send --profile="$DISPATCH_PROFILE" \
       --text="❌ *[Orchestrator]* Dispatch rejected for \`$BUG_ID\`: payload failed packCheck:
 \`\`\`
 $(echo "$PACK_RAW" | head -n 6)
@@ -437,7 +458,7 @@ else
   # it is the same run (lock check below also refuses an alive duplicate PID).
   if ! GUARD_OUT=$(node "$DISPATCH_HELPER" guard --packet-file="$PACKET_FILE" --self-pid="$$" 2>&1); then
     echo "[Dispatcher] Dispatch refused for ticket #$TICKET: $GUARD_OUT" >&2
-    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="🚫 *[Orchestrator]* Dispatch refused for \`#$TICKET\`: ${GUARD_OUT#refused: }" 2>/dev/null || true
+    tg_send --profile="$DISPATCH_PROFILE" --text="🚫 *[Orchestrator]* Dispatch refused for \`#$TICKET\`: ${GUARD_OUT#refused: }" 2>/dev/null || true
     rm -f "$PACKET_FILE"
     exit 3
   fi
@@ -754,7 +775,7 @@ if [ -f "$RUN_LOCK_FILE" ]; then
   dup_pid=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("pid",""))' "$RUN_LOCK_FILE" 2>/dev/null || true)
   if [ -n "$dup_pid" ] && kill -0 "$dup_pid" 2>/dev/null; then
     echo "[Dispatcher] $BUG_ID is already running (PID $dup_pid). Use a new --bug-id for parallel work."
-    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="ℹ️ *[Orchestrator]* \`$BUG_ID\` is already running (PID \`$dup_pid\`). Send a new bug id to run in parallel." 2>/dev/null || true
+    tg_send --profile="$DISPATCH_PROFILE" --text="ℹ️ *[Orchestrator]* \`$BUG_ID\` is already running (PID \`$dup_pid\`). Send a new bug id to run in parallel." 2>/dev/null || true
     exit 1
   fi
   rm -f "$RUN_LOCK_FILE" "$RUN_ACTIVE_FILE" 2>/dev/null || true
@@ -855,7 +876,7 @@ if [ -n "$TICKET" ]; then
   TICKET_ATTEMPT_OPEN=1
 fi
 if [ -n "$LOCK_CONFLICTS" ]; then
-  bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* \`$BUG_ID\` starts in parallel — routing around live file claims:
+  tg_send --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* \`$BUG_ID\` starts in parallel — routing around live file claims:
 $(printf '%s' "$LOCK_CONFLICTS" | head -n 8)" 2>/dev/null || true
 fi
 
@@ -872,9 +893,9 @@ tg_msg() {
   local text="$1"
   local photo="${2:-}"
   if [ -n "$photo" ] && [ -f "$photo" ]; then
-    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --photo="$photo" --caption="$text" 2>/dev/null || true
+    tg_send --profile="$DISPATCH_PROFILE" --photo="$photo" --caption="$text" 2>/dev/null || true
   else
-    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="$text" 2>/dev/null || true
+    tg_send --profile="$DISPATCH_PROFILE" --text="$text" 2>/dev/null || true
   fi
 }
 
@@ -884,9 +905,9 @@ tg_qa() {
   local prof
   prof=$(qa_profile_for_category)
   if [ -n "$photo" ] && [ -f "$photo" ]; then
-    bash "$TELEGRAM_SCRIPT" --profile="$prof" --photo="$photo" --caption="$text" 2>/dev/null || true
+    tg_send --profile="$prof" --photo="$photo" --caption="$text" 2>/dev/null || true
   else
-    bash "$TELEGRAM_SCRIPT" --profile="$prof" --text="$text" 2>/dev/null || true
+    tg_send --profile="$prof" --text="$text" 2>/dev/null || true
   fi
 }
 
@@ -957,7 +978,7 @@ start_heartbeat() {
     # Continuous typing action loop in background to display 3 loading dots in Telegram chat header
     (
       while true; do
-        bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
+        [ "${DISPATCH_NOTIFY:-1}" = "1" ] && bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
         sleep 4
       done
     ) &
@@ -1848,7 +1869,7 @@ Fix pushed to main. Awaiting CI/CD deploy (~45s)."
     # Pulse Telegram typing indicator during deploy wait so 3 dots are shown
     (
       for i in $(seq 1 11); do
-        bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
+        [ "${DISPATCH_NOTIFY:-1}" = "1" ] && bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
         sleep 4
       done
     ) &
