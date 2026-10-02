@@ -146,6 +146,21 @@ export const KNOWN_PROJECTS = {
     contextProvider: 'health',
     roles: HEALTH_PROJECT_ROLES,
   },
+  'chiwah-tax': {
+    id: 'chiwah-tax',
+    name: 'Chiwah LTD tax and Companies House',
+    type: 'external',
+    projectNumber: null,
+    workspace: path.join(os.homedir(), 'chiwah-tax'),
+    templateDir: null,
+    allowGit: false,
+    gdriveFolder: '',
+    description: 'Tax engine, maker/checker seats, and the Companies House filing pack',
+    roles: [
+      { id: 'tax_accountant', name: 'Tax Accountant', file: null, description: 'Maker and desk. Quotes results/*.json and does not invent a figure.' },
+      { id: 'tax_verifier', name: 'Tax Verifier', file: null, description: 'Checker. Re-reads the same files and does not edit them.' },
+    ],
+  },
   'health-tracker': {
     id: 'health-tracker',
     name: 'Health Tracker Website (Project 1)',
@@ -288,6 +303,36 @@ export const ROLE_ALIASES = {
   final: 'final_case_builder',
   casebuilder: 'final_case_builder',
 };
+
+/** Poller id for this process. Empty keeps the legacy chat-id key. */
+let boundBotId = '';
+
+export function bindRegistryBot(botId) {
+  boundBotId = String(botId || '').trim();
+  return boundBotId;
+}
+
+/** A private Telegram chat id is the user's id, the same number on every bot. */
+function isPrivateChat(chatId) {
+  return /^[1-9]\d*$/.test(String(chatId));
+}
+
+/**
+ * Private project and role live under `botId:chatId`, because the bare user
+ * id is not a conversation. A group project stays on the room id so every
+ * bot agrees which project the room is. A group role stays on this bot.
+ */
+function projectKey(chatId) {
+  const cid = String(chatId);
+  if (boundBotId && isPrivateChat(cid)) return `${boundBotId}:${cid}`;
+  return cid;
+}
+
+function roleKey(chatId) {
+  const cid = String(chatId);
+  if (boundBotId) return `${boundBotId}:${cid}`;
+  return cid;
+}
 
 function loadState() {
   try {
@@ -513,6 +558,17 @@ export function resolveProjectId(raw) {
   ) {
     return 'external-health';
   }
+  if (
+    s === 'tax' ||
+    s === 'chiwah' ||
+    s === 'chiwah-tax' ||
+    s === 'chiwah tax' ||
+    s === 'companies house' ||
+    s === 'company house' ||
+    s === 'companies-house'
+  ) {
+    return 'chiwah-tax';
+  }
 
   // Dynamic project 3+ check (e.g. "external 3", "project 3", "3", "external-4")
   const matchNum = s.match(/^(?:project\s*|external\s*|-)?(\d+)$/);
@@ -559,16 +615,14 @@ export function resolveRoleId(raw, projectId = 'external-2') {
 
 export function getChatProject(chatId) {
   const state = loadState();
-  const cid = String(chatId);
-  const entry = state.chats[cid];
+  const entry = state.chats[projectKey(chatId)];
   const pid = entry?.projectId || 'health-tracker';
   return KNOWN_PROJECTS[pid] || KNOWN_PROJECTS['health-tracker'];
 }
 
 export function getChatRole(chatId) {
   const state = loadState();
-  const cid = String(chatId);
-  return state.chats[cid]?.roleId || null;
+  return state.chats[roleKey(chatId)]?.roleId || null;
 }
 
 export function switchChatProject(chatId, rawProjectId) {
@@ -578,13 +632,24 @@ export function switchChatProject(chatId, rawProjectId) {
     throw new Error(`Unknown project "${rawProjectId}". Known projects: ${known}, or use "/project external 2", "/project 1", etc.`);
   }
   const state = loadState();
-  const cid = String(chatId);
-  state.chats[cid] = {
-    ...(state.chats[cid] || {}),
+  const key = projectKey(chatId);
+  const next = {
+    ...(state.chats[key] || {}),
     projectId: pid,
-    roleId: null, // reset active role to full council when switching projects
     switchedAt: new Date().toISOString(),
   };
+  // Leaving a project drops this bot's seat. Other bots keep theirs.
+  const rkey = roleKey(chatId);
+  if (rkey === key) {
+    next.roleId = null;
+  } else if (state.chats[rkey]) {
+    state.chats[rkey] = {
+      ...state.chats[rkey],
+      roleId: null,
+      roleSwitchedAt: new Date().toISOString(),
+    };
+  }
+  state.chats[key] = next;
 
   const project = KNOWN_PROJECTS[pid];
   if (project.type === 'external') {
@@ -603,23 +668,27 @@ export function switchChatRole(chatId, rawRole) {
     const valid = (currentProject.roles || []).map((r) => r.id).join(', ');
     throw new Error(`Unknown role "${rawRole}". Valid roles for ${currentProject.name}: ${valid}`);
   }
+  const role = currentProject.roles.find((r) => r.id === roleId);
+  if (!role) {
+    throw new Error(`Role "${rawRole}" is not a seat on ${currentProject.name}. Switch project first.`);
+  }
 
   const state = loadState();
-  const cid = String(chatId);
-  state.chats[cid] = {
-    ...(state.chats[cid] || {}),
+  const key = roleKey(chatId);
+  state.chats[key] = {
+    ...(state.chats[key] || {}),
     roleId,
     roleSwitchedAt: new Date().toISOString(),
   };
   saveState(state);
-  return currentProject.roles.find((r) => r.id === roleId);
+  return role;
 }
 
 export function resetChatRole(chatId) {
   const state = loadState();
-  const cid = String(chatId);
-  if (state.chats[cid]) {
-    delete state.chats[cid].roleId;
+  const key = roleKey(chatId);
+  if (state.chats[key]) {
+    delete state.chats[key].roleId;
     saveState(state);
   }
 }
