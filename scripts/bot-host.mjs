@@ -4387,18 +4387,22 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // One shared working headline (provider + model + elapsed + usage) for
     // every bot-host agent — same line shape as the Grok TG router. The
     // provider follows the chat's effective model, not the registry default.
-    const headlineRoleBase = addr?.roleId
-      ? String(addr.roleId).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    const roleHeadlineLabel = addr?.roleId
+      ? `${addr.roleId.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())} (${providerLabelForModel(eff.model)})`
       : addr?.isBroadcast
-        ? 'Council Coordinator'
-        : '';
-    // Headline provider for the lane actually running, keeping the role prefix
-    // when one is shown — so a displaced or failed-over turn never keeps
-    // announcing the dead lane it started on.
-    const headlineForLane = (lane) => headlineRoleBase
-      ? `${headlineRoleBase} (${providerLabelForModel(lane)})`
-      : providerLabelForModel(lane);
-    const roleHeadlineLabel = headlineForLane(eff.model);
+        ? `Council Coordinator (${providerLabelForModel(eff.model)})`
+        : providerLabelForModel(eff.model);
+    // Headline for the lane actually running, mirroring the role prefix above —
+    // so a displaced or failed-over turn never keeps announcing the dead lane
+    // it started on. The construction above stays untouched (landed work).
+    const headlineForLane = (lane) => {
+      const base = addr?.roleId
+        ? String(addr.roleId).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+        : addr?.isBroadcast
+          ? 'Council Coordinator'
+          : '';
+      return base ? `${base} (${providerLabelForModel(lane)})` : providerLabelForModel(lane);
+    };
     renderer.setHeadline({
       providerLabel: roleHeadlineLabel,
       modelLabel: eff.model || '',
