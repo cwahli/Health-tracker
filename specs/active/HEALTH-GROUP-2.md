@@ -7,11 +7,11 @@ skill: debug-contract
 auto_go: false
 allowed_files:
   - scripts/lib/health-group.mjs
-  - scripts/health-runner.mjs
   - scripts/bot-host.mjs
   - scripts/assert-health-group.test.mjs
   - specs/active/HEALTH-GROUP-2.md
 frozen_files:
+  - scripts/health-runner.mjs
   - scripts/lib/health/docs.mjs
   - scripts/lib/health/context.mjs
   - scripts/lib/health/readiness.mjs
@@ -56,15 +56,14 @@ context (last refresh, the four documents, what is withheld — facts only).
   gains a `brief` block — last refresh time/mode/counts, each of the four
   documents with its last write and open count, the withheld section headings,
   and why — passed to the first and the retry prompt. Facts only, no prose.
-- **`scripts/health-runner.mjs` — the turn's reply.** `answerBriefAsk({ projectId,
+- **`scripts/bot-host.mjs` — the turn's reply and the wiring.** `answerBriefAsk({ projectId,
   botId, refresh })` runs the publisher (injectable for the sensor) and returns
   the real `formatRefreshText` as `{ answered, usedModel: false, text,
   markdown: true }`; a refused run keeps its own stage and error
   (`brief refused: <stage>` / `brief failed: <message>`) and says nothing was
-  invented.
-- **`scripts/bot-host.mjs` — the wiring.** The health turn gains the brief
-  branch under the same busy guard: a progress line, the publisher, then the
-  reply as markdown; the existing `fell back:` log covers brief failures.
+  invented. The health turn gains the brief branch under the same busy guard:
+  a progress line, the publisher, then the reply as markdown; the existing
+  `fell back:` log covers brief failures.
 - **`scripts/assert-health-group.test.mjs` — the contract.** New checks:
   classification (brief / council / tax room), the executable brief turn
   (the publisher is called exactly once, the reply equals `formatRefreshText`,
@@ -83,9 +82,12 @@ context (last refresh, the four documents, what is withheld — facts only).
 - **The brief-state block is facts, not a summary.** The model still may not
   invent a number; the block quotes the workspace, and the number checker is
   unchanged.
-- **`answerBriefAsk` exists for the executable proof.** The sensor cannot drive
-  the live host message path, so the turn's logic lives where the host and the
-  sensor call the same function.
+- **`answerBriefAsk` lives in the host for the executable proof.** The sensor
+  cannot drive the live host message path, so the turn's logic lives where the
+  host and the sensor call the same function — and `bot-host.mjs` is explicitly
+  import-safe (`invokedAsCli` gates `main`). It was first written in the runner;
+  it moved here so the pass does not claim a file a stalled open PR already owns
+  (claim-guard: one file, one owner).
 
 ## Evidence (measured on this box, 2026-10-02)
 
@@ -95,7 +97,7 @@ context (last refresh, the four documents, what is withheld — facts only).
   prompt calls → **3 FAIL** (last refresh, the four documents, a withheld
   section); `answerBriefAsk` made to answer with a canned line instead of
   running the publisher → **3 FAIL** (the run count, the real refresh text, and
-  the refusal path the canned line swallowed).
+  the refusal path the canned line swallowed — re-run after the move, same 3).
 - Gates: `assert-tax-group` 38/0 (1 skipped host-only), `assert-chat-scope` ok,
   `assert-project-registry-parity` OK (23 aliases), `vitest run
   tests/bot-host.test.ts` 162/162, `npm run test:prepush` exit 0 (receptionist +

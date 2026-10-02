@@ -189,7 +189,7 @@ import {
 // The Personal Health Coach's data loop. `/health` is deliberately not gated on
 // the chat's active project: the command names its own project, so a verify can
 // be run from any chat, and the reply says which one it read.
-import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText, answerBriefAsk } from './health-runner.mjs';
+import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText } from './health-runner.mjs';
 // "Can a seat actually run?" — the readiness check reads the context a seat
 // would be handed plus this host's credentials, and reports what is missing
 // instead of letting a turn start on an empty context.
@@ -4108,6 +4108,35 @@ export function tuiStatusLine(botId, sessionId) {
   const age = lease.since ? ` · up ${humanAge(Date.now() - lease.since)}` : '';
   const sess = lease.session ? ` · ${lease.session.slice(0, 12)}…` : '';
   return `tui: ${who} · ${use}${age}${sess}`;
+}
+
+/**
+ * The health room's brief ask — "work on the brief", "update the documents".
+ *
+ * It is not a question for the seats and not a slash command: it runs the same
+ * publisher `/health refresh` runs and the room gets the same reply. While the
+ * gate is open the drafts publish and the analysis stays withheld — the refresh
+ * already decides that, so there is no refusal line to add here. A refresh that
+ * cannot run keeps its own stage and reason, and says nothing was invented.
+ * `refresh` is injectable so the sensor can drive the turn with a fixture run.
+ */
+export async function answerBriefAsk({ projectId = 'external-health', botId = '', refresh } = {}) {
+  const run = typeof refresh === 'function' ? refresh : () => runHealthRefresh({ projectId, botId });
+  let res;
+  try {
+    res = await run();
+  } catch (err) {
+    return { answered: true, usedModel: false, text: `❌ Working the brief failed: ${err.message}`, fallbackReason: `brief failed: ${err.message}` };
+  }
+  if (!res?.ok) {
+    return {
+      answered: true,
+      usedModel: false,
+      text: `❌ The brief could not be worked (${res?.stage || 'unknown'}): ${res?.error || 'the publisher gave no reason'}`,
+      fallbackReason: `brief refused: ${res?.stage || 'unknown'}`,
+    };
+  }
+  return { answered: true, usedModel: false, text: formatRefreshText(res), markdown: true };
 }
 
 async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0 }) {

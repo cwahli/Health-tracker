@@ -37,7 +37,8 @@ import {
   formatHealthGroupReply,
   isHealthAsk,
 } from './lib/health-group.mjs';
-import { answerBriefAsk, formatRefreshText } from './health-runner.mjs';
+import { formatRefreshText } from './health-runner.mjs';
+import { answerBriefAsk } from './bot-host.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOST = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
