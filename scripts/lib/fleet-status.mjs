@@ -22,6 +22,7 @@ export const REPO_ROOT = path.resolve(HERE, '..', '..');
 
 export const FLEET_CACHE_TTL_MS = 15000;
 export const DEFAULT_LOCATIONS = ['Mac', 'VM', 'Grok VM', 'Mobile', 'Collab'];
+export const FLEET_STALE_TTL_MS = 15 * 60 * 1000;
 
 let fleetTicketsCache = { cachedAt: 0, rows: [] };
 const fleetNodeHeartbeats = new Map();
@@ -43,12 +44,15 @@ export function recordFleetHeartbeat(data, { now = Date.now() } = {}) {
   const phase = String(data.phase || data.status || 'working').trim();
   const task = String(data.task || data.sentence || '').slice(0, 240);
   const ticketKey = String(data.ticketKey || data.ticket || '').trim();
+  const standin = Boolean(data.standin);
   const record = {
     location,
     agent,
     phase,
     task,
     ticketKey,
+    standin,
+    pid: data.pid || null,
     updatedAt: new Date(now).toISOString(),
     updatedAtMs: now,
   };
@@ -63,11 +67,56 @@ export function recordFleetHeartbeat(data, { now = Date.now() } = {}) {
   return { ok: true, node: record };
 }
 
+/** Explicit mapping table: one pane per ticket, no loose substring overlap. */
+export const LOCATION_OWNER_KEYS = {
+  'mac': ['mac', 'darwin'],
+  'vm': ['vm', 'vps', 'vps-france'],
+  'grok vm': ['grok', 'grok-vps'],
+  'collab': ['collab', 'colab'],
+  'mobile': ['mobile', 'termux', 'phone', 'android'],
+};
+
 /**
- * Get terminal panes with lease-based TTL decay:
- * - < 2 min: working (or waiting_prompt)
- * - 2 to 10 min: idle
- * - > 10 min: offline
+ * Match a ticket owner string to a fleet pane location.
+ * Crucial: grok-vps must strictly match 'Grok VM' and NEVER match 'VM'.
+ */
+export function matchesLocation(locationName, ownerStr) {
+  const loc = String(locationName || '').toLowerCase().trim();
+  const owner = String(ownerStr || '').toLowerCase().trim();
+  if (!owner) return false;
+  const atParts = owner.split('@');
+  const hostPart = (atParts.length > 1 ? atParts[1] : atParts[0]).trim();
+  const tokens = hostPart.split(/[^a-z0-9_-]+/).filter(Boolean);
+
+  if (loc === 'grok vm') {
+    return tokens.includes('grok-vps') || tokens.includes('grok') || hostPart === 'grok-vps' || hostPart === 'grok';
+  }
+  if (loc === 'vm') {
+    // Grok on grok-vps must NEVER match the VM pane!
+    if (tokens.includes('grok-vps') || tokens.includes('grok') || hostPart.includes('grok')) {
+      return false;
+    }
+    return tokens.includes('vm') || tokens.includes('vps') || tokens.includes('vps-france') || hostPart === 'vm' || hostPart === 'vps' || hostPart === 'vps-france';
+  }
+  if (loc === 'mac') {
+    return tokens.includes('mac') || tokens.includes('darwin') || hostPart === 'mac';
+  }
+  if (loc === 'collab') {
+    return tokens.includes('collab') || tokens.includes('colab') || hostPart === 'collab' || hostPart === 'colab';
+  }
+  if (loc === 'mobile') {
+    return tokens.includes('mobile') || tokens.includes('termux') || tokens.includes('phone') || tokens.includes('android');
+  }
+  return false;
+}
+
+/**
+ * Get terminal panes with separated liveness and sheet claim:
+ * - Worker badge comes from reporter beat (working, idle) or presence fallback.
+ * - Sheet row is a claim (ticketKey chip/link, multi-claim warning if > 1 claim).
+ * - Freshness: retained phase under 15m; 'stale' after 15m quiet period.
+ * - 'offline' reserved for explicit disconnect, standin: true, or no reporter.
+ * - A working pane with no reported sentence displays 'Sentence missing'.
  */
 export function getFleetNodes(opts = {}) {
   const now = typeof opts === 'number' ? opts : (opts?.now ?? Date.now());
@@ -99,55 +148,58 @@ export function getFleetNodes(opts = {}) {
     (t) => String(t.status || '').trim().toLowerCase() === 'in progress'
   );
 
-  function findActiveTicket(targetLoc) {
-    const l = targetLoc.toLowerCase();
-    return activeTickets.find((t) => {
-      const owner = String(t.owner || '').toLowerCase();
-      const atParts = owner.split('@');
-      const target = (atParts[1] || '').trim();
-      if (l === 'mac') return target === 'mac' || target.includes('mac');
-      if (l === 'vm') return target === 'vm' || target === 'vps-france' || target.includes('vps');
-      if (l === 'grok vm') return target === 'grok' || target === 'grok-vps' || target.includes('grok');
-      if (l === 'collab') return target === 'collab' || target.includes('collab');
-      if (l === 'mobile') return target === 'mobile' || target.includes('termux') || target.includes('phone');
-      return false;
-    });
-  }
+  function resolveNode(loc, beat) {
+    // 1. Identify sheet claims for this pane
+    const matchingTickets = activeTickets.filter((t) => matchesLocation(loc, t.owner));
+    const isMultiClaim = matchingTickets.length > 1;
+    const claimedTicketKeys = matchingTickets.map((t) => t.id);
+    const sheetTicketKey = claimedTicketKeys.join(', ');
 
-  // Iterate over known default locations
-  for (const loc of DEFAULT_LOCATIONS) {
-    seenLocations.add(loc);
-    const beat = fleetNodeHeartbeats.get(loc);
+    // 2. Determine worker liveness (badge comes from worker, not sheet claim)
+    let agent = '—';
+    let status = 'offline';
+    let lastPhase = 'offline';
+    let task = '';
+    let updatedAt = null;
 
-    // 1. PM Sheet binding: If a ticket is 'In progress' for this location, agent is actively WORKING
-    const activeTicket = findActiveTicket(loc);
-    if (activeTicket) {
-      const ownerAgent = String(activeTicket.owner || '').split('@')[0].trim();
-      const agent = ownerAgent || beat?.agent || 'Active Agent';
-      const task = String(activeTicket.originalRequest || activeTicket.workDoneSoFar || 'In progress')
-        .replace(/[\r\n\t]+/g, ' ')
-        .slice(0, 240);
-      result.push({
-        location: loc,
-        agent,
-        status: 'working',
-        task,
-        ticketKey: activeTicket.id,
-        updatedAt: beat?.updatedAt || new Date(now).toISOString(),
-      });
-      continue;
-    }
+    if (beat) {
+      agent = beat.agent || '—';
+      updatedAt = beat.updatedAt;
+      const reportedPhase = String(beat.phase || 'working').toLowerCase();
+      lastPhase = reportedPhase;
 
-    if (!beat) {
-      let fallback = null;
+      if (beat.standin) {
+        status = 'offline';
+        task = 'Offline (mock standin)';
+        agent = '—';
+      } else if (reportedPhase === 'offline') {
+        status = 'offline';
+        task = beat.task || 'Offline (explicit disconnect)';
+      } else {
+        const ageMs = Math.max(0, now - (beat.updatedAtMs || 0));
+        if (ageMs > FLEET_STALE_TTL_MS) {
+          status = 'stale';
+          task = beat.task ? beat.task : `Last: ${reportedPhase}`;
+        } else {
+          // Fresh (within 15m): keep the reported phase (no 2m/10m decay)
+          status = reportedPhase === 'working' ? 'working' : reportedPhase;
+          if (status === 'working') {
+            task = (beat.task || '').trim() || 'Sentence missing';
+          } else {
+            task = (beat.task || '').trim() || 'Idle';
+          }
+        }
+      }
+    } else {
+      // No beat received yet: check fallback presence
       if (loc === 'VM') {
         try {
           const home = opts.home || os.homedir();
           const botHostStateDir = path.join(home, '.local', 'state', 'bot-host');
+          let isWorking = false;
+          let activeDetail = '';
+          let activeBot = 'VM Bot (@VM_19485_bot)';
           if (fs.existsSync(botHostStateDir)) {
-            let isWorking = false;
-            let activeDetail = '';
-            let activeBot = 'VM Bot (@VM_19485_bot)';
             for (const botId of ['vm', 'vm2', 'vm3', 'vm4', 'vm5', 'vm6', 'android', 'opencode']) {
               const leaseFile = path.join(botHostStateDir, botId, 'leases.json');
               if (fs.existsSync(leaseFile)) {
@@ -163,16 +215,19 @@ export function getFleetNodes(opts = {}) {
                 } catch {}
               }
             }
-            fallback = {
-              location: 'VM',
-              agent: activeBot,
-              status: isWorking ? 'working' : 'idle',
-              task: isWorking ? activeDetail : 'Ready (polling Telegram)',
-              ticketKey: '',
-              updatedAt: new Date(now).toISOString(),
-            };
           }
-        } catch {}
+          agent = activeBot;
+          status = isWorking ? 'working' : 'idle';
+          lastPhase = status;
+          task = isWorking ? activeDetail : 'Ready (polling Telegram)';
+          updatedAt = new Date(now).toISOString();
+        } catch {
+          status = 'idle';
+          lastPhase = 'idle';
+          task = 'Ready (polling Telegram)';
+          agent = 'VM Bot (@VM_19485_bot)';
+          updatedAt = new Date(now).toISOString();
+        }
       } else if (loc === 'Grok VM' || loc === 'Collab' || loc === 'Mobile') {
         try {
           const hostKey = loc === 'Grok VM' ? 'grok' : loc.toLowerCase();
@@ -180,82 +235,69 @@ export function getFleetNodes(opts = {}) {
           if (ws && ws.reachable) {
             if (ws.standin) {
               // Standin is a local mock process on VPS, not real connected hardware
-              fallback = {
-                location: loc,
-                agent: '—',
-                status: 'offline',
-                task: 'Offline (mock standin)',
-                ticketKey: '',
-                updatedAt: null,
-              };
+              status = 'offline';
+              lastPhase = 'offline';
+              task = 'Offline (mock standin)';
+              agent = '—';
+              updatedAt = null;
             } else {
-              fallback = {
-                location: loc,
-                agent: loc === 'Grok VM' ? 'Grok Worker' : `${loc} Worker`,
-                status: 'idle',
-                task: 'Worker connected (waiting for prompt)',
-                ticketKey: '',
-                updatedAt: ws.lastSeen || new Date(now).toISOString(),
-              };
+              agent = loc === 'Grok VM' ? 'Grok Worker' : `${loc} Worker`;
+              status = 'idle';
+              lastPhase = 'idle';
+              task = 'Worker connected (waiting for prompt)';
+              updatedAt = ws.lastSeen || new Date(now).toISOString();
             }
+          } else {
+            status = 'offline';
+            lastPhase = 'offline';
+            task = 'No reporter active';
+            agent = '—';
+            updatedAt = null;
           }
-        } catch {}
+        } catch {
+          status = 'offline';
+          lastPhase = 'offline';
+          task = 'No reporter active';
+          agent = '—';
+          updatedAt = null;
+        }
+      } else {
+        status = 'offline';
+        lastPhase = 'offline';
+        task = 'No reporter active';
+        agent = '—';
+        updatedAt = null;
       }
-
-      if (fallback) {
-        result.push(fallback);
-        continue;
-      }
-
-      result.push({
-        location: loc,
-        agent: '—',
-        status: 'offline',
-        task: 'No reporter active',
-        ticketKey: '',
-        updatedAt: null,
-      });
-      continue;
     }
-    const ageMs = Math.max(0, now - (beat.updatedAtMs || 0));
-    let status = 'working';
-    if (ageMs > 10 * 60 * 1000) {
-      status = 'offline';
-    } else if (ageMs > 2 * 60 * 1000) {
-      status = 'idle';
-    } else {
-      status = beat.phase === 'working' ? 'working' : (beat.phase || 'working');
-    }
-    result.push({
-      location: beat.location,
-      agent: beat.agent,
+
+    // Determine ticketKey: sheet claim takes precedence for ticket display chip/link;
+    // fallback to worker's reported ticketKey if sheet has no active claim.
+    const finalTicketKey = sheetTicketKey || beat?.ticketKey || '';
+
+    return {
+      location: loc,
+      agent,
       status,
-      task: status === 'offline' ? 'Offline (no reporter activity)' : beat.task,
-      ticketKey: beat.ticketKey,
-      updatedAt: beat.updatedAt,
-    });
+      lastPhase,
+      task,
+      ticketKey: finalTicketKey,
+      multiClaim: isMultiClaim,
+      claimedTickets: claimedTicketKeys,
+      updatedAt,
+    };
+  }
+
+  // Iterate over known default locations
+  for (const loc of DEFAULT_LOCATIONS) {
+    seenLocations.add(loc);
+    const beat = fleetNodeHeartbeats.get(loc);
+    result.push(resolveNode(loc, beat));
   }
 
   // Include any extra locations reported dynamically
   for (const [loc, beat] of fleetNodeHeartbeats.entries()) {
     if (seenLocations.has(loc)) continue;
-    const ageMs = Math.max(0, now - (beat.updatedAtMs || 0));
-    let status = 'working';
-    if (ageMs > 10 * 60 * 1000) {
-      status = 'offline';
-    } else if (ageMs > 2 * 60 * 1000) {
-      status = 'idle';
-    } else {
-      status = beat.phase === 'working' ? 'working' : (beat.phase || 'working');
-    }
-    result.push({
-      location: beat.location,
-      agent: beat.agent,
-      status,
-      task: status === 'offline' ? 'Offline' : beat.task,
-      ticketKey: beat.ticketKey,
-      updatedAt: beat.updatedAt,
-    });
+    result.push(resolveNode(loc, beat));
   }
 
   return result;
@@ -265,9 +307,9 @@ export function getFleetNodes(opts = {}) {
  * Read tickets from PM spreadsheet tab 'current' projecting the 8 human fields strictly by name.
  * Caches for 15s in memory. On failure, returns previous snapshot and age. Never writes to Google.
  */
-export async function getFleetTickets({ env = process.env, root = REPO_ROOT } = {}) {
+export async function getFleetTickets({ env = process.env, root = REPO_ROOT, refresh = false } = {}) {
   const now = Date.now();
-  if (fleetTicketsCache.cachedAt && now - fleetTicketsCache.cachedAt < FLEET_CACHE_TTL_MS && fleetTicketsCache.rows.length) {
+  if (!refresh && fleetTicketsCache.cachedAt && now - fleetTicketsCache.cachedAt < FLEET_CACHE_TTL_MS && fleetTicketsCache.rows.length) {
     return fleetTicketsCache.rows;
   }
 

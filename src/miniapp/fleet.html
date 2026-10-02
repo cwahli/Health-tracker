@@ -63,9 +63,11 @@
   .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 9999px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
   .badge-working { background: #065f46; color: #a7f3d0; border: 1px solid #059669; }
   .badge-waiting { background: #854d0e; color: #fef08a; border: 1px solid #ca8a04; }
+  .badge-stale   { background: #451a03; color: #fdba74; border: 1px solid #c2410c; }
   .badge-idle    { background: #334155; color: #cbd5e1; border: 1px solid #475569; }
   .badge-offline { background: #450a0a; color: #fecaca; border: 1px solid #dc2626; }
   .badge-active  { background: #1e40af; color: #bfdbfe; border: 1px solid #3b82f6; }
+  .badge-multi   { background: #581c87; color: #e9d5ff; border: 1px solid #9333ea; font-size: 10px; padding: 1px 5px; border-radius: 4px; margin-left: 6px; }
   .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .badge-dot.pulse { animation: pulse 1.8s infinite; }
   @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.85); } }
@@ -220,7 +222,8 @@
   function renderStatusBadge(status) {
     var s = (status || 'idle').toLowerCase();
     if (s === 'working') return '<span class="badge badge-working"><span class="badge-dot pulse"></span>Working</span>';
-    if (s === 'waiting_prompt') return '<span class="badge badge-waiting"><span class="badge-dot"></span>Waiting</span>';
+    if (s === 'waiting_prompt' || s === 'waiting') return '<span class="badge badge-waiting"><span class="badge-dot"></span>Waiting</span>';
+    if (s === 'stale') return '<span class="badge badge-stale"><span class="badge-dot"></span>Stale</span>';
     if (s === 'offline') return '<span class="badge badge-offline"><span class="badge-dot"></span>Offline</span>';
     return '<span class="badge badge-idle"><span class="badge-dot"></span>Idle</span>';
   }
@@ -301,8 +304,12 @@
     }
     var html = state.terminals.map(function (m) {
       var tKey = m.ticketKey || '';
-      var clickAttr = tKey ? ' class="clickable-row" onclick="window._jumpTicket(\'' + esc(tKey) + '\')"' : '';
-      var linkedLink = tKey ? '<a href="javascript:void(0)" onclick="window._jumpTicket(\'' + esc(tKey) + '\')">' + esc(tKey) + '</a>' : '<span class="empty-cell">—</span>';
+      var firstKey = tKey.split(',')[0].trim();
+      var clickAttr = firstKey ? ' class="clickable-row" onclick="window._jumpTicket(\'' + esc(firstKey) + '\')"' : '';
+      var multiBadge = m.multiClaim ? ' <span class="badge-multi" title="Multiple tickets claim this pane">multi-claim</span>' : '';
+      var linkedLink = tKey
+        ? '<a href="javascript:void(0)" onclick="window._jumpTicket(\'' + esc(firstKey) + '\')">' + esc(tKey) + '</a>' + multiBadge
+        : '<span class="empty-cell">—</span>';
       return '<tr' + clickAttr + '>' +
         '<td><strong>' + esc(m.location) + '</strong></td>' +
         '<td>' + esc(m.agent) + '</td>' +
@@ -351,8 +358,12 @@
     renderBots();
   }
 
-  function fetchState(cb) {
-    var url = '/fleet/api/state' + location.search;
+  function fetchState(cb, isRefresh) {
+    var query = location.search;
+    if (isRefresh) {
+      query = query ? (query + '&refresh=1') : '?refresh=1';
+    }
+    var url = '/fleet/api/state' + query;
     fetch(url, { headers: { 'Accept': 'application/json' } })
       .then(function (res) { return res.json(); })
       .then(function (data) {
@@ -379,7 +390,7 @@
         setTimeout(function () {
           btnRef.classList.remove('spinning');
         }, 350);
-      });
+      }, true);
     });
   }
 

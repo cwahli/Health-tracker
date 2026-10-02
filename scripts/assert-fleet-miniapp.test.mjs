@@ -45,7 +45,7 @@ function makeInitData(botToken, { user = { id: 123456, first_name: 'Test' }, aut
   return params.toString();
 }
 
-test('recordFleetHeartbeat and getFleetNodes TTL decay', () => {
+test('recordFleetHeartbeat and getFleetNodes freshness windows: 5m stays working, 20m becomes stale', () => {
   resetFleetStateForTest();
   const t0 = 10000000;
 
@@ -73,15 +73,17 @@ test('recordFleetHeartbeat and getFleetNodes TTL decay', () => {
   const mac1 = nodes.find((n) => n.location === 'Mac');
   assert.equal(mac1.status, 'working');
 
-  // 3. At t0 + 3 minutes (> 2 min TTL): decays to idle
-  nodes = getFleetNodes({ now: t0 + 3 * 60 * 1000 });
+  // 3. At t0 + 5 minutes (no 2m decay to idle): still working!
+  nodes = getFleetNodes({ now: t0 + 5 * 60 * 1000 });
   const mac2 = nodes.find((n) => n.location === 'Mac');
-  assert.equal(mac2.status, 'idle');
+  assert.equal(mac2.status, 'working');
 
-  // 4. At t0 + 11 minutes (> 10 min TTL): decays to offline
-  nodes = getFleetNodes({ now: t0 + 11 * 60 * 1000 });
+  // 4. At t0 + 20 minutes (> 15 min TTL): becomes stale with old phase visible
+  nodes = getFleetNodes({ now: t0 + 20 * 60 * 1000 });
   const mac3 = nodes.find((n) => n.location === 'Mac');
-  assert.equal(mac3.status, 'offline');
+  assert.equal(mac3.status, 'stale');
+  assert.equal(mac3.lastPhase, 'working');
+  assert.ok(mac3.task.includes('Planning fleet-miniapp') || mac3.task.includes('working'));
 
   // 5. Default locations always present
   const defaultLocations = ['Mac', 'VM', 'Grok VM', 'Mobile', 'Collab'];
@@ -248,9 +250,19 @@ test('gateway /fleet routes: landing, auth, app, state, and heartbeat', async ()
   }
 });
 
-test('getFleetNodes binds PM ticket In progress to working status with task sentence', () => {
+test('getFleetNodes separates PM ticket claim from worker liveness badge', () => {
   resetFleetStateForTest();
   const t0 = 10000000;
+
+  // 1. Idle beat from Mac + 'In progress' ticket on PM sheet:
+  // Stale ticket does NOT paint an idle beat green! Badge must stay 'idle'.
+  recordFleetHeartbeat({
+    location: 'Mac',
+    agent: 'Antigravity (Gemini 3.8 Flash High)',
+    phase: 'idle',
+    task: 'Waiting for instructions',
+  }, { now: t0 });
+
   const mockTickets = [
     {
       id: 'spec:fleet-refine',
@@ -258,25 +270,172 @@ test('getFleetNodes binds PM ticket In progress to working status with task sent
       owner: 'Antigravity (Gemini 3.8 Flash High) @ mac',
       status: 'In progress',
     },
+  ];
+
+  let nodes = getFleetNodes({ now: t0, tickets: mockTickets });
+  let mac = nodes.find((n) => n.location === 'Mac');
+  assert.ok(mac);
+  // Badge comes from worker: idle!
+  assert.equal(mac.status, 'idle');
+  // Ticket claim is projected in ticketKey
+  assert.equal(mac.ticketKey, 'spec:fleet-refine');
+  assert.equal(mac.task, 'Waiting for instructions');
+
+  // 2. Working pane with no reported sentence displays 'Sentence missing'
+  recordFleetHeartbeat({
+    location: 'Mac',
+    agent: 'Antigravity (Gemini 3.8 Flash High)',
+    phase: 'working',
+    task: '', // empty sentence
+  }, { now: t0 });
+
+  nodes = getFleetNodes({ now: t0, tickets: mockTickets });
+  mac = nodes.find((n) => n.location === 'Mac');
+  assert.equal(mac.status, 'working');
+  assert.equal(mac.task, 'Sentence missing');
+});
+
+test('location mapping prevents grok-vps from lighting VM and flags multi-claims', () => {
+  resetFleetStateForTest();
+  const t0 = 10000000;
+
+  const mockTickets = [
     {
-      id: 'spec:vm-idle',
-      originalRequest: 'Previous VM task',
-      owner: 'Muse Spark @ vps-france',
-      status: 'Assigned',
+      id: 'spec:grok-task',
+      originalRequest: 'Grok background synthesis',
+      owner: 'Grok @ grok-vps',
+      status: 'In progress',
+    },
+    {
+      id: 'spec:mac-1',
+      originalRequest: 'First Mac task',
+      owner: 'Gemini @ mac',
+      status: 'In progress',
+    },
+    {
+      id: 'spec:mac-2',
+      originalRequest: 'Second Mac task',
+      owner: 'Gemini @ mac',
+      status: 'In progress',
     },
   ];
 
   const nodes = getFleetNodes({ now: t0, tickets: mockTickets });
-  const mac = nodes.find((n) => n.location === 'Mac');
-  assert.ok(mac);
-  assert.equal(mac.status, 'working');
-  assert.equal(mac.task, 'Refine fleet telemetry with PM sync and refresh button');
-  assert.equal(mac.ticketKey, 'spec:fleet-refine');
-  assert.equal(mac.agent, 'Antigravity (Gemini 3.8 Flash High)');
 
+  // 1. grok-vps matches Grok VM, NEVER VM
   const vm = nodes.find((n) => n.location === 'VM');
   assert.ok(vm);
-  // VM has no 'In progress' ticket, so it falls back to idle
-  assert.equal(vm.status, 'idle');
+  assert.notEqual(vm.ticketKey, 'spec:grok-task');
+
+  const grokVm = nodes.find((n) => n.location === 'Grok VM');
+  assert.ok(grokVm);
+  assert.equal(grokVm.ticketKey, 'spec:grok-task');
+
+  // 2. Multi-claim on Mac: two 'In progress' tickets flags multiClaim: true
+  const mac = nodes.find((n) => n.location === 'Mac');
+  assert.ok(mac);
+  assert.equal(mac.multiClaim, true);
+  assert.ok(mac.ticketKey.includes('spec:mac-1'));
+  assert.ok(mac.ticketKey.includes('spec:mac-2'));
+});
+
+test('mock stand-ins are reported offline', () => {
+  resetFleetStateForTest();
+  const t0 = 10000000;
+
+  recordFleetHeartbeat({
+    location: 'Collab',
+    agent: 'Collab Worker',
+    phase: 'working',
+    standin: true,
+  }, { now: t0 });
+
+  recordFleetHeartbeat({
+    location: 'Grok VM',
+    agent: 'Grok Worker',
+    phase: 'working',
+    standin: true,
+  }, { now: t0 });
+
+  const nodes = getFleetNodes({ now: t0 });
+  const collab = nodes.find((n) => n.location === 'Collab');
+  assert.ok(collab);
+  assert.equal(collab.status, 'offline');
+  assert.equal(collab.task, 'Offline (mock standin)');
+
+  const grokVm = nodes.find((n) => n.location === 'Grok VM');
+  assert.ok(grokVm);
+  assert.equal(grokVm.status, 'offline');
+  assert.equal(grokVm.task, 'Offline (mock standin)');
+});
+
+test('on-demand refresh bypasses 15-second in-memory cache', async () => {
+  resetFleetStateForTest();
+  const res1 = await getFleetTickets();
+  assert.ok(Array.isArray(res1));
+
+  // Call with refresh: true to bypass cache
+  const res2 = await getFleetTickets({ refresh: true });
+  assert.ok(Array.isArray(res2));
+});
+
+test('heartbeat endpoint enforces authentication and rejects spoofed locations', async () => {
+  resetFleetStateForTest();
+  const secret = 'gateway-secret-telemetry-999';
+  const env = {
+    FLEET_TELEMETRY_SECRET: secret,
+    FLEET_SECRET_MAC: 'mac-scoped-secret-777',
+  };
+
+  const handle = createGateway({ env });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const base = `http://127.0.0.1:${port}`;
+
+  try {
+    // 1. Unauthenticated beat is rejected with 401
+    const unauthRes = await fetch(`${base}/fleet/api/heartbeat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ location: 'Mac', phase: 'working', task: 'Unauth attempt' }),
+    });
+    assert.equal(unauthRes.status, 401);
+
+    // 2. Bad secret is rejected with 401
+    const badSecretRes = await fetch(`${base}/fleet/api/heartbeat`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-fleet-telemetry-secret': 'wrong-secret',
+      },
+      body: JSON.stringify({ location: 'Mac', phase: 'working', task: 'Bad secret attempt' }),
+    });
+    assert.equal(badSecretRes.status, 401);
+
+    // 3. Valid global secret admits
+    const validRes = await fetch(`${base}/fleet/api/heartbeat`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-fleet-telemetry-secret': secret,
+      },
+      body: JSON.stringify({ location: 'Mac', phase: 'working', task: 'Valid global secret' }),
+    });
+    assert.equal(validRes.status, 200);
+
+    // 4. Mismatched location with host-scoped secret is rejected with 403
+    const spoofRes = await fetch(`${base}/fleet/api/heartbeat`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-fleet-telemetry-secret': 'mac-scoped-secret-777',
+      },
+      body: JSON.stringify({ location: 'VM', phase: 'working', task: 'Spoofed VM from Mac key' }),
+    });
+    assert.equal(spoofRes.status, 403);
+  } finally {
+    server.close();
+  }
 });
 

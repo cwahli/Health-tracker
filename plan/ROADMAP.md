@@ -64,18 +64,6 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are *
 
 **Q-11 and Q-13 are done** (App.tsx 350 / 14 KB, `Header.tsx` 690 / 28.8 KB, `BiomarkerDictionaryModal.tsx` 3,725 / 180 KB — see the entries below). The only remaining >200 KB file is **`LogChat.tsx`** (340 KB / 6,474 lines, under its 6,500 ceiling after extraction).
 
-## FM-1 — Unified Worker Telemetry & PM Synchronization (Active)
-
-**Charter & Refinement:** Replaces brittle 30s heartbeat loops with event-driven telemetry, on-demand refresh, and direct synchronization with the Google PM spreadsheet (`10oPI9AsHaKpb9xRR8XcTm6JyH1gYyykUFBNqeqg2SM0`, tab `current`).
-
-**Principles:**
-1. **PM Sheet Semantic Binding:** `In progress` status on the PM spreadsheet is the canonical definition of a worker **working (🟢)**. The worker pane in the Telegram Mini-App (`/fleet`) displays green with the ticket's active task sentence (`originalRequest`). `Assigned` status means **idle (🟡)** ("Idle — ready for task").
-2. **Event-Driven Telemetry & Timestamp:** Eliminate 30s heartbeat spam. Workers emit telemetry on state changes (turn start/stop, ticket switch). The Telemetry Hub preserves the last known state with an explicit relative timestamp (`Updated at HH:MM (Xm ago)`) rather than decaying to dead/offline after 2m/10m.
-3. **On-Demand Refresh (🔄):** The `/fleet` Mini-App masthead provides a refresh icon triggering an instant state re-fetch without continuous polling.
-4. **Mock Stand-In Honesty:** Stand-in worker processes (`standin: true`) are never reported as live online hardware. Collab is reported as **offline (⚪)** until a physical Google Colab notebook connects.
-
-**Gated by:** `node scripts/assert-fleet-miniapp.test.mjs` + `npx tsc --noEmit`.
-
 ## R-15 — omni-agent lanes (charter; executes AFTER R-14.1)
 
 **Blocked on R-14.1 completion** (or an explicit human reorder). Destination journey: bot-code. Goal: "all agents usable across all bots" — every backend that can run a turn headlessly is first-class in the lane contract, every backend that cannot is declared honestly as degraded, and any lane may fill any role (specify/implement/verify) within its declared capabilities. Packet: `specs/active/r15-omni-agent-lanes.md`.
