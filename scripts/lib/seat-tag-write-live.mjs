@@ -27,8 +27,8 @@ import { connect } from './tg-userbot.mjs';
  * title, which is the only field this file is allowed to change.
  */
 async function currentRecord(client, group, username) {
-  const dialogs = await client.getDialogs({ limit: 200 });
-  const target = dialogs.find((d) => (d.chat?.title || d.name || '') === group);
+  const matches = dialogs.filter((d) => (d.chat?.title || d.name || '') === group);
+  const target = matches.find((d) => d.isChannel) || matches[0];
   if (!target) return { ok: false, reason: `group "${group}" is not in this session's dialogs` };
   for await (const p of client.iterParticipants(target.entity)) {
     if (p.username !== username) continue;
@@ -36,7 +36,7 @@ async function currentRecord(client, group, username) {
       ok: true,
       entity: target.entity,
       participant: p,
-      rights: p.adminRights || null,
+      rights: p.participant?.adminRights || p.adminRights || null,
     };
   }
   return { ok: false, reason: `@${username} is not in "${group}"` };
@@ -63,21 +63,20 @@ export async function writeCustomTitle({ group, username, title, rights = null }
     const carried = record.rights || {};
     const merged = {
       // Carry over everything the member already had…
-      ...carried,
-      // …and let the operator's decision set only what it names.
-      ...rights,
-      // …with the title as the only other thing that changes.
-      rank: String(title),
+      ...(typeof carried === 'object' ? carried : {}),
+      // …and map snake_case rights from CLI to MTProto ChatAdminRights fields.
+      ...(rights?.change_info != null ? { changeInfo: Boolean(rights.change_info) } : {}),
+      ...(rights?.changeInfo != null ? { changeInfo: Boolean(rights.changeInfo) } : {}),
     };
-    // An empty record would be an implicit demote; a member with no rights at all
-    // is being promoted, which is exactly the case the caller must have asked for.
-    const adminRights = Object.keys(merged).length
-      ? merged
-      : null;
+    if (merged.changeInfo == null) merged.changeInfo = true;
+    const adminRights = new Api.ChatAdminRights(merged);
+
+    const channelPeer = await client.getInputEntity(record.entity);
+    const userPeer = await client.getInputEntity(record.participant);
 
     await client.invoke(new Api.channels.EditAdmin({
-      channel: record.entity,
-      user: record.participant,
+      channel: channelPeer,
+      userId: userPeer,
       adminRights,
       rank: String(title),
     }));

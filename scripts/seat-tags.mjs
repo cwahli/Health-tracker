@@ -141,13 +141,16 @@ if (!flag('no-read')) {
     if (connected.ok) {
       const client = connected.client;
       const dialogs = await client.getDialogs({ limit: 200 });
-      const group = dialogs.find((d) => (d.chat?.title || d.name || '') === GROUP);
+      const matches = dialogs.filter((d) => (d.chat?.title || d.name || '') === GROUP);
+      const group = matches.find((d) => d.isChannel) || matches[0];
       if (!group) {
         readNote = `group "${GROUP}" is not in the creator session's dialogs — run as the account that owns it`;
       } else {
         const byName = new Map();
         for await (const p of client.iterParticipants(group.entity)) {
-          byName.set(p.username || '', { rank: p.adminRights?.rank || '', admin: Boolean(p.adminRights) });
+          const rank = p.participant?.rank || p.adminRights?.rank || '';
+          const admin = Boolean(p.participant?.adminRights || p.adminRights || p.participant?.className?.includes('Admin') || p.participant?.className?.includes('Creator'));
+          byName.set(p.username || '', { rank, admin });
         }
         getParticipants = async (row) => byName.get(row.username) || null;
       }
