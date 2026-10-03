@@ -2149,7 +2149,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       await api.sendMessage(chatId, helpText(config, eff));
       return;
 
-    case 'status': {
+    case 'status': case 'status_all': {
       const location = workLocation();
       const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
       const work = statusForTelegram(workId, { sessionName: WORK_VIEW_SESSION });
