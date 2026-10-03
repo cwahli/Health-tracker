@@ -99,6 +99,7 @@ import {
   isHardModelFailure,
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
+  HARD_MODEL_FAILURE_COOLDOWN_MS,
   freemodelDisplayTier,
   sortFreemodelTierRows,
   freemodelRatingOf,
@@ -742,7 +743,8 @@ export function stampLaneCooldown({ botId, model, errText, kind = 'connection-fa
     const { dir } = ensureBotLedger(botId || 'default');
     const stamped = stampCooldown({ stateDir: dir, provider, model: m, errText, kind, now });
     if (stamped.stamped) {
-      console.log(`[${botId}] connection cooldown on ${provider}/${m} until ${new Date(now + CONNECTION_FAILED_COOLDOWN_MS).toISOString()}`);
+      const until = Date.now() + (kind === 'model-unavailable' ? HARD_MODEL_FAILURE_COOLDOWN_MS : CONNECTION_FAILED_COOLDOWN_MS);
+      console.log(`[${botId}] ${kind} cooldown on ${provider}/${m} until ${new Date(until).toISOString()}`);
     }
     return stamped;
   } catch {

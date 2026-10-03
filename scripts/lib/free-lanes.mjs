@@ -2249,14 +2249,30 @@ function writeJsonAtomic(filePath, obj) {
  * session.quota (route + shared-bucket keys) and overlays the table —
  * pref order untouched. Returns { stamped, keys } or { stamped: false, reason }.
  */
-export function stampCooldown({ stateDir, provider, model, errText, kind = "connection-failed", ttlMs = CONNECTION_FAILED_COOLDOWN_MS, now = Date.now() } = {}) {
+/**
+ * How long a hard model failure keeps a lane out of the walk.
+ *
+ * A dead lane is not a spent quota: no credential, no such model, or an
+ * unroutable ref will not heal in 10 minutes, and re-probing it every few
+ * minutes is what turned one exhausted evening into an endless 10-hop walk
+ * (live VM5 2026-10-03: user retries ~35min apart, every turn re-burned the
+ * same dead lanes whose 10min stamps had just expired). So dead lanes rest
+ * like an unknown quota (6h), while transport blips keep the short cooldown.
+ * An explicit ttlMs still wins for callers that know better.
+ */
+export const HARD_MODEL_FAILURE_COOLDOWN_MS = 6 * 3600 * 1000;
+
+export function stampCooldown({ stateDir, provider, model, errText, kind = "connection-failed", ttlMs = null, now = Date.now() } = {}) {
+  const ttl = Number(ttlMs) > 0
+    ? Number(ttlMs)
+    : kind === "model-unavailable" ? HARD_MODEL_FAILURE_COOLDOWN_MS : CONNECTION_FAILED_COOLDOWN_MS;
   return stampDepleted({
     stateDir,
     provider,
     model,
     errText,
     kind,
-    depletedUntil: now + Math.max(1000, Number(ttlMs) || CONNECTION_FAILED_COOLDOWN_MS),
+    depletedUntil: now + Math.max(1000, ttl),
   });
 }
 

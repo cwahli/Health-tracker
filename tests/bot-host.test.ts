@@ -104,7 +104,7 @@ import {
   sweepOrphanedLeases,
   selectTurnLanes,
 } from '../scripts/bot-host.mjs';
-import { isHardModelFailure, ensureBotLedger, withCatalogLanes } from '../scripts/lib/free-lanes.mjs';
+import { isHardModelFailure, ensureBotLedger, withCatalogLanes, stampCooldown, CONNECTION_FAILED_COOLDOWN_MS, HARD_MODEL_FAILURE_COOLDOWN_MS } from '../scripts/lib/free-lanes.mjs';
 import {
   buildStatusSnapshot,
   formatStatusPlain,
@@ -1354,6 +1354,51 @@ describe('vm5 failover refs (live 2026-10-03)', () => {
       expect(stamped?.stamped).toBe(true);
       const session = JSON.parse(fs.readFileSync(path.join(dir, 'session.json'), 'utf8'));
       expect(session.quota['gemini/gemini-3.8-flash']?.depletedUntil).toBeGreaterThan(Date.now());
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = oldHome;
+      if (oldLanes === undefined) delete process.env.FREE_LANES_DIR;
+      else process.env.FREE_LANES_DIR = oldLanes;
+      if (oldShared === undefined) delete process.env.FREE_LANES_SHARED_DIR;
+      else process.env.FREE_LANES_SHARED_DIR = oldShared;
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(lanesDir, { recursive: true, force: true });
+      fs.rmSync(sharedDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rests dead lanes for hours, transport blips for minutes', () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5d-home-'));
+    const lanesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5d-lanes-'));
+    const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5d-shared-'));
+    const oldHome = process.env.HOME;
+    const oldLanes = process.env.FREE_LANES_DIR;
+    const oldShared = process.env.FREE_LANES_SHARED_DIR;
+    process.env.HOME = homeDir;
+    process.env.FREE_LANES_DIR = lanesDir;
+    process.env.FREE_LANES_SHARED_DIR = sharedDir;
+    try {
+      const { dir } = ensureBotLedger('vm5ttl');
+      const table = {
+        version: 3, failover: 'test', updatedAt: null, buckets: {},
+        lanes: [
+          { pref: 1, family: 'f1', provider: 'opencode', model: 'x', label: 'X', bucket: 'b', tg: true, resetRule: 't', status: 'available', nextReset: '-', nextResetAt: null, cooldownLeft: '-' },
+          { pref: 2, family: 'f2', provider: 'opencode', model: 'y', label: 'Y', bucket: 'b', tg: true, resetRule: 't', status: 'available', nextReset: '-', nextResetAt: null, cooldownLeft: '-' },
+        ],
+      };
+      fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(table));
+      fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ quota: {} }));
+      // Live VM5 2026-10-03: user retries ~35min apart re-burned every dead
+      // lane whose 10min stamp had just expired. Dead lanes must outlast that.
+      const t0 = Date.now();
+      expect(stampCooldown({ stateDir: dir, provider: 'opencode', model: 'x', errText: 'connect ECONNREFUSED 1.2.3.4', now: t0 }).stamped).toBe(true);
+      expect(stampCooldown({ stateDir: dir, provider: 'opencode', model: 'y', errText: 'Model unavailable: y', kind: 'model-unavailable', now: t0 }).stamped).toBe(true);
+      const session = JSON.parse(fs.readFileSync(path.join(dir, 'session.json'), 'utf8'));
+      expect(session.quota['opencode/x'].kind).toBe('connection-failed');
+      expect(session.quota['opencode/x'].depletedUntil).toBeLessThanOrEqual(t0 + CONNECTION_FAILED_COOLDOWN_MS + 5000);
+      expect(session.quota['opencode/y'].kind).toBe('model-unavailable');
+      expect(session.quota['opencode/y'].depletedUntil).toBeGreaterThan(t0 + CONNECTION_FAILED_COOLDOWN_MS);
+      expect(session.quota['opencode/y'].depletedUntil).toBeLessThanOrEqual(t0 + HARD_MODEL_FAILURE_COOLDOWN_MS + 5000);
     } finally {
       if (oldHome === undefined) delete process.env.HOME;
       else process.env.HOME = oldHome;
