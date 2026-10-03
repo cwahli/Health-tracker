@@ -634,6 +634,42 @@ export function readJsonBody(req, { maxBytes = 8192 } = {}) {
 export const FLEET_LEASE_TTL_MS = 2 * 60 * 1000;
 export const FLEET_IDLE_TTL_MS = 10 * 60 * 1000;
 
+const proofShotCache = new Map();
+const PROOF_SHOT_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * Fetch a proof screenshot's bytes from Drive, once per file per TTL.
+ *
+ * The proof column holds Drive links to private files, so the browser cannot
+ * render one directly. This runs on the same governed identity that already
+ * reads the sheet — no second Google client, no new credential — and hands the
+ * gateway a byte buffer to stream. Small, in-memory, expiring; a miss returns
+ * null and the cell falls back to its text.
+ */
+export async function loadProofShot(fileId, { env = process.env, now = Date.now() } = {}) {
+  const hit = proofShotCache.get(fileId);
+  if (hit && hit.expiresAt > now) return hit.value;
+  try {
+    const { loadHostEnv, identityFromEnv, accessToken, downloadFile } = await import('./lib/google-store.mjs');
+    loadHostEnv('', env);
+    const tok = await accessToken(identityFromEnv(env));
+    if (!tok.ok) return null;
+    const got = await downloadFile(fileId, tok.token);
+    if (!got.ok) return null;
+    const buf = Buffer.isBuffer(got.data) ? got.data : Buffer.from(got.data || '');
+    if (!buf.length) return null;
+    const type = /png/i.test(got.name || '') ? 'image/png'
+      : /webp/i.test(got.name || '') ? 'image/webp'
+        : /gif/i.test(got.name || '') ? 'image/gif'
+          : 'image/jpeg';
+    const value = { bytes: buf, type };
+    proofShotCache.set(fileId, { value, expiresAt: now + PROOF_SHOT_TTL_MS });
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 export const fleetSseClients = new Set();
 
 export function recordFleetHeartbeat(payload, opts = {}) {
@@ -1033,6 +1069,41 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       const terminals = getFleetNodes({ tickets });
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify({ ok: true, tickets, terminals, bots, generatedAt: new Date().toISOString() }));
+    }
+
+    if (url.pathname.startsWith('/fleet/api/proof/')) {
+      // A proof screenshot. Same door as every other fleet route, and the
+      // bytes come from the governed Google identity already reading the sheet
+      // — a Drive link is private, so the browser cannot load it itself.
+      const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+      const authHeader = req.headers['x-telegram-init-data'] || '';
+      let verdict = isTestAuth ? { ok: true } : verifyAnyToken(req, url, secret);
+      if (!verdict.ok && authHeader) {
+        const authVer = authorizeForgeAtGateway({ initData: String(authHeader), env });
+        if (authVer.ok) verdict = { ok: true };
+      }
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const fileId = decodeURIComponent(url.pathname.slice('/fleet/api/proof/'.length).split('/')[0] || '');
+      if (!/^[A-Za-z0-9_-]{10,}$/.test(fileId)) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'bad file id' }));
+      }
+      try {
+        const shot = await loadProofShot(fileId, { env });
+        if (!shot) {
+          res.writeHead(404, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'proof image not available' }));
+        }
+        res.writeHead(200, { 'content-type': shot.type, 'cache-control': 'private, max-age=3600' });
+        return res.end(shot.bytes);
+      } catch (err) {
+        logGatewayError(err);
+        res.writeHead(502, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'proof image unreadable' }));
+      }
     }
 
     if (url.pathname === '/fleet/api/events') {
