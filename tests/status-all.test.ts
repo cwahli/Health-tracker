@@ -96,26 +96,49 @@ describe('fleetChatStatus', () => {
 });
 
 describe('formatFleetStatusTable', () => {
-  it('renders one line per bot with the answering bot named', () => {
+  it('renders a narrow table when model+agent are uniform, off bots on one line', () => {
     const text = formatFleetStatusTable(
       [
         { id: 'vm', name: 'VM Bot', enabled: true, model: 'm', agent: 'build', sessionId: 'ses_123456789012345', foreignSession: false, totals: { runs: 2, tokens: 1500, cost: 0 }, task: 'working' },
-        { id: 'vm2', name: 'VM2', enabled: true, model: null, agent: null, sessionId: null, foreignSession: true, totals: null, task: 'idle' },
+        { id: 'vm2', name: 'VM2', enabled: true, model: 'm', agent: 'build', sessionId: null, foreignSession: true, totals: null, task: 'idle' },
         { id: 'old', name: 'Old', enabled: false, model: null, agent: null, sessionId: null, foreignSession: false, totals: null, task: 'off' },
       ],
       { chatId: '7', via: 'vm' },
     );
     const lines = text.split('\n');
     expect(lines[0]).toBe('Fleet status · chat 7 · 3 bots (via vm)');
-    expect(lines[1]).toContain('VM Bot (vm)');
-    expect(lines[1]).toContain('task: working');
-    expect(lines[1]).toContain('2 runs · 1.5k');
-    expect(lines[1]).toContain('ses_12345678');
-    expect(lines[2]).toContain('session: other project');
-    expect(lines[3]).toBe('• Old (old) — off');
+    expect(lines[1]).toBe('all: m · build');
+    expect(lines[2]).toBe('```');
+    expect(lines[3]).toContain('Bot');
+    expect(lines[3]).toContain('Session');
+    const vm = lines.find((l) => l.startsWith('vm '));
+    expect(vm).toContain('working');
+    expect(vm).toContain('2·1.5k');
+    expect(vm).toContain('ses_1234');
+    expect(lines.find((l) => l.startsWith('vm2'))).toContain('other-proj');
+    expect(lines).toContain('```');
+    expect(lines[lines.length - 1]).toBe('off: old');
+    expect(text).not.toContain('•');
+  });
+
+  it('renders Model/Agent columns when bots differ', () => {
+    const text = formatFleetStatusTable(
+      [
+        { id: 'vm', name: 'VM Bot', enabled: true, model: 'opencode/nemotron-free', agent: 'build', sessionId: null, foreignSession: false, totals: null, task: 'idle' },
+        { id: 'mobile', name: 'Mobile', enabled: true, model: 'other/model', agent: 'plan', sessionId: null, foreignSession: false, totals: null, task: 'idle' },
+      ],
+      { chatId: '7' },
+    );
+    expect(text).toContain('Model');
+    expect(text).toContain('opencode/nemotron…');
+    expect(text).toContain('other/model');
+    expect(text).not.toContain('all:');
   });
 
   it('renders a header for an empty fleet', () => {
-    expect(formatFleetStatusTable([], { chatId: '7' })).toBe('Fleet status · chat 7 · 0 bots');
+    const text = formatFleetStatusTable([], { chatId: '7' });
+    const lines = text.split('\n');
+    expect(lines[0]).toBe('Fleet status · chat 7 · 0 bots');
+    expect(lines.filter((l) => l === '```').length).toBe(2);
   });
 });
