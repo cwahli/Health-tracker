@@ -102,7 +102,9 @@ import {
   recordRunStart,
   recordRunFinish,
   sweepOrphanedLeases,
+  selectTurnLanes,
 } from '../scripts/bot-host.mjs';
+import { isHardModelFailure, ensureBotLedger } from '../scripts/lib/free-lanes.mjs';
 import {
   buildStatusSnapshot,
   formatStatusPlain,
@@ -1131,6 +1133,107 @@ describe('freemodels', () => {
     // No SELECTABLE standalone gemini picker entries — only the pending setup row.
     expect(entries.filter((e) => e.surface === 'gemini').every((e) => e.selectable === false)).toBe(true);
     expect(entries.some((e) => String(e.pendingAction || '').includes('GEMINI_API_KEY'))).toBe(true);
+  });
+});
+
+describe('vm5 failover refs (live 2026-10-03)', () => {
+  it('keeps the vendor on bare chat-only lane ids', () => {
+    // Live: the ledger's `tokenharbor` lane with model `mimo-v2.6-flash:free`
+    // was emitted bare, and every turn burned on `Invalid model reference`.
+    expect(toModelRef('tokenharbor', 'mimo-v2.6-flash:free')).toBe('tokenharbor/mimo-v2.6-flash:free');
+    expect(toModelRef('cloudflare', 'qwen3.8-flash:free')).toBe('cloudflare/qwen3.8-flash:free');
+    expect(toModelRef('opencode', 'opencode/big-pickle')).toBe('opencode/big-pickle');
+    expect(toModelRef('opencode', 'tokenharbor/deepseek-v4.1-flash:free')).toBe(
+      'tokenharbor/deepseek-v4.1-flash:free',
+    );
+    expect(toModelRef('cline', 'cline-free/kat-coder-pro')).toBe('cline:cline-free/kat-coder-pro');
+  });
+
+  it('treats an invalid model reference as a hard model failure', () => {
+    expect(isHardModelFailure('Invalid model reference: mimo-v2.6-flash:free')).toBe(true);
+    expect(isHardModelFailure('Model unavailable: tokenharbor/deepseek-v4.1-flash:free')).toBe(true);
+    expect(isHardModelFailure('429 Too Many Requests')).toBe(false);
+    expect(isHardModelFailure('')).toBe(false);
+  });
+
+  it('walks a qualified tokenharbor ref and hides vendors with no credential', () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5-home-'));
+    const lanesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5-lanes-'));
+    const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5-shared-'));
+    const oldHome = process.env.HOME;
+    const oldLanes = process.env.FREE_LANES_DIR;
+    const oldShared = process.env.FREE_LANES_SHARED_DIR;
+    process.env.HOME = homeDir;
+    process.env.FREE_LANES_DIR = lanesDir;
+    process.env.FREE_LANES_SHARED_DIR = sharedDir;
+    try {
+      const { dir } = ensureBotLedger('vm5test');
+      const lane = (pref: number, provider: string, model: string) => ({
+        pref,
+        family: `f${pref}`,
+        provider,
+        model,
+        label: model,
+        bucket: `${provider}-test`,
+        tg: true,
+        resetRule: 'test',
+        status: 'available',
+        nextReset: '-',
+        nextResetAt: null,
+        cooldownLeft: '-',
+      });
+      const table = {
+        version: 3,
+        failover: 'test',
+        updatedAt: null,
+        buckets: {},
+        lanes: [
+          lane(1, 'opencode', 'opencode/space-bunny-free'),
+          lane(2, 'tokenharbor', 'mimo-v2.6-flash:free'),
+          lane(3, 'opencode', 'cloudflare/@cf/qwen/qwen3.8-27b'),
+        ],
+      };
+      fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(table));
+      fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ quota: {} }));
+      const ready = (overrides = {}) => ({
+        opencode: { ready: true },
+        cline: { ready: true },
+        tokenharbor: { ready: true },
+        cloudflare: { ready: true },
+        gemini: { ready: true },
+        freebuff: { ready: true },
+        ...overrides,
+      });
+      const open = selectTurnLanes({
+        botId: 'vm5test',
+        model: 'opencode/space-bunny-free',
+        fallback: 'cline:cline-free/deepseek-v4.1-flash',
+        readiness: ready(),
+      });
+      expect(open.models).toContain('tokenharbor/mimo-v2.6-flash:free');
+      expect(open.models).not.toContain('mimo-v2.6-flash:free');
+      const closed = selectTurnLanes({
+        botId: 'vm5test',
+        model: 'opencode/space-bunny-free',
+        fallback: 'cline:cline-free/deepseek-v4.1-flash',
+        readiness: ready({
+          tokenharbor: { ready: false, needs: 'a Token Harbor key', fix: 'set it', command: null },
+          cloudflare: { ready: false, needs: 'a Cloudflare token', fix: 'set it', command: null },
+        }),
+      });
+      expect(closed.models).toEqual(['opencode/space-bunny-free']);
+      expect(closed.skipped.some((s) => /needs a Token Harbor key/.test(s.why || ''))).toBe(true);
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = oldHome;
+      if (oldLanes === undefined) delete process.env.FREE_LANES_DIR;
+      else process.env.FREE_LANES_DIR = oldLanes;
+      if (oldShared === undefined) delete process.env.FREE_LANES_SHARED_DIR;
+      else process.env.FREE_LANES_SHARED_DIR = oldShared;
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(lanesDir, { recursive: true, force: true });
+      fs.rmSync(sharedDir, { recursive: true, force: true });
+    }
   });
 });
 

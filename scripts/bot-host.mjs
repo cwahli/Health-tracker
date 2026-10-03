@@ -4899,7 +4899,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           const pack = await resolvePackPath({
             manifest: handed.packManifest,
             failedLane: handed.model || '',
-            lanesFn: async () => (selectTurnLanes({ botId: config.id, model: eff.model, fallback: config.agent.model }).models || []),
+            lanesFn: async () => (selectTurnLanes({ botId: config.id, model: eff.model, fallback: config.agent.model, readiness: hostReadiness(caches, config.id) }).models || []),
             summarizeFn: async ({ model: lane, manifest: man }) => (await runOpencode({
               prompt: `Summarize this handoff pack in 10 lines or less (files changed, what the next turn needs):\n${(man.files || []).map((f) => `- ${f.path} (${f.bytes} bytes)`).join('\n')}`,
               model: lane,
@@ -4930,10 +4930,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     };
     // The ledger picks the walk. A lane it already stamped is not retried, an
     // ended lane is never offered, and a terminal-only row is never chosen.
+    // Readiness is passed so a vendor with no credential on this host reads as
+    // needs-setup (not selectable) instead of burning a turn on `Model
+    // unavailable` every message (live VM5 2026-10-03: tokenharbor/cloudflare
+    // have no key on the VPS).
     const laneChoice = selectTurnLanes({
       botId: config.id,
       model: eff.model,
       fallback: config.agent.model,
+      readiness: hostReadiness(caches, config.id),
     });
     if (laneChoice.exhausted) {
       // QS-9: the local ledger is empty, but that verdict only covers this

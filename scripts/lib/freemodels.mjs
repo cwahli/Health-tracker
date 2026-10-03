@@ -94,7 +94,15 @@ export function parseModelRef(raw) {
 export function toModelRef(surface, id) {
   if (surface === 'cline') return `cline:${id}`;
   if (surface === 'gemini') return `gemini:${id}`;
-  return id;
+  // A chat-only lane id without a vendor path (e.g. provider `tokenharbor`,
+  // model `mimo-v2.6-flash:free`) is not runnable as-is: the OpenCode CLI
+  // answers `Invalid model reference` and the walk burns a turn on it every
+  // time (live VM5 2026-10-03). Keep the vendor so the attempt is routed and
+  // stamped against the right lane and bucket. `opencode` surface behavior is
+  // unchanged (legacy bare ids still pass through).
+  if (!surface || surface === 'opencode') return id;
+  if (String(id || '').includes('/')) return id;
+  return `${surface}/${id}`;
 }
 
 export function formatFreeLabel(ref) {

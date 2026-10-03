@@ -152,7 +152,7 @@ export function isConnectionFailure(msg) {
  * failure classifiers to avoid a cycle with agent-opencode.
  */
 const HARD_MODEL_FAILURE_RE =
-  /model (is |was )?(unavailable|not found|not available|does not exist|removed|deprecated|discontinued)|no such model|unknown ([\w-]+\s+)?model|model .* not (found|available|supported|enabled)|unsupported model/i;
+  /model (is |was )?(unavailable|not found|not available|does not exist|removed|deprecated|discontinued)|invalid model( reference)?|no such model|unknown ([\w-]+\s+)?model|model .* not (found|available|supported|enabled)|unsupported model/i;
 
 export function isHardModelFailure(msg) {
   const text = String(msg || "");
@@ -529,7 +529,11 @@ export function effectiveProviderOf(lane) {
 function toModelRefShim(provider, model) {
   if (provider === "cline") return `cline:${model}`;
   if (provider === "gemini") return `gemini:${model}`;
-  return model;
+  // Mirror freemodels.toModelRef: a bare chat-only id keeps its vendor so the
+  // walk emits a routable ref instead of an `Invalid model reference` burn.
+  if (!provider || provider === "opencode") return model;
+  if (String(model || "").includes("/")) return model;
+  return `${provider}/${model}`;
 }
 
 /**
