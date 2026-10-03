@@ -206,6 +206,7 @@
         "bugs": false,
         "forge": false,
         "fleet": false,
+        "review": false,
         "routerOnly": ["switch", "unlock"],
         "aliases": ["think"]
       }

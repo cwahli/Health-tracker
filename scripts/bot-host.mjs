@@ -2928,6 +2928,30 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'review': {
+      // Human review queue (Mini App). Same web_app button + initData door
+      // as /fleet, served by the gateway under /review/. Unlike the fleet
+      // board it is NOT scoped to the VM bot: every bot serves its own
+      // button, and the gateway accepts initData from any configured bot.
+      // Agents set a row's Status to `review` when work is ready for human
+      // eyes; the app shows proof screenshots over the original request, and
+      // 👍 archives the row while comments append back to the sheet.
+      const reviewGatewayUrl = readTuiUrl();
+      if (!reviewGatewayUrl) {
+        await api.sendMessage(chatId, '⭐ Review queue is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /review again.');
+        return;
+      }
+      const reviewUrl = `${reviewGatewayUrl}/review/?bot=${config.id}`;
+      await api.sendMessage(chatId, [
+        '⭐ *Review Queue*',
+        'Work marked ready for review: proof screenshots over the original request.',
+        '👍 archives a finished item; 💬 sends feedback back to the sheet.',
+      ].join('\n'), {
+        reply_markup: { inline_keyboard: [[{ text: '⭐ Open Review Queue', web_app: { url: reviewUrl } }]] },
+      });
+      return;
+    }
+
     case 'debug': {
       const location = workLocation();
       const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
