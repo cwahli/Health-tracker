@@ -6,23 +6,26 @@
 <title>Review Queue</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  :root { --gutter: clamp(12px, 3vw, 28px); }
+  :root { --gutter: clamp(10px, 3vw, 22px); }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
-    margin: 0; padding: 0 0 clamp(16px, 4vw, 40px) 0;
-    background: #0f172a; color: #e2e8f0;
+    margin: 0; padding: 0;
+    background: #0b1220; color: #e2e8f0;
     font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     -webkit-text-size-adjust: 100%; line-height: 1.5;
+    display: flex; flex-direction: column; height: 100dvh; overflow: hidden;
   }
+
+  /* --- masthead: title, refresh, pager -------------------------------- */
   .masthead {
-    position: sticky; top: 0; z-index: 30;
+    flex: 0 0 auto;
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    background: #0f172a; padding: 8px var(--gutter); margin: 0;
-    border-bottom: 1px solid #334155;
+    background: #0b1220; padding: 6px var(--gutter); border-bottom: 1px solid #1e293b;
   }
   .title-group { display: flex; align-items: center; gap: 8px; }
-  h1 { color: #f8fafc; font-size: clamp(18px, 3.5vw, 24px); margin: 0; }
-  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981; }
+  h1 { color: #f8fafc; font-size: clamp(15px, 3.5vw, 19px); margin: 0; }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981; }
   .btn-refresh {
     background: #1e293b; border: 1px solid #334155; color: #93c5fd;
     border-radius: 6px; padding: 2px 7px; font-size: 13px; cursor: pointer;
@@ -32,88 +35,109 @@
   .btn-refresh:hover { background: #334155; }
   .btn-refresh.spinning { animation: spin 0.8s linear infinite; pointer-events: none; opacity: 0.7; }
   @keyframes spin { 100% { transform: rotate(360deg); } }
-  .pager { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #93c5fd; }
+  .pager { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #93c5fd; }
   .pager button {
     background: #1e293b; border: 1px solid #334155; color: #93c5fd;
-    border-radius: 6px; padding: 4px 10px; font-size: 14px; cursor: pointer;
+    border-radius: 6px; padding: 3px 9px; font-size: 14px; cursor: pointer;
   }
-  .pager button:disabled { opacity: 0.35; }
-  .card { padding: 12px var(--gutter); }
-  .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
-  .chip {
-    display: inline-block; padding: 2px 8px; border-radius: 9999px;
-    font-size: 11px; font-weight: 600; background: #1e293b; color: #93c5fd;
-    border: 1px solid #334155; overflow-wrap: anywhere;
+  .pager button:disabled { opacity: 0.3; }
+
+  /* --- one-word tabs --------------------------------------------------- */
+  .tabs {
+    flex: 0 0 auto; display: flex; background: #0b1220;
+    border-bottom: 1px solid #1e293b;
   }
-  .chip-key { color: #7dd3fc; }
-  .chip-gate { color: #fbbf24; border-color: #854d0e; }
-  .gallery {
-    display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory;
-    -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;
-    border: 1px solid #334155; border-radius: 10px; background: #000;
-    padding: 8px;
+  .tabs button {
+    flex: 1; cursor: pointer; padding: 8px 4px; font-size: 12.5px; font-weight: 600;
+    color: #7f93b0; background: transparent; border: none;
+    border-bottom: 2px solid transparent;
+    transition: color 0.12s, border-color 0.12s;
   }
-  .gallery figure { margin: 0; flex: 0 0 100%; scroll-snap-align: center; }
-  .gallery img {
-    width: 100%; max-height: 52vh; object-fit: contain; display: block;
-    border-radius: 6px; background: #000;
+  .tabs button.on { color: #fff; border-bottom-color: #3b82f6; }
+
+  /* --- panel: the image gets the space -------------------------------- */
+  .panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .view { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+  .view.on { display: flex; }
+  .view.scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+
+  /* Info card: sits above the proof stage, capped so the shot keeps the space */
+  .info { padding: 8px var(--gutter); flex: 0 0 auto; max-height: 30vh; overflow-y: auto;
+          background: #0f172a; border-bottom: 1px solid #1e293b; }
+  .kv { margin-bottom: 10px; }
+  .kv:last-child { margin-bottom: 0; }
+  .kv h3 {
+    margin: 0 0 3px; font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: .06em; color: #64748b;
   }
-  .gallery figcaption { text-align: center; font-size: 12px; color: #94a3b8; padding-top: 4px; }
+  .kv p { margin: 0; font-size: 13.5px; color: #e2e8f0; white-space: pre-wrap; overflow-wrap: break-word; }
+  .kv .key { color: #7dd3fc; font-family: "SF Mono", Consolas, monospace; font-size: 12.5px; }
+  .kv .gate { color: #fbbf24; }
+
+  /* Text tabs (request / to do) */
+  .text { padding: 14px var(--gutter); font-size: 15px; color: #e2e8f0;
+          white-space: pre-wrap; overflow-wrap: break-word; }
+
+  /* Image stage: full-bleed, snap carousel, heart on the right edge */
+  .stage { position: relative; flex: 1 1 auto; min-height: 0; background: #000; }
+  .track {
+    display: flex; height: 100%; overflow-x: auto; scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; scrollbar-width: none;
+  }
+  .track::-webkit-scrollbar { display: none; }
+  .track figure { margin: 0; flex: 0 0 100%; height: 100%; scroll-snap-align: center;
+                  display: flex; align-items: center; justify-content: center; position: relative; }
+  .track img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
   .noproof {
-    border: 1px dashed #475569; border-radius: 10px; padding: 20px;
-    text-align: center; color: #94a3b8; font-size: 13px;
+    flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
+    text-align: center; color: #64748b; font-size: 13px; padding: 24px;
   }
-  .panel {
-    background: #1e293b; border: 1px solid #334155; border-radius: 10px;
-    padding: 10px 12px; margin-top: 10px;
+  .count {
+    position: absolute; left: 10px; bottom: 10px; z-index: 3;
+    background: rgba(0,0,0,.6); border: 1px solid #334155; color: #e2e8f0;
+    border-radius: 9999px; padding: 2px 9px; font-size: 11px;
   }
-  .panel h3 {
-    margin: 0 0 6px; font-size: 11px; text-transform: uppercase;
-    letter-spacing: .06em; color: #93c5fd;
+  .heart {
+    position: absolute; right: 10px; bottom: 10px; z-index: 4;
+    width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
+    background: rgba(15,23,42,.72); color: #fca5a5; font-size: 25px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,.5);
+    transition: transform 0.12s, background 0.12s, color 0.12s;
   }
-  .panel.request { border-color: #1d4ed8; }
-  .panel.request h3 { color: #bfdbfe; }
-  .panel p { margin: 0; font-size: 14px; color: #e2e8f0; white-space: pre-wrap; overflow-wrap: break-word; }
-  .panel.context p { font-size: 13px; color: #cbd5e1; }
-  details.panel { padding: 10px 12px; }
-  details.panel summary { cursor: pointer; font-size: 12px; color: #93c5fd; font-weight: 600; }
-  .actions {
-    position: sticky; bottom: 0; background: #0f172a;
-    border-top: 1px solid #334155; padding: 10px var(--gutter) calc(10px + env(safe-area-inset-bottom));
-    margin-top: 12px;
+  .heart:active { transform: scale(0.9); }
+  .heart.confirm { background: #b45309; color: #fff; }
+
+  /* --- composer: no send button, keyboard sends ----------------------- */
+  .composer {
+    flex: 0 0 auto; background: #0b1220; border-top: 1px solid #1e293b;
+    padding: 6px var(--gutter) calc(6px + env(safe-area-inset-bottom));
   }
-  .seg { display: flex; gap: 0; margin-bottom: 8px; }
-  .seg button {
-    flex: 1; cursor: pointer; padding: 7px 6px; font-size: 12px; font-weight: 600;
-    color: #93c5fd; background: #1e293b; border: 1px solid #334155; margin-left: -1px;
+  .target { display: flex; gap: 6px; margin-bottom: 6px; }
+  .target button {
+    cursor: pointer; padding: 4px 12px; font-size: 11.5px; font-weight: 600;
+    color: #7f93b0; background: #111c33; border: 1px solid #1e293b; border-radius: 9999px;
+    transition: color 0.12s, background 0.12s, border-color 0.12s;
   }
-  .seg button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
-  .seg button:last-child { border-radius: 0 8px 8px 0; }
-  .seg button.on { background: #1d4ed8; color: #fff; border-color: #1e40af; }
+  .target button.on { color: #fff; background: #1d4ed8; border-color: #3b82f6; }
   textarea {
-    width: 100%; min-height: 64px; resize: vertical;
-    background: #1e293b; border: 1px solid #334155; border-radius: 8px;
-    color: #e2e8f0; font-size: 14px; padding: 8px 10px; font-family: inherit;
+    width: 100%; min-height: 40px; max-height: 22vh; resize: none;
+    background: #111c33; border: 1px solid #1e293b; border-radius: 10px;
+    color: #e2e8f0; font-size: 14px; padding: 9px 11px; font-family: inherit; line-height: 1.35;
   }
-  .row { display: flex; gap: 8px; margin-top: 8px; }
-  .btn {
-    border: none; border-radius: 8px; padding: 10px 14px;
-    font-size: 14px; font-weight: 700; cursor: pointer;
-  }
-  .btn-approve { background: #065f46; color: #a7f3d0; border: 1px solid #059669; flex: 1; }
-  .btn-approve.confirm { background: #b45309; color: #fff; border-color: #f59e0b; }
-  .btn-send { background: #1d4ed8; color: #fff; flex: 1; }
-  .btn:disabled { opacity: 0.5; }
+  .hint { font-size: 10.5px; color: #475569; margin-top: 4px; }
+
   .toast {
-    position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%);
-    background: #1e293b; border: 1px solid #334155; color: #f8fafc;
+    position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+    background: #111c33; border: 1px solid #334155; color: #f8fafc;
     border-radius: 8px; padding: 8px 14px; font-size: 13px; z-index: 50;
-    max-width: 90vw; text-align: center;
+    max-width: 88vw; text-align: center;
   }
-  .empty { text-align: center; padding: 48px var(--gutter); color: #94a3b8; }
-  .empty .big { font-size: 40px; }
+  .empty { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
+           justify-content: center; text-align: center; color: #64748b; padding: 24px; }
+  .empty .big { font-size: 38px; }
   .lightbox {
-    position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.94);
+    position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.95);
     display: none; align-items: center; justify-content: center;
   }
   .lightbox.open { display: flex; }
@@ -134,28 +158,45 @@
   </div>
 </div>
 
-<div id="body"></div>
+<div class="tabs" id="tabs">
+  <button data-tab="info">Info</button>
+  <button data-tab="request">Request</button>
+  <button data-tab="todo">To&nbsp;do</button>
+</div>
+
+<div class="panel" id="panel"></div>
+
+<div class="composer" id="composer" hidden>
+  <div class="target" id="target">
+    <button data-target="left">To&nbsp;do</button>
+    <button data-target="original">Request</button>
+  </div>
+  <textarea id="comment" rows="1" placeholder="Comment for the agent…"></textarea>
+  <div class="hint">Enter sends · Shift+Enter new line</div>
+</div>
+
 <div class="lightbox" id="lightbox"><img id="lightbox-img" alt="proof fullscreen"></div>
 
 <script>
 (function () {
-  if (window.Telegram && window.Telegram.WebApp) {
-    try {
-      window.Telegram.WebApp.ready();
-      window.Telegram.WebApp.expand();
-    } catch (e) {}
-  }
+  var tg = null;
+  try {
+    tg = window.Telegram && window.Telegram.WebApp;
+    if (tg) {
+      if (tg.ready) tg.ready();
+      if (tg.expand) tg.expand();
+      if (tg.disableVerticalSwipes) { try { tg.disableVerticalSwipes(); } catch (e) {} }
+    }
+  } catch (e) {}
 
-  var state = { items: [], idx: 0, target: 'left', approving: false };
+  var state = { items: [], idx: 0, tab: 'info', target: 'left', busy: false };
   var query = location.search || '';
+  var builtKey = null; // item key currently in the DOM — the blink guard
 
   function esc(s) {
-    if (s === null || s === undefined || s === '') return '<span style="color:#64748b">—</span>';
+    if (s === null || s === undefined || s === '') return '<span style="color:#475569">—</span>';
     return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   function toast(msg) {
@@ -165,7 +206,7 @@
     t.className = 'toast';
     t.textContent = msg;
     document.body.appendChild(t);
-    setTimeout(function () { t.remove(); }, 3200);
+    setTimeout(function () { t.remove(); }, 3000);
   }
 
   function proofUrl(key, fileId) {
@@ -173,145 +214,212 @@
     return '/review/api/proof' + q + 'key=' + encodeURIComponent(key) + '&file=' + encodeURIComponent(fileId);
   }
 
+  function api(path, opts) {
+    return fetch(path + query, opts).then(function (res) {
+      return res.json().then(function (j) { return { status: res.status, body: j }; });
+    });
+  }
+
+  /* --- build the item's DOM ONCE; later toggles only flip classes ---- */
+  function build(it) {
+    builtKey = it.key;
+    var panel = document.getElementById('panel');
+    var composer = document.getElementById('composer');
+    var proofs = it.proofs || [];
+
+    var views = '';
+    views += '<div class="view scroll info" data-view="info">'
+      + '<div class="kv"><h3>Ticket</h3><p class="key">' + esc(it.key) + (it.ref ? ' · ' + esc(it.ref) : '') + '</p></div>'
+      + '<div class="kv"><h3>Owner</h3><p>' + esc(it.owner) + '</p></div>'
+      + '<div class="kv"><h3>Last activity</h3><p>' + esc(it.lastActivity) + '</p></div>'
+      + (it.gate ? '<div class="kv"><h3>Gate</h3><p class="gate">' + esc(it.gate) + '</p></div>' : '')
+      + '<div class="kv"><h3>Work done</h3><p>' + esc(it.workDone) + '</p></div>'
+      + '<div class="kv"><h3>Proof</h3><p>' + (proofs.length ? proofs.map(function (p) { return esc(p.name); }).join('\n') : 'none filed') + '</p></div>'
+      + '</div>';
+    views += '<div class="view scroll text" data-view="request"><div id="pane-request">' + esc(it.originalRequest) + '</div></div>';
+    views += '<div class="view scroll text" data-view="todo"><div id="pane-todo">' + esc(it.whatsLeft) + '</div></div>';
+
+    var stage = '';
+    if (proofs.length) {
+      stage = '<div class="stage"><div class="track" id="track">'
+        + proofs.map(function (p, i) {
+            var src = proofUrl(it.key, p.id);
+            return '<figure><img src="' + src + '" alt="proof ' + (i + 1) + ' of ' + proofs.length + '" data-full="' + src + '"></figure>';
+          }).join('')
+        + '</div>'
+        + '<div class="count" id="imgcount">' + (proofs.length > 1 ? '1/' + proofs.length : '1 shot') + '</div>'
+        + '<button class="heart" id="heart" title="Done — archive" aria-label="Mark done and archive">🤍</button>'
+        + '</div>';
+    } else {
+      stage = '<div class="noproof">No proof screenshots filed.<br>Heart it only if the proof is acceptable elsewhere.</div>'
+        + '<div style="position:relative;flex:0 0 auto">'
+        + '<button class="heart" id="heart" style="position:static;margin:-64px auto 0;display:flex" title="Done — archive" aria-label="Mark done and archive">🤍</button>'
+        + '</div>';
+    }
+
+    // Info first, then the proof stage: the meta card sits ABOVE the image.
+    panel.innerHTML = views + '<div class="view on" data-view="proof">' + stage + '</div>';
+
+    if (proofs.length) {
+      var track = document.getElementById('track');
+      var count = document.getElementById('imgcount');
+      track.addEventListener('scroll', function () {
+        var i = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
+        count.textContent = (i + 1) + '/' + proofs.length;
+      }, { passive: true });
+      panel.querySelectorAll('.track img').forEach(function (img) {
+        img.addEventListener('click', function () {
+          document.getElementById('lightbox-img').src = img.getAttribute('data-full');
+          document.getElementById('lightbox').classList.add('open');
+        });
+      });
+    }
+    document.getElementById('heart').addEventListener('click', onHeart);
+    composer.hidden = false;
+  }
+
+  /* --- view switching: class flips only, nothing rebuilt --------------
+     The blink was a full innerHTML rebuild per tap (the <img> reloaded and
+     flashed). Views are built once per item; a tap only toggles `on`, and the
+     image keeps its DOM node, its loaded bytes and its scroll position. */
+  function showProofView() {
+    var proof = document.querySelector('[data-view="proof"]');
+    var stage = document.querySelector('.stage');
+    if (stage) stage.hidden = false;
+    document.querySelectorAll('#panel .view').forEach(function (v) { if (v !== proof) v.classList.remove('on'); });
+    if (proof) proof.classList.add('on');
+    document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.remove('on'); });
+    state.tab = 'proof';
+  }
+
+  function showTextView(name) {
+    state.tab = name;
+    var proof = document.querySelector('[data-view="proof"]');
+    var stage = document.querySelector('.stage');
+    var infoView = document.querySelector('#panel .view[data-view="info"]');
+    // Info is a sibling card above the stage; Request/To do are full views that
+    // replace it. A tab tap only flips classes — no innerHTML, no reloaded <img>.
+    if (infoView) infoView.classList.toggle('on', name === 'info');
+    var isText = name === 'request' || name === 'todo';
+    if (stage) stage.hidden = isText;
+    if (proof) proof.classList.toggle('on', !isText);
+    var view = document.querySelector('#panel .view[data-view="' + name + '"]');
+    if (view && isText) view.classList.add('on');
+    document.querySelectorAll('#panel .view[data-view="request"], #panel .view[data-view="todo"]').forEach(function (v) {
+      if (v.getAttribute('data-view') !== name) v.classList.remove('on');
+    });
+    document.querySelectorAll('#tabs button').forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-tab') === name);
+    });
+  }
+
+  /* --- composer ------------------------------------------------------- */
+  function setTarget(which) {
+    state.target = which;
+    document.querySelectorAll('#target button').forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-target') === which);
+    });
+  }
+
+  document.getElementById('tabs').addEventListener('click', function (e) {
+    var tab = e.target.getAttribute('data-tab');
+    if (!tab) return;
+    showTextView(tab);
+  });
+  document.getElementById('target').addEventListener('click', function (e) {
+    var t = e.target.getAttribute('data-target');
+    if (!t) return;
+    setTarget(t);
+    var box = document.getElementById('comment');
+    if (box && !state.busy) box.focus();
+  });
+  document.getElementById('comment').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendComment(); }
+  });
+
+  function onHeart() {
+    var btn = document.getElementById('heart');
+    var it = state.items[state.idx];
+    if (!it || !btn || state.busy) return;
+    state.busy = true;
+    btn.textContent = '…';
+    api('/review/api/approve', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: it.key }),
+    }).then(function (r) {
+      state.busy = false;
+      if (r.body && r.body.ok) {
+        toast('Archived ✅ ' + it.key);
+        state.items.splice(state.idx, 1);
+        if (state.idx >= state.items.length) state.idx = Math.max(0, state.items.length - 1);
+        render();
+      } else {
+        btn.textContent = '🤍';
+        toast('Approve failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
+      }
+    }).catch(function () { state.busy = false; btn.textContent = '🤍'; toast('Approve failed: network'); });
+  }
+
+  function sendComment() {
+    var ta = document.getElementById('comment');
+    var it = state.items[state.idx];
+    if (!it || state.busy) return;
+    var text = ta.value.trim();
+    if (!text) return;
+    state.busy = true;
+    api('/review/api/comment', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: it.key, target: state.target, text: text }),
+    }).then(function (r) {
+      state.busy = false;
+      if (r.body && r.body.ok) {
+        var pane = document.getElementById(state.target === 'left' ? 'pane-todo' : 'pane-request');
+        var before = pane ? pane.innerHTML : '';
+        if (pane) pane.innerHTML = before + '\n' + esc(r.body.stamped);
+        ta.value = '';
+        toast('Sent → ' + (state.target === 'left' ? 'To do' : 'Request'));
+      } else {
+        toast('Send failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
+      }
+    }).catch(function () { state.busy = false; toast('Send failed: network'); });
+  }
+
+  /* --- render: only rebuilds when the item actually changes ----------- */
   function render() {
-    var body = document.getElementById('body');
+    var panel = document.getElementById('panel');
     var prev = document.getElementById('btn-prev');
     var next = document.getElementById('btn-next');
     document.getElementById('pos').textContent = state.items.length ? ((state.idx + 1) + '/' + state.items.length) : '0/0';
     prev.disabled = state.idx <= 0;
     next.disabled = state.idx >= state.items.length - 1;
     if (!state.items.length) {
-      body.innerHTML = '<div class="empty"><div class="big">🎉</div><p>No items awaiting review.<br>Agents set Status to <b>review</b> when work is ready for human eyes.</p></div>';
+      builtKey = null;
+      panel.innerHTML = '<div class="empty"><div class="big">🎉</div><p>No items awaiting review.<br>Agents set Status to <b>review</b> when work is ready for human eyes.</p></div>';
+      document.getElementById('composer').hidden = true;
       return;
     }
     var it = state.items[state.idx];
-    var proofs = it.proofs || [];
-    var gal = proofs.length
-      ? '<div class="gallery">' + proofs.map(function (p, i) {
-          return '<figure><img src="' + proofUrl(it.key, p.id) + '" alt="proof ' + (i + 1) + '" loading="lazy" data-full="' + proofUrl(it.key, p.id) + '">' +
-            '<figcaption>' + esc(p.name) + ' · ' + (i + 1) + '/' + proofs.length + '</figcaption></figure>';
-        }).join('') + '</div>'
-      : '<div class="noproof">No proof screenshots filed yet.<br>Ask the agent to file screenshots before approving.</div>';
-    body.innerHTML =
-      '<div class="card">' +
-        '<div class="meta">' +
-          '<span class="chip chip-key">' + esc(it.key) + '</span>' +
-          (it.ref ? '<span class="chip">' + esc(it.ref) + '</span>' : '') +
-          '<span class="chip">' + esc(it.owner || 'unowned') + '</span>' +
-          '<span class="chip">' + esc(it.lastActivity || '') + '</span>' +
-        '</div>' +
-        (it.gate ? '<div class="meta"><span class="chip chip-gate">gate: ' + esc(it.gate) + '</span></div>' : '') +
-        gal +
-        '<div class="panel request"><h3>Original request</h3><p>' + esc(it.originalRequest) + '</p></div>' +
-        '<details class="panel context"><summary>Work done so far</summary><p>' + esc(it.workDone) + '</p></details>' +
-        '<details class="panel context"><summary>What\u2019s left to do</summary><p id="whatsleft">' + esc(it.whatsLeft) + '</p></details>' +
-        '<div class="actions">' +
-          '<div class="seg" role="tablist" aria-label="Comment target">' +
-            '<button id="seg-left" class="' + (state.target === 'left' ? 'on' : '') + '">↩ What\u2019s left (proof wrong)</button>' +
-            '<button id="seg-original" class="' + (state.target === 'original' ? 'on' : '') + '">＋ Original request (new feature)</button>' +
-          '</div>' +
-          '<textarea id="comment" placeholder="Comment for the agent\u2026"></textarea>' +
-          '<div class="row">' +
-            '<button class="btn btn-approve" id="btn-approve">👍 Done</button>' +
-            '<button class="btn btn-send" id="btn-send">Send ➤</button>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
-
-    document.getElementById('seg-left').addEventListener('click', function () { state.target = 'left'; render(); });
-    document.getElementById('seg-original').addEventListener('click', function () { state.target = 'original'; render(); });
-    document.getElementById('btn-approve').addEventListener('click', onApprove);
-    document.getElementById('btn-send').addEventListener('click', onSend);
-    body.querySelectorAll('.gallery img').forEach(function (img) {
-      img.addEventListener('click', function () {
-        document.getElementById('lightbox-img').src = img.getAttribute('data-full');
-        document.getElementById('lightbox').classList.add('open');
-      });
-    });
+    if (builtKey !== it.key) {
+      build(it);
+      showProofView();
+    }
   }
 
+  document.getElementById('btn-prev').addEventListener('click', function () {
+    if (state.idx > 0) { state.idx -= 1; render(); }
+  });
+  document.getElementById('btn-next').addEventListener('click', function () {
+    if (state.idx < state.items.length - 1) { state.idx += 1; render(); }
+  });
   document.getElementById('lightbox').addEventListener('click', function () {
     this.classList.remove('open');
     document.getElementById('lightbox-img').src = '';
   });
-  document.getElementById('btn-prev').addEventListener('click', function () {
-    if (state.idx > 0) { state.idx -= 1; state.approving = false; render(); }
+  document.getElementById('btn-refresh').addEventListener('click', function () {
+    this.classList.add('spinning');
+    fetchState(true);
+    setTimeout(function () { document.getElementById('btn-refresh').classList.remove('spinning'); }, 600);
   });
-  document.getElementById('btn-next').addEventListener('click', function () {
-    if (state.idx < state.items.length - 1) { state.idx += 1; state.approving = false; render(); }
-  });
-
-  function api(path, opts) {
-    var url = path + query;
-    return fetch(url, opts).then(function (res) { return res.json().then(function (j) { return { status: res.status, body: j }; }); });
-  }
-
-  function onApprove() {
-    var btn = document.getElementById('btn-approve');
-    var it = state.items[state.idx];
-    if (!it) return;
-    if (!state.approving) {
-      state.approving = true;
-      btn.textContent = 'Tap again to archive ✅';
-      btn.classList.add('confirm');
-      return;
-    }
-    btn.disabled = true;
-    btn.textContent = 'Archiving…';
-    api('/review/api/approve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: it.key }),
-    }).then(function (r) {
-      if (r.body && r.body.ok) {
-        toast('Archived ✅ ' + it.key);
-        state.items.splice(state.idx, 1);
-        if (state.idx >= state.items.length) state.idx = Math.max(0, state.items.length - 1);
-        state.approving = false;
-        render();
-      } else {
-        toast('Approve failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
-        state.approving = false;
-        render();
-      }
-    }).catch(function () {
-      toast('Approve failed: network');
-      state.approving = false;
-      render();
-    });
-  }
-
-  function onSend() {
-    var ta = document.getElementById('comment');
-    var btn = document.getElementById('btn-send');
-    var it = state.items[state.idx];
-    if (!it) return;
-    var text = ta.value.trim();
-    if (!text) { toast('Write a comment first'); return; }
-    btn.disabled = true;
-    btn.textContent = 'Sending…';
-    api('/review/api/comment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: it.key, target: state.target, text: text }),
-    }).then(function (r) {
-      if (r.body && r.body.ok) {
-        toast('Sent → ' + (state.target === 'left' ? 'What\u2019s left' : 'Original request'));
-        if (state.target === 'left') it.whatsLeft = (it.whatsLeft ? it.whatsLeft + '\n' : '') + r.body.stamped;
-        else it.originalRequest = (it.originalRequest ? it.originalRequest + '\n' : '') + r.body.stamped;
-        state.approving = false;
-        render();
-      } else {
-        toast('Send failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
-        btn.disabled = false;
-        btn.textContent = 'Send ➤';
-      }
-    }).catch(function () {
-      toast('Send failed: network');
-      btn.disabled = false;
-      btn.textContent = 'Send ➤';
-    });
-  }
 
   function fetchState(isRefresh) {
     var q = isRefresh ? (query ? query + '&refresh=1' : '?refresh=1') : query;
@@ -321,8 +429,9 @@
         if (data && data.ok) {
           var cur = state.items[state.idx] && state.items[state.idx].key;
           state.items = data.items || [];
-          var at = state.items.findIndex(function (x) { return x.key === cur; });
-          state.idx = at >= 0 ? at : 0;
+          var at = -1;
+          for (var i = 0; i < state.items.length; i++) { if (state.items[i].key === cur) { at = i; break; } }
+          state.idx = at >= 0 ? at : Math.min(state.idx, Math.max(0, state.items.length - 1));
           document.getElementById('live-indicator').style.background = '#10b981';
           render();
         }
@@ -332,13 +441,7 @@
       });
   }
 
-  var btnRef = document.getElementById('btn-refresh');
-  btnRef.addEventListener('click', function () {
-    btnRef.classList.add('spinning');
-    fetchState(true);
-    setTimeout(function () { btnRef.classList.remove('spinning'); }, 600);
-  });
-
+  setTarget('left');
   fetchState(false);
   setInterval(function () {
     if (document.visibilityState === 'visible') fetchState(false);

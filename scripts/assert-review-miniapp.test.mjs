@@ -280,6 +280,10 @@ test('gateway /review routes: landing, app, state, proof guard, write validation
     const appHtml = await appRes.text();
     assert.ok(appHtml.includes('Review Queue'));
     assert.ok(appHtml.includes('id="comment"'));
+    assert.ok(appHtml.includes('data-tab="info"') && appHtml.includes('data-tab="request"') && appHtml.includes('data-tab="todo"'), 'one-word tabs');
+    assert.ok(appHtml.includes('class="heart"'), 'heart on the image');
+    assert.ok(!appHtml.includes('Send ➤'), 'no send button — keyboard sends');
+    assert.ok(appHtml.includes('Enter sends'), 'keyboard send hint');
 
     const stateRes = await fetch(`${base}/review/api/state`);
     assert.equal(stateRes.status, 200);
