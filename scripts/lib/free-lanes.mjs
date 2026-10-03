@@ -142,6 +142,24 @@ export function isConnectionFailure(msg) {
 }
 
 /**
+ * A hard model failure, not a quota decision and not transport. The vendor
+ * says this model is not servable right now ("Model unavailable:
+ * tokenharbor/deepseek-v4.1-flash:free", live 2026-10-03) — retrying the same
+ * lane cannot help, but without a stamp the next turn walks straight back
+ * into it. Gets the same short cooldown as a connection failure, never the
+ * 6h quota default. Self-contained by design: call sites check quota first,
+ * then connection, then this — matching free-lanes must not import the
+ * failure classifiers to avoid a cycle with agent-opencode.
+ */
+const HARD_MODEL_FAILURE_RE =
+  /model (is |was )?(unavailable|not found|not available|does not exist|removed|deprecated|discontinued)|no such model|unknown ([\w-]+\s+)?model|model .* not (found|available|supported|enabled)|unsupported model/i;
+
+export function isHardModelFailure(msg) {
+  const text = String(msg || "");
+  return Boolean(text.trim()) && HARD_MODEL_FAILURE_RE.test(text);
+}
+
+/**
  * Token Harbor's free allowance is one shared, rolling ~7-day value bar, not a
  * per-model daily cap. That is the Grok router's model and the table says so on
  * every Token Harbor row (`resetRule: "rolling ~7-day value bar"`), with all six

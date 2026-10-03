@@ -96,6 +96,7 @@ import {
   projectLanes,
   soonestResetAmongDepleted,
   isConnectionFailure,
+  isHardModelFailure,
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
   freemodelDisplayTier,
@@ -517,6 +518,27 @@ function shortProviderModel(model) {
 }
 
 /**
+ * Chat-facing lane name: the routing ref without its surface prefix and
+ * without internal variant markers. `cline:cline-free/deepseek-v4.1-flash`
+ * → `deepseek-v4.1-flash`, `tokenharbor/deepseek-v4.1-flash:free` →
+ * `tokenharbor/deepseek-v4.1-flash` (the vendor dir stays because the
+ * headline provider for that bar reads OpenCode), `opencode/space-bunny-free`
+ * → `space-bunny-free`. Plain ids pass through untouched, so unit-test
+ * lanes like `m1` render exactly as before. Display only — routing still
+ * uses the full ref.
+ */
+export function chatLaneName(ref) {
+  const r = freemodelRefToRoute(ref || '');
+  let s = String(r.model || ref || '').trim();
+  s = s.replace(/^cline-free\//i, '').replace(/:free$/i, '');
+  if (r.provider && s.toLowerCase().startsWith(`${String(r.provider).toLowerCase()}/`)) {
+    const rest = s.slice(String(r.provider).length + 1);
+    if (!/^tokenharbor\//i.test(s)) s = rest;
+  }
+  return s || String(ref || '');
+}
+
+/**
  * Which tool the /tui terminal should launch for this chat, and what it may
  * claim. The table itself lives in lib/tui-surface.mjs so the bot, the attach
  * script and the sensors cannot disagree about it.
@@ -713,12 +735,12 @@ function getAnnotatedFreeModels(caches, botId) {
  * Keep a lane out of the walk for a few minutes after a transport failure.
  * Never throws: a stamp that fails must not cost the chat its answer.
  */
-export function stampLaneCooldown({ botId, model, errText, now = Date.now() } = {}) {
+export function stampLaneCooldown({ botId, model, errText, kind = 'connection-failed', now = Date.now() } = {}) {
   try {
     const { provider, model: m } = freemodelRefToRoute(model || '');
     if (!provider || !m) return null;
     const { dir } = ensureBotLedger(botId || 'default');
-    const stamped = stampCooldown({ stateDir: dir, provider, model: m, errText, now });
+    const stamped = stampCooldown({ stateDir: dir, provider, model: m, errText, kind, now });
     if (stamped.stamped) {
       console.log(`[${botId}] connection cooldown on ${provider}/${m} until ${new Date(now + CONNECTION_FAILED_COOLDOWN_MS).toISOString()}`);
     }
@@ -1414,8 +1436,10 @@ export class ProgressRenderer {
       const gist = compressReasoning(event.text, { maxChars: this.maxChars });
       // Drop compressor fragments (".", "/", "check", "at", ":") and repeats:
       // each accepted gist would otherwise become its own chat message.
+      // Single-word reasoning shards ("anywhere") also read as nonsense on the
+      // `Thinking:` line, so a gist needs at least two words to be shown.
       const clean = gist.trim();
-      if (!clean || clean.length < 8 || clean === this.thinking) return;
+      if (!clean || clean.length < 12 || clean.split(/\s+/).length < 2 || clean === this.thinking) return;
       this.thinking = gist;
       this.status = 'thinking';
       this._schedule();
@@ -3362,9 +3386,49 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         }
         return;
       }
+      if (sub === 'tags') {
+        await api.sendMessage(chatId, '🏷️ *Checking and synchronizing seat tags in Telegram...*', { parse_mode: 'Markdown' }).catch(() => {});
+        try {
+          const { execFile } = await import('node:child_process');
+          const { promisify } = await import('node:util');
+          const execFileAsync = promisify(execFile);
+          // The creator-session credentials live in the host's own env files, never
+          // in this repo. Read them at call time; refuse by name when absent.
+          const hostEnv = {};
+          for (const f of ['tui-gateway.env', 'common.env']) {
+            try {
+              for (const line of fs.readFileSync(path.join(os.homedir(), '.config', 'bot-host', f), 'utf8').split('\n')) {
+                const m = line.match(/^(TELEGRAM_API_ID|TELEGRAM_API_HASH)=(.+)$/);
+                if (m) hostEnv[m[1]] = m[2].trim().replace(/^["']|["']$/g, '');
+              }
+            } catch { /* host may not have this file */ }
+          }
+          const apiId = process.env.TELEGRAM_API_ID || hostEnv.TELEGRAM_API_ID;
+          const apiHash = process.env.TELEGRAM_API_HASH || hostEnv.TELEGRAM_API_HASH;
+          if (!apiId || !apiHash) {
+            await api.sendMessage(chatId, '❌ Seat tags need TELEGRAM_API_ID / TELEGRAM_API_HASH in ~/.config/bot-host/tui-gateway.env on this host.');
+            return;
+          }
+          const { stdout, stderr } = await execFileAsync(
+            process.execPath,
+            [path.join(HERE, 'seat-tags.mjs'), '--apply', '--rights=change_info:true,view:true'],
+            {
+              env: { ...process.env, TELEGRAM_API_ID: apiId, TELEGRAM_API_HASH: apiHash },
+              timeout: 30000,
+            },
+          );
+          const clean = (stdout || stderr || 'All tags up to date.').replace(/\x1B\[[0-9;]*[mK]/g, '').trim();
+          await api.sendMessage(chatId, `\`\`\`\n${clean}\n\`\`\``, { parse_mode: 'Markdown' })
+            .catch(() => api.sendMessage(chatId, clean));
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Failed to sync seat tags: ${err.message}`);
+        }
+        return;
+      }
       // Anything else (including no argument) is the status answer.
       const status = getHealthStatus({ projectId });
-      await api.sendMessage(chatId, formatStatusText(status), { parse_mode: 'Markdown' });
+      await api.sendMessage(chatId, formatStatusText(status), { parse_mode: 'Markdown' })
+        .catch(() => api.sendMessage(chatId, formatStatusText(status)));
       return;
     }
 
@@ -3960,6 +4024,24 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
           try { onCooldown({ model, errText, stamp }); } catch {}
         }
       }
+      // A lane that answers "model unavailable" is neither quota (no 6h stamp)
+      // nor transport (no retry — a second attempt cannot help). Without a
+      // stamp the next turn walks straight back into the same dead lane, so
+      // it gets the same short cooldown a connection failure does and the
+      // walk skips it until the stamp expires.
+      if (
+        !String(attemptResult?.finalText || '').trim() &&
+        !isQuotaOrLimitError(attemptFailureText(attemptResult)) &&
+        !isConnectionFailure(attemptFailureText(attemptResult)) &&
+        isHardModelFailure(attemptFailureText(attemptResult)) &&
+        !isAborted()
+      ) {
+        const errText = attemptFailureText(attemptResult);
+        const stamp = stampLaneCooldown({ botId: config?.id, model, errText, kind: 'model-unavailable' });
+        if (typeof onCooldown === 'function') {
+          try { onCooldown({ model, errText, stamp }); } catch {}
+        }
+      }
       if (typeof onAttemptComplete === 'function') {
         try { onAttemptComplete({ model, attempt, result: attemptResult, aborted: Boolean(isAborted()) }); } catch {}
       }
@@ -3980,10 +4062,12 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
       }
       // Quota envelopes (Cline's INFERENCE_CAP_ERROR JSON) stay in the
       // ledger/observer log; the chat line carries the short verdict only.
+      // Non-quota failures are one collapsed line, capped — never the raw
+      // multi-line error with its model-id echo.
       const short = isQuotaOrLimitError(raw)
         ? `free limit hit${parseRetryAfter(raw) ? ` (${parseRetryAfter(raw)})` : ''}`
-        : raw.slice(0, 200);
-      const line = `🔀 *${from}* failed (${short.slice(0, 200)}) — switching to *${to}*…`;
+        : raw.split('\n')[0].replace(/\s+/g, ' ').trim().slice(0, 120) || 'error';
+      const line = `🔀 *${chatLaneName(from)}* failed (${short.slice(0, 200)}) — switching to *${chatLaneName(to)}*…`;
       try {
         if (typeof onSwitchNotify === 'function') {
           onSwitchNotify(line);
@@ -4479,7 +4563,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     };
     renderer.setHeadline({
       providerLabel: roleHeadlineLabel,
-      modelLabel: eff.model || '',
+      modelLabel: chatLaneName(eff.model) || '',
     });
     // Paint the headline now (starting… 0s) so the chat sees the turn begin
     // at once; the old lazy path left only bare typing until the first
@@ -4880,12 +4964,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       return;
     }
     if (laneChoice.displaced) {
-      // The ledger's reason usually already carries its own reset stamp
-      // ("depleted until 2026-09-26T11:59:11Z (from vendor countdown …)"), so
-      // appending the reset label again produced "… until X until X".
-      const stamp = laneChoice.displaced.resetLabel;
+      // Chat copy carries the compact countdown, never the ledger's absolute
+      // stamp: "depleted until 2026-10-03T04:30:29Z (default TTL, no countdown
+      // in vendor text) / Sat 11:30 WIB" is a log line, not a chat line (live
+      // 2026-10-03). Lane names go through chatLaneName for the same reason —
+      // no surface prefixes, no :free markers.
       const reason = String(laneChoice.displaced.why || '');
-      const why = stamp && !reason.includes(stamp) ? `${reason} until ${stamp}` : reason;
+      const why = laneChoice.displaced.until
+        ? `depleted (reset in ${formatResetIn(laneChoice.displaced.until, Date.now())})`
+        : reason.split('\n')[0].replace(/\s+/g, ' ').trim().slice(0, 160) || 'not available';
       console.log(`[${config.id}] lane ${eff.model} not selectable (${why}); using ${laneChoice.chose}`);
       // QS-2: "the same prompt completes on the next lane with a user-visible
       // switch line naming failed lane -> next lane". The walk did exactly that
@@ -4901,14 +4988,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       // stays there: without the stick the next turn announces the dead lane
       // as its starting model again, every message until reset.
       try {
-        renderer.setHeadline({ providerLabel: headlineForLane(laneChoice.chose), modelLabel: laneChoice.chose });
+        renderer.setHeadline({ providerLabel: headlineForLane(laneChoice.chose), modelLabel: chatLaneName(laneChoice.chose) });
       } catch {
         // a UI hiccup must never break failover
       }
       if (!laneChoice.degradedToLight) {
         await api.sendMessage(
           chatId,
-          `🔀 \`${eff.model}\` is ${why} — this turn ran on \`${laneChoice.chose}\` instead, and the chat stays on \`${laneChoice.chose}\` until you switch back.`,
+          `🔀 \`${chatLaneName(eff.model)}\` is ${why} — this turn ran on \`${chatLaneName(laneChoice.chose)}\` instead, and the chat stays on \`${chatLaneName(laneChoice.chose)}\` until you switch back.`,
         ).catch(() => {});
       }
       // A coding turn that can only be served by a light model is said out loud.
@@ -4918,7 +5005,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         console.log(`[${config.id}] no coding lane left; degraded to a light model (${laneChoice.chose})`);
         await api.sendMessage(
           chatId,
-          `⚠️ \`${eff.model}\` is ${laneChoice.displaced.why}, and no coding lane is free right now — this turn runs on the light model \`${laneChoice.chose}\`. Code may be weaker than usual.`
+          `⚠️ \`${chatLaneName(eff.model)}\` is ${why}, and no coding lane is free right now — this turn runs on the light model \`${chatLaneName(laneChoice.chose)}\`. Code may be weaker than usual.`
         ).catch(() => {});
       }
     }
@@ -4970,7 +5057,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         // must move the headline too, or the progress line keeps naming the
         // dead lane while another one does the work.
         try {
-          renderer.setHeadline({ providerLabel: headlineForLane(model), modelLabel: model });
+          renderer.setHeadline({ providerLabel: headlineForLane(model), modelLabel: chatLaneName(model) });
         } catch {
           // a UI hiccup must never break failover
         }
