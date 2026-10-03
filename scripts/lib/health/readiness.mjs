@@ -33,6 +33,7 @@ import path from 'node:path';
 
 import { KNOWN_PROJECTS } from '../project-registry.mjs';
 import { geminiKeyIn } from '../agent-gemini.mjs';
+import { SEAT_MODEL_ENV } from './seat-model.mjs';
 import { ANALYSIS_FILE, BRIEF_FILES, VERIFY_FILE, buildHealthContext } from './context.mjs';
 import { DOCS_FILE, DOCTOR_ARTIFACT, STALE_AFTER_DAYS, doctorReview, loadDocsRegistry } from './docs.mjs';
 import { searchAvailability } from './research.mjs';
@@ -114,12 +115,19 @@ function roleDriftLines(project, workspace) {
  * `healthPaths`, or `--workspace` on the CLI) so this module never has its own
  * opinion about where a project lives.
  */
+/**
+ * `modelReach` is the answer from `seatModelReach()` — pass `null` (the default)
+ * to fall back to the older Gemini-key question. Supplying it is how a caller
+ * that can await the OpenCode CLI makes this check model-agnostic; see the model
+ * check below for why the probe is not done in here.
+ */
 export function checkHealthReadiness({
   projectId = 'external-health',
   env = process.env,
   paths = {},
   now = new Date(),
   modelKey = '',
+  modelReach = null,
 } = {}) {
   const project = KNOWN_PROJECTS[projectId];
   const workspace = paths.workspace || project?.workspace || '';
@@ -219,11 +227,37 @@ export function checkHealthReadiness({
     checks.push(line('docs', 'finding', 'No document registry', `Nothing has been published from ${result} yet — /health refresh creates the four documents.`));
   }
 
-  // The bot half: a context it can read, and a credential it can run on.
-  const key = String(modelKey || geminiKeyIn(env) || '').trim();
-  checks.push(key
-    ? line('model', 'ok', 'A model credential is present on this host', 'Gemini lane only: the council runs single-shot with no tools or search grounding.')
-    : line('model', 'blocker', 'No model credential on this host', `Set GEMINI_API_KEY in ${CONTEXT_ENV_FILE} (all bots on a host) or the phone's ~/.config/opencode-bot/<id>.env. /freemodel works without it; a seat turn does not.`));
+  // The bot half: a context it can read, and a model it can run on.
+  //
+  // This asked `geminiKeyIn(env)` and reported "No model credential on this host
+  // — set GEMINI_API_KEY" on a box whose Telegram bot answers all day from the
+  // host's own catalog. A seat turn is not Gemini-bound: it walks the same lane
+  // list `getModels()` gives the bot (see seat-model.mjs). So the question is
+  // "can this host run a model", and the answer names the real cause.
+  //
+  // `modelReach` is what `seatModelReach()` returned — passed in rather than
+  // awaited here, because this function is synchronous and 15 call sites depend
+  // on that (L2: no breaking signature for a vendor-pin fix). The two production
+  // callers, `health-runner --readiness` and the Telegram `/health readiness`,
+  // both await the probe and hand the answer in.
+  //
+  // With no reach answer supplied — a fixture, or the legacy Gemini wiring — the
+  // check falls back to asking for a Gemini key, which is exactly the behaviour
+  // that existed before and still holds for a host configured that way.
+  const reach = modelReach || { ok: Boolean(geminiKeyIn(env)), reason: geminiKeyIn(env) ? 'gemini-key' : 'none', models: 0, sample: '' };
+  const override = String(env?.[SEAT_MODEL_ENV] || '').trim();
+  checks.push(modelKey || override
+    ? line('model', 'ok', 'A seat model is pinned on this host',
+        `COUNCIL_MODEL=${override || 'set'}${modelKey ? ' (and a Gemini credential)' : ''}. The council runs single-shot with no tools or search grounding.`)
+    : reach.ok
+      ? line('model', 'ok', reach.reason === 'catalog'
+          ? `This host can run a model — ${reach.models} in the catalog`
+          : 'A model credential is present on this host',
+        reach.reason === 'catalog'
+          ? `Seats take the host's own lanes, free first (e.g. ${reach.sample}). Set COUNCIL_MODEL to pin one. No credential to set: the bot's model config is what a seat uses.`
+          : 'Gemini lane only: the council runs single-shot with no tools or search grounding.')
+      : line('model', 'blocker', 'This host has no model a seat could run',
+          `\`opencode models\` returned nothing and no Gemini credential is set. The Telegram bot runs on the same catalog, so if the bot answers this host has lanes — check the bot's model config, or set GEMINI_API_KEY in ${CONTEXT_ENV_FILE} as the older fallback.`));
 
   // The literature lane's half: search reach is a *finding*, not a blocker —
   // every other seat still runs without it. What it must never be is silent:

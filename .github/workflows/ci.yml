@@ -320,6 +320,16 @@ jobs:
       - name: Seat brief gate (assert-health-brief)
         run: node scripts/assert-health-brief.mjs
 
+      # A seat's model is host config, not this repo's opinion. The lane was
+      # pinned to one vendor in three places at once — COUNCIL_MODEL defaulted to
+      # a Gemini id, the readiness gate asked geminiKeyIn(), and runGemini
+      # rejected any id outside GEMINI_MODELS — so `/health readiness` reported
+      # "No model credential on this host" on a box whose Telegram bot answered
+      # all day and whose catalog listed 72 lanes. Seats now take the host's own
+      # lanes, free first, walking them with the bot's failover.
+      - name: Seat model gate (assert-seat-model)
+        run: node scripts/assert-seat-model.mjs
+
       # The coder build gate must never be fooled by the npm `tsc` decoy: when a
       # worktree has no local compiler, `npx tsc` resolves version 2.0.4 of the
       # package named `tsc`, whose only output is "This is not the tsc command
