@@ -939,6 +939,26 @@ describe('pickers', () => {
     expect(compactUnsupported('collab', 'gpu tunnels')).toContain('/compact');
   });
 
+  it('declares the turn seat outside the try so the finally can read it', async () => {
+    // The finished-turn record in `finally` reads `activeRole`. Declared inside
+    // the try block it is out of scope there, so every recorded turn threw
+    // "activeRole is not defined" and the thread was never recorded.
+    const src = (await import('node:fs')).readFileSync(
+      new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8',
+    );
+    const decl = src.indexOf('let activeRole = null;');
+    expect(decl).toBeGreaterThan(-1);
+    const storeFacts = src.indexOf('const storeFacts =');
+    expect(decl).toBeGreaterThan(storeFacts);
+    // Same statement list as storeFacts, i.e. BEFORE the turn's `try {`.
+    expect(decl).toBeLessThan(src.indexOf('try {', storeFacts));
+    // Assigned, not redeclared, inside the try.
+    expect(src).toContain('activeRole = getChatRole(chatId);');
+    expect(src).not.toContain('let activeRole = getChatRole(chatId);');
+    // And the consumer the crash came from is still there.
+    expect(src).toContain('roleId: activeRole || addr?.roleId || null,');
+  });
+
   it('keeps one command source of truth including /compact', async () => {
     expect(assertValidCommands()).toBe(true);
     // every advertised command has a handler case in bot-host.mjs
