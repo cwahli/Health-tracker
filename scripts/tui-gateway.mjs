@@ -537,7 +537,99 @@ import {
   FLEET_CACHE_TTL_MS,
 } from './lib/fleet-status.mjs';
 
+import {
+  getReviewContext as getReviewContextStatus,
+  getReviewItems as getReviewItemsStatus,
+  approveReviewItem as approveReviewItemStatus,
+  commentReviewItem as commentReviewItemStatus,
+  verifyProofFile as verifyProofFileStatus,
+  resetReviewState as resetReviewStateStatus,
+} from './lib/review-status.mjs';
+
 export { FLEET_CACHE_TTL_MS };
+
+export const BOOTSTRAP_REVIEW = [
+  '<!doctype html>',
+  '<html lang="en"><head><meta charset="utf-8">',
+  '<meta name="viewport" content="width=device-width,initial-scale=1">',
+  '<title>Review</title>',
+  '<script src="https://telegram.org/js/telegram-web-app.js"></script>',
+  '<style>html,body{margin:0;height:100%;background:#0b1220;color:#f8fafc;',
+  'font:14px system-ui;display:flex;align-items:center;justify-content:center;',
+  'text-align:center;padding:24px}</style>',
+  '</head><body><div id="m">opening review queue\u2026</div>',
+  '<script>',
+  '(function () {',
+  '  var m = document.getElementById("m");',
+  '  var attempts = 0;',
+  '  function tryProceed() {',
+  '    attempts++;',
+  '    var bot = (typeof location !== "undefined" && location.search && new URLSearchParams(location.search).get("bot")) || "vm";',
+  '    var initData = "";',
+  '    if (typeof Telegram !== "undefined" && Telegram && Telegram.WebApp) {',
+  '      if (Telegram.WebApp.ready) Telegram.WebApp.ready();',
+  '      if (Telegram.WebApp.expand) Telegram.WebApp.expand();',
+  '      if (Telegram.WebApp.initData) initData = Telegram.WebApp.initData;',
+  '    }',
+  '    if (!initData && typeof window !== "undefined" && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {',
+  '      initData = window.Telegram.WebApp.initData;',
+  '    }',
+  '    if (!initData && typeof location !== "undefined" && location.hash) {',
+  '      try {',
+  '        var hp = new URLSearchParams(location.hash.replace(/^#/, ""));',
+  '        initData = hp.get("tgWebAppData") || "";',
+  '      } catch (e) {}',
+  '    }',
+  '    if (initData) {',
+  '      if (typeof location !== "undefined" && location.replace) {',
+  '        location.replace("/review?bot=" + encodeURIComponent(bot) + "&initData=" + encodeURIComponent(initData));',
+  '      }',
+  '      return;',
+  '    }',
+  '    if (attempts < 20 && typeof setTimeout !== "undefined") {',
+  '      setTimeout(tryProceed, 100);',
+  '      return;',
+  '    }',
+  '    if (m) m.textContent = "no initData \u2014 open this from the /review button in Telegram";',
+  '  }',
+  '  tryProceed();',
+  '})();',
+  '</script></body></html>',
+].join('\n');
+
+/** Test-auth door for the review routes: same harness flag as the fleet. */
+export function isReviewTestAuth(env = process.env) {
+  return String(env.REVIEW_TEST_AUTH || env.FLEET_TEST_AUTH || '').trim() === '1';
+}
+
+export async function getReviewItems(opts = {}) {
+  return getReviewItemsStatus(opts);
+}
+
+export function resetReviewStateForTest() {
+  resetReviewStateStatus();
+}
+
+/** Read a small JSON POST body (review approve/comment). Rejects oversize. */
+export function readJsonBody(req, { maxBytes = 8192 } = {}) {
+  return new Promise((resolve) => {
+    let body = '';
+    let tooBig = false;
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > maxBytes) tooBig = true;
+    });
+    req.on('end', () => {
+      if (tooBig) return resolve({ ok: false, error: 'body too large' });
+      try {
+        resolve({ ok: true, json: JSON.parse(body || '{}') });
+      } catch {
+        resolve({ ok: false, error: 'invalid json' });
+      }
+    });
+    req.on('error', () => resolve({ ok: false, error: 'body read failed' }));
+  });
+}
 
 export const FLEET_LEASE_TTL_MS = 2 * 60 * 1000;
 export const FLEET_IDLE_TTL_MS = 10 * 60 * 1000;
@@ -1066,6 +1158,150 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         }
       });
       return;
+    }
+
+    // Human review queue (Mini App). Same web_app button + initData door as
+    // /fleet, but served to every bot: any chat's /review button lands here.
+    // The landing validates initData against the requesting bot's token first,
+    // then auto-matches any other configured bot token (a human may hold the
+    // button from any bot). Writes (approve/comment) edit the PM sheet through
+    // review-status.mjs, the queue's governed writer.
+    if (url.pathname === '/review/' || url.pathname === '/review' || url.pathname === '/review/index.html') {
+      const initData = url.searchParams.get('initData') || '';
+      if (!initData) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(BOOTSTRAP_REVIEW);
+      }
+      let botId = url.searchParams.get('bot') || env.TUI_BOT_ID || 'vm';
+      let verdict = validateInitData(initData, tokenFor(botId, env));
+      if (!verdict.ok && (verdict.reason === 'hash mismatch' || verdict.reason === 'missing initData or bot token')) {
+        for (const [k, raw] of Object.entries(env)) {
+          if (!k.startsWith('TUI_BOT_TOKEN_')) continue;
+          const val = String(raw || '').trim();
+          if (!val) continue;
+          const candidateBot = k.slice('TUI_BOT_TOKEN_'.length).toLowerCase();
+          if (candidateBot === botId) continue;
+          const v = validateInitData(initData, val);
+          if (v.ok) {
+            log(`review landing bot=${botId} auto-matched bot=${candidateBot}`);
+            botId = candidateBot;
+            verdict = v;
+            break;
+          }
+        }
+      }
+      if (!verdict.ok) {
+        log(`review landing refused (${verdict.reason}) for bot=${botId}`);
+        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
+        return res.end(`<!doctype html><meta charset=utf-8><body style="font:14px system-ui;background:#0b1220;color:#f8fafc;padding:24px">
+          <h1>refused</h1><p>${escapeHtml(verdict.reason)}</p></body>`);
+      }
+      const token = issueToken({ botId, chatId: verdict.chatId, secret, ttlSec: ttl });
+      log(`review admitted bot=${botId} ${verdict.boundBy || 'chat'}=${verdict.chatId}`);
+      res.writeHead(302, {
+        location: `/review/app?token=${encodeURIComponent(token)}`,
+        'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+        'cache-control': 'no-store',
+      });
+      return res.end();
+    }
+
+    if (url.pathname === '/review/app') {
+      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`review app refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const reviewHtmlPath = path.join(REPO_ROOT, 'src', 'miniapp', 'review.html');
+      try {
+        const body = fs.readFileSync(reviewHtmlPath, 'utf8');
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(body);
+      } catch (err) {
+        res.writeHead(404, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'review.html not found' }));
+      }
+    }
+
+    if (url.pathname === '/review/api/state') {
+      const authHeader = req.headers['x-telegram-init-data'] || '';
+      let verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
+      if (!verdict.ok && authHeader) {
+        const authVer = authorizeForgeAtGateway({ initData: String(authHeader), env });
+        if (authVer.ok) verdict = { ok: true };
+      }
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const forceRefresh = url.searchParams.get('refresh') === '1' || req.headers['x-refresh'] === '1';
+      const state = await getReviewItems({ env, root: REPO_ROOT, refresh: forceRefresh });
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ...state, generatedAt: new Date().toISOString() }));
+    }
+
+    if (url.pathname === '/review/api/proof') {
+      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const key = String(url.searchParams.get('key') || '').trim();
+      const fileId = String(url.searchParams.get('file') || '').trim();
+      if (!key || !fileId) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'key and file required' }));
+      }
+      try {
+        const { downloadFile } = await import('./lib/google-store.mjs');
+        const ctx = await getReviewContextStatus({ env });
+        if (!ctx.ok) {
+          res.writeHead(502, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: ctx.reason }));
+        }
+        const checked = await verifyProofFileStatus(ctx, key, fileId);
+        if (!checked.ok) {
+          res.writeHead(404, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: checked.error || 'proof not found' }));
+        }
+        const dl = await downloadFile(fileId, ctx.token);
+        if (!dl.ok || !dl.bytes) {
+          res.writeHead(502, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: dl.error || 'proof download failed' }));
+        }
+        const mime = /^image\/[a-z0-9.+-]+$/i.test(String(checked.file?.mimeType || '')) ? checked.file.mimeType : 'image/png';
+        res.writeHead(200, {
+          'content-type': mime,
+          'content-length': dl.bytes.length,
+          'cache-control': 'private, max-age=300',
+          'content-disposition': `inline; filename="${String(checked.file?.name || 'proof.png').replace(/["\r\n]/g, '')}"`,
+        });
+        return res.end(dl.bytes);
+      } catch (err) {
+        logGatewayError(err);
+        res.writeHead(502, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'proof upstream unreachable' }));
+      }
+    }
+
+    if ((url.pathname === '/review/api/approve' || url.pathname === '/review/api/comment') && req.method === 'POST') {
+      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const parsed = await readJsonBody(req);
+      if (!parsed.ok) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: parsed.error }));
+      }
+      const data = parsed.json || {};
+      const out = url.pathname === '/review/api/approve'
+        ? await approveReviewItemStatus(data.key, { env })
+        : await commentReviewItemStatus(data.key, data.text, data.target, { env });
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify(out));
     }
 
     // One-click bot forge. The gateway owns the hostname and the initData

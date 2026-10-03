@@ -884,3 +884,44 @@ export async function appendRows(sheetId, tab, rows, token) {
 export async function readTab(sheetId, tab, token, { range = `${tab}!A1:Z200` } = {}) {
   return request(`${API.sheets}/${encodeURIComponent(sheetId)}/values/${encodeURIComponent(range)}`, { token });
 }
+
+/**
+ * Sheets: overwrite cells in place (PUT `spreadsheets.values.update`).
+ *
+ * Append-only is the fleet's default write shape, but a human review queue
+ * cannot append its way to "approved" or to an amended cell: the review
+ * mini-app edits one row's Status / Original-request / What's-left cells and
+ * deletes the row on archive. Both shapes live here — the one Google client —
+ * so the governed write path stays single. Callers pass a full A1 range
+ * (`current!F42` or `current!B42:D42`) and the replacement values.
+ */
+export async function updateValues(sheetId, rangeA1, values, token) {
+  const qs = `?valueInputOption=RAW&includeValuesInResponse=false`;
+  return request(`${API.sheets}/${encodeURIComponent(sheetId)}/values/${encodeURIComponent(rangeA1)}${qs}`, {
+    method: 'PUT',
+    token,
+    body: { values },
+  });
+}
+
+/**
+ * Sheets: delete whole rows (`spreadsheets.batchUpdate` + deleteDimension).
+ *
+ * The review mini-app's archive moves a row to `archive_done` then removes it
+ * from `current`, so an approved item leaves the queue instead of lingering as
+ * Done. Indices are zero-based and end-exclusive per the API; callers working
+ * with 1-based sheet row numbers delete row N via (N-1, N).
+ */
+export async function deleteSheetRows(sheetId, sheetGid, startIndex, endIndex, token) {
+  return request(`${API.sheets}/${encodeURIComponent(sheetId)}:batchUpdate`, {
+    method: 'POST',
+    token,
+    body: {
+      requests: [{
+        deleteDimension: {
+          range: { sheetId: sheetGid, dimension: 'ROWS', startIndex, endIndex },
+        },
+      }],
+    },
+  });
+}
