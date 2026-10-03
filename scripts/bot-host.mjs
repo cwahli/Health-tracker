@@ -1390,6 +1390,26 @@ export class ProgressRenderer {
     return oneLine.length > max ? `…${oneLine.slice(-max)}` : oneLine;
   }
 
+  /** Where the turn got to, for error notices: last tool + last output. */
+  lastActivityLine() {
+    const bits = [];
+    if (this.tool) {
+      const runtime = this.toolStartedAt
+        ? ` · ${Math.max(0, Math.round((Date.now() - this.toolStartedAt) / 1000))}s`
+        : '';
+      const detail = this.toolDetail ? ` ${this._tail(this.toolDetail, 80)}` : '';
+      bits.push(`Tool ${this.tool}${runtime}${detail}`);
+    }
+    if (this.lastOutput) bits.push(`Out: ${this._tail(this.lastOutput, 140)}`);
+    else if (this.thinking) bits.push(`Thinking: ${this._tail(this.thinking, 140)}`);
+    if (!bits.length) return '';
+    return `Last: ${bits.join(' / ')}`;
+  }
+
+  timeoutResumeHint() {
+    return 'Next: reply to continue the same session, or /new to restart — smaller asks finish faster.';
+  }
+
   _render() {
     const lines = [];
     const now = Date.now();
@@ -1667,8 +1687,9 @@ export class ProgressRenderer {
       let lead = `Error: ${friendly}`;
       if (isTimeoutError(errText)) {
         lead = `⏱ ${friendly}`;
+        const last = this.lastActivityLine();
         hint =
-          '\nTip: retry with /thinking medium, a smaller ask, /model for a faster model, or /new for a fresh session.';
+          `${last ? `\n${last}` : ''}\n${this.timeoutResumeHint()}\nTip: retry with /thinking medium, a smaller ask, /model for a faster model, or /new for a fresh session.`;
       }
       await this.deliver(`${lead}${errTail}${hint}`);
       return;
@@ -1687,8 +1708,14 @@ export class ProgressRenderer {
     if (blocks.length) await this.deliver(blocks.join('\n\n'));
     if (errText) {
       // Partial output arrived but the run still errored (e.g. a late timeout):
-      // never swallow the error silently.
-      await this.deliver(`(Finished with an error after partial output: ${humanizeRunError(errText)})`);
+      // never swallow the error silently. On a timeout say where it got to
+      // and how to continue — the bare "didn't finish" strands the user.
+      let note = `(Finished with an error after partial output: ${humanizeRunError(errText)})`;
+      if (isTimeoutError(errText)) {
+        const last = this.lastActivityLine();
+        note += `${last ? `\n${last}` : ''}\n${this.timeoutResumeHint()}`;
+      }
+      await this.deliver(note);
     }
   }
 

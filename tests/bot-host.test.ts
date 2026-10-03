@@ -1942,6 +1942,52 @@ describe('ProgressRenderer finish (bot restart/timeout truthfulness)', () => {
     expect(all).not.toContain('90000ms');
   });
 
+  it('timeout with partial output says where it got to and how to continue', async () => {
+    const sent: string[] = [];
+    const api = {
+      sendMessage: async (_chatId: unknown, text: string, _extra?: unknown) => {
+        sent.push(text);
+        return { message_id: sent.length };
+      },
+      editMessageText: async () => ({}),
+      sendChatAction: async () => ({}),
+    };
+    const throttle = { submit: (fn: () => unknown) => Promise.resolve().then(fn), pause: () => {} };
+    const renderer = new ProgressRenderer({ api: api as never, throttle: throttle as never, chatId: 1 });
+    renderer.onEvent({ kind: 'tool', tool: 'shell', status: 'running', input: { command: 'npm run build' } });
+    renderer.onEvent({ kind: 'text', text: 'first output chunk' });
+    await renderer.finish({ code: null, finalText: 'partial answer', lastError: 'timed out after 900000ms', stderr: '' });
+    const all = sent.join('\n');
+    expect(all).toContain('partial answer');
+    expect(all).toContain('Finished with an error after partial output');
+    expect(all).toContain('15m');
+    expect(all).toContain('Last:');
+    expect(all).toContain('shell');
+    expect(all).toContain('continue the same session');
+    renderer.stopTyping();
+  });
+
+  it('timeout with no output still reports last activity', async () => {
+    const sent: string[] = [];
+    const api = {
+      sendMessage: async (_chatId: unknown, text: string, _extra?: unknown) => {
+        sent.push(text);
+        return { message_id: sent.length };
+      },
+      editMessageText: async () => ({}),
+      sendChatAction: async () => ({}),
+    };
+    const throttle = { submit: (fn: () => unknown) => Promise.resolve().then(fn), pause: () => {} };
+    const renderer = new ProgressRenderer({ api: api as never, throttle: throttle as never, chatId: 1 });
+    renderer.onEvent({ kind: 'tool', tool: 'shell', status: 'running', input: { command: 'npm run build' } });
+    await renderer.finish({ code: null, finalText: '', lastError: 'timed out after 900000ms', stderr: '' });
+    const all = sent.join('\n');
+    expect(all).toContain('Timed out after 15m');
+    expect(all).toContain('shell');
+    expect(all).toContain('continue the same session');
+    renderer.stopTyping();
+  });
+
   it('clean empty run keeps the legacy Done message', async () => {
     const { renderer, sent } = makeRenderer();
     await renderer.finish({ code: 0, finalText: '', lastError: '', stderr: '' });
