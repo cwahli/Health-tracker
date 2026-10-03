@@ -1135,13 +1135,26 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   // double-list problem one level down.
   const seen = new Set();
   const buttons = [];
-  for (const g of tierGroups) {
+  // Keyed (non-free) rows leave their tier group for one trailing group: the
+  // keyboard spends free lanes first and the user's own key last (live VM5
+  // 2026-10-03). The groups above keep their counts honest — a moved row is
+  // not counted twice.
+  const isKeyedRow = (r) => (r.plan || (r.lane ? planCodeForLane(r.lane) : '')) === 'GM';
+  const keyedFallback = [];
+  const displayGroups = tierGroups
+    .map((g) => ({ ...g, rows: (g.rows || []).filter((r) => {
+      if (isKeyedRow(r)) { keyedFallback.push(r); return false; }
+      return true;
+    }) }))
+    .filter((g) => (g.rows || []).length > 0);
+  if (keyedFallback.length) displayGroups.push({ tier: 'keyed', rows: keyedFallback });
+  for (const g of displayGroups) {
     // A keyboard has no subheadings, so the tier title is a row of its own:
     // `VPS Standard model (10)` — location-scoped, with the group's count.
     // `noop` is the callback the router already uses for a non-actionable
     // keyboard row, and the tap handler answers it silently.
-    if (tierGroups.length > 1) {
-      buttons.push({ text: headingWidth(`${freemodelDisplayTier(g.tier, location || 'vps')} (${g.rows.length})`), data: 'noop', header: true });
+    if (displayGroups.length > 1) {
+      buttons.push({ text: headingWidth(g.tier === 'keyed' ? `VPS Keyed fallback (${g.rows.length})` : `${freemodelDisplayTier(g.tier, location || 'vps')} (${g.rows.length})`), data: 'noop', header: true });
     }
   for (const r of g.rows) {
     const label = r.laneLabel || r.label;
@@ -3847,7 +3860,7 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   // The same projection /allowance and /freemodel read, so the walk can only
   // offer what those two surfaces call selectable.
   const projection = projectLanes(table, ledger.session || {}, { now, location: botId, readiness });
-  const lanes = projection.filter((r) => r.selectable).map((r) => ({ provider: r.provider, model: r.model, pref: r.pref, family: r.family, label: r.label }));
+  const lanes = projection.filter((r) => r.selectable).map((r) => ({ provider: r.provider, model: r.model, pref: r.pref, family: r.family, label: r.label, plan: r.plan }));
   const skipped = projection.filter((r) => !r.selectable).map((r) => ({
     provider: r.provider,
     model: r.model,
@@ -3890,9 +3903,13 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
     if (ra.rank !== rb.rank) return ra.rank - rb.rank;
     return (Number(a.pref) || 0) - (Number(b.pref) || 0);
   };
-  const byTierThenRating = (a, b) => (walkTierRank(a.model) - walkTierRank(b.model)) || byRating(a, b);
+  // Keyed (non-free) lanes are the last resort in every tier: they spend the
+  // user's own key, so free lanes of any tier go first (live VM5 2026-10-03).
+  const keyedRank = (l) => (l?.plan === 'GM' ? 1 : 0);
+  const byTierThenRating = (a, b) => (keyedRank(a) - keyedRank(b)) || (walkTierRank(a.model) - walkTierRank(b.model)) || byRating(a, b);
+  const bySameTier = (a, b) => (keyedRank(a) - keyedRank(b)) || byRating(a, b);
   const orderedLanes = model
-    ? [...fallbackLanes].filter((l) => tierOf(l) === currentGroup).sort(byRating)
+    ? [...fallbackLanes].filter((l) => tierOf(l) === currentGroup).sort(bySameTier)
       .concat([...fallbackLanes].filter((l) => tierOf(l) !== currentGroup).sort(byTierThenRating))
     : [...fallbackLanes].sort(byTierThenRating);
   const codingLeft = orderedLanes.filter((l) => tierOf(l) === 'high').length;

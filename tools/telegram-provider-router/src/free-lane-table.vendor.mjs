@@ -840,7 +840,7 @@ export function formatResetIn(isoOrMs, now = Date.now()) {
   return `${m}m`;
 }
 
-/** Short plan code: CF / CL / OC / TH / FB. */
+/** Short plan code: CF / CL / OC / OG / TH / FB. */
 export function planCodeForLane(lane) {
   const provider = String(lane?.provider || "").toLowerCase();
   const model = String(lane?.model || "").toLowerCase();
@@ -848,6 +848,10 @@ export function planCodeForLane(lane) {
   if (provider === "cloudflare" || model.includes("cloudflare/") || bucket.includes("cloudflare")) return "CF";
   if (provider === "cline" || model.startsWith("cline")) return "CL";
   if (provider === "freebuff" || bucket.includes("freebuff")) return "FB";
+  // The go-plan pool is separate quota from the zen pool: it gets its own code
+  // so the two space-bunny rows survive the canonical dedupe as two rows and
+  // read as two pools (live VM5 2026-10-03).
+  if (provider === "opencode-go" || model.startsWith("opencode-go/")) return "OG";
   // Token Harbor free bar = TH for both paths: the OpenCode `tokenharbor/…`
   // tools lane and the chat-only `provider: tokenharbor` lane are the same
   // shared `tokenharbor-free` bucket, so they share one public plan code.

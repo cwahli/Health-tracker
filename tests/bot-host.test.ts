@@ -103,8 +103,9 @@ import {
   recordRunFinish,
   sweepOrphanedLeases,
   selectTurnLanes,
+  formatFreemodelWithDepletion,
 } from '../scripts/bot-host.mjs';
-import { isHardModelFailure, ensureBotLedger, withCatalogLanes, stampCooldown, CONNECTION_FAILED_COOLDOWN_MS, HARD_MODEL_FAILURE_COOLDOWN_MS } from '../scripts/lib/free-lanes.mjs';
+import { isHardModelFailure, ensureBotLedger, withCatalogLanes, stampCooldown, CONNECTION_FAILED_COOLDOWN_MS, HARD_MODEL_FAILURE_COOLDOWN_MS, canonicalAllowanceLanes, planCodeForLane } from '../scripts/lib/free-lanes.mjs';
 import {
   buildStatusSnapshot,
   formatStatusPlain,
@@ -1367,8 +1368,7 @@ describe('vm5 failover refs (live 2026-10-03)', () => {
     }
   });
 
-  it('rests dead lanes for hours, transport blips for minutes', () => {
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5d-home-'));
+  it('rests dead lanes for hours, transport blips for minutes', () => {    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5d-home-'));
     const lanesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5d-lanes-'));
     const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5d-shared-'));
     const oldHome = process.env.HOME;
@@ -1399,6 +1399,67 @@ describe('vm5 failover refs (live 2026-10-03)', () => {
       expect(session.quota['opencode/y'].kind).toBe('model-unavailable');
       expect(session.quota['opencode/y'].depletedUntil).toBeGreaterThan(t0 + CONNECTION_FAILED_COOLDOWN_MS);
       expect(session.quota['opencode/y'].depletedUntil).toBeLessThanOrEqual(t0 + HARD_MODEL_FAILURE_COOLDOWN_MS + 5000);
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = oldHome;
+      if (oldLanes === undefined) delete process.env.FREE_LANES_DIR;
+      else process.env.FREE_LANES_DIR = oldLanes;
+      if (oldShared === undefined) delete process.env.FREE_LANES_SHARED_DIR;
+      else process.env.FREE_LANES_SHARED_DIR = oldShared;
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(lanesDir, { recursive: true, force: true });
+      fs.rmSync(sharedDir, { recursive: true, force: true });
+    }
+  });
+
+  it('codes the go-plan pool OG so its row survives beside the zen row', () => {
+    expect(planCodeForLane({ provider: 'opencode-go', model: 'space-bunny-free' })).toBe('OG');
+    expect(planCodeForLane({ provider: 'opencode', model: 'opencode/space-bunny-free' })).toBe('OC');
+    expect(planCodeForLane({ provider: 'opencode', model: 'tokenharbor/x:free' })).toBe('TH');
+  });
+
+  it('lists go-plan in /freemodel and parks keyed gemini last', () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5e-home-'));
+    const lanesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5e-lanes-'));
+    const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5e-shared-'));
+    const oldHome = process.env.HOME;
+    const oldLanes = process.env.FREE_LANES_DIR;
+    const oldShared = process.env.FREE_LANES_SHARED_DIR;
+    process.env.HOME = homeDir;
+    process.env.FREE_LANES_DIR = lanesDir;
+    process.env.FREE_LANES_SHARED_DIR = sharedDir;
+    try {
+      const { dir } = ensureBotLedger('vm5keys');
+      const table = {
+        version: 3, failover: 'test', updatedAt: null, buckets: {},
+        lanes: [
+          { pref: 1, family: 'f1', provider: 'opencode', model: 'opencode/space-bunny-free', label: 'Space Bunny', bucket: 'opencode-zen-free', tg: true, resetRule: 't', status: 'available', nextReset: '-', nextResetAt: null, cooldownLeft: '-' },
+        ],
+      };
+      const folded = withCatalogLanes(table, ['opencode-go/space-bunny-free', 'google/gemini-3.8-flash']).table;
+      fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(folded));
+      fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ quota: {} }));
+      const readiness = {
+        opencode: { ready: true }, cline: { ready: true }, tokenharbor: { ready: true },
+        cloudflare: { ready: true }, gemini: { ready: true }, freebuff: { ready: true },
+      };
+      // The walk spends free lanes before the keyed one.
+      const choice = selectTurnLanes({
+        botId: 'vm5keys', model: 'opencode/space-bunny-free', fallback: 'x',
+        readiness, catalogEntries: [],
+      });
+      const refs = choice.models;
+      expect(refs).toContain('opencode-go/space-bunny-free');
+      expect(refs).toContain('gemini:gemini/gemini-3.8-flash');
+      expect(refs.indexOf('opencode-go/space-bunny-free')).toBeLessThan(refs.indexOf('gemini:gemini/gemini-3.8-flash'));
+      // The keyboard shows both, keyed last.
+      const canonical = canonicalAllowanceLanes({ table: folded, session: { quota: {} }, readiness, location: 'test' });
+      const body = formatFreemodelWithDepletion([], [], { current: '', location: 'test', canonical, tableLanes: folded.lanes });
+      const rowButtons = (body.buttons || []).filter((b) => !b.header);
+      const texts = rowButtons.map((b) => String(b.text || ''));
+      expect(texts.some((t) => /\bOG\b/.test(t))).toBe(true);
+      expect(texts.some((t) => /\bGM\b/.test(t))).toBe(true);
+      expect(/\bGM\b/.test(texts[texts.length - 1])).toBe(true);
     } finally {
       if (oldHome === undefined) delete process.env.HOME;
       else process.env.HOME = oldHome;
