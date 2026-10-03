@@ -99,22 +99,25 @@ describe('formatFleetStatusTable', () => {
   it('renders a narrow table when model+agent are uniform, off bots on one line', () => {
     const text = formatFleetStatusTable(
       [
-        { id: 'vm', name: 'VM Bot', enabled: true, model: 'm', agent: 'build', sessionId: 'ses_123456789012345', foreignSession: false, totals: { runs: 2, tokens: 1500, cost: 0 }, task: 'working' },
-        { id: 'vm2', name: 'VM2', enabled: true, model: 'm', agent: 'build', sessionId: null, foreignSession: true, totals: null, task: 'idle' },
-        { id: 'old', name: 'Old', enabled: false, model: null, agent: null, sessionId: null, foreignSession: false, totals: null, task: 'off' },
+        { id: 'vm', name: 'VM Bot', enabled: true, role: 'coordinator', model: 'm', agent: 'build', sessionId: 'ses_123456789012345', foreignSession: false, totals: { runs: 2, tokens: 1500, cost: 0 }, task: 'working' },
+        { id: 'vm2', name: 'VM2', enabled: true, role: 'data_steward', model: 'm', agent: 'build', sessionId: null, foreignSession: true, totals: null, task: 'idle' },
+        { id: 'old', name: 'Old', enabled: false, role: null, model: null, agent: null, sessionId: null, foreignSession: false, totals: null, task: 'off' },
       ],
       { chatId: '7', via: 'vm' },
     );
     const lines = text.split('\n');
-    expect(lines[0]).toBe('Fleet status · chat 7 · 3 bots (via vm)');
+    expect(lines[0]).toBe('Fleet status · chat 7 · 3 agents (via vm)');
     expect(lines[1]).toBe('all: m · build');
     expect(lines[2]).toBe('```');
     expect(lines[3]).toContain('Bot');
+    expect(lines[3]).toContain('Role');
     expect(lines[3]).toContain('Session');
     const vm = lines.find((l) => l.startsWith('vm '));
+    expect(vm).toContain('coordinator');
     expect(vm).toContain('working');
     expect(vm).toContain('2·1.5k');
     expect(vm).toContain('ses_1234');
+    expect(lines.find((l) => l.startsWith('vm2'))).toContain('data_steward');
     expect(lines.find((l) => l.startsWith('vm2'))).toContain('other-proj');
     expect(lines).toContain('```');
     expect(lines[lines.length - 1]).toBe('off: old');
@@ -138,7 +141,44 @@ describe('formatFleetStatusTable', () => {
   it('renders a header for an empty fleet', () => {
     const text = formatFleetStatusTable([], { chatId: '7' });
     const lines = text.split('\n');
-    expect(lines[0]).toBe('Fleet status · chat 7 · 0 bots');
+    expect(lines[0]).toBe('Fleet status · chat 7 · 0 agents');
     expect(lines.filter((l) => l === '```').length).toBe(2);
+  });
+});
+
+describe('fleetChatStatus council filter', () => {
+  let root = '';
+  let home = '';
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'status-all-council-root-'));
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'status-all-council-home-'));
+    writeJson(path.join(root, 'bots', 'registry.json'), {
+      master: 'vm',
+      bots: [
+        { id: 'vm', name: 'VM Bot', runtime: 'bot-host', enabled: true, agent: { model: 'm', defaultAgent: 'build' } },
+        { id: 'vm2', name: 'VM2', runtime: 'bot-host', enabled: true, extends: 'vm', agent: { healthRole: 'data_steward' } },
+        { id: 'vm3', name: 'VM3', runtime: 'bot-host', enabled: true, extends: 'vm' },
+      ],
+    });
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const roleOf = (b) => String(b.agent?.healthRole || '');
+
+  it('lists master plus seat holders only', () => {
+    const rows = fleetChatStatus({ chatId: '7', workspace: 'ws', root, home, seats: ['data_steward'], roleOf });
+    expect(rows.map((r) => r.id).sort()).toEqual(['vm', 'vm2']);
+    expect(rows.find((r) => r.id === 'vm')?.role).toBe('coordinator');
+    expect(rows.find((r) => r.id === 'vm2')?.role).toBe('data_steward');
+  });
+
+  it('lists everyone without a seat filter', () => {
+    const rows = fleetChatStatus({ chatId: '7', workspace: 'ws', root, home });
+    expect(rows.map((r) => r.id).sort()).toEqual(['vm', 'vm2', 'vm3']);
   });
 });
