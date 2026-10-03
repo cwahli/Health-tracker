@@ -17,6 +17,9 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 import { workerStatus } from './worker-presence.mjs';
+import { applyMasterDefaults } from './registry.mjs';
+import { shortSession } from './bot-status.mjs';
+import { formatTokens } from './commands.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -577,6 +580,127 @@ export async function getFleetBots({ root = REPO_ROOT, home = os.homedir() } = {
   } catch {
     return [];
   }
+}
+
+/**
+ * Runtimes that share the bot-host on-disk per-chat state layout
+ * (`~/.local/state/bot-host/<id>/{prefs,sessions,totals,leases}.json`).
+ * hermes/collab/provider-router keep their own state and are excluded.
+ */
+export const FLEET_CHAT_RUNTIMES = new Set(['bot-host', 'device']);
+
+function readJsonObject(file) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function lookupByChat(obj, chatId) {
+  const key = String(chatId ?? '');
+  if (!key || !obj || typeof obj !== 'object') return undefined;
+  if (Object.hasOwn(obj, key)) return obj[key];
+  return undefined;
+}
+
+function splitScopedSession(raw) {
+  const s = String(raw ?? '');
+  if (!s) return { workspace: '', sessionId: null };
+  const cut = s.indexOf('\u0000');
+  if (cut === -1) return { workspace: '', sessionId: null };
+  return { workspace: s.slice(0, cut), sessionId: s.slice(cut + 1) || null };
+}
+
+/**
+ * One row per bot-host/device bot for this chat, read from on-disk state.
+ *
+ * Each bot is its own OS process, so live memory (last-run usage, uptime,
+ * poll health, running flag) of *other* bots is not visible here. Task state
+ * falls back to what the fleet dashboard uses: a leases.json entry for this
+ * chat means working, otherwise idle. Only the answering bot's own /status
+ * has the live-memory fields — this table says which bot to ask for those.
+ *
+ * `workspace` scopes the session row the same way /status does (an exact
+ * workspace match, or the row belongs to another project).
+ */
+export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home = os.homedir() } = {}) {
+  const key = String(chatId ?? '');
+  if (!key) return [];
+  let bots = [];
+  try {
+    const reg = readJsonObject(path.join(root, 'bots', 'registry.json'));
+    if (!Array.isArray(reg.bots) || reg.bots.length === 0) return [];
+    bots = applyMasterDefaults({ master: reg.master, bots: reg.bots }).bots;
+  } catch {
+    return [];
+  }
+  const ws = String(workspace || '');
+  return bots
+    .filter((b) => FLEET_CHAT_RUNTIMES.has(b.runtime || 'bot-host'))
+    .map((b) => {
+      const dir = path.join(home, '.local', 'state', 'bot-host', b.id);
+      const pref = lookupByChat(readJsonObject(path.join(dir, 'prefs.json')), key) || {};
+      const sessionRow = lookupByChat(readJsonObject(path.join(dir, 'sessions.json')), key);
+      const totalsRow = lookupByChat(readJsonObject(path.join(dir, 'totals.json')), key) || {};
+      const leases = readJsonObject(path.join(dir, 'leases.json'));
+      const leaseHit = Array.isArray(leases)
+        ? leases.some((l) => String(l?.chatId ?? '') === key)
+        : lookupByChat(leases, key) !== undefined;
+      const scoped = splitScopedSession(sessionRow);
+      const sessionId = scoped.sessionId && (!ws || scoped.workspace === ws) ? scoped.sessionId : null;
+      const foreignSession = Boolean(scoped.sessionId && ws && scoped.workspace !== ws);
+      const runs = Number(totalsRow.runs) || 0;
+      const tokens = Number(totalsRow.tokens) || 0;
+      const cost = Number(totalsRow.cost) || 0;
+      const enabled = b.enabled !== false;
+      return {
+        id: b.id,
+        name: b.name || b.id,
+        enabled,
+        model: pref.model || b.agent?.model || null,
+        agent: pref.agent || b.agent?.defaultAgent || null,
+        sessionId,
+        foreignSession,
+        totals: runs > 0 || tokens > 0 || cost > 0 ? { runs, tokens, cost } : null,
+        task: !enabled ? 'off' : leaseHit ? 'working' : 'idle',
+      };
+    });
+}
+
+function fleetStatusRow(r) {
+  const head = `• ${r.name || r.id}${r.id && (r.name || r.id) !== r.id ? ` (${r.id})` : ''}`;
+  if (!r.enabled) return `${head} — off`;
+  const bits = [`model: ${r.model || '—'}`, `agent: ${r.agent || '—'}`];
+  bits.push(
+    r.sessionId
+      ? `session: ${shortSession(r.sessionId)}`
+      : r.foreignSession
+        ? 'session: other project'
+        : 'session: —',
+  );
+  bits.push(`task: ${r.task}`);
+  if (r.totals) {
+    const spend = Number(r.totals.cost) || 0;
+    bits.push(
+      `${r.totals.runs} run${r.totals.runs === 1 ? '' : 's'} · ${formatTokens(r.totals.tokens)}${spend > 0 ? ` · $${spend.toFixed(spend < 0.01 ? 5 : 4)}` : ''}`,
+    );
+  }
+  return `${head} — ${bits.join(' · ')}`;
+}
+
+/**
+ * Compact fleet-wide table for /status_all. One line per bot; the answering
+ * bot is named so a group chat knows who rendered it.
+ */
+export function formatFleetStatusTable(rows, { chatId, via } = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  const lines = [
+    `Fleet status · chat ${String(chatId ?? '')} · ${list.length} bot${list.length === 1 ? '' : 's'}${via ? ` (via ${via})` : ''}`,
+  ];
+  for (const r of list) lines.push(fleetStatusRow(r));
+  return lines.join('\n');
 }
 
 /** Clear in-memory caches (for sensor testing). */
