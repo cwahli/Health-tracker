@@ -7,6 +7,44 @@
 //   ⏳ Cline muse spark 1.3 contributor free (high) working… 50s - 210k (30%)
 // Fixes land here, not per agent (Case H ladder, plan/RELIABILITY.md §14.6).
 
+/**
+ * phaseLabelFor — the truthful phase label for the user surface.
+ *
+ * PROGRESS-SURFACES-1, Node 3. Deliberately NOT the model's own words: a label
+ * derived from the real tool lifecycle cannot contradict the answer, which is
+ * the failure mode that makes raw reasoning harmful on a user surface. The
+ * model changes its mind mid-trace and commits to one branch, and a user shown
+ * the trace is left adjudicating between two outputs from the same model.
+ *
+ * Measured: visible chain-of-thought mentioned the hint that actually drove
+ * the answer only 25% of the time on Claude 3.7 and 39% on R1.
+ *
+ * An unknown tool collapses to a generic label on purpose: inventing a specific
+ * one would be the "fictional narrative" the research warns against.
+ */
+export function phaseLabelFor(tool, status) {
+  const raw = String(tool || '').trim().toLowerCase();
+  const state = String(status || '').trim().toLowerCase();
+  if (!raw) {
+    return state === 'thinking' ? 'thinking it through' : '';
+  }
+  // The caller passes `this.tool`, which is already `${event.tool} (${event.status})`
+  // — the completion marker rides on the TOOL string, while `status` is the
+  // headline's own state ('working' / 'thinking'). Reading only `status` made a
+  // finished command still read as "running a command"; the sensor caught it.
+  const done = /\b(completed|done|success|ok|error|failed)\b/.test(raw) ||
+    /\b(completed|done|success|failed)\b/.test(state);
+  // Strip the trailing "(status)" so it cannot itself match a tool pattern.
+  const name = raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
+  if (/bash|shell|exec|terminal/.test(name)) return done ? 'ran a command' : 'running a command';
+  if (/^(read|cat|glob|grep|list|search)/.test(name)) return done ? 'read files' : 'reading files';
+  if (/^(write|edit|patch|apply)/.test(name)) return done ? 'wrote files' : 'writing files';
+  if (/test|vitest|assert|lint|typecheck|tsc/.test(name)) return done ? 'ran the gates' : 'running the gates';
+  if (/git/.test(name)) return done ? 'checked git' : 'working with git';
+  if (/fetch|http|web|search_docs/.test(name)) return done ? 'looked something up' : 'looking something up';
+  return 'working';
+}
+
 export function formatTokenCount(n) {
   const v = Number(n) || 0;
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
