@@ -240,13 +240,11 @@ test('multiple shots per item: one fetch each, and the counter follows the swipe
     assert.ok(proofFetches.includes('file-0'), 'shot 1 fetched');
     assert.ok(proofFetches.includes('file-2'), 'shot 3 fetched');
 
-    await page.evaluate(() => {
-      const t = document.getElementById('track');
-      t.scrollLeft = t.clientWidth * 2;
-      t.dispatchEvent(new Event('scroll'));
-    });
-    await page.waitForTimeout(120);
-    assert.equal(await page.textContent('#imgcount'), '3/3');
+    // Swiping between shots is no longer native scrolling (the track is
+    // transformed and every gesture is ours), so it is driven by real touch
+    // in scripts/assert-review-gestures.test.mjs — which also proves the
+    // counter moves. What is unique here is the fetch-per-shot and the copy.
+    assert.equal(await page.textContent('#imgcount'), '1/3', 'the counter reads 1/N at rest');
 
     // A single-shot item shows no fraction.
     await page.click('#btn-next');
