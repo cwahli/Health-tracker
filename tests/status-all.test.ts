@@ -203,11 +203,52 @@ describe('fleet-status-html', () => {
     expect(usageCell(rows[1])).toBe('—');
   });
 
-  it('renders a styled HTML grid with every cell', async () => {
+  it('builds skill-pipeline data: positional rows matching the columns', async () => {
     const mod = await import('../scripts/lib/fleet-status-html.mjs');
-    const html = mod.renderFleetStatusHtml(rows, { title: 'T', subtitle: 'S' });
-    for (const cell of ['<table', 'Agent', 'Role', 'Model', 'Tool', 'Session', 'Task', 'Usage', 'vm', 'coordinator', 'opencode', 'cline', 'ses_abc', 'working', '310k (31%)', 'off: old', '#0f172a']) {
-      expect(html).toContain(cell);
+    const model = mod.buildFleetStatusTableJson(rows, { title: 'T', subtitle: 'S' });
+    expect(model.title).toBe('T');
+    expect(model.preamble).toEqual(['S']);
+    expect(model.tables).toHaveLength(1);
+    expect(model.tables[0].columns).toEqual(['Agent', 'Role', 'Model', 'Tool', 'Session', 'Task', 'Usage']);
+    for (const r of model.tables[0].rows) expect(r).toHaveLength(model.tables[0].columns.length);
+    expect(model.tables[0].rows[0]).toEqual(['vm', 'coordinator', 'opencode/nemotron-free', 'opencode', 'ses_abc', 'working', '310k (31%)']);
+    expect(model.notes.join('\n')).toContain('off: old');
+  });
+
+  it('writes the document through qa-evidence/build-table.py when present', async () => {
+    const mod = await import('../scripts/lib/fleet-status-html.mjs');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'status-all-doc-'));
+    try {
+      const doc = mod.writeFleetStatusDoc(rows, { title: 'T', subtitle: 'S', dir });
+      const html = fs.readFileSync(doc.htmlPath, 'utf8');
+      for (const cell of ['Agent', 'Role', 'Model', 'Tool', 'Session', 'Task', 'Usage', 'vm', 'coordinator', 'opencode', 'cline', 'ses_abc', 'working', '310k (31%)', 'off: old']) {
+        expect(html).toContain(cell);
+      }
+      if (doc.renderer === 'qa-evidence/build-table.py') {
+        expect(html).toContain('st-table');
+      } else {
+        expect(doc.renderer).toBe('builtin-grid-fallback');
+        expect(html).toContain('<table');
+      }
+      // The JSON the builder ate is kept beside the document for inspection.
+      const kept = JSON.parse(fs.readFileSync(doc.jsonPath, 'utf8'));
+      expect(kept.tables[0].rows).toHaveLength(2);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the built-in grid when the builder is missing', async () => {
+    const mod = await import('../scripts/lib/fleet-status-html.mjs');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'status-all-docfb-'));
+    try {
+      const doc = mod.writeFleetStatusDoc(rows, { title: 'T', subtitle: 'S', dir, buildTablePy: null });
+      expect(doc.renderer).toBe('builtin-grid-fallback');
+      const html = fs.readFileSync(doc.htmlPath, 'utf8');
+      expect(html).toContain('310k (31%)');
+      expect(html).toContain('<table');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -262,5 +303,32 @@ describe('noteUsage last-run persistence', () => {
       process.env.HOME = prevHome;
       fs.rmSync(fakeHome, { recursive: true, force: true });
     }
+  });
+});
+
+describe('runSeatModel usage passthrough', () => {
+  it('returns the winning lane usage so the group path can record it', async () => {
+    const { runSeatModel } = await import('../scripts/lib/health/seat-model.mjs');
+    const res = await runSeatModel({
+      prompt: 'hi',
+      chatModel: 'm',
+      botModel: 'm',
+      models: ['m'],
+      runOpencodeImpl: async () => ({ finalText: 'hello', lastError: '', usage: { cost: 0.001, tokens: { total: 310000 } } }),
+    });
+    expect(res.finalText).toBe('hello');
+    expect(res.usage).toEqual({ cost: 0.001, tokens: { total: 310000 } });
+  });
+
+  it('yields null usage when the lane reports none', async () => {
+    const { runSeatModel } = await import('../scripts/lib/health/seat-model.mjs');
+    const res = await runSeatModel({
+      prompt: 'hi',
+      chatModel: 'm',
+      botModel: 'm',
+      models: ['m'],
+      runOpencodeImpl: async () => ({ finalText: 'hello', lastError: '' }),
+    });
+    expect(res.usage).toBeNull();
   });
 });
