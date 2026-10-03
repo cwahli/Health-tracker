@@ -41,6 +41,19 @@ These are one plan. Do not start a later phase while an earlier phase is open. D
 4. **Then — BOT-24's remaining packets.** The shared `/freemodel` and `/allowance` projection. QS-8 is that proof. Do not start those packets during phase 1.
 5. **Then — R-15.** Omni lanes, after the exam is green. It does not add a bot.
 
+6. **Progress surfaces (2 PRs, independent of the phases above — a hub-file
+   concern, not a product phase).** One turn fans out at `fanoutProgressEvent`
+   to two recorders — the Telegram headline and the tmux observer pane — with no
+   shared state and no reconciliation. PR #524 (`agent/progress-sync`) sequences
+   the relay cursor so a `shift()`-trimmed array can no longer silently
+   duplicate or skip events past 500, and keeps the producer's clock. PR #526
+   (`agent/progress-surfaces`) compresses reasoning from the accumulated stream
+   instead of each shard, and splits `thinkingLevel` from `thinkingText`. Both
+   sensors are ratchets, verified load-bearing by reverting each half. **Node 3
+   is open on a human:** set `progress.progressMode = 'phase'` per bot, or leave
+   `'gist'`. Full write-up: `specs/active/progress-surfaces-1.md` on
+   `agent/progress-sync`.
+
 **Not in this sequence.** F-13.2 stays blocked on a live T2 capture. L-5, D-3, D-5, D-6, and D-10 stay human-blocked. CB-6 is superseded. CB-7, CB-8, and V-17 do not start. Website shipped rows stay shipped.
 
 **Frozen. Do not bring these back** because the chat can now point at another worker:
