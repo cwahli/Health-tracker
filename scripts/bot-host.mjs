@@ -2298,6 +2298,28 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         seats: statusAllTax ? TAX_SEAT_IDS : HEALTH_SEAT_IDS,
         roleOf: statusAllTax ? taxRoleOf : healthRoleOf,
       });
+      const statusAllCaption = `Fleet status · chat ${String(chatId)} · ${fleetRows.length} agent${fleetRows.length === 1 ? '' : 's'} (via ${config.id})`;
+      // A real table ships as a photo: Telegram text has no grid rendering.
+      // Anything failing here (no sharp, no fonts, send error) falls back to
+      // the monospace text table, so the command never comes back empty.
+      try {
+        const { renderFleetTablePng } = await import('./lib/fleet-table-image.mjs');
+        const png = await renderFleetTablePng(fleetRows, { title: statusAllCaption });
+        if (png) {
+          const pngDir = path.join(os.tmpdir(), `bot-host-status-all-${config.id}`);
+          fs.mkdirSync(pngDir, { recursive: true });
+          const pngPath = path.join(pngDir, `fleet-${String(chatId)}.png`);
+          fs.writeFileSync(pngPath, png);
+          try {
+            await api.sendMediaFile(chatId, pngPath, { caption: statusAllCaption });
+            return;
+          } finally {
+            try {
+              fs.unlinkSync(pngPath);
+            } catch {}
+          }
+        }
+      } catch {}
       await api.sendMessage(chatId, formatFleetStatusTable(fleetRows, { chatId: String(chatId), via: config.id }));
       return;
     }

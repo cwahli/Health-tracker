@@ -182,3 +182,38 @@ describe('fleetChatStatus council filter', () => {
     expect(rows.map((r) => r.id).sort()).toEqual(['vm', 'vm2', 'vm3']);
   });
 });
+
+describe('fleet-table-image', () => {
+  const rows = [
+    { id: 'vm', name: 'VM Bot', enabled: true, role: 'coordinator', model: 'opencode/nemotron-free', agent: 'build', sessionId: 'ses_abc', foreignSession: false, totals: { runs: 3, tokens: 12500, cost: 0 }, task: 'working' },
+    { id: 'vm2', name: 'VM2', enabled: true, role: 'data_steward', model: 'cline:claude-free', agent: 'build', sessionId: null, foreignSession: false, totals: null, task: 'idle' },
+  ];
+
+  it('maps tool surface and usage from the row', async () => {
+    const mod = await import('../scripts/lib/fleet-table-image.mjs');
+    expect(mod.toolOf('opencode/nemotron-free')).toBe('opencode');
+    expect(mod.toolOf('cline:claude-free')).toBe('cline');
+    expect(mod.toolOf(null)).toBe('—');
+    expect(mod.usageOf(rows[0])).toBe('3 runs · 12.5k');
+    expect(mod.usageOf(rows[1])).toBe('—');
+  });
+
+  it('renders an SVG grid with every cell', async () => {
+    const mod = await import('../scripts/lib/fleet-table-image.mjs');
+    const { svg, width, height } = mod.renderFleetTableSvg(rows, { title: 'T' });
+    for (const cell of ['Agent', 'Role', 'Model', 'Tool', 'Session', 'Task', 'Usage', 'vm', 'coordinator', 'opencode', 'cline', 'ses_abc', 'working', '3 runs']) {
+      expect(svg).toContain(cell);
+    }
+    expect(width).toBeGreaterThan(400);
+    expect(height).toBeGreaterThan(100);
+  });
+
+  it('rasterizes to PNG when sharp is present', async () => {
+    const mod = await import('../scripts/lib/fleet-table-image.mjs');
+    const png = await mod.renderFleetTablePng(rows, { title: 'T' });
+    if (!png) return;
+    expect(png[0]).toBe(0x89);
+    expect(png[1]).toBe(0x50);
+    expect(png.length).toBeGreaterThan(1000);
+  });
+});
