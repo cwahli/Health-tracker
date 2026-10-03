@@ -183,37 +183,84 @@ describe('fleetChatStatus council filter', () => {
   });
 });
 
-describe('fleet-table-image', () => {
+describe('fleet-status-html', () => {
   const rows = [
-    { id: 'vm', name: 'VM Bot', enabled: true, role: 'coordinator', model: 'opencode/nemotron-free', agent: 'build', sessionId: 'ses_abc', foreignSession: false, totals: { runs: 3, tokens: 12500, cost: 0 }, task: 'working' },
-    { id: 'vm2', name: 'VM2', enabled: true, role: 'data_steward', model: 'cline:claude-free', agent: 'build', sessionId: null, foreignSession: false, totals: null, task: 'idle' },
+    { id: 'vm', name: 'VM Bot', enabled: true, role: 'coordinator', model: 'opencode/nemotron-free', agent: 'build', sessionId: 'ses_abc', foreignSession: false, totals: { runs: 3, tokens: 12500, cost: 0 }, lastUsage: { tokens: 310000, contextLimit: 1000000 }, task: 'working' },
+    { id: 'vm2', name: 'VM2', enabled: true, role: 'data_steward', model: 'cline:claude-free', agent: 'build', sessionId: null, foreignSession: false, totals: null, lastUsage: null, task: 'idle' },
+    { id: 'old', name: 'Old', enabled: false, role: null, model: null, agent: null, sessionId: null, foreignSession: false, totals: null, lastUsage: null, task: 'off' },
   ];
 
-  it('maps tool surface and usage from the row', async () => {
-    const mod = await import('../scripts/lib/fleet-table-image.mjs');
+  it('maps tool surface from the row model', async () => {
+    const mod = await import('../scripts/lib/fleet-status-html.mjs');
     expect(mod.toolOf('opencode/nemotron-free')).toBe('opencode');
     expect(mod.toolOf('cline:claude-free')).toBe('cline');
     expect(mod.toolOf(null)).toBe('—');
-    expect(mod.usageOf(rows[0])).toBe('3 runs · 12.5k');
-    expect(mod.usageOf(rows[1])).toBe('—');
   });
 
-  it('renders an SVG grid with every cell', async () => {
-    const mod = await import('../scripts/lib/fleet-table-image.mjs');
-    const { svg, width, height } = mod.renderFleetTableSvg(rows, { title: 'T' });
-    for (const cell of ['Agent', 'Role', 'Model', 'Tool', 'Session', 'Task', 'Usage', 'vm', 'coordinator', 'opencode', 'cline', 'ses_abc', 'working', '3 runs']) {
-      expect(svg).toContain(cell);
+  it('renders session usage as tokens plus context share', async () => {
+    const { usageCell } = await import('../scripts/lib/fleet-status.mjs');
+    expect(usageCell(rows[0])).toBe('310k (31%)');
+    expect(usageCell(rows[1])).toBe('—');
+  });
+
+  it('renders a styled HTML grid with every cell', async () => {
+    const mod = await import('../scripts/lib/fleet-status-html.mjs');
+    const html = mod.renderFleetStatusHtml(rows, { title: 'T', subtitle: 'S' });
+    for (const cell of ['<table', 'Agent', 'Role', 'Model', 'Tool', 'Session', 'Task', 'Usage', 'vm', 'coordinator', 'opencode', 'cline', 'ses_abc', 'working', '310k (31%)', 'off: old', '#0f172a']) {
+      expect(html).toContain(cell);
     }
-    expect(width).toBeGreaterThan(400);
-    expect(height).toBeGreaterThan(100);
   });
 
-  it('rasterizes to PNG when sharp is present', async () => {
-    const mod = await import('../scripts/lib/fleet-table-image.mjs');
-    const png = await mod.renderFleetTablePng(rows, { title: 'T' });
-    if (!png) return;
-    expect(png[0]).toBe(0x89);
-    expect(png[1]).toBe(0x50);
-    expect(png.length).toBeGreaterThan(1000);
+  it('maps persisted last-run snapshots to rows', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'status-all-last-root-'));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'status-all-last-home-'));
+    try {
+      writeJson(path.join(root, 'bots', 'registry.json'), {
+        master: 'vm',
+        bots: [{ id: 'vm', runtime: 'bot-host', enabled: true, agent: { model: 'm', defaultAgent: 'build' } }],
+      });
+      const state = path.join(home, '.local', 'state', 'bot-host', 'vm');
+      writeJson(path.join(state, 'totals.json'), {
+        7: { runs: 2, tokens: 5000, cost: 0, last: { tokens: { total: 310000 }, cost: 0, contextLimit: 1000000, agent: 'build', at: 1 } },
+      });
+      const found = fleetChatStatus({ chatId: '7', workspace: 'ws', root, home }).find((r) => r.id === 'vm');
+      expect(found?.lastUsage).toEqual({ tokens: 310000, contextLimit: 1000000 });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('noteUsage last-run persistence', () => {
+  it('stores the last snapshot beside cumulative totals', async () => {
+    const prevHome = process.env.HOME;
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'status-all-noteusage-'));
+    process.env.HOME = fakeHome;
+    const { noteUsage } = await import('../scripts/bot-host.mjs');
+    try {
+      const totals = new Map();
+      const lastUsage = new Map();
+      await noteUsage({
+        chatId: '7',
+        result: { usage: { tokens: { total: 310000 }, cost: 0 } },
+        eff: { model: 'opencode/nemotron-free', agent: 'build' },
+        config: { id: 'probe-bot' },
+        caches: {},
+        totals,
+        lastUsage,
+      });
+      const saved = JSON.parse(
+        fs.readFileSync(path.join(fakeHome, '.local', 'state', 'bot-host', 'probe-bot', 'totals.json'), 'utf8'),
+      );
+      expect(saved['7'].runs).toBe(1);
+      expect(saved['7'].tokens).toBe(310000);
+      expect(saved['7'].last.tokens).toEqual({ total: 310000 });
+      expect(saved['7'].last.agent).toBe('build');
+      expect(Number(saved['7'].last.at)).toBeGreaterThan(0);
+    } finally {
+      process.env.HOME = prevHome;
+      fs.rmSync(fakeHome, { recursive: true, force: true });
+    }
   });
 });

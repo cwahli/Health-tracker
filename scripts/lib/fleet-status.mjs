@@ -687,6 +687,9 @@ export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home
       const runs = Number(totalsRow.runs) || 0;
       const tokens = Number(totalsRow.tokens) || 0;
       const cost = Number(totalsRow.cost) || 0;
+      const last = totalsRow.last && typeof totalsRow.last === 'object' ? totalsRow.last : null;
+      const lastTokens = Number(last?.tokens?.total ?? last?.tokens) || 0;
+      const lastLimit = Number(last?.contextLimit) || 0;
       const enabled = b.enabled !== false;
       const seat = typeof roleOf === 'function' ? String(roleOf(b) || '') : '';
       return {
@@ -699,6 +702,7 @@ export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home
         sessionId,
         foreignSession,
         totals: runs > 0 || tokens > 0 || cost > 0 ? { runs, tokens, cost } : null,
+        lastUsage: lastTokens > 0 ? { tokens: lastTokens, contextLimit: lastLimit } : null,
         task: !enabled ? 'off' : leaseHit ? 'working' : 'idle',
       };
     });
@@ -720,7 +724,19 @@ function sessionCell(r) {
   return '—';
 }
 
-function runsCell(r) {
+/**
+ * Session usage for the compaction question: last-run tokens against the
+ * context window, e.g. `310k (30%)`. Falls back to cumulative chat totals
+ * when no last-run snapshot was persisted yet.
+ */
+export function usageCell(r) {
+  const t = Number(r.lastUsage?.tokens) || 0;
+  const limit = Number(r.lastUsage?.contextLimit) || 0;
+  if (t > 0 && limit > 0) {
+    const pct = Math.round((t / limit) * 100);
+    return `${formatTokens(t)} (${pct}%)`;
+  }
+  if (t > 0) return formatTokens(t);
   if (!r.totals) return '—';
   const spend = Number(r.totals.cost) || 0;
   return `${r.totals.runs}·${formatTokens(r.totals.tokens)}${spend > 0 ? `·$${spend.toFixed(spend < 0.01 ? 5 : 4)}` : ''}`;
@@ -747,24 +763,24 @@ export function formatFleetStatusTable(rows, { chatId, via } = {}) {
   if (uniform) {
     const free = live[0].model && /free/i.test(live[0].model) ? ' (free)' : '';
     out.push(`all: ${live[0].model || '—'}${free} · ${live[0].agent || '—'}`);
-    const W = { bot: 8, role: 14, sess: 9, task: 7, runs: 10 };
+    const W = { bot: 8, role: 14, sess: 9, task: 7, runs: 14 };
     out.push('```');
-    out.push(`${padEnd('Bot', W.bot)} ${padEnd('Role', W.role)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Runs', W.runs)}`.trimEnd());
+    out.push(`${padEnd('Bot', W.bot)} ${padEnd('Role', W.role)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Usage', W.runs)}`.trimEnd());
     for (const r of live) {
       out.push(
-        `${padEnd(trunc(r.id, W.bot), W.bot)} ${padEnd(roleCell(r), W.role)} ${padEnd(sessionCell(r), W.sess)} ${padEnd(r.task, W.task)} ${padEnd(runsCell(r), W.runs)}`.trimEnd(),
+        `${padEnd(trunc(r.id, W.bot), W.bot)} ${padEnd(roleCell(r), W.role)} ${padEnd(sessionCell(r), W.sess)} ${padEnd(r.task, W.task)} ${padEnd(trunc(usageCell(r), W.runs), W.runs)}`.trimEnd(),
       );
     }
     out.push('```');
   } else {
-    const W = { bot: 8, role: 14, model: 18, agent: 5, sess: 9, task: 7, runs: 10 };
+    const W = { bot: 8, role: 14, model: 18, agent: 5, sess: 9, task: 7, runs: 14 };
     out.push('```');
     out.push(
-      `${padEnd('Bot', W.bot)} ${padEnd('Role', W.role)} ${padEnd('Model', W.model)} ${padEnd('Ag', W.agent)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Runs', W.runs)}`.trimEnd(),
+      `${padEnd('Bot', W.bot)} ${padEnd('Role', W.role)} ${padEnd('Model', W.model)} ${padEnd('Ag', W.agent)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Usage', W.runs)}`.trimEnd(),
     );
     for (const r of live) {
       out.push(
-        `${padEnd(trunc(r.id, W.bot), W.bot)} ${padEnd(roleCell(r), W.role)} ${padEnd(trunc(r.model || '—', W.model), W.model)} ${padEnd(trunc(r.agent || '—', W.agent), W.agent)} ${padEnd(sessionCell(r), W.sess)} ${padEnd(r.task, W.task)} ${padEnd(runsCell(r), W.runs)}`.trimEnd(),
+        `${padEnd(trunc(r.id, W.bot), W.bot)} ${padEnd(roleCell(r), W.role)} ${padEnd(trunc(r.model || '—', W.model), W.model)} ${padEnd(trunc(r.agent || '—', W.agent), W.agent)} ${padEnd(sessionCell(r), W.sess)} ${padEnd(r.task, W.task)} ${padEnd(trunc(usageCell(r), W.runs), W.runs)}`.trimEnd(),
       );
     }
     out.push('```');
