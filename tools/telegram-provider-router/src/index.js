@@ -108,9 +108,11 @@ const WORKSPACE = process.env.WORKSPACE || "/workspace";
 // OPENCODE_TIMEOUT_MS kept as alias for idle window (old 210s hard cut-off removed).
 const OC_IDLE_MS = Number(process.env.OPENCODE_IDLE_MS || process.env.OPENCODE_TIMEOUT_MS || 900000);
 const OC_MAX_MS = Number(process.env.OPENCODE_MAX_MS || 7200000);
-const OC_PROGRESS_MS = Number(process.env.OPENCODE_PROGRESS_MS || 30000);
+// Heartbeat: the progress card repaints at least this often so the clock +
+// freshness line keep moving even when the model emits nothing (long tool).
+const OC_PROGRESS_MS = Number(process.env.OPENCODE_PROGRESS_MS || 15000);
 // Min gap between Telegram edits when activity fingerprint changes (compact thought stream).
-const OC_PROGRESS_MIN_MS = Number(process.env.OPENCODE_PROGRESS_MIN_MS || 15000);
+const OC_PROGRESS_MIN_MS = Number(process.env.OPENCODE_PROGRESS_MIN_MS || 8000);
 const OC_TIMEOUT_MS = OC_IDLE_MS; // legacy name used in busy replies
 const BUSY_WATCHDOG_MS = Number(process.env.BUSY_WATCHDOG_MS || 30000);
 const BUSY_ORPHAN_GRACE_MS = Number(process.env.BUSY_ORPHAN_GRACE_MS || 45000);
@@ -1611,7 +1613,7 @@ async function ocLastActivityLine(sid, sinceCreated = 0) {
 }
 
 /** Compact live stream for Telegram: narrations + recent tools (Muse reasoning text is often empty/encrypted). */
-async function ocCompactProgressCard(sid, sinceCreated, { label, detail, elapsedSec } = {}) {
+async function ocCompactProgressCard(sid, sinceCreated, { label, detail, elapsedSec, idleSec = null } = {}) {
   const head = await headlineFromLive(sid, {
     elapsedSec: elapsedSec || 0,
     detail: detail || "working",
@@ -1693,6 +1695,15 @@ async function ocCompactProgressCard(sid, sinceCreated, { label, detail, elapsed
       lines.push(`(progress read failed: ${String(e.message || e).slice(0, 80)})`);
     }
   }
+  if (idleSec != null && Number.isFinite(Number(idleSec))) {
+    const idle = Math.max(0, Math.round(Number(idleSec)));
+    lines.push("");
+    lines.push(
+      idle >= 60
+        ? `⚠️ no change ${idle}s — still running (long tool or stuck?)`
+        : `↻ upd ${idle}s ago`
+    );
+  }
   return lines.join("\n").slice(0, 3500);
 }
 
@@ -1747,14 +1758,17 @@ async function waitOcIdle(sid, { onProgress, onTyping, label = "OpenCode", chatI
         st.type === "retry"
           ? `retry: ${(st.message || "waiting").slice(0, 120)}`
           : st.type || "working";
+      const idleSec = Math.round((Date.now() - lastActivityAt) / 1000);
       const card = await ocCompactProgressCard(sid, sinceCreated, {
         label,
         detail,
         elapsedSec,
+        idleSec,
       }).catch(async () => {
         const activity = await ocLastActivityLine(sid, sinceCreated);
         const extra = activity ? `\nLast: ${activity}` : "";
-        return `⏳ ${label} still working (${detail}, ${elapsedSec}s)…${extra}`;
+        const stale = idleSec >= 60 ? `\n⚠️ no change ${idleSec}s — still running (long tool or stuck?)` : `\n↻ upd ${idleSec}s ago`;
+        return `⏳ ${label} still working (${detail}, ${elapsedSec}s)…${extra}${stale}`;
       });
       await Promise.resolve(onProgress(card)).catch(() => {});
     }

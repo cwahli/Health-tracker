@@ -1346,13 +1346,14 @@ export function readTuiUrl(env = process.env, file = miniappUrlFile()) {
 }
 
 export class ProgressRenderer {
-  constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, dryRun = false, providerLabel = '', modelLabel = '', thinking = '', onMessageId = null }) {
+  constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, heartbeatMs, dryRun = false, providerLabel = '', modelLabel = '', thinking = '', onMessageId = null }) {
     this.api = api;
     this.throttle = throttle;
     this.chatId = chatId;
     this.mode = mode;
-    this.maxChars = maxChars;
-    this.maxEdits = maxEdits;
+    this.maxChars = maxChars ?? 220;
+    this.maxEdits = maxEdits ?? 120;
+    this.heartbeatMs = Math.max(5000, Number(heartbeatMs) || 12000);
     this.dryRun = dryRun;
     this.providerLabel = providerLabel;
     this.modelLabel = modelLabel;
@@ -1366,9 +1367,15 @@ export class ProgressRenderer {
     this.createRetryAt = 0;
     this.thinking = '';
     this.tool = '';
+    this.toolDetail = '';
+    this.toolStartedAt = null;
+    this.lastOutput = '';
+    this.lastEventAt = null;
+    this.lastRendered = '';
     this.status = 'starting';
     this.typingTimer = null;
     this.typingIntervalMs = 4000;
+    this.heartbeatTimer = null;
   }
 
   setHeadline({ providerLabel, modelLabel, thinking } = {}) {
@@ -1377,9 +1384,16 @@ export class ProgressRenderer {
     if (thinking != null) this.thinkingLevel = thinking;
   }
 
+  _tail(text, max = 180) {
+    const oneLine = String(text ?? '').replace(/\s+/g, ' ').trim();
+    if (!oneLine) return '';
+    return oneLine.length > max ? `…${oneLine.slice(-max)}` : oneLine;
+  }
+
   _render() {
     const lines = [];
-    const elapsedSec = this.startedAt ? (Date.now() - this.startedAt) / 1000 : 0;
+    const now = Date.now();
+    const elapsedSec = this.startedAt ? (now - this.startedAt) / 1000 : 0;
     lines.push(
       formatWorkingHeadline({
         providerLabel: this.providerLabel || 'Agent',
@@ -1392,7 +1406,17 @@ export class ProgressRenderer {
       }),
     );
     if (this.thinking) lines.push(`Thinking: ${this.thinking}`);
-    if (this.tool) lines.push(`Tool: ${this.tool}`);
+    if (this.tool) {
+      const running = this.toolStartedAt ? ` · ${Math.max(0, Math.round((now - this.toolStartedAt) / 1000))}s` : '';
+      const detail = this.toolDetail ? ` ${this._tail(this.toolDetail, 90)}` : '';
+      lines.push(`Tool: ${this.tool}${running}${detail}`);
+    }
+    if (this.lastOutput) lines.push(`Out: ${this._tail(this.lastOutput, 180)}`);
+    if (this.startedAt) {
+      const idleSec = Math.max(0, Math.round((now - (this.lastEventAt || this.startedAt)) / 1000));
+      if (idleSec >= 45) lines.push(`⚠️ no update ${idleSec}s — still running (long tool or stuck?)`);
+      else lines.push(`↻ upd ${idleSec}s ago`);
+    }
     return lines.join('\n');
   }
 
@@ -1403,7 +1427,9 @@ export class ProgressRenderer {
       return;
     }
     this.startedAt = Date.now();
+    this.lastEventAt = this.startedAt;
     this._startTyping();
+    this._startHeartbeat();
   }
 
   /**
@@ -1442,15 +1468,38 @@ export class ProgressRenderer {
     if (typeof this.typingTimer.unref === 'function') this.typingTimer.unref();
   }
 
+  _startHeartbeat() {
+    if (this.dryRun || this.heartbeatTimer) return;
+    this.heartbeatTimer = setInterval(() => {
+      try {
+        this._schedule(true);
+      } catch {}
+    }, this.heartbeatMs);
+    if (typeof this.heartbeatTimer.unref === 'function') this.heartbeatTimer.unref();
+  }
+
+  _stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
   stopTyping() {
     if (this.typingTimer) {
       clearInterval(this.typingTimer);
       this.typingTimer = null;
     }
+    this._stopHeartbeat();
   }
 
   onEvent(event) {
+    if (!event || typeof event !== 'object') return;
     if (event.kind === 'reasoning' && event.text) {
+      // Proof of life even when the gist is filtered below: a filtered shard
+      // still means the model is streaming, so the freshness line keeps that
+      // truth instead of crying stuck.
+      this.lastEventAt = Date.now();
       const gist = compressReasoning(event.text, { maxChars: this.maxChars });
       // Drop compressor fragments (".", "/", "check", "at", ":") and repeats:
       // each accepted gist would otherwise become its own chat message.
@@ -1462,25 +1511,47 @@ export class ProgressRenderer {
       this.status = 'thinking';
       this._schedule();
     } else if (event.kind === 'tool') {
+      this.lastEventAt = Date.now();
       this.tool = `${event.tool} (${event.status})`;
+      this.toolStartedAt = Date.now();
+      const inp = event.input;
+      let detail = '';
+      if (typeof inp === 'string') detail = inp;
+      else if (inp && typeof inp === 'object') {
+        detail = String(inp.command || inp.file_path || inp.path || inp.filePath || inp.pattern || inp.glob || '');
+      }
+      const out = event.output != null ? String(event.output) : '';
+      if (!detail && out) detail = out;
+      this.toolDetail = detail;
+      if (out.trim()) this.lastOutput = out;
       this.status = 'working';
       this._schedule();
+    } else if (event.kind === 'text' && event.text) {
+      this.lastEventAt = Date.now();
+      this.lastOutput = String(event.text);
+      if (this.status === 'starting') this.status = 'working';
+      this._schedule();
     } else if (event.kind === 'step_finish') {
+      this.lastEventAt = Date.now();
       if (event.tokens != null && Number.isFinite(Number(event.tokens))) {
         this.usedTokens = (this.usedTokens || 0) + Number(event.tokens);
       }
       this.status = 'working';
       this._schedule();
+    } else if (event.kind === 'step_start' || event.kind === 'other' || event.kind === 'error') {
+      // Proof of life without a paint: the heartbeat carries the freshness.
+      this.lastEventAt = Date.now();
     }
   }
 
-  _schedule() {
+  _schedule(isHeartbeat = false) {
     if (this.dryRun) {
       console.log(`[progress] ${this._render().replace(/\n/g, ' | ')}`);
       return;
     }
+    if (!this.throttle || typeof this.throttle.submit !== 'function') return;
     if (this.messageId == null) {
-      if (!this.thinking && !this.tool) return;
+      if (!this.thinking && !this.tool && !this.lastOutput) return;
       // One progress message per run: never queue a second create while the
       // first is in flight, and back off after a failed create (rate-limit
       // returns null) instead of spawning a new message per event.
@@ -1489,9 +1560,11 @@ export class ProgressRenderer {
       this.throttle
         .submit(async () => {
           try {
-            const result = await this._guarded(() => this.api.sendMessage(this.chatId, this._render()));
+            const body = this._render();
+            const result = await this._guarded(() => this.api.sendMessage(this.chatId, body));
             if (result?.message_id != null) {
               this.messageId = result.message_id;
+              this.lastRendered = body;
               if (typeof this.onMessageId === 'function') {
                 try { this.onMessageId(this.messageId); } catch {}
               }
@@ -1507,8 +1580,16 @@ export class ProgressRenderer {
         });
       return;
     }
-    if (this.edits >= this.maxEdits) return;
-    this.edits += 1;
+    // Content edits keep the maxEdits budget (spam guard). Heartbeats bypass
+    // it so the clock + freshness line keep moving on long runs — they are
+    // still throttled to one edit per throttle window.
+    if (!isHeartbeat) {
+      if (this.edits >= this.maxEdits) return;
+      this.edits += 1;
+    }
+    const body = this._render();
+    if (body === this.lastRendered) return;
+    this.lastRendered = body;
     this.throttle
       .submit(() => this._guarded(() => this.api.editMessageText(this.chatId, this.messageId, this._render())))
       .catch(() => {});
@@ -1571,7 +1652,7 @@ export class ProgressRenderer {
     const killedNoOutput = result.code == null && !errText && stderrBlank && !partial;
     if (killedNoOutput) {
       this.status = 'failed';
-      if (this.messageId != null) this._schedule();
+      if (this.messageId != null) this._schedule(true);
       await this.deliver(
         withFooter(
           'Interrupted before the model produced output (the bot process restarted mid-run). Nothing was computed — just send your request again.',
@@ -1581,8 +1662,7 @@ export class ProgressRenderer {
     }
     if (errText && !partial) {
       this.status = 'failed';
-      if (this.messageId != null) this._schedule();
-      const friendly = humanizeRunError(errText);
+      if (this.messageId != null) this._schedule(true);      const friendly = humanizeRunError(errText);
       let hint = '';
       let lead = `Error: ${friendly}`;
       if (isTimeoutError(errText)) {
@@ -1594,7 +1674,7 @@ export class ProgressRenderer {
       return;
     }
     this.status = 'done';
-    if (this.messageId != null) this._schedule();
+    if (this.messageId != null) this._schedule(true);
     if (!partial) {
       const code = result.code === 0 ? '' : ` (exit ${result.code})`;
       await this.deliver(withFooter(`Done${code}, but the model returned no text output.`));
