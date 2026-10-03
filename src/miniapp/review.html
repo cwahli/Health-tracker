@@ -6,23 +6,26 @@
 <title>Review Queue</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  :root { --gutter: clamp(12px, 3vw, 28px); }
+  :root { --gutter: clamp(10px, 3vw, 22px); }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
-    margin: 0; padding: 0 0 clamp(16px, 4vw, 40px) 0;
-    background: #0f172a; color: #e2e8f0;
+    margin: 0; padding: 0;
+    background: #0b1220; color: #e2e8f0;
     font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     -webkit-text-size-adjust: 100%; line-height: 1.5;
+    display: flex; flex-direction: column; height: 100dvh; overflow: hidden;
   }
+
+  /* --- masthead ------------------------------------------------------- */
   .masthead {
-    position: sticky; top: 0; z-index: 30;
+    flex: 0 0 auto;
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    background: #0f172a; padding: 8px var(--gutter); margin: 0;
-    border-bottom: 1px solid #334155;
+    background: #0b1220; padding: 6px var(--gutter); border-bottom: 1px solid #1e293b;
   }
   .title-group { display: flex; align-items: center; gap: 8px; }
-  h1 { color: #f8fafc; font-size: clamp(18px, 3.5vw, 24px); margin: 0; }
-  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981; }
+  h1 { color: #f8fafc; font-size: clamp(15px, 3.5vw, 19px); margin: 0; }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981; }
   .btn-refresh {
     background: #1e293b; border: 1px solid #334155; color: #93c5fd;
     border-radius: 6px; padding: 2px 7px; font-size: 13px; cursor: pointer;
@@ -32,92 +35,104 @@
   .btn-refresh:hover { background: #334155; }
   .btn-refresh.spinning { animation: spin 0.8s linear infinite; pointer-events: none; opacity: 0.7; }
   @keyframes spin { 100% { transform: rotate(360deg); } }
-  .pager { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #93c5fd; }
+  .pager { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #93c5fd; }
   .pager button {
     background: #1e293b; border: 1px solid #334155; color: #93c5fd;
-    border-radius: 6px; padding: 4px 10px; font-size: 14px; cursor: pointer;
+    border-radius: 6px; padding: 3px 9px; font-size: 14px; cursor: pointer;
   }
-  .pager button:disabled { opacity: 0.35; }
-  .card { padding: 12px var(--gutter); }
-  .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
-  .chip {
-    display: inline-block; padding: 2px 8px; border-radius: 9999px;
-    font-size: 11px; font-weight: 600; background: #1e293b; color: #93c5fd;
-    border: 1px solid #334155; overflow-wrap: anywhere;
+  .pager button:disabled { opacity: 0.3; }
+
+  /* --- one-word tabs: Info doubles as the card's collapse switch ------ */
+  .tabs { flex: 0 0 auto; display: flex; background: #0b1220; border-bottom: 1px solid #1e293b; }
+  .tabs button {
+    flex: 1; cursor: pointer; padding: 8px 4px; font-size: 12.5px; font-weight: 600;
+    color: #7f93b0; background: transparent; border: none; border-bottom: 2px solid transparent;
+    transition: color 0.12s, border-color 0.12s;
   }
-  .chip-key { color: #7dd3fc; }
-  .chip-gate { color: #fbbf24; border-color: #854d0e; }
-  .gallery {
-    display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory;
-    -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;
-    border: 1px solid #334155; border-radius: 10px; background: #000;
-    padding: 8px;
+  .tabs button.on { color: #fff; border-bottom-color: #3b82f6; }
+
+  /* --- panel ----------------------------------------------------------- */
+  .panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; }
+  .view { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+  .view.on { display: flex; }
+  .view.scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+
+  .info { padding: 8px var(--gutter); flex: 0 0 auto; max-height: 30vh; overflow-y: auto;
+          background: #0f172a; border-bottom: 1px solid #1e293b; }
+  .kv { margin-bottom: 10px; }
+  .kv:last-child { margin-bottom: 0; }
+  .kv h3 { margin: 0 0 3px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: #64748b; }
+  .kv p { margin: 0; font-size: 13.5px; color: #e2e8f0; white-space: pre-wrap; overflow-wrap: break-word; }
+  .kv .key { color: #7dd3fc; font-family: "SF Mono", Consolas, monospace; font-size: 12.5px; }
+  .kv .gate { color: #fbbf24; }
+  .text { padding: 14px var(--gutter); font-size: 15px; color: #e2e8f0;
+          white-space: pre-wrap; overflow-wrap: break-word; }
+
+  /* --- image stage: pinch, pan, swipe, all gestures are ours --------- */
+  .stage { position: relative; flex: 1 1 auto; min-height: 0; background: #000; overflow: hidden; }
+  .track {
+    display: flex; height: 100%; width: 100%;
+    touch-action: none; /* every gesture below is handled here, not by the UA */
+    will-change: transform;
   }
-  .gallery figure { margin: 0; flex: 0 0 100%; scroll-snap-align: center; }
-  .gallery img {
-    width: 100%; max-height: 52vh; object-fit: contain; display: block;
-    border-radius: 6px; background: #000;
+  .track.animating { transition: transform 0.24s ease-out; }
+  .slide { flex: 0 0 100%; height: 100%; position: relative; overflow: hidden; }
+  .zoom { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .slide img { max-width: 100%; max-height: 100%; object-fit: contain; display: block;
+               transform-origin: center center; will-change: transform; }
+
+  .noproof { flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
+             text-align: center; color: #64748b; font-size: 13px; padding: 24px; }
+
+  /* Overlays never share a corner: counter + hint on the left, heart on the
+     right. The hint has done its job once the reader has pinched, so it goes. */
+  .count {
+    position: absolute; left: 10px; bottom: 10px; z-index: 5;
+    background: rgba(0,0,0,.6); border: 1px solid #334155; color: #e2e8f0;
+    border-radius: 9999px; padding: 2px 9px; font-size: 11px;
   }
-  .gallery figcaption { text-align: center; font-size: 12px; color: #94a3b8; padding-top: 4px; }
-  .noproof {
-    border: 1px dashed #475569; border-radius: 10px; padding: 20px;
-    text-align: center; color: #94a3b8; font-size: 13px;
+  .zoomhint {
+    position: absolute; left: 58px; bottom: 10px; z-index: 5;
+    background: rgba(0,0,0,.6); border: 1px solid #334155; color: #93c5fd;
+    border-radius: 9999px; padding: 2px 9px; font-size: 10.5px; pointer-events: none;
+    transition: opacity 0.18s;
   }
-  .panel {
-    background: #1e293b; border: 1px solid #334155; border-radius: 10px;
-    padding: 10px 12px; margin-top: 10px;
+  #track[data-zoomed="1"] ~ .zoomhint { opacity: 0; }
+  .heart {
+    position: absolute; right: 10px; bottom: 10px; z-index: 6;
+    width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
+    background: rgba(15,23,42,.72); color: #fca5a5; font-size: 25px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,.5); transition: transform 0.12s;
   }
-  .panel h3 {
-    margin: 0 0 6px; font-size: 11px; text-transform: uppercase;
-    letter-spacing: .06em; color: #93c5fd;
+  .heart:active { transform: scale(0.9); }
+
+  /* --- composer: no send button, keyboard sends ----------------------- */
+  .composer { flex: 0 0 auto; background: #0b1220; border-top: 1px solid #1e293b;
+              padding: 6px var(--gutter) calc(6px + env(safe-area-inset-bottom)); }
+  .target { display: flex; gap: 6px; margin-bottom: 6px; }
+  .target button {
+    cursor: pointer; padding: 4px 12px; font-size: 11.5px; font-weight: 600;
+    color: #7f93b0; background: #111c33; border: 1px solid #1e293b; border-radius: 9999px;
+    transition: color 0.12s, background 0.12s, border-color 0.12s;
   }
-  .panel.request { border-color: #1d4ed8; }
-  .panel.request h3 { color: #bfdbfe; }
-  .panel p { margin: 0; font-size: 14px; color: #e2e8f0; white-space: pre-wrap; overflow-wrap: break-word; }
-  .panel.context p { font-size: 13px; color: #cbd5e1; }
-  details.panel { padding: 10px 12px; }
-  details.panel summary { cursor: pointer; font-size: 12px; color: #93c5fd; font-weight: 600; }
-  .actions {
-    position: sticky; bottom: 0; background: #0f172a;
-    border-top: 1px solid #334155; padding: 10px var(--gutter) calc(10px + env(safe-area-inset-bottom));
-    margin-top: 12px;
-  }
-  .seg { display: flex; gap: 0; margin-bottom: 8px; }
-  .seg button {
-    flex: 1; cursor: pointer; padding: 7px 6px; font-size: 12px; font-weight: 600;
-    color: #93c5fd; background: #1e293b; border: 1px solid #334155; margin-left: -1px;
-  }
-  .seg button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
-  .seg button:last-child { border-radius: 0 8px 8px 0; }
-  .seg button.on { background: #1d4ed8; color: #fff; border-color: #1e40af; }
+  .target button.on { color: #fff; background: #1d4ed8; border-color: #3b82f6; }
   textarea {
-    width: 100%; min-height: 64px; resize: vertical;
-    background: #1e293b; border: 1px solid #334155; border-radius: 8px;
-    color: #e2e8f0; font-size: 14px; padding: 8px 10px; font-family: inherit;
+    width: 100%; min-height: 40px; max-height: 22vh; resize: none;
+    background: #111c33; border: 1px solid #1e293b; border-radius: 10px;
+    color: #e2e8f0; font-size: 14px; padding: 9px 11px; font-family: inherit; line-height: 1.35;
   }
-  .row { display: flex; gap: 8px; margin-top: 8px; }
-  .btn {
-    border: none; border-radius: 8px; padding: 10px 14px;
-    font-size: 14px; font-weight: 700; cursor: pointer;
-  }
-  .btn-approve { background: #065f46; color: #a7f3d0; border: 1px solid #059669; flex: 1; }
-  .btn-approve.confirm { background: #b45309; color: #fff; border-color: #f59e0b; }
-  .btn-send { background: #1d4ed8; color: #fff; flex: 1; }
-  .btn:disabled { opacity: 0.5; }
+  .hint { font-size: 10.5px; color: #475569; margin-top: 4px; }
+
   .toast {
-    position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%);
-    background: #1e293b; border: 1px solid #334155; color: #f8fafc;
+    position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+    background: #111c33; border: 1px solid #334155; color: #f8fafc;
     border-radius: 8px; padding: 8px 14px; font-size: 13px; z-index: 50;
-    max-width: 90vw; text-align: center;
+    max-width: 88vw; text-align: center;
   }
-  .empty { text-align: center; padding: 48px var(--gutter); color: #94a3b8; }
-  .empty .big { font-size: 40px; }
-  .lightbox {
-    position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.94);
-    display: none; align-items: center; justify-content: center;
-  }
-  .lightbox.open { display: flex; }
-  .lightbox img { max-width: 100vw; max-height: 100vh; object-fit: contain; }
+  .empty { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
+           justify-content: center; text-align: center; color: #64748b; padding: 24px; }
+  .empty .big { font-size: 38px; }
 </style>
 </head>
 <body>
@@ -134,28 +149,47 @@
   </div>
 </div>
 
-<div id="body"></div>
-<div class="lightbox" id="lightbox"><img id="lightbox-img" alt="proof fullscreen"></div>
+<div class="tabs" id="tabs">
+  <button data-tab="info">Info</button>
+  <button data-tab="request">Request</button>
+  <button data-tab="todo">To&nbsp;do</button>
+</div>
+
+<div class="panel" id="panel"></div>
+
+<div class="composer" id="composer" hidden>
+  <div class="target" id="target">
+    <button data-target="left">To&nbsp;do</button>
+    <button data-target="original">Request</button>
+  </div>
+  <textarea id="comment" rows="1" placeholder="Comment for the agent…"></textarea>
+  <div class="hint">Enter sends · Shift+Enter new line</div>
+</div>
 
 <script>
 (function () {
-  if (window.Telegram && window.Telegram.WebApp) {
-    try {
-      window.Telegram.WebApp.ready();
-      window.Telegram.WebApp.expand();
-    } catch (e) {}
-  }
+  try {
+    var tg = window.Telegram && window.Telegram.WebApp;
+    if (tg) {
+      if (tg.ready) tg.ready();
+      if (tg.expand) tg.expand();
+      if (tg.disableVerticalSwipes) { try { tg.disableVerticalSwipes(); } catch (e) {} }
+    }
+  } catch (e) {}
 
-  var state = { items: [], idx: 0, target: 'left', approving: false };
+  var state = { items: [], idx: 0, tab: 'proof', infoOpen: false, target: 'left', busy: false };
   var query = location.search || '';
+  var builtKey = null;      // item key currently in the DOM — the blink guard
+  var view = null;          // per-item picture view: slides, zoom, gestures
+
+  var MAX_ZOOM = 6;
+  var DOUBLE_TAP_MS = 300;
+  var SWIPE_RATIO = 0.18;
 
   function esc(s) {
-    if (s === null || s === undefined || s === '') return '<span style="color:#64748b">—</span>';
+    if (s === null || s === undefined || s === '') return '<span style="color:#475569">—</span>';
     return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   function toast(msg) {
@@ -165,7 +199,7 @@
     t.className = 'toast';
     t.textContent = msg;
     document.body.appendChild(t);
-    setTimeout(function () { t.remove(); }, 3200);
+    setTimeout(function () { t.remove(); }, 3000);
   }
 
   function proofUrl(key, fileId) {
@@ -173,145 +207,461 @@
     return '/review/api/proof' + q + 'key=' + encodeURIComponent(key) + '&file=' + encodeURIComponent(fileId);
   }
 
+  function api(path, opts) {
+    return fetch(path + query, opts).then(function (res) {
+      return res.json().then(function (j) { return { status: res.status, body: j }; });
+    });
+  }
+
+  /* ===================== picture view =================================
+     Every touch gesture is ours (the UA is told `touch-action: none`), so a
+     proof screenshot is browsed the way a photo is:
+       · one finger, not zoomed  → swipe to the next/previous shot
+       · one finger, zoomed      → pan
+       · two fingers             → pinch to zoom, drag to pan
+       · double tap              → zoom in on that point / back out
+     Zoom and offset live per slide and are clamped, so a picture can never
+     be dragged off its own bounds. ==================================== */
+  function PictureView(track, countEl) {
+    this.track = track;
+    this.countEl = countEl;
+    this.i = 0;
+    this.n = track.querySelectorAll('.slide').length;
+    this.zooms = [];
+    for (var k = 0; k < this.n; k++) this.zooms.push({ s: 1, x: 0, y: 0 });
+    this.pointers = new Map();
+    this.dragPx = 0;
+    this.mode = null;          // 'swipe' | 'pan' | 'pinch'
+    this.lastTap = 0;
+    this.lastTapPt = null;
+    this.bind();
+    this.apply();
+  }
+
+  PictureView.prototype.img = function (i) {
+    var f = this.track.querySelectorAll('.slide')[i || 0];
+    return f ? f.querySelector('img') : null;
+  };
+
+  PictureView.prototype.slideBox = function (i) {
+    return this.track.querySelectorAll('.slide')[i || 0];
+  };
+
+  PictureView.prototype.zoomOf = function (i) { return this.zooms[i || 0] || { s: 1, x: 0, y: 0 }; };
+
+  /** Clamp the offset so the scaled picture stays inside its own frame. */
+  PictureView.prototype.clamp = function (i) {
+    var img = this.img(i);
+    var z = this.zooms[i];
+    if (!img) return;
+    var box = this.slideBox(i);
+    var bw = img.offsetWidth || 1;
+    var bh = img.offsetHeight || 1;
+    var vw = box.clientWidth || 1;
+    var vh = box.clientHeight || 1;
+    var maxX = Math.max(0, (bw * z.s - vw) / 2);
+    var maxY = Math.max(0, (bh * z.s - vh) / 2);
+    z.x = Math.min(maxX, Math.max(-maxX, z.x));
+    z.y = Math.min(maxY, Math.max(-maxY, z.y));
+  };
+
+  PictureView.prototype.paint = function (i) {
+    var img = this.img(i);
+    if (!img) return;
+    var z = this.zooms[i];
+    img.style.transform = 'translate(' + z.x + 'px,' + z.y + 'px) scale(' + z.s + ')';
+  };
+
+  /** Apply zoom/offset to the slide on screen (and clamp it). */
+  PictureView.prototype.apply = function () {
+    for (var i = 0; i < this.n; i++) {
+      this.clamp(i);
+      if (i === this.i || this.dragPx) this.paint(i);
+    }
+    if (this.countEl) {
+      this.countEl.textContent = this.n > 1 ? (this.i + 1) + '/' + this.n : '1 shot';
+    }
+    this.track.dataset.slide = String(this.i);
+    this.track.dataset.zoomed = this.zoomOf(this.i).s > 1.02 ? '1' : '0';
+    this.track.style.transform = 'translate3d(' + (-this.i * 100 + (this.dragPx / this.track.clientWidth) * 100) + '%,0,0)';
+  };
+
+  PictureView.prototype.animateTo = function (i) {
+    if (i < 0 || i >= this.n) return;
+    this.i = i;
+    this.dragPx = 0;
+    this.track.classList.add('animating');
+    var self = this;
+    this.apply();
+    setTimeout(function () { self.track.classList.remove('animating'); self.apply(); }, 260);
+  };
+
+  PictureView.prototype.zoomTo = function (i, scale, cx, cy) {
+    var z = this.zooms[i];
+    var from = z.s;
+    var next = Math.min(MAX_ZOOM, Math.max(1, scale));
+    if (Math.abs(next - from) < 0.001) return;
+    // Keep the point under the fingers (or the double tap) where it is.
+    var box = this.slideBox(i);
+    var r = box.getBoundingClientRect();
+    var px = cx === undefined ? r.left + r.width / 2 : cx - r.left;
+    var py = cy === undefined ? r.top + r.height / 2 : cy - r.top;
+    var img = this.img(i);
+    var bw = img ? img.offsetWidth : 0;
+    var bh = img ? img.offsetHeight : 0;
+    // Where the anchored point sits inside the picture, relative to its centre.
+    var ox = (px - r.width / 2) - z.x;
+    var oy = (py - r.height / 2) - z.y;
+    var k = next / from;
+    z.s = next;
+    z.x -= ox * (k - 1);
+    z.y -= oy * (k - 1);
+    if (bw && bh) {
+      // the anchor uses the picture's own scale, not the box's
+      var imgK = (bw * next) / Math.max(1, box.clientWidth);
+      void imgK;
+    }
+    this.clamp(i);
+    this.paint(i);
+  };
+
+  PictureView.prototype.bind = function () {
+    var self = this;
+    var track = this.track;
+
+    track.addEventListener('pointerdown', function (e) {
+      track.setPointerCapture(e.pointerId);
+      self.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (self.pointers.size === 1) {
+        self.startX = e.clientX;
+        self.startY = e.clientY;
+        self.startZ = self.zoomOf(self.i);
+        self.dragPx = 0;
+        self.mode = self.startZ.s > 1.02 ? 'pan' : 'swipe';
+        self.pinch = null;
+        // A double tap toggles zoom, and it must be recognised in BOTH states:
+        // the second tap lands while the picture is already zoomed, and a check
+        // that only looked at the not-zoomed path made "tap again to fit" a
+        // silent no-op — the reader zoomed in and could not get back out.
+        var now = Date.now();
+        var isDouble = now - self.lastTap < DOUBLE_TAP_MS
+          && self.lastTapPt
+          && Math.abs(self.lastTapPt.x - e.clientX) < 40
+          && Math.abs(self.lastTapPt.y - e.clientY) < 40;
+        if (isDouble) {
+          self.mode = 'tap';
+          self.lastTap = 0;
+        } else {
+          self.lastTap = now;
+          self.lastTapPt = { x: e.clientX, y: e.clientY };
+        }
+      } else if (self.pointers.size === 2) {
+        self.mode = 'pinch';
+        var pts = [...self.pointers.values()];
+        self.pinch = {
+          dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
+          mid: { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 },
+          scale: self.zoomOf(self.i).s,
+          x: self.zoomOf(self.i).x,
+          y: self.zoomOf(self.i).y,
+        };
+        self.dragPx = 0;
+      }
+      track.classList.remove('animating');
+      e.preventDefault();
+    });
+
+    track.addEventListener('pointermove', function (e) {
+      if (!self.pointers.has(e.pointerId)) return;
+      self.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (self.mode === 'pinch' && self.pointers.size >= 2) {
+        var pts = [...self.pointers.values()];
+        var dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+        var mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+        self.zoomTo(self.i, self.pinch.scale * (dist / self.pinch.dist), mid.x, mid.y);
+        var z = self.zoomOf(self.i);
+        z.x += mid.x - self.pinch.mid.x;
+        z.y += mid.y - self.pinch.mid.y;
+        self.pinch.mid = mid;
+        self.clamp(self.i);
+        self.paint(self.i);
+        e.preventDefault();
+        return;
+      }
+
+      var dx = e.clientX - self.startX;
+      var dy = e.clientY - self.startY;
+      if (self.mode === 'pan') {
+        var z2 = self.zoomOf(self.i);
+        z2.x = self.startZ.x + dx;
+        z2.y = self.startZ.y + dy;
+        self.clamp(self.i);
+        self.paint(self.i);
+        e.preventDefault();
+        return;
+      }
+      if (self.mode === 'swipe') {
+        self.dragPx = dx;
+        self.apply();
+        e.preventDefault();
+      }
+    });
+
+    function endPointer(e) {
+      if (!self.pointers.has(e.pointerId)) return;
+      self.pointers.delete(e.pointerId);
+      if (self.pointers.size === 1) {
+        // A finger lifted mid-pinch: restart as a pan from the surviving finger.
+        var rest = [...self.pointers.values()][0];
+        self.mode = self.zoomOf(self.i).s > 1.02 ? 'pan' : 'swipe';
+        self.startX = rest.x;
+        self.startY = rest.y;
+        self.startZ = { s: self.zoomOf(self.i).s, x: self.zoomOf(self.i).x, y: self.zoomOf(self.i).y };
+        self.dragPx = 0;
+        return;
+      }
+      if (self.pointers.size) return;
+      if (self.mode === 'tap') {
+        var z3 = self.zoomOf(self.i);
+        // A double tap toggles: back to fit, or 2.5x centred on the tap.
+        self.zoomTo(self.i, z3.s > 1.02 ? 1 : 2.5, e.clientX, e.clientY);
+        if (z3.s <= 1.02) self.paint(self.i);
+        self.mode = null;
+        return;
+      }
+      if (self.mode === 'swipe') {
+        var w = track.clientWidth || 1;
+        if (Math.abs(self.dragPx) > Math.max(40, w * SWIPE_RATIO)) {
+          self.animateTo(self.dragPx < 0 ? self.i + 1 : self.i - 1);
+          self.mode = null;
+          return;
+        }
+      }
+      self.dragPx = 0;
+      self.mode = null;
+      self.apply();
+    }
+    track.addEventListener('pointerup', endPointer);
+    track.addEventListener('pointercancel', endPointer);
+    track.addEventListener('wheel', function (e) {
+      // Desktop/trackpad: ctrl+wheel zooms, plain wheel scrolls sideways.
+      if (!e.ctrlKey && !e.metaKey) {
+        var d = e.deltaY + e.deltaX;
+        if (Math.abs(d) < 2) return;
+        var target = self.i + (d > 0 ? 1 : -1);
+        if (target >= 0 && target < self.n) { e.preventDefault(); self.animateTo(target); }
+        return;
+      }
+      e.preventDefault();
+      self.zoomTo(self.i, self.zoomOf(self.i).s * (e.deltaY < 0 ? 1.12 : 1 / 1.12), e.clientX, e.clientY);
+    }, { passive: false });
+
+    window.addEventListener('resize', function () { self.apply(); });
+  };
+
+  /* ===================== item DOM ==================================== */
+  function build(it) {
+    builtKey = it.key;
+    var panel = document.getElementById('panel');
+    var proofs = it.proofs || [];
+
+    var views = '';
+    views += '<div class="view scroll info" data-view="info">'
+      + '<div class="kv"><h3>Ticket</h3><p class="key">' + esc(it.key) + (it.ref ? ' · ' + esc(it.ref) : '') + '</p></div>'
+      + '<div class="kv"><h3>Owner</h3><p>' + esc(it.owner) + '</p></div>'
+      + '<div class="kv"><h3>Last activity</h3><p>' + esc(it.lastActivity) + '</p></div>'
+      + (it.gate ? '<div class="kv"><h3>Gate</h3><p class="gate">' + esc(it.gate) + '</p></div>' : '')
+      + '<div class="kv"><h3>Work done</h3><p>' + esc(it.workDone) + '</p></div>'
+      + '<div class="kv"><h3>Proof</h3><p>' + (proofs.length ? proofs.map(function (p) { return esc(p.name); }).join('\n') : 'none filed') + '</p></div>'
+      + '</div>';
+    views += '<div class="view scroll text" data-view="request"><div id="pane-request">' + esc(it.originalRequest) + '</div></div>';
+    views += '<div class="view scroll text" data-view="todo"><div id="pane-todo">' + esc(it.whatsLeft) + '</div></div>';
+
+    var stage = '';
+    if (proofs.length) {
+      stage = '<div class="stage full"><div class="track" id="track">'
+        + proofs.map(function (p, i) {
+            var src = proofUrl(it.key, p.id);
+            return '<div class="slide"><div class="zoom"><img src="' + src + '" alt="proof shot ' + (i + 1) + ' of ' + proofs.length + '"></div></div>';
+          }).join('')
+        + '</div>'
+        + '<div class="count" id="imgcount">' + (proofs.length > 1 ? '1/' + proofs.length : '1 shot') + '</div>'
+        + (proofs.length > 1 ? '<div class="zoomhint">pinch · drag</div>' : '<div class="zoomhint">pinch to zoom</div>')
+        + '<button class="heart" id="heart" title="Done — archive" aria-label="Mark done and archive">🤍</button>'
+        + '</div>';
+    } else {
+      stage = '<div class="noproof">No proof screenshots filed.</div>'
+        + '<button class="heart" id="heart" style="position:absolute;right:10px;bottom:10px" title="Done — archive" aria-label="Mark done and archive">🤍</button>';
+    }
+
+    // Info first: the card stacks ABOVE the picture, and tapping Info folds it
+    // away so the picture takes the whole area.
+    panel.innerHTML = views + '<div class="view on" data-view="proof">' + stage + '</div>';
+
+    view = proofs.length ? new PictureView(document.getElementById('track'), document.getElementById('imgcount')) : null;
+    document.getElementById('heart').addEventListener('click', onHeart);
+    document.getElementById('composer').hidden = false;
+    setInfo(false);
+  }
+
+  /* --- Info is a toggle, not a destination: tap it again to fold the
+     card away and hand the whole area to the picture. ------------------ */
+  function setInfo(open) {
+    state.infoOpen = !!open;
+    var infoView = document.querySelector('#panel .view[data-view="info"]');
+    if (infoView) {
+      infoView.classList.toggle('on', state.infoOpen);
+      infoView.hidden = !state.infoOpen;
+    }
+    var stage = document.querySelector('.stage');
+    if (stage) stage.classList.toggle('full', !state.infoOpen);
+    document.querySelectorAll('#tabs button').forEach(function (b) {
+      b.classList.toggle('on', state.infoOpen && b.getAttribute('data-tab') === 'info');
+    });
+  }
+
+  function showProof() {
+    var proof = document.querySelector('[data-view="proof"]');
+    var stage = document.querySelector('.stage');
+    if (stage) stage.hidden = false;
+    document.querySelectorAll('#panel .view').forEach(function (v) {
+      if (v !== proof) v.classList.remove('on');
+    });
+    if (proof) proof.classList.add('on');
+    document.querySelectorAll('#tabs button').forEach(function (b) {
+      b.classList.toggle('on', state.infoOpen && b.getAttribute('data-tab') === 'info');
+    });
+    state.tab = 'proof';
+  }
+
+  function showText(name) {
+    state.tab = name;
+    state.infoOpen = false;
+    var proof = document.querySelector('[data-view="proof"]');
+    var stage = document.querySelector('.stage');
+    var infoView = document.querySelector('#panel .view[data-view="info"]');
+    if (infoView) { infoView.classList.remove('on'); infoView.hidden = true; }
+    if (stage) { stage.hidden = true; stage.classList.add('full'); }
+    document.querySelectorAll('#panel .view').forEach(function (v) {
+      v.classList.toggle('on', v.getAttribute('data-view') === name);
+    });
+    if (proof) proof.classList.remove('on');
+    document.querySelectorAll('#tabs button').forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-tab') === name);
+    });
+  }
+
+  /* --- composer ------------------------------------------------------- */
+  function setTarget(which) {
+    state.target = which;
+    document.querySelectorAll('#target button').forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-target') === which);
+    });
+  }
+
+  document.getElementById('tabs').addEventListener('click', function (e) {
+    var tab = e.target.getAttribute('data-tab');
+    if (!tab) return;
+    if (tab === 'info') {
+      // Toggle: the second tap folds the card and gives the picture the area.
+      if (state.tab !== 'proof') { state.tab = 'proof'; showProof(); setInfo(true); return; }
+      setInfo(!state.infoOpen);
+      return;
+    }
+    showText(tab);
+  });
+
+  document.getElementById('target').addEventListener('click', function (e) {
+    var t = e.target.getAttribute('data-target');
+    if (!t) return;
+    setTarget(t);
+    var box = document.getElementById('comment');
+    if (box && !state.busy) box.focus();
+  });
+
+  document.getElementById('comment').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendComment(); }
+  });
+
+  function onHeart() {
+    var btn = document.getElementById('heart');
+    var it = state.items[state.idx];
+    if (!it || !btn || state.busy) return;
+    state.busy = true;
+    btn.textContent = '…';
+    api('/review/api/approve', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: it.key }),
+    }).then(function (r) {
+      state.busy = false;
+      if (r.body && r.body.ok) {
+        toast('Archived ✅ ' + it.key);
+        state.items.splice(state.idx, 1);
+        if (state.idx >= state.items.length) state.idx = Math.max(0, state.items.length - 1);
+        render();
+      } else {
+        btn.textContent = '🤍';
+        toast('Approve failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
+      }
+    }).catch(function () { state.busy = false; btn.textContent = '🤍'; toast('Approve failed: network'); });
+  }
+
+  function sendComment() {
+    var ta = document.getElementById('comment');
+    var it = state.items[state.idx];
+    if (!it || state.busy) return;
+    var text = ta.value.trim();
+    if (!text) return;
+    state.busy = true;
+    api('/review/api/comment', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: it.key, target: state.target, text: text }),
+    }).then(function (r) {
+      state.busy = false;
+      if (r.body && r.body.ok) {
+        var pane = document.getElementById(state.target === 'left' ? 'pane-todo' : 'pane-request');
+        var before = pane ? pane.innerHTML : '';
+        if (pane) pane.innerHTML = before + '\n' + esc(r.body.stamped);
+        ta.value = '';
+        toast('Sent → ' + (state.target === 'left' ? 'To do' : 'Request'));
+      } else {
+        toast('Send failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
+      }
+    }).catch(function () { state.busy = false; toast('Send failed: network'); });
+  }
+
+  /* --- render: only rebuilds when the item actually changes ----------- */
   function render() {
-    var body = document.getElementById('body');
+    var panel = document.getElementById('panel');
     var prev = document.getElementById('btn-prev');
     var next = document.getElementById('btn-next');
     document.getElementById('pos').textContent = state.items.length ? ((state.idx + 1) + '/' + state.items.length) : '0/0';
     prev.disabled = state.idx <= 0;
     next.disabled = state.idx >= state.items.length - 1;
     if (!state.items.length) {
-      body.innerHTML = '<div class="empty"><div class="big">🎉</div><p>No items awaiting review.<br>Agents set Status to <b>review</b> when work is ready for human eyes.</p></div>';
+      builtKey = null;
+      view = null;
+      panel.innerHTML = '<div class="empty"><div class="big">🎉</div><p>No items awaiting review.<br>Agents set Status to <b>review</b> when work is ready for human eyes.</p></div>';
+      document.getElementById('composer').hidden = true;
       return;
     }
     var it = state.items[state.idx];
-    var proofs = it.proofs || [];
-    var gal = proofs.length
-      ? '<div class="gallery">' + proofs.map(function (p, i) {
-          return '<figure><img src="' + proofUrl(it.key, p.id) + '" alt="proof ' + (i + 1) + '" loading="lazy" data-full="' + proofUrl(it.key, p.id) + '">' +
-            '<figcaption>' + esc(p.name) + ' · ' + (i + 1) + '/' + proofs.length + '</figcaption></figure>';
-        }).join('') + '</div>'
-      : '<div class="noproof">No proof screenshots filed yet.<br>Ask the agent to file screenshots before approving.</div>';
-    body.innerHTML =
-      '<div class="card">' +
-        '<div class="meta">' +
-          '<span class="chip chip-key">' + esc(it.key) + '</span>' +
-          (it.ref ? '<span class="chip">' + esc(it.ref) + '</span>' : '') +
-          '<span class="chip">' + esc(it.owner || 'unowned') + '</span>' +
-          '<span class="chip">' + esc(it.lastActivity || '') + '</span>' +
-        '</div>' +
-        (it.gate ? '<div class="meta"><span class="chip chip-gate">gate: ' + esc(it.gate) + '</span></div>' : '') +
-        gal +
-        '<div class="panel request"><h3>Original request</h3><p>' + esc(it.originalRequest) + '</p></div>' +
-        '<details class="panel context"><summary>Work done so far</summary><p>' + esc(it.workDone) + '</p></details>' +
-        '<details class="panel context"><summary>What\u2019s left to do</summary><p id="whatsleft">' + esc(it.whatsLeft) + '</p></details>' +
-        '<div class="actions">' +
-          '<div class="seg" role="tablist" aria-label="Comment target">' +
-            '<button id="seg-left" class="' + (state.target === 'left' ? 'on' : '') + '">↩ What\u2019s left (proof wrong)</button>' +
-            '<button id="seg-original" class="' + (state.target === 'original' ? 'on' : '') + '">＋ Original request (new feature)</button>' +
-          '</div>' +
-          '<textarea id="comment" placeholder="Comment for the agent\u2026"></textarea>' +
-          '<div class="row">' +
-            '<button class="btn btn-approve" id="btn-approve">👍 Done</button>' +
-            '<button class="btn btn-send" id="btn-send">Send ➤</button>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
-
-    document.getElementById('seg-left').addEventListener('click', function () { state.target = 'left'; render(); });
-    document.getElementById('seg-original').addEventListener('click', function () { state.target = 'original'; render(); });
-    document.getElementById('btn-approve').addEventListener('click', onApprove);
-    document.getElementById('btn-send').addEventListener('click', onSend);
-    body.querySelectorAll('.gallery img').forEach(function (img) {
-      img.addEventListener('click', function () {
-        document.getElementById('lightbox-img').src = img.getAttribute('data-full');
-        document.getElementById('lightbox').classList.add('open');
-      });
-    });
+    if (builtKey !== it.key) build(it);
+    showProof();
   }
 
-  document.getElementById('lightbox').addEventListener('click', function () {
-    this.classList.remove('open');
-    document.getElementById('lightbox-img').src = '';
-  });
   document.getElementById('btn-prev').addEventListener('click', function () {
-    if (state.idx > 0) { state.idx -= 1; state.approving = false; render(); }
+    if (state.idx > 0) { state.idx -= 1; render(); }
   });
   document.getElementById('btn-next').addEventListener('click', function () {
-    if (state.idx < state.items.length - 1) { state.idx += 1; state.approving = false; render(); }
+    if (state.idx < state.items.length - 1) { state.idx += 1; render(); }
   });
-
-  function api(path, opts) {
-    var url = path + query;
-    return fetch(url, opts).then(function (res) { return res.json().then(function (j) { return { status: res.status, body: j }; }); });
-  }
-
-  function onApprove() {
-    var btn = document.getElementById('btn-approve');
-    var it = state.items[state.idx];
-    if (!it) return;
-    if (!state.approving) {
-      state.approving = true;
-      btn.textContent = 'Tap again to archive ✅';
-      btn.classList.add('confirm');
-      return;
-    }
-    btn.disabled = true;
-    btn.textContent = 'Archiving…';
-    api('/review/api/approve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: it.key }),
-    }).then(function (r) {
-      if (r.body && r.body.ok) {
-        toast('Archived ✅ ' + it.key);
-        state.items.splice(state.idx, 1);
-        if (state.idx >= state.items.length) state.idx = Math.max(0, state.items.length - 1);
-        state.approving = false;
-        render();
-      } else {
-        toast('Approve failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
-        state.approving = false;
-        render();
-      }
-    }).catch(function () {
-      toast('Approve failed: network');
-      state.approving = false;
-      render();
-    });
-  }
-
-  function onSend() {
-    var ta = document.getElementById('comment');
-    var btn = document.getElementById('btn-send');
-    var it = state.items[state.idx];
-    if (!it) return;
-    var text = ta.value.trim();
-    if (!text) { toast('Write a comment first'); return; }
-    btn.disabled = true;
-    btn.textContent = 'Sending…';
-    api('/review/api/comment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: it.key, target: state.target, text: text }),
-    }).then(function (r) {
-      if (r.body && r.body.ok) {
-        toast('Sent → ' + (state.target === 'left' ? 'What\u2019s left' : 'Original request'));
-        if (state.target === 'left') it.whatsLeft = (it.whatsLeft ? it.whatsLeft + '\n' : '') + r.body.stamped;
-        else it.originalRequest = (it.originalRequest ? it.originalRequest + '\n' : '') + r.body.stamped;
-        state.approving = false;
-        render();
-      } else {
-        toast('Send failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
-        btn.disabled = false;
-        btn.textContent = 'Send ➤';
-      }
-    }).catch(function () {
-      toast('Send failed: network');
-      btn.disabled = false;
-      btn.textContent = 'Send ➤';
-    });
-  }
+  document.getElementById('btn-refresh').addEventListener('click', function () {
+    this.classList.add('spinning');
+    fetchState(true);
+    setTimeout(function () { document.getElementById('btn-refresh').classList.remove('spinning'); }, 600);
+  });
 
   function fetchState(isRefresh) {
     var q = isRefresh ? (query ? query + '&refresh=1' : '?refresh=1') : query;
@@ -321,8 +671,9 @@
         if (data && data.ok) {
           var cur = state.items[state.idx] && state.items[state.idx].key;
           state.items = data.items || [];
-          var at = state.items.findIndex(function (x) { return x.key === cur; });
-          state.idx = at >= 0 ? at : 0;
+          var at = -1;
+          for (var i = 0; i < state.items.length; i++) { if (state.items[i].key === cur) { at = i; break; } }
+          state.idx = at >= 0 ? at : Math.min(state.idx, Math.max(0, state.items.length - 1));
           document.getElementById('live-indicator').style.background = '#10b981';
           render();
         }
@@ -332,13 +683,7 @@
       });
   }
 
-  var btnRef = document.getElementById('btn-refresh');
-  btnRef.addEventListener('click', function () {
-    btnRef.classList.add('spinning');
-    fetchState(true);
-    setTimeout(function () { btnRef.classList.remove('spinning'); }, 600);
-  });
-
+  setTarget('left');
   fetchState(false);
   setInterval(function () {
     if (document.visibilityState === 'visible') fetchState(false);
