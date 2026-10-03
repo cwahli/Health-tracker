@@ -36,6 +36,23 @@ export const VM_OPENCODE_WINDOW_MS = 15 * 60 * 1000;
 let fleetTicketsCache = { cachedAt: 0, rows: [] };
 const fleetNodeHeartbeats = new Map();
 
+/**
+ * The Drive FILE id inside a proof cell, or '' when there is none.
+ *
+ * A `drive.google.com/file/d/<id>/…` link is a screenshot, and the mini app
+ * renders it as the picture. A `/folders/` link, a bare key, or prose is not
+ * an image and stays text — the cell never guesses which one it is.
+ */
+export function driveFileIdFrom(value) {
+  const s = String(value || '');
+  if (!/drive\.google\.com/i.test(s)) return '';
+  const m = s.match(/\/file\/d\/([A-Za-z0-9_-]{10,})/);
+  if (m) return m[1];
+  // thumbnail links carry the id in a query param
+  const q = s.match(/[?&]id=([A-Za-z0-9_-]{10,})/);
+  return q ? q[1] : '';
+}
+
 /** Directory where local beats are persisted. */
 export function fleetBeatsDir() {
   const dir = path.join(os.homedir(), '.local', 'state', 'fleet-beats');
@@ -481,6 +498,8 @@ export async function getFleetTickets({ env = process.env, root = REPO_ROOT, ref
               };
 
               const idVal = getByName('key') || getByName('id') || getByName('#') || String(idx + 1);
+              const proof = getByName('Completion proof') || getByName('proof') || '—';
+              const proofShot = driveFileIdFrom(proof);
               return {
                 id: idVal,
                 originalRequest: getByName('Original request') || getByName('goal') || getByName('title') || '—',
@@ -488,7 +507,11 @@ export async function getFleetTickets({ env = process.env, root = REPO_ROOT, ref
                 whatsLeftToDo: getByName("What's left to do") || getByName('todo') || '—',
                 owner: getByName('Owner') || '—',
                 status: getByName('Status') || 'Pending',
-                completionProof: getByName('Completion proof') || getByName('proof') || '—',
+                // A Drive FILE link is a screenshot: the cell shows the picture,
+                // not the URL. Anything else (a folder, a key, prose) stays text.
+                completionProof: proofShot ? '' : proof,
+                proofFileId: proofShot,
+                completionProofText: proofShot ? proof : '',
                 completionGate: getByName('Completion gate') || getByName('gate') || '—',
                 lastActivity: getByName('last_activity') || getByName('last activity') || getByName('built_at') || '—',
               };

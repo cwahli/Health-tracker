@@ -33,6 +33,7 @@ import {
   getFleetNodes as getStatusNodes,
   getFleetTickets as getStatusTickets,
   getFleetBots as getStatusBots,
+  driveFileIdFrom,
 } from './lib/fleet-status.mjs';
 
 function makeInitData(botToken, { user = { id: 123456, first_name: 'Test' }, authDate = Math.floor(Date.now() / 1000) } = {}) {
@@ -558,4 +559,29 @@ test('ticket projection follows the live sheet headers (key, LAST ACTIVITY)', as
     // 'LAST ACTIVITY' header carries the timestamp; a dash means the lookup missed.
     assert.notEqual(t.lastActivity, '—', `lastActivity projected for ${t.id}`);
   }
+});
+
+test('only a Drive FILE link becomes a screenshot; a folder, key, or prose stays text', () => {
+  // A file link is a screenshot: the cell renders the picture, not the URL.
+  assert.equal(
+    driveFileIdFrom('https://drive.google.com/file/d/162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM/view'),
+    '162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM',
+  );
+  assert.equal(
+    driveFileIdFrom('https://drive.google.com/file/d/1yEcrqTRVFf358Bty6F0xnl29frgcbgDt/view?usp=sharing'),
+    '1yEcrqTRVFf358Bty6F0xnl29frgcbgDt',
+  );
+  assert.equal(
+    driveFileIdFrom('https://drive.google.com/thumbnail?id=162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM&sz=w400'),
+    '162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM',
+  );
+  // A FOLDER is not one image — it must never be guessed into a screenshot.
+  assert.equal(driveFileIdFrom('https://drive.google.com/drive/folders/1kY6Z2TDoNM5s0vuRiv_rXE_k145cDMnj'), '');
+  // Prose and bare keys are not links at all.
+  assert.equal(driveFileIdFrom('TRANSCRIPT+payload-render, real-surface render still owed'), '');
+  assert.equal(driveFileIdFrom('spec:fleet-beat-fixes'), '');
+  assert.equal(driveFileIdFrom('sync-2026-10-02b-checkouts'), '');
+  assert.equal(driveFileIdFrom(''), '');
+  assert.equal(driveFileIdFrom('—'), '');
+  assert.equal(driveFileIdFrom('see https://example.com/a/b/c for detail'), '');
 });

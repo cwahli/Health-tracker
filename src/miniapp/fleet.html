@@ -141,9 +141,8 @@
           <table class="st-table" id="table-tickets">
             <thead>
               <tr>
-                <th style="width:70px;min-width:70px;max-width:70px">#</th>
-                <th>Owner</th>
                 <th>Original request</th>
+                <th>Owner</th>
                 <th>Work done so far</th>
                 <th>What's left to do</th>
                 <th>Status</th>
@@ -153,7 +152,7 @@
               </tr>
             </thead>
             <tbody id="body-tickets">
-              <tr><td colspan="9" style="text-align:center;padding:24px;color:#94a3b8">Loading tickets…</td></tr>
+              <tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8">Loading tickets…</td></tr>
             </tbody>
           </table>
         </div>
@@ -228,6 +227,16 @@
     return '<span class="badge badge-idle"><span class="badge-dot"></span>Idle</span>';
   }
 
+  // Proof screenshots ride the same session the API calls already use: the
+  // page keeps the gateway token in its query string, so the image request
+  // carries it too rather than opening a second, unauthenticated door.
+  function proofSrc(fileId) {
+    return '/fleet/api/proof/' + encodeURIComponent(fileId) + (location.search || '');
+  }
+  function proofLink(fileId) {
+    return 'https://drive.google.com/file/d/' + encodeURIComponent(fileId) + '/view';
+  }
+
   function esc(s) {
     if (!s && s !== 0) return '<span class="empty-cell">—</span>';
     return String(s)
@@ -241,19 +250,29 @@
     var tb = document.getElementById('body-tickets');
     if (!tb) return;
     if (!state.tickets || !state.tickets.length) {
-      tb.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:#94a3b8">No tickets found</td></tr>';
+      tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8">No tickets found</td></tr>';
       return;
     }
     var html = state.tickets.map(function (t) {
       var idStr = String(t.id || '').replace(/^#/, '');
+      // A Drive file id in the proof cell means "this is a screenshot": show the
+      // picture, not the link. The gateway streams the bytes (a Drive file is
+      // private, the browser cannot fetch it itself). Everything else — a
+      // folder link, a key, prose — stays the text it always was.
+      var proofCell = t.proofFileId
+        ? '<a href="' + esc(proofLink(t.proofFileId)) + '" target="_blank" rel="noopener">' +
+            '<img src="' + esc(proofSrc(t.proofFileId)) + '" alt="completion proof screenshot" ' +
+            'loading="lazy" style="max-width:220px;max-height:150px;border-radius:6px;border:1px solid #334155;cursor:zoom-in" ' +
+            'onerror="this.closest(\'td\').textContent=\'image unavailable\'">' +
+          '</a>'
+        : esc(t.completionProof);
       return '<tr id="ticket-row-' + esc(idStr) + '" data-ticket-id="' + esc(idStr) + '">' +
-        '<td><strong>' + esc(t.id) + '</strong></td>' +
-        '<td>' + esc(t.owner) + '</td>' +
         '<td>' + esc(t.originalRequest) + '</td>' +
+        '<td>' + esc(t.owner) + '</td>' +
         '<td>' + esc(t.workDoneSoFar) + '</td>' +
         '<td>' + esc(t.whatsLeftToDo) + '</td>' +
         '<td>' + esc(t.status) + '</td>' +
-        '<td>' + esc(t.completionProof) + '</td>' +
+        '<td>' + proofCell + '</td>' +
         '<td>' + esc(t.completionGate) + '</td>' +
         '<td>' + esc(t.lastActivity) + '</td>' +
         '</tr>';
