@@ -1755,7 +1755,7 @@ async function sendChunked(api, chatId, text) {
 
 const CLEAR_KEYBOARD = { inline_keyboard: [] };
 
-async function noteUsage({ chatId, result, eff, config, caches, totals, lastUsage }) {
+export async function noteUsage({ chatId, result, eff, config, caches, totals, lastUsage }) {
   let contextLimit = 0;
   try {
     contextLimit = await getContextLimit(config, caches, eff.model);
@@ -1773,6 +1773,10 @@ async function noteUsage({ chatId, result, eff, config, caches, totals, lastUsag
   prev.runs += 1;
   prev.tokens += Number(result.usage?.tokens?.total) || 0;
   prev.cost += raw.cost;
+  // Last-run snapshot beside the cumulative totals: sibling bots read this
+  // file (not our memory), so without it no one else can show this chat's
+  // session usage or its share of the context window.
+  prev.last = { ...raw, at: Date.now() };
   totals.set(chatId, prev);
   saveTotals(config.id, totals);
   return formatUsage(raw);
@@ -2299,25 +2303,30 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         roleOf: statusAllTax ? taxRoleOf : healthRoleOf,
       });
       const statusAllCaption = `Fleet status · chat ${String(chatId)} · ${fleetRows.length} agent${fleetRows.length === 1 ? '' : 's'} (via ${config.id})`;
-      // A real table ships as a photo: Telegram text has no grid rendering.
-      // Anything failing here (no sharp, no fonts, send error) falls back to
-      // the monospace text table, so the command never comes back empty.
+      // The readable table ships as a styled HTML document (the /allowance
+      // table pattern): Telegram text has no grid rendering. Anything failing
+      // here falls back to the monospace text table, so the command never
+      // comes back empty.
       try {
-        const { renderFleetTablePng } = await import('./lib/fleet-table-image.mjs');
-        const png = await renderFleetTablePng(fleetRows, { title: statusAllCaption });
-        if (png) {
-          const pngDir = path.join(os.tmpdir(), `bot-host-status-all-${config.id}`);
-          fs.mkdirSync(pngDir, { recursive: true });
-          const pngPath = path.join(pngDir, `fleet-${String(chatId)}.png`);
-          fs.writeFileSync(pngPath, png);
+        const { renderFleetStatusHtml } = await import('./lib/fleet-status-html.mjs');
+        const live = fleetRows.filter((r) => r.enabled !== false);
+        const uniform =
+          live.length > 0 && live.every((r) => r.model === live[0].model && r.agent === live[0].agent);
+        const html = renderFleetStatusHtml(fleetRows, {
+          title: statusAllCaption,
+          subtitle: uniform ? `all: ${live[0].model || '—'} · ${live[0].agent || '—'}` : '',
+        });
+        const htmlDir = path.join(os.tmpdir(), `bot-host-status-all-${config.id}`);
+        fs.mkdirSync(htmlDir, { recursive: true });
+        const htmlPath = path.join(htmlDir, `fleet-${String(chatId)}.html`);
+        fs.writeFileSync(htmlPath, html, 'utf8');
+        try {
+          await api.sendMediaFile(chatId, htmlPath, { caption: statusAllCaption });
+          return;
+        } finally {
           try {
-            await api.sendMediaFile(chatId, pngPath, { caption: statusAllCaption });
-            return;
-          } finally {
-            try {
-              fs.unlinkSync(pngPath);
-            } catch {}
-          }
+            fs.unlinkSync(htmlPath);
+          } catch {}
         }
       } catch {}
       await api.sendMessage(chatId, formatFleetStatusTable(fleetRows, { chatId: String(chatId), via: config.id }));
