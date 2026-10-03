@@ -986,7 +986,10 @@ export function trackRunQuota({ botId, modelRef, result }) {
     const filtered = extractLogError(result.stderr || '') || String(result.lastError || '');
     if (text || !filtered || !isQuotaOrLimitError(filtered)) return null;
     const { provider, model } = freemodelRefToRoute(modelRef || '');
-    if (!provider || !model || provider === 'gemini') return null;
+    // Keyed Gemini lanes stamp like any other lane: the key carries its own
+    // quota (vendor countdown or default TTL) and the host-account mirror
+    // shares it, so a spent key is skipped instead of re-burned every turn.
+    if (!provider || !model) return null;
     const { dir } = ensureBotLedger(botId || 'default');
     // Carry the vendor's own retry countdown into the stamp: a Cline daily
     // cap ("try again in 22h") must not decay to the 6h default TTL, or the
@@ -3827,11 +3830,11 @@ export function stickyModelAfterTurn({ chatModel, answeredModel, answered }) {
  * the old one was skipped. A host with no ledger yet keeps the old two-entry
  * chain, so a fresh install behaves exactly as before.
  */
-export function selectTurnLanes({ botId, model, fallback, now = Date.now(), readiness = null } = {}) {
+export function selectTurnLanes({ botId, model, fallback, now = Date.now(), readiness = null, catalogEntries = null } = {}) {
   const legacy = failoverModels(model, fallback);
   let ledger;
   try {
-    ledger = loadFreeLaneLedger({ stateDir: ensureBotLedger(botId || 'default').dir });
+    ledger = loadFreeLaneLedger({ stateDir: ensureBotLedger(botId || 'default').dir, catalogEntries });
   } catch {
     return { models: legacy, skipped: [], fromLedger: false };
   }
@@ -4899,7 +4902,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           const pack = await resolvePackPath({
             manifest: handed.packManifest,
             failedLane: handed.model || '',
-            lanesFn: async () => (selectTurnLanes({ botId: config.id, model: eff.model, fallback: config.agent.model, readiness: hostReadiness(caches, config.id) }).models || []),
+            lanesFn: async () => (selectTurnLanes({ botId: config.id, model: eff.model, fallback: config.agent.model, readiness: hostReadiness(caches, config.id), catalogEntries: await getFreeModels(caches, config) }).models || []),
             summarizeFn: async ({ model: lane, manifest: man }) => (await runOpencode({
               prompt: `Summarize this handoff pack in 10 lines or less (files changed, what the next turn needs):\n${(man.files || []).map((f) => `- ${f.path} (${f.bytes} bytes)`).join('\n')}`,
               model: lane,
@@ -4939,6 +4942,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       model: eff.model,
       fallback: config.agent.model,
       readiness: hostReadiness(caches, config.id),
+      catalogEntries: await getFreeModels(caches, config),
     });
     if (laneChoice.exhausted) {
       // QS-9: the local ledger is empty, but that verdict only covers this

@@ -530,13 +530,30 @@ export function effectiveProviderOf(lane) {
 
 /** toModelRef lives in freemodels; a local shim keeps this module standalone. */
 function toModelRefShim(provider, model) {
-  if (provider === "cline") return `cline:${model}`;
-  if (provider === "gemini") return `gemini:${model}`;
+  return laneWalkRef(provider, model);
+}
+
+/**
+ * The executable chat ref for a walk lane. Mirrored in freemodels.toModelRef
+ * (this module stays standalone for the router vendor mirror — keep both in
+ * sync). `google/` catalog rows run through the direct Gemini runner, not the
+ * OpenCode `google/` provider: that provider is unavailable on hosts without
+ * a wired OpenCode google credential (live VPS 2026-10-03, `Model
+ * unavailable: google/gemini-3.8-flash`), while GEMINI_API_KEY answers
+ * directly (pinged `ok` 2026-10-03).
+ */
+export function laneWalkRef(provider, model) {
+  const surface = String(provider || '');
+  if (surface === 'cline') return `cline:${model}`;
+  if (surface === 'gemini' || surface === 'google') {
+    const id = String(model || '');
+    return `gemini:${id.startsWith('gemini/') ? id : `gemini/${id}`}`;
+  }
   // Mirror freemodels.toModelRef: a bare chat-only id keeps its vendor so the
   // walk emits a routable ref instead of an `Invalid model reference` burn.
-  if (!provider || provider === "opencode") return model;
-  if (String(model || "").includes("/")) return model;
-  return `${provider}/${model}`;
+  if (!surface || surface === 'opencode') return model;
+  if (String(model || '').includes('/')) return model;
+  return `${surface}/${model}`;
 }
 
 /**
@@ -1819,10 +1836,19 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
   // The same model reaches the catalog under more than one surface prefix:
   // `opencode/space-bunny-free`, `opencode-go/space-bunny-free` and
   // `cline:cline-free/kat-coder-pro` all name a model the table may already carry
-  // under its own path. Matching on provider+model therefore folded in a second
+  // under its own path. Matching on the bare model id therefore folded in a second
   // row for it and the table showed the same model twice under two plan codes, so
-  // the model id is compared with the vendor prefix and the surface stripped.
-  const known = new Set(lanes.map((l) => modelKey(l.model)).filter(Boolean));
+  // the model id is compared with the vendor prefix and the surface stripped —
+  // but qualified by the EFFECTIVE provider: `opencode/space-bunny-free` and
+  // `opencode-go/space-bunny-free` are different free pools (both cost-0, live
+  // 2026-10-03) and each deserves its own row and quota, while the
+  // `opencode/tokenharbor/x` + `tokenharbor/x` twins share one bar and stay one.
+  const foldKey = (provider, model) => {
+    const k = modelKey(model);
+    if (!k) return '';
+    return `${effectiveProviderOf({ provider, model }).toLowerCase()}/${k}`;
+  };
+  const known = new Set(lanes.map((l) => foldKey(l.provider, l.model)).filter(Boolean));
   for (const entry of entries || []) {
     const ref = typeof entry === "string" ? entry : entry?.ref || "";
     if (!ref) continue;
@@ -1830,7 +1856,7 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
     // it is already reported as a gap by /setup.
     if (typeof entry === "object" && entry && (entry.status === "pending-signin" || /^pending:/.test(ref))) continue;
     for (const route of routeCandidates(ref)) {
-      const key = modelKey(route.model);
+      const key = foldKey(route.provider, route.model);
       if (!key || known.has(key)) continue;
       known.add(key);
       nextPref += 1;
@@ -1844,10 +1870,18 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
         .replace(/^[a-z][a-z0-9-]*:\s*/i, "")
         .replace(/\s*\(free\)\s*$/i, "")
         .trim();
+      // Store the model without its own redundant vendor prefix so quota keys
+      // stay single (`opencode-go/space-bunny-free`, not the doubled form the
+      // legacy table rows carry): a folded row has no live stamps to preserve,
+      // so it starts clean. Matching still works via tail comparison.
+      const ownPrefix = `${String(route.provider || '').toLowerCase()}/`;
+      const storedModel = String(route.model || '').toLowerCase().startsWith(ownPrefix)
+        ? String(route.model).slice(String(route.provider).length + 1)
+        : route.model;
       const lane = {
         pref: nextPref,
         provider: route.provider,
-        model: route.model,
+        model: storedModel,
         label: cleanLabel || shortModelName(route.model) || route.model,
         // `available` means "not known to be spent". The projection is what refuses
         // to offer it — a missing credential, a terminal-only tool or a live

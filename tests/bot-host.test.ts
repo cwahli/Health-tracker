@@ -104,7 +104,7 @@ import {
   sweepOrphanedLeases,
   selectTurnLanes,
 } from '../scripts/bot-host.mjs';
-import { isHardModelFailure, ensureBotLedger } from '../scripts/lib/free-lanes.mjs';
+import { isHardModelFailure, ensureBotLedger, withCatalogLanes } from '../scripts/lib/free-lanes.mjs';
 import {
   buildStatusSnapshot,
   formatStatusPlain,
@@ -1147,6 +1147,13 @@ describe('vm5 failover refs (live 2026-10-03)', () => {
       'tokenharbor/deepseek-v4.1-flash:free',
     );
     expect(toModelRef('cline', 'cline-free/kat-coder-pro')).toBe('cline:cline-free/kat-coder-pro');
+    // `google/` catalog rows execute through the direct Gemini runner: the
+    // OpenCode `google/` provider is unwired on this host (live 2026-10-03).
+    expect(toModelRef('google', 'gemini-3.8-flash')).toBe('gemini:gemini/gemini-3.8-flash');
+    expect(toModelRef('gemini', 'gemini-3.8-flash')).toBe('gemini:gemini/gemini-3.8-flash');
+    expect(toModelRef('gemini', 'gemini/gemini-3.1-pro')).toBe('gemini:gemini/gemini-3.1-pro');
+    // The go-plan pool is its own quota: a bare id keeps the vendor.
+    expect(toModelRef('opencode-go', 'space-bunny-free')).toBe('opencode-go/space-bunny-free');
   });
 
   it('treats an invalid model reference as a hard model failure', () => {
@@ -1223,6 +1230,130 @@ describe('vm5 failover refs (live 2026-10-03)', () => {
       });
       expect(closed.models).toEqual(['opencode/space-bunny-free']);
       expect(closed.skipped.some((s) => /needs a Token Harbor key/.test(s.why || ''))).toBe(true);
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = oldHome;
+      if (oldLanes === undefined) delete process.env.FREE_LANES_DIR;
+      else process.env.FREE_LANES_DIR = oldLanes;
+      if (oldShared === undefined) delete process.env.FREE_LANES_SHARED_DIR;
+      else process.env.FREE_LANES_SHARED_DIR = oldShared;
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(lanesDir, { recursive: true, force: true });
+      fs.rmSync(sharedDir, { recursive: true, force: true });
+    }
+  });
+
+  it('folds provider-distinct catalog rows but keeps shared-bar twins single', () => {
+    const table = {
+      version: 3,
+      failover: 'test',
+      buckets: {},
+      lanes: [
+        { pref: 1, family: 'f1', provider: 'opencode', model: 'opencode/space-bunny-free', label: 'Space Bunny', bucket: 'opencode-zen-free', tg: true },
+        { pref: 2, family: 'f2', provider: 'opencode', model: 'tokenharbor/mimo-v2.6-flash:free', label: 'MiMo', bucket: 'tokenharbor-free', tg: true },
+      ],
+    };
+    const { table: folded, added } = withCatalogLanes(table, [
+      'opencode-go/space-bunny-free',
+      'google/gemini-3.8-flash',
+      'tokenharbor/mimo-v2.6-flash:free',
+    ]);
+    const refs = added.map((l) => `${l.provider}/${l.model}`);
+    // The go-plan pool is separate quota: its own row. The tokenharbor twin
+    // shares one bar: still a single row.
+    expect(refs).toContain('opencode-go/space-bunny-free');
+    expect(refs).toContain('google/gemini-3.8-flash');
+    expect(refs.filter((r) => /mimo-v2\.6-flash/.test(r))).toHaveLength(0);
+    expect(folded.lanes).toHaveLength(4);
+    const go = folded.lanes.find((l) => l.provider === 'opencode-go');
+    expect(go.model).toBe('space-bunny-free');
+  });
+
+  it('walks folded go-plan and gemini lanes in executable form', () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5b-home-'));
+    const lanesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5b-lanes-'));
+    const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5b-shared-'));
+    const oldHome = process.env.HOME;
+    const oldLanes = process.env.FREE_LANES_DIR;
+    const oldShared = process.env.FREE_LANES_SHARED_DIR;
+    process.env.HOME = homeDir;
+    process.env.FREE_LANES_DIR = lanesDir;
+    process.env.FREE_LANES_SHARED_DIR = sharedDir;
+    try {
+      const { dir } = ensureBotLedger('vm5fold');
+      const table = {
+        version: 3,
+        failover: 'test',
+        updatedAt: null,
+        buckets: {},
+        lanes: [
+          { pref: 1, family: 'f1', provider: 'opencode', model: 'opencode/space-bunny-free', label: 'Space Bunny', bucket: 'opencode-zen-free', tg: true, resetRule: 't', status: 'available', nextReset: '-', nextResetAt: null, cooldownLeft: '-' },
+        ],
+      };
+      fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(table));
+      fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ quota: {} }));
+      const readiness = {
+        opencode: { ready: true },
+        cline: { ready: true },
+        tokenharbor: { ready: true },
+        cloudflare: { ready: true },
+        gemini: { ready: true },
+        freebuff: { ready: true },
+      };
+      const choice = selectTurnLanes({
+        botId: 'vm5fold',
+        model: 'opencode/space-bunny-free',
+        fallback: 'cline:cline-free/deepseek-v4.1-flash',
+        readiness,
+        catalogEntries: ['opencode-go/space-bunny-free', 'google/gemini-3.8-flash'],
+      });
+      expect(choice.models).toContain('opencode-go/space-bunny-free');
+      expect(choice.models).toContain('gemini:gemini/gemini-3.8-flash');
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = oldHome;
+      if (oldLanes === undefined) delete process.env.FREE_LANES_DIR;
+      else process.env.FREE_LANES_DIR = oldLanes;
+      if (oldShared === undefined) delete process.env.FREE_LANES_SHARED_DIR;
+      else process.env.FREE_LANES_SHARED_DIR = oldShared;
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(lanesDir, { recursive: true, force: true });
+      fs.rmSync(sharedDir, { recursive: true, force: true });
+    }
+  });
+
+  it('stamps a keyed gemini quota error instead of re-burning it', async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5c-home-'));
+    const lanesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5c-lanes-'));
+    const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5c-shared-'));
+    const oldHome = process.env.HOME;
+    const oldLanes = process.env.FREE_LANES_DIR;
+    const oldShared = process.env.FREE_LANES_SHARED_DIR;
+    process.env.HOME = homeDir;
+    process.env.FREE_LANES_DIR = lanesDir;
+    process.env.FREE_LANES_SHARED_DIR = sharedDir;
+    try {
+      const { dir } = ensureBotLedger('vm5quota');
+      const table = {
+        version: 3,
+        failover: 'test',
+        updatedAt: null,
+        buckets: {},
+        lanes: [
+          { pref: 1, family: 'f1', provider: 'opencode', model: 'opencode/space-bunny-free', label: 'Space Bunny', bucket: 'opencode-zen-free', tg: true, resetRule: 't', status: 'available', nextReset: '-', nextResetAt: null, cooldownLeft: '-' },
+        ],
+      };
+      fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(table));
+      fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ quota: {} }));
+      const { trackRunQuota } = await import('../scripts/bot-host.mjs');
+      const stamped = trackRunQuota({
+        botId: 'vm5quota',
+        modelRef: 'gemini:gemini-3.8-flash',
+        result: { finalText: '', stderr: '', lastError: '429 Resource exhausted, retry in 20s' },
+      });
+      expect(stamped?.stamped).toBe(true);
+      const session = JSON.parse(fs.readFileSync(path.join(dir, 'session.json'), 'utf8'));
+      expect(session.quota['gemini/gemini-3.8-flash']?.depletedUntil).toBeGreaterThan(Date.now());
     } finally {
       if (oldHome === undefined) delete process.env.HOME;
       else process.env.HOME = oldHome;
