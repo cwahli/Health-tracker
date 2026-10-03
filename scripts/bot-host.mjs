@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { TelegramApi, TelegramError, isSendableMedia } from './lib/tg-api.mjs';
 import { chunkForTelegram } from './lib/tg-copy-code.mjs';
-import { formatWorkingHeadline, ctxLimitFor } from './lib/tg-progress.mjs';
+import { formatWorkingHeadline, ctxLimitFor, phaseLabelFor } from './lib/tg-progress.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
 import {
   sessionKey,
@@ -29,7 +29,7 @@ import {
   repointWorkView,
 } from './lib/work-session.mjs';
 import { checkRegistry } from './lib/lane-contract.mjs';
-import { compressReasoning } from './lib/reasoning-compress.mjs';
+import { createReasoningReducer } from './lib/reasoning-compress.mjs';
 import { recordFailure, loadFailures } from './lib/failure-log.mjs';
 import { providerReadiness, setupGaps, setServiceUnit } from './lib/setup-gaps.mjs';
 import {
@@ -1352,7 +1352,7 @@ export function readTuiUrl(env = process.env, file = miniappUrlFile()) {
 }
 
 export class ProgressRenderer {
-  constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, heartbeatMs, dryRun = false, providerLabel = '', modelLabel = '', thinking = '', onMessageId = null }) {
+  constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, heartbeatMs, progressMode = 'gist', dryRun = false, providerLabel = '', modelLabel = '', thinking = '', onMessageId = null }) {
     this.api = api;
     this.throttle = throttle;
     this.chatId = chatId;
@@ -1364,6 +1364,11 @@ export class ProgressRenderer {
     this.providerLabel = providerLabel;
     this.modelLabel = modelLabel;
     this.thinkingLevel = thinking;
+    // 'gist' = today's behaviour (reasoning prose on the user surface).
+    // 'phase' = a truthful label from the tool lifecycle instead. Default
+    // 'gist' so this ships as a capability, not a product change; flipping it
+    // is config only (`progress.mode` in bots/registry.json).
+    this.progressMode = progressMode === 'phase' ? 'phase' : 'gist';
     this.onMessageId = onMessageId;
     this.startedAt = null;
     this.usedTokens = null;
@@ -1371,7 +1376,12 @@ export class ProgressRenderer {
     this.edits = 0;
     this.creating = false;
     this.createRetryAt = 0;
-    this.thinking = '';
+    // `thinkingLevel` is the configured reasoning LEVEL (low/high/xhigh).
+    // `thinkingText` is a gist of the reasoning CONTENT. They were both called
+    // "thinking" and both rendered under that one word, so /status reporting a
+    // level and the headline reporting a sentence looked like the same field.
+    this.thinkingText = '';
+    this.reasoning = createReasoningReducer({ maxChars: this.maxChars });
     this.tool = '';
     this.toolDetail = '';
     this.toolStartedAt = null;
@@ -1407,7 +1417,7 @@ export class ProgressRenderer {
       bits.push(`Tool ${this.tool}${runtime}${detail}`);
     }
     if (this.lastOutput) bits.push(`Out: ${this._tail(this.lastOutput, 140)}`);
-    else if (this.thinking) bits.push(`Thinking: ${this._tail(this.thinking, 140)}`);
+    else if (this.thinkingText) bits.push(`Thinking: ${this._tail(this.thinkingText, 140)}`);
     if (!bits.length) return '';
     return `Last: ${bits.join(' / ')}`;
   }
@@ -1431,7 +1441,23 @@ export class ProgressRenderer {
         detail: this.status,
       }),
     );
-    if (this.thinking) lines.push(`Thinking: ${this.thinking}`);
+    // Node 3 (PROGRESS-SURFACES-1) ships as a CAPABILITY, off by default.
+    //
+    // The evidence says the user surface should carry a truthful phase label
+    // rather than reasoning prose: visible chain-of-thought mentioned the
+    // driving hint only 25% of the time on Claude 3.7 and 39% on R1, and
+    // users end up arguing with the reasoning instead of the answer
+    // (ollama #8528, open-webui #8706 ask for it hidden outright).
+    //
+    // That is a product decision, so it is NOT made here. Default `off` keeps
+    // today's behaviour byte-for-byte; flipping it to `phase` is a one-word
+    // config change and needs no code edit.
+    if (this.progressMode === 'phase') {
+      const phase = phaseLabelFor(this.tool, this.status);
+      if (phase) lines.push(`Phase: ${phase}`);
+    } else if (this.thinkingText) {
+      lines.push(`Thinking: ${this.thinkingText}`);
+    }
     if (this.tool) {
       const running = this.toolStartedAt ? ` · ${Math.max(0, Math.round((now - this.toolStartedAt) / 1000))}s` : '';
       const detail = this.toolDetail ? ` ${this._tail(this.toolDetail, 90)}` : '';
@@ -1526,14 +1552,16 @@ export class ProgressRenderer {
       // still means the model is streaming, so the freshness line keeps that
       // truth instead of crying stuck.
       this.lastEventAt = Date.now();
-      const gist = compressReasoning(event.text, { maxChars: this.maxChars });
-      // Drop compressor fragments (".", "/", "check", "at", ":") and repeats:
-      // each accepted gist would otherwise become its own chat message.
-      // Single-word reasoning shards ("anywhere") also read as nonsense on the
-      // `Thinking:` line, so a gist needs at least two words to be shown.
-      const clean = gist.trim();
-      if (!clean || clean.length < 12 || clean.split(/\s+/).length < 2 || clean === this.thinking) return;
-      this.thinking = gist;
+      // The reducer compresses the ACCUMULATED stream, keyed by part id, so
+      // the gist advances with the phase instead of summarising whichever
+      // fragment happened to arrive last. It tolerates a delta that beats its
+      // own part registration (opencode #26924) and an unbalanced fragment
+      // (opencode #43312). `part.type` is the only trustworthy signal — opencode
+      // publishes reasoning deltas with field:"text".
+      const gist = this.reasoning.push(event.part, { text: event.text });
+      // A one-word "gist" is a fragment that slipped through, not a summary.
+      if (!gist || gist === this.thinkingText) return;
+      this.thinkingText = gist;
       this.status = 'thinking';
       this._schedule();
     } else if (event.kind === 'tool') {
@@ -1577,7 +1605,7 @@ export class ProgressRenderer {
     }
     if (!this.throttle || typeof this.throttle.submit !== 'function') return;
     if (this.messageId == null) {
-      if (!this.thinking && !this.tool && !this.lastOutput) return;
+      if (!this.thinkingText && !this.tool && !this.lastOutput) return;
       // One progress message per run: never queue a second create while the
       // first is in flight, and back off after a failed create (rate-limit
       // returns null) instead of spawning a new message per event.
