@@ -2303,29 +2303,32 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         roleOf: statusAllTax ? taxRoleOf : healthRoleOf,
       });
       const statusAllCaption = `Fleet status · chat ${String(chatId)} · ${fleetRows.length} agent${fleetRows.length === 1 ? '' : 's'} (via ${config.id})`;
-      // The readable table ships as a styled HTML document (the /allowance
+      // The readable table ships as the telegram-tables skill grid
+      // (JSON -> qa-evidence/build-table.py -> HTML document, the /allowance
       // table pattern): Telegram text has no grid rendering. Anything failing
       // here falls back to the monospace text table, so the command never
       // comes back empty.
       try {
-        const { renderFleetStatusHtml } = await import('./lib/fleet-status-html.mjs');
+        const { writeFleetStatusDoc } = await import('./lib/fleet-status-html.mjs');
         const live = fleetRows.filter((r) => r.enabled !== false);
         const uniform =
           live.length > 0 && live.every((r) => r.model === live[0].model && r.agent === live[0].agent);
-        const html = renderFleetStatusHtml(fleetRows, {
-          title: statusAllCaption,
-          subtitle: uniform ? `all: ${live[0].model || '—'} · ${live[0].agent || '—'}` : '',
-        });
         const htmlDir = path.join(os.tmpdir(), `bot-host-status-all-${config.id}`);
         fs.mkdirSync(htmlDir, { recursive: true });
-        const htmlPath = path.join(htmlDir, `fleet-${String(chatId)}.html`);
-        fs.writeFileSync(htmlPath, html, 'utf8');
+        const doc = writeFleetStatusDoc(fleetRows, {
+          title: statusAllCaption,
+          subtitle: uniform ? `all: ${live[0].model || '—'} · ${live[0].agent || '—'}` : '',
+          dir: htmlDir,
+        });
         try {
-          await api.sendMediaFile(chatId, htmlPath, { caption: statusAllCaption });
+          await api.sendMediaFile(chatId, doc.htmlPath, { caption: statusAllCaption });
           return;
         } finally {
           try {
-            fs.unlinkSync(htmlPath);
+            fs.unlinkSync(doc.htmlPath);
+          } catch {}
+          try {
+            fs.unlinkSync(doc.jsonPath);
           } catch {}
         }
       } catch {}
@@ -4524,6 +4527,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     console.log(`[${config.id}] health group ${healthTurn.mode}${healthTurn.roleId ? ` ${healthTurn.roleId}` : ''}`);
     let reply;
     let typing;
+    // The winning lane's measured usage for this turn. The council path has
+    // no coder turn, so without this accumulator the seat's per-chat Usage
+    // stays — forever no matter how much it talks in the room.
+    const seatUsage = { tokens: 0, cost: 0, model: '' };
     try {
       if (healthTurn.mode === 'brief') {
         // A brief ask is not a question for the seats: it runs the publisher,
@@ -4563,6 +4570,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
               botModel: config.agent.model,
               timeoutMs: 120000,
             });
+            try {
+              const t = Number(res?.usage?.tokens?.total ?? res?.usage?.tokens) || 0;
+              const c = Number(res?.usage?.cost) || 0;
+              if (t > 0 || c > 0) {
+                seatUsage.tokens += t;
+                seatUsage.cost += c;
+                if (!seatUsage.model && res?.answeredBy) seatUsage.model = res.answeredBy;
+              }
+            } catch {}
             const out = String(res?.finalText || '').trim();
             if (!out) throw new Error(res?.lastError || 'the model returned no text');
             return out;
@@ -4581,6 +4597,22 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
     if (reply?.text) {
       await api.sendMessage(chatId, reply.text, reply.markdown ? { parse_mode: 'Markdown' } : undefined).catch(() => {});
+      // Persist this turn's measured usage beside the cumulative chat totals,
+      // the same record the coder path keeps: without it /status_all can only
+      // show — for a seat that answers in this room every day.
+      if (seatUsage.tokens > 0 || seatUsage.cost > 0) {
+        try {
+          await noteUsage({
+            chatId,
+            result: { usage: { tokens: { total: seatUsage.tokens }, cost: seatUsage.cost } },
+            eff: { ...eff, model: seatUsage.model || eff.model },
+            config,
+            caches,
+            totals,
+            lastUsage,
+          });
+        } catch {}
+      }
     }
     if (reply?.answered) {
       if (healthTurn.mode === 'seat') forgetTaxGroup(taxWorkspace, chatId);

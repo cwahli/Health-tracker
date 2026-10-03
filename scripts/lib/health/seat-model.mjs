@@ -220,5 +220,10 @@ export async function runSeatModel({
       : String(result?.lastError || ''),
     answeredBy,
     attempts,
+    // The winning lane's measured usage. The group-council path has no coder
+    // turn, so without this the seat's per-chat Usage stays — forever: the
+    // runner already measures it (runOpencode resolves `usage`), it was just
+    // dropped on the floor here.
+    usage: result?.usage ?? null,
   };
 }
