@@ -3384,9 +3384,49 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         }
         return;
       }
+      if (sub === 'tags') {
+        await api.sendMessage(chatId, '🏷️ *Checking and synchronizing seat tags in Telegram...*', { parse_mode: 'Markdown' }).catch(() => {});
+        try {
+          const { execFile } = await import('node:child_process');
+          const { promisify } = await import('node:util');
+          const execFileAsync = promisify(execFile);
+          // The creator-session credentials live in the host's own env files, never
+          // in this repo. Read them at call time; refuse by name when absent.
+          const hostEnv = {};
+          for (const f of ['tui-gateway.env', 'common.env']) {
+            try {
+              for (const line of fs.readFileSync(path.join(os.homedir(), '.config', 'bot-host', f), 'utf8').split('\n')) {
+                const m = line.match(/^(TELEGRAM_API_ID|TELEGRAM_API_HASH)=(.+)$/);
+                if (m) hostEnv[m[1]] = m[2].trim().replace(/^["']|["']$/g, '');
+              }
+            } catch { /* host may not have this file */ }
+          }
+          const apiId = process.env.TELEGRAM_API_ID || hostEnv.TELEGRAM_API_ID;
+          const apiHash = process.env.TELEGRAM_API_HASH || hostEnv.TELEGRAM_API_HASH;
+          if (!apiId || !apiHash) {
+            await api.sendMessage(chatId, '❌ Seat tags need TELEGRAM_API_ID / TELEGRAM_API_HASH in ~/.config/bot-host/tui-gateway.env on this host.');
+            return;
+          }
+          const { stdout, stderr } = await execFileAsync(
+            process.execPath,
+            [path.join(HERE, 'seat-tags.mjs'), '--apply', '--rights=change_info:true,view:true'],
+            {
+              env: { ...process.env, TELEGRAM_API_ID: apiId, TELEGRAM_API_HASH: apiHash },
+              timeout: 30000,
+            },
+          );
+          const clean = (stdout || stderr || 'All tags up to date.').replace(/\x1B\[[0-9;]*[mK]/g, '').trim();
+          await api.sendMessage(chatId, `\`\`\`\n${clean}\n\`\`\``, { parse_mode: 'Markdown' })
+            .catch(() => api.sendMessage(chatId, clean));
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Failed to sync seat tags: ${err.message}`);
+        }
+        return;
+      }
       // Anything else (including no argument) is the status answer.
       const status = getHealthStatus({ projectId });
-      await api.sendMessage(chatId, formatStatusText(status), { parse_mode: 'Markdown' });
+      await api.sendMessage(chatId, formatStatusText(status), { parse_mode: 'Markdown' })
+        .catch(() => api.sendMessage(chatId, formatStatusText(status)));
       return;
     }
 
