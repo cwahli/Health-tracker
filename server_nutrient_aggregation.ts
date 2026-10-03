@@ -1,4 +1,5 @@
 import { NUTRIENT_KEYS } from "./src/utils/nutrients";
+import { resolveLabelEnergyKcal, shouldPreferLabelEnergy } from "./src/utils/labelEnergy";
 import { getTraceNutrientsForFoodType, getCookingMethodModifier, calculateUniversalAddedNutrients, BEVERAGE_PATTERN, lookupCanonicalBaseFood } from "./server_food_db";
 import { classifyUniversalPhysicalFormV3 } from "./server_matching_engine";
 import { decidePrepAddition } from "./server_prep_policy";
@@ -73,6 +74,9 @@ export function aggregateItemsNutrients(
     });
 
     const labelData = item.labelNutrientsPerServing || item.syntheticBase100g;
+    // A verified catalog match owns the whole panel once applied (STEP 2 below),
+    // so the printed-label energy gate must stand down rather than overrule it.
+    let verifiedDbApplied = false;
     let servingSizeGrams = labelData && labelData.servingSizeGrams !== undefined && labelData.servingSizeGrams !== null
       ? Number(labelData.servingSizeGrams)
       : 0;
@@ -312,6 +316,7 @@ export function aggregateItemsNutrients(
         const match = !hasInMap ? databaseMatchesArray.find((m: any) => m.id === dbId) : null;
         if (hasInMap) {
           const baseNutrientsPer100g = dbMatchMap.get(dbId);
+          verifiedDbApplied = true;
           addDebugLog(`[Nutrient] "${canonicalName}" STEP 2 fallback override. baseNutrientsPer100g=${JSON.stringify(baseNutrientsPer100g)}`);
           const factor = ((baseNutrientsPer100g as any)?.basisType === 'total' || (baseNutrientsPer100g as any)?.basisType === 'per_dish') ? 1 : (itemWeight / 100);
           for (const key of NUTRIENT_KEYS) {
@@ -328,6 +333,7 @@ export function aggregateItemsNutrients(
               itemNutrients[key] = parseFloat((baseNutrientsPer100g[key] * factor).toFixed(2));
             }
           }
+          verifiedDbApplied = true;
           addDebugLog(`[Nutrient] "${canonicalName}" core-11 reinforced by match object.`);
         }
       }
@@ -721,6 +727,32 @@ export function aggregateItemsNutrients(
           addDebugLog(`[Atwater Energy Consistency Gate] "${displayName}": Calories (${itemNutrients.calories} kcal) below fat thermal energy (${itemNutrients.totalFat}g fat * 9 = ${minFatKcal.toFixed(1)} kcal). Reconciled calories to ${derivedKcal} kcal.`);
           itemNutrients.calories = derivedKcal;
         }
+      }
+    }
+
+    // Printed-label energy is truth: macros cannot express fibre, polyols or
+    // alcohol energy, so Atwater silently under-reports those foods. Live:
+    // job_1791044439374_4x4srekyi logged a 440 ml beer labelled 54 kcal/100ml
+    // (~238 kcal) as 88 kcal = 22 g carbs × 4. An explicit calories lock still wins.
+    if (!itemLockedKeys.has('calories') && !verifiedDbApplied) {
+      const labelEnergy = resolveLabelEnergyKcal({
+        rawNutritionLabel: item.rawNutritionLabel,
+        labelNutrientsPerServing: labelData,
+        servingSizeGrams,
+        itemWeightGrams: itemWeight,
+      });
+      // Printed panel only. The numeric per-serving panel is the model's core-11
+      // estimate rather than label truth, and must not overrule a verified match.
+      if (
+        labelEnergy.source === 'rawNutritionLabel' &&
+        shouldPreferLabelEnergy({ derivedKcal: itemNutrients.calories, labelKcal: labelEnergy.kcal })
+      ) {
+        addDebugLog(
+          `[Label Energy Gate] "${displayName}": derived ${itemNutrients.calories} kcal (Atwater) vs printed label ` +
+          `${labelEnergy.perServingKcal} kcal per ${labelEnergy.basisGrams}g → ${labelEnergy.kcal} kcal for ${itemWeight}g ` +
+          `(${labelEnergy.source}). Using the printed label.`
+        );
+        itemNutrients.calories = labelEnergy.kcal;
       }
     }
 
