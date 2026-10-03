@@ -18,7 +18,6 @@ import { createRequire } from 'node:module';
 
 import { workerStatus } from './worker-presence.mjs';
 import { applyMasterDefaults } from './registry.mjs';
-import { shortSession } from './bot-status.mjs';
 import { formatTokens } from './commands.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -692,38 +691,72 @@ export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home
     });
 }
 
-function fleetStatusRow(r) {
-  const head = `• ${r.name || r.id}${r.id && (r.name || r.id) !== r.id ? ` (${r.id})` : ''}`;
-  if (!r.enabled) return `${head} — off`;
-  const bits = [`model: ${r.model || '—'}`, `agent: ${r.agent || '—'}`];
-  bits.push(
-    r.sessionId
-      ? `session: ${shortSession(r.sessionId)}`
-      : r.foreignSession
-        ? 'session: other project'
-        : 'session: —',
-  );
-  bits.push(`task: ${r.task}`);
-  if (r.totals) {
-    const spend = Number(r.totals.cost) || 0;
-    bits.push(
-      `${r.totals.runs} run${r.totals.runs === 1 ? '' : 's'} · ${formatTokens(r.totals.tokens)}${spend > 0 ? ` · $${spend.toFixed(spend < 0.01 ? 5 : 4)}` : ''}`,
-    );
-  }
-  return `${head} — ${bits.join(' · ')}`;
+function padEnd(s, w) {
+  const t = String(s ?? '');
+  return t.length >= w ? t : t + ' '.repeat(w - t.length);
+}
+
+function trunc(s, w) {
+  const t = String(s ?? '');
+  return t.length > w ? `${t.slice(0, w - 1)}…` : t;
+}
+
+function sessionCell(r) {
+  if (r.sessionId) return trunc(r.sessionId, 9);
+  if (r.foreignSession) return 'other-proj';
+  return '—';
+}
+
+function runsCell(r) {
+  if (!r.totals) return '—';
+  const spend = Number(r.totals.cost) || 0;
+  return `${r.totals.runs}·${formatTokens(r.totals.tokens)}${spend > 0 ? `·$${spend.toFixed(spend < 0.01 ? 5 : 4)}` : ''}`;
 }
 
 /**
- * Compact fleet-wide table for /status_all. One line per bot; the answering
- * bot is named so a group chat knows who rendered it.
+ * Monospace fleet-wide table for /status_all. Telegram has no table
+ * rendering, so the table ships in a code fence with padded columns.
+ * When every live bot shares model+agent those move to one `all:` line and
+ * the table stays narrow enough for a phone; otherwise each row carries its
+ * own Model/Agent columns. Disabled bots are not table rows — they get one
+ * `off:` line. The answering bot is named so a group chat knows who
+ * rendered it. Full per-bot detail stays behind each bot's own /status.
  */
 export function formatFleetStatusTable(rows, { chatId, via } = {}) {
   const list = Array.isArray(rows) ? rows : [];
-  const lines = [
-    `Fleet status · chat ${String(chatId ?? '')} · ${list.length} bot${list.length === 1 ? '' : 's'}${via ? ` (via ${via})` : ''}`,
-  ];
-  for (const r of list) lines.push(fleetStatusRow(r));
-  return lines.join('\n');
+  const live = list.filter((r) => r.enabled !== false);
+  const off = list.filter((r) => r.enabled === false);
+  const uniform =
+    live.length > 0 && live.every((r) => r.model === live[0].model && r.agent === live[0].agent);
+  const head = `Fleet status · chat ${String(chatId ?? '')} · ${list.length} bot${list.length === 1 ? '' : 's'}${via ? ` (via ${via})` : ''}`;
+  const out = [head];
+  if (uniform) {
+    const free = live[0].model && /free/i.test(live[0].model) ? ' (free)' : '';
+    out.push(`all: ${live[0].model || '—'}${free} · ${live[0].agent || '—'}`);
+    const W = { bot: 8, sess: 9, task: 7, runs: 10 };
+    out.push('```');
+    out.push(`${padEnd('Bot', W.bot)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Runs', W.runs)}`.trimEnd());
+    for (const r of live) {
+      out.push(
+        `${padEnd(trunc(r.id, W.bot), W.bot)} ${padEnd(sessionCell(r), W.sess)} ${padEnd(r.task, W.task)} ${padEnd(runsCell(r), W.runs)}`.trimEnd(),
+      );
+    }
+    out.push('```');
+  } else {
+    const W = { bot: 8, model: 18, agent: 5, sess: 9, task: 7, runs: 10 };
+    out.push('```');
+    out.push(
+      `${padEnd('Bot', W.bot)} ${padEnd('Model', W.model)} ${padEnd('Ag', W.agent)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Runs', W.runs)}`.trimEnd(),
+    );
+    for (const r of live) {
+      out.push(
+        `${padEnd(trunc(r.id, W.bot), W.bot)} ${padEnd(trunc(r.model || '—', W.model), W.model)} ${padEnd(trunc(r.agent || '—', W.agent), W.agent)} ${padEnd(sessionCell(r), W.sess)} ${padEnd(r.task, W.task)} ${padEnd(runsCell(r), W.runs)}`.trimEnd(),
+      );
+    }
+    out.push('```');
+  }
+  if (off.length) out.push(`off: ${off.map((r) => r.id).join(', ')}`);
+  return out.join('\n');
 }
 
 /** Clear in-memory caches (for sensor testing). */

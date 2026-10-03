@@ -656,7 +656,7 @@ export async function loadProofShot(fileId, { env = process.env, now = Date.now(
     if (!tok.ok) return null;
     const got = await downloadFile(fileId, tok.token);
     if (!got.ok) return null;
-    const buf = Buffer.isBuffer(got.bytes) ? got.bytes : Buffer.from(got.bytes || '');
+const buf = Buffer.isBuffer(got.bytes) ? got.bytes : Buffer.from(got.bytes || '');
     if (!buf.length) return null;
     const type = /png/i.test(got.name || '') ? 'image/png'
       : /webp/i.test(got.name || '') ? 'image/webp'
