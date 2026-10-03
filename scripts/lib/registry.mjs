@@ -221,8 +221,9 @@ export function normalizeConfig(bot, { defaultWorkspace = process.cwd() } = {}) 
     progress: {
       mode: bot.progress?.mode || 'concise',
       editIntervalMs: bot.progress?.editIntervalMs ?? 2500,
-      maxEdits: bot.progress?.maxEdits ?? 40,
+      maxEdits: bot.progress?.maxEdits ?? 120,
       maxChars: bot.progress?.maxChars ?? 220,
+      heartbeatMs: bot.progress?.heartbeatMs ?? 12000,
     },
     session: { mode: bot.session?.mode || 'per-chat' },
     ...(bot.hermes ? { hermes: bot.hermes } : {}),
