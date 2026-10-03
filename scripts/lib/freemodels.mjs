@@ -306,36 +306,9 @@ export function buildFreeModelList(opts = {}) {
   return entries;
 }
 
-export function formatFreeModelText(entries, { current, location = '' } = {}) {
-  const list = Array.isArray(entries) ? entries : [];
-  const selectable = list.filter((entry) => entry.selectable !== false);
-  const countProvider = (provider) => selectable.filter((entry) => entry.provider === provider).length;
-  const countOpencode = selectable.filter((entry) => entry.tool === 'opencode' && entry.provider !== 'tokenharbor' && !/^(?:opencode|google)\/gemini-/i.test(entry.ref)).length;
-  const countGemini = selectable.filter((entry) => /^(?:opencode|google)\/gemini-/i.test(entry.ref)).length;
-  const where = location || list[0]?.location || 'this host';
-  const parts = [
-    ['opencode', countOpencode],
-    ['cline', countProvider('cline')],
-    ['tokenharbor', countProvider('tokenharbor')],
-    ['gemini', countGemini],
-    ['freebuff', countProvider('freebuff')],
-  ].filter(([, n]) => n > 0).map(([provider, n]) => `${n} ${provider}`);
-  const pending = list.filter((entry) => entry.status === 'pending-signin');
-  const terminal = list.length - selectable.length - pending.length;
-  const lines = [
-    `Free models at ${where}: ${selectable.length} selectable${parts.length ? ` (${parts.join(', ')})` : ''}${pending.length ? ` · ${pending.length} pending setup/sign-in` : ''}${terminal ? ` · ${terminal} terminal-only` : ''} · current: ${current || '(unknown)'}`,
-    'This list is location-scoped: tools, credentials, and quota belong to this host.',
-  ];
-  if (selectable.length) lines.push('Tap a model below to switch this chat.');
-  else lines.push('No selectable free model is currently installed and authenticated on this host.');
-  const notes = list.filter((entry) => entry.note).map((entry) => `• ${entry.label}: ${entry.note}`);
-  if (notes.length) lines.push('', ...notes);
-  if (pending.length) {
-    lines.push('', 'Pending setup/sign-in:');
-    lines.push(...pending.map((entry) => `• ${entry.tool}: ${entry.pendingAction}`));
-  }
-  if (countProvider('cline')) lines.push('', 'Cline is listed only when its local CLI and auth are usable; its daily caps are per host.');
-  if (list.some((entry) => String(entry.ref || '').match(/^(?:opencode|google)\/gemini-/i))) lines.push('Gemini is exposed through OpenCode, not as a standalone bot surface.');
-  if (list.some((entry) => entry.surface === 'freebuff' && entry.selectable !== false)) lines.push('Freebuff is shown for visibility but is terminal-only and is not a Telegram tap target.');
-  return lines.join('\n');
-}
+// formatFreeModelText used to live here and is gone with /free (2026-10-03).
+// It rendered the raw catalog as a prose list, told the reader "Tap a model
+// below to switch this chat" while attaching no keyboard at all, and /freemodel
+// had already replaced it with the canonical lane list and real buttons. It was
+// the only thing here that rendered that list as text, so removing the command
+// removed its last caller rather than orphaning it.
