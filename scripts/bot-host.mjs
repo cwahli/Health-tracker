@@ -150,6 +150,10 @@ import {
   COMPACT_SUMMARY_PROMPT,
 } from './lib/bot-status.mjs';
 import {
+  fleetChatStatus,
+  formatFleetStatusTable,
+} from './lib/fleet-status.mjs';
+import {
   selectInboundMedia,
   sanitizeFileName,
   inboundMediaDir,
@@ -2274,7 +2278,21 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       await api.sendMessage(chatId, helpText(config, eff));
       return;
 
-    case 'status': case 'status_all': {
+    case 'status_all': {
+      // Fleet-wide table, not a second /status: one row per bot-host/device
+      // bot for this chat, read from on-disk state (each bot is its own
+      // process, so live memory of other bots is not visible here — the table
+      // says which bot to ask for its own /status). In a group the addressed
+      // bot (bare command: the master) renders it, so the room gets one table,
+      // not one reply per bot.
+      const statusAllProject = getChatProject(chatId);
+      const statusAllWorkspace = statusAllProject.type === 'external' ? statusAllProject.workspace : config.agent.workspace;
+      const fleetRows = fleetChatStatus({ chatId: String(chatId), workspace: statusAllWorkspace, root: REPO_ROOT, home: HOME });
+      await api.sendMessage(chatId, formatFleetStatusTable(fleetRows, { chatId: String(chatId), via: config.id }));
+      return;
+    }
+
+    case 'status': {
       const location = workLocation();
       const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
       const work = statusForTelegram(workId, { sessionName: WORK_VIEW_SESSION });
