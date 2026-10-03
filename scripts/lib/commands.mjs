@@ -12,6 +12,7 @@ export const BOT_COMMANDS = [
   { command: 'start', description: 'Start the bot and show help' },
   { command: 'help', description: 'Show available commands' },
   { command: 'status', description: 'Show session, model, agent, usage' },
+  { command: 'status_all', description: 'Show fleet-wide status across agents in this chat' },
   { command: 'new', description: 'Start a fresh session' },
   { command: 'compact', description: 'Summarize session and start fresh' },
   { command: 'model', description: 'Pick a model (or set it directly)' },
@@ -67,6 +68,7 @@ export const HELP_USAGE = {
   start: { args: '', text: 'start the bot and show help' },
   help: { args: '', text: 'show available commands' },
   status: { args: '', text: 'show session, model, agent, workspace, usage' },
+  status_all: { args: '', text: 'fleet-wide status table across agents in this chat' },
   new: { args: '', text: 'start a fresh session' },
   compact: { args: '', text: 'summarize session and start fresh' },
   model: { args: '[name]', text: 'pick a model (or set it directly)' },
@@ -158,7 +160,9 @@ export function assertValidCommands(commands = BOT_COMMANDS) {
   export function parseCommand(text) {
     const raw = String(text ?? '').trim();
     if (!raw.startsWith('/')) return null;
-    const [head, ...rest] = raw.split(/\s+/);
+    let normalized = raw;
+    if (/^\/status_all\s*$/i.test(raw)) return { name: 'status_all', args: 'all', raw };
+    const [head, ...rest] = normalized.split(/\s+/);
     const name = head.slice(1).toLowerCase().replace(/@[A-Za-z0-9_]+$/, '');
     return { name, args: rest.join(' ').trim(), raw };
   }

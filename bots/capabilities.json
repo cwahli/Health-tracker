@@ -178,6 +178,7 @@
         "start": true,
         "help": true,
         "status": true,
+        "status_all": true,
         "new": true,
         "compact": true,
         "model": true,
