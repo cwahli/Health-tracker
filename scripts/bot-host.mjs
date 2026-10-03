@@ -63,7 +63,6 @@ import { recordError, noteHealthy, recordRecoveryAttempt, classifyErrorKind, eva
 import {
   parseModelRef,
   buildFreeModelList,
-  formatFreeModelText,
   formatFreeLabel,
   CLINE_FREE_MODELS,
   clineReady,
@@ -2332,16 +2331,12 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
-    case 'free': {
-      const entries = await getFreeModels(caches, config);
-      if (!entries.length) {
-        await api.sendMessage(chatId, 'No locally available free models found on this host.');
-        return;
-      }
-      await sendChunked(api, chatId, formatFreeModelText(entries, { current: eff.model, location: workLocation() }));
-      return;
-    }
-
+    // /free is gone (2026-10-03). It was the raw-catalog free-model text list, the
+    // surface /freemodel replaced with the canonical lane list and a tappable
+    // keyboard. Two names for one screen, one of them the older and less
+    // accurate of the two, so it is removed rather than aliased: a reader who
+    // typed /free gets "Unknown command" and the menu, which is the honest
+    // answer now that the replacement is /freemodel.
     case 'models': {
       const models = await getModels(config, caches);
       await sendChunked(api, chatId, formatModelList(models));
