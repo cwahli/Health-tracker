@@ -39,6 +39,29 @@ export const DEFAULT_LEASE_MS = 5 * 60 * 1000;
 export const MAX_JOB_EVENTS = 500;
 export const MAX_JOB_EVENT_CHARS = 2000;
 
+/**
+ * The event cursor is a **producer-assigned monotonic sequence**, never an
+ * index into the stored array.
+ *
+ * It used to be an index, and the array was trimmed from the front with
+ * `shift()` once it passed MAX_JOB_EVENTS. Those two facts together are a
+ * silent correctness bug on any turn long enough to overflow the cap: the
+ * reader's `after` (an index) silently starts pointing at a *different* event
+ * the moment the array shifts, so events are duplicated or skipped with no
+ * error anywhere. A chatty turn on a free lane crosses 500 events routinely.
+ *
+ * With a monotonic `seq` the cap is still a cap, but the reader can now be
+ * told the truth: `droppedThrough` names the highest sequence that fell off
+ * the back, so a reader whose `after` is older than that knows it has a gap
+ * (`resyncRequired`) instead of silently reading the wrong window.
+ *
+ * The cursor is also assigned by whoever *observes* the model (the producer),
+ * so `at` is the producer's clock. The receiver's clock is kept separately as
+ * `receivedAt`; across a VM<->phone relay with any clock skew the two order
+ * events differently, and conflating them made tmux and Telegram disagree
+ * about which thing happened first.
+ */
+
 export function jobsDir(home = os.homedir()) {
   return path.join(home, '.hermes', 'worker-jobs');
 }
@@ -204,7 +227,19 @@ export function appendJobEvent(id, event, { home = os.homedir(), now = Date.now(
     return { ok: false, reason: `unsupported event kind: ${kind || '(none)'}` };
   }
   const clip = (v, max = MAX_JOB_EVENT_CHARS) => String(v ?? '').slice(0, max);
-  const clean = { kind, at: new Date(now).toISOString() };
+  // The producer's own timestamp is the truth about ordering. Keep it when it
+  // is a usable ISO string, and keep the receiver's clock beside it as
+  // `receivedAt` so latency stays measurable instead of being erased.
+  const producerAt = typeof event?.at === 'string' && !Number.isNaN(Date.parse(event.at))
+    ? event.at
+    : null;
+  const clean = {
+    kind,
+    seq: (Number(job.lastEventSeq) || 0) + 1,
+    at: producerAt || new Date(now).toISOString(),
+    receivedAt: new Date(now).toISOString(),
+  };
+  if (producerAt) clean.producerAt = true;
   if (event.tool != null) clean.tool = clip(event.tool, 100);
   if (event.status != null) clean.status = clip(event.status, 60);
   if (event.text != null) clean.text = clip(event.text);
@@ -214,9 +249,16 @@ export function appendJobEvent(id, event, { home = os.homedir(), now = Date.now(
   if (event.tokens != null && Number.isFinite(Number(event.tokens))) clean.tokens = Number(event.tokens);
   if (!Array.isArray(job.events)) job.events = [];
   job.events.push(clean);
-  while (job.events.length > MAX_JOB_EVENTS) job.events.shift();
+  job.lastEventSeq = clean.seq;
+  // Trim from the front, but remember *what* went so a reader can be told it
+  // has a gap. `droppedThrough` is a sequence, so it stays meaningful after the
+  // array it described is gone.
+  while (job.events.length > MAX_JOB_EVENTS) {
+    const dropped = job.events.shift();
+    job.droppedThrough = Number(dropped?.seq) || Number(job.droppedThrough) || 0;
+  }
   write(file, job);
-  return { ok: true, seq: job.events.length };
+  return { ok: true, seq: clean.seq };
 }
 
 /**
@@ -226,14 +268,43 @@ export function appendJobEvent(id, event, { home = os.homedir(), now = Date.now(
  */
 export function readJobEvents(id, { after = 0, home = os.homedir() } = {}) {
   const job = getJob(id, { home });
-  if (!job) return { events: [], nextAfter: Number(after) || 0, done: false, aborted: false };
+  if (!job) return { events: [], nextAfter: Number(after) || 0, done: false, aborted: false, resyncRequired: false, droppedThrough: 0 };
   const events = Array.isArray(job.events) ? job.events : [];
   const from = Math.max(0, Number(after) || 0);
+  const droppedThrough = Number(job.droppedThrough) || 0;
+
+  // A job written before this change has index-addressed events and no `seq`.
+  // Reading those by sequence would silently skip the whole backlog, so an
+  // unsequenced backlog falls back to the old index slice. New jobs always
+  // have `seq` on every event and take the correct path below.
+  const sequenced = events.length > 0 && events.every((e) => Number.isFinite(Number(e?.seq)));
+  if (!sequenced) {
+    return {
+      events: events.slice(from),
+      nextAfter: events.length,
+      done: Boolean(job.doneAt),
+      aborted: Boolean(job.aborted),
+      resyncRequired: false,
+      droppedThrough: 0,
+      unsequenced: true,
+    };
+  }
+
+  // Select by sequence, not position. `after` is the highest sequence the
+  // caller has already seen; anything strictly greater is new to it.
+  const fresh = events.filter((e) => Number(e.seq) > from);
+  const highest = fresh.length ? Number(fresh[fresh.length - 1].seq) : from;
+  // The caller is behind the trim point: events between its cursor and the
+  // oldest retained one no longer exist anywhere. Say so rather than handing
+  // back a window that looks complete but is not.
+  const resyncRequired = droppedThrough > 0 && from < droppedThrough;
   return {
-    events: events.slice(from),
-    nextAfter: events.length,
+    events: fresh,
+    nextAfter: Math.max(highest, from),
     done: Boolean(job.doneAt),
     aborted: Boolean(job.aborted),
+    resyncRequired,
+    droppedThrough,
   };
 }
 
