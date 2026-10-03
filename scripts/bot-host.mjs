@@ -4708,6 +4708,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   // the same turn spools under the same name and stays idempotent.
   const turnStartedAt = Date.now();
   const storeFacts = { bot: config.id, chat: chatId, location: process.env.LOCATION || '', at: new Date(turnStartedAt).toISOString() };
+  // The turn's seat is read inside the try, but the finished-turn record in the
+  // `finally` reads it too. A `let` declared inside the try block is not in
+  // scope there, so every turn that reached the record threw
+  // "activeRole is not defined" and the thread was never recorded. Declared out
+  // here, assigned in the try: both blocks see the same binding.
+  let activeRole = null;
   try {
     await renderer.start();
     // One shared working headline (provider + model + elapsed + usage) for
@@ -4769,7 +4775,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const promptWithMedia = media.length ? buildInboundPrompt(prompt, media) : prompt;
 
     let activeProject = getChatProject(chatId);
-    let activeRole = getChatRole(chatId);
+    activeRole = getChatRole(chatId);
 
     if (addr?.roleId) {
       activeRole = addr.roleId;
