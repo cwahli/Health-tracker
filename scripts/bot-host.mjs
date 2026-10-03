@@ -177,7 +177,7 @@ import {
 } from './lib/project-registry.mjs';
 import { runPmCommand } from './lib/pm-run.mjs';
 import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-runner.mjs';
-import { classifyHealthGroupTurn, answerHealthGroup, dedicatedHealthRoleIds, readHealthVerify } from './lib/health-group.mjs';
+import { classifyHealthGroupTurn, answerHealthGroup, dedicatedHealthRoleIds, readHealthVerify, healthRoleOf, HEALTH_SEAT_IDS } from './lib/health-group.mjs';
 import { gateFromArtifact } from './lib/health/docs.mjs';
 import {
   answerTaxGroup,
@@ -188,7 +188,9 @@ import {
   readTaxSnapshot,
   rememberTaxGroup,
   taxDeskBotId,
+  taxRoleOf,
   TAX_PROJECT_ID,
+  TAX_SEAT_IDS,
 } from './lib/tax-group.mjs';
 // The Personal Health Coach's data loop. `/health` is deliberately not gated on
 // the chat's active project: the command names its own project, so a verify can
@@ -2279,15 +2281,23 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
 
     case 'status_all': {
-      // Fleet-wide table, not a second /status: one row per bot-host/device
-      // bot for this chat, read from on-disk state (each bot is its own
-      // process, so live memory of other bots is not visible here — the table
-      // says which bot to ask for its own /status). In a group the addressed
-      // bot (bare command: the master) renders it, so the room gets one table,
-      // not one reply per bot.
+      // Council table, not a second /status: one row per agent in this
+      // chat's council (coordinator + seat holders), read from on-disk state
+      // (each bot is its own process, so live memory of other bots is not
+      // visible here — the table says which bot to ask for its own /status).
+      // In a group the addressed bot (bare command: the master) renders it,
+      // so the room gets one table, not one reply per bot.
       const statusAllProject = getChatProject(chatId);
       const statusAllWorkspace = statusAllProject.type === 'external' ? statusAllProject.workspace : config.agent.workspace;
-      const fleetRows = fleetChatStatus({ chatId: String(chatId), workspace: statusAllWorkspace, root: REPO_ROOT, home: HOME });
+      const statusAllTax = statusAllProject.id === TAX_PROJECT_ID;
+      const fleetRows = fleetChatStatus({
+        chatId: String(chatId),
+        workspace: statusAllWorkspace,
+        root: REPO_ROOT,
+        home: HOME,
+        seats: statusAllTax ? TAX_SEAT_IDS : HEALTH_SEAT_IDS,
+        roleOf: statusAllTax ? taxRoleOf : healthRoleOf,
+      });
       await api.sendMessage(chatId, formatFleetStatusTable(fleetRows, { chatId: String(chatId), via: config.id }));
       return;
     }

@@ -636,31 +636,42 @@ function splitScopedSession(raw) {
 }
 
 /**
- * One row per bot-host/device bot for this chat, read from on-disk state.
+ * One row per council agent for this chat, read from on-disk state.
  *
- * Each bot is its own OS process, so live memory (last-run usage, uptime,
- * poll health, running flag) of *other* bots is not visible here. Task state
- * falls back to what the fleet dashboard uses: a leases.json entry for this
- * chat means working, otherwise idle. Only the answering bot's own /status
- * has the live-memory fields — this table says which bot to ask for those.
+ * `seats` + `roleOf` select the agents in the room: the registry master
+ * (coordinator) plus the bots holding a seat on this chat's council
+ * (health seats for a health chat, tax seats for a tax chat). Without them
+ * every chat-capable runtime is listed. Each bot is its own OS process, so
+ * live memory (last-run usage, uptime, poll health) of *other* bots is not
+ * visible here. Task state falls back to what the fleet dashboard uses: a
+ * leases.json entry for this chat means working, otherwise idle. Only the
+ * answering bot's own /status has the live-memory fields — this table says
+ * which bot to ask for those.
  *
  * `workspace` scopes the session row the same way /status does (an exact
  * workspace match, or the row belongs to another project).
  */
-export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home = os.homedir() } = {}) {
+export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home = os.homedir(), seats = null, roleOf = null, masterId = null } = {}) {
   const key = String(chatId ?? '');
   if (!key) return [];
   let bots = [];
+  let master = null;
   try {
     const reg = readJsonObject(path.join(root, 'bots', 'registry.json'));
     if (!Array.isArray(reg.bots) || reg.bots.length === 0) return [];
+    master = masterId || reg.master || null;
     bots = applyMasterDefaults({ master: reg.master, bots: reg.bots }).bots;
   } catch {
     return [];
   }
   const ws = String(workspace || '');
+  const inCouncil = (b) => {
+    if (!Array.isArray(seats) || typeof roleOf !== 'function') return true;
+    if (master && b.id === master) return true;
+    return seats.includes(roleOf(b));
+  };
   return bots
-    .filter((b) => FLEET_CHAT_RUNTIMES.has(b.runtime || 'bot-host'))
+    .filter((b) => FLEET_CHAT_RUNTIMES.has(b.runtime || 'bot-host') && inCouncil(b))
     .map((b) => {
       const dir = path.join(home, '.local', 'state', 'bot-host', b.id);
       const pref = lookupByChat(readJsonObject(path.join(dir, 'prefs.json')), key) || {};
@@ -677,10 +688,12 @@ export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home
       const tokens = Number(totalsRow.tokens) || 0;
       const cost = Number(totalsRow.cost) || 0;
       const enabled = b.enabled !== false;
+      const seat = typeof roleOf === 'function' ? String(roleOf(b) || '') : '';
       return {
         id: b.id,
         name: b.name || b.id,
         enabled,
+        role: master && b.id === master ? 'coordinator' : seat || null,
         model: pref.model || b.agent?.model || null,
         agent: pref.agent || b.agent?.defaultAgent || null,
         sessionId,
@@ -728,29 +741,30 @@ export function formatFleetStatusTable(rows, { chatId, via } = {}) {
   const off = list.filter((r) => r.enabled === false);
   const uniform =
     live.length > 0 && live.every((r) => r.model === live[0].model && r.agent === live[0].agent);
-  const head = `Fleet status · chat ${String(chatId ?? '')} · ${list.length} bot${list.length === 1 ? '' : 's'}${via ? ` (via ${via})` : ''}`;
+  const head = `Fleet status · chat ${String(chatId ?? '')} · ${list.length} agent${list.length === 1 ? '' : 's'}${via ? ` (via ${via})` : ''}`;
   const out = [head];
+  const roleCell = (r) => trunc(r.role || '—', 14);
   if (uniform) {
     const free = live[0].model && /free/i.test(live[0].model) ? ' (free)' : '';
     out.push(`all: ${live[0].model || '—'}${free} · ${live[0].agent || '—'}`);
-    const W = { bot: 8, sess: 9, task: 7, runs: 10 };
+    const W = { bot: 8, role: 14, sess: 9, task: 7, runs: 10 };
     out.push('```');
-    out.push(`${padEnd('Bot', W.bot)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Runs', W.runs)}`.trimEnd());
+    out.push(`${padEnd('Bot', W.bot)} ${padEnd('Role', W.role)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Runs', W.runs)}`.trimEnd());
     for (const r of live) {
       out.push(
-        `${padEnd(trunc(r.id, W.bot), W.bot)} ${padEnd(sessionCell(r), W.sess)} ${padEnd(r.task, W.task)} ${padEnd(runsCell(r), W.runs)}`.trimEnd(),
+        `${padEnd(trunc(r.id, W.bot), W.bot)} ${padEnd(roleCell(r), W.role)} ${padEnd(sessionCell(r), W.sess)} ${padEnd(r.task, W.task)} ${padEnd(runsCell(r), W.runs)}`.trimEnd(),
       );
     }
     out.push('```');
   } else {
-    const W = { bot: 8, model: 18, agent: 5, sess: 9, task: 7, runs: 10 };
+    const W = { bot: 8, role: 14, model: 18, agent: 5, sess: 9, task: 7, runs: 10 };
     out.push('```');
     out.push(
-      `${padEnd('Bot', W.bot)} ${padEnd('Model', W.model)} ${padEnd('Ag', W.agent)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Runs', W.runs)}`.trimEnd(),
+      `${padEnd('Bot', W.bot)} ${padEnd('Role', W.role)} ${padEnd('Model', W.model)} ${padEnd('Ag', W.agent)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Runs', W.runs)}`.trimEnd(),
     );
     for (const r of live) {
       out.push(
-        `${padEnd(trunc(r.id, W.bot), W.bot)} ${padEnd(trunc(r.model || '—', W.model), W.model)} ${padEnd(trunc(r.agent || '—', W.agent), W.agent)} ${padEnd(sessionCell(r), W.sess)} ${padEnd(r.task, W.task)} ${padEnd(runsCell(r), W.runs)}`.trimEnd(),
+        `${padEnd(trunc(r.id, W.bot), W.bot)} ${padEnd(roleCell(r), W.role)} ${padEnd(trunc(r.model || '—', W.model), W.model)} ${padEnd(trunc(r.agent || '—', W.agent), W.agent)} ${padEnd(sessionCell(r), W.sess)} ${padEnd(r.task, W.task)} ${padEnd(runsCell(r), W.runs)}`.trimEnd(),
       );
     }
     out.push('```');
