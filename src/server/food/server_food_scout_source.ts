@@ -961,6 +961,56 @@ export function logScoutItemSummaries(items: any[], onLog: (msg: string) => void
 }
 
 /**
+ * Printed-label truth must survive an edit or re-analysis turn. The edit
+ * instruction asks the model to preserve rawNutritionLabel, but a model that
+ * re-emits a dish without it silently downgrades a label-locked item to an
+ * estimate (live: job_1791044439374_4x4srekyi turn 2 dropped the beer label, so
+ * the re-read carried no OCR energy at all). TS restores it here rather than
+ * trusting the instruction.
+ *
+ * Only identity-matched items are touched, and only fields the newcomer left
+ * empty — a model that deliberately re-read the label with new values keeps them.
+ */
+export function preserveLabelTruth(args: { priorItems?: any[]; nextItems?: any[] }): { restored: string[] } {
+  const prior = Array.isArray(args?.priorItems) ? args.priorItems : [];
+  const next = Array.isArray(args?.nextItems) ? args.nextItems : [];
+  if (prior.length === 0 || next.length === 0) return { restored: [] };
+
+  const norm = (v: any): string => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const labelFields = ['rawNutritionLabel', 'packageLabelText', 'packGrams'];
+  const restored: string[] = [];
+
+  for (const item of next) {
+    const key = norm(item?.dishName || item?.originalName || item?.name || item?.keyword);
+    if (!key) continue;
+    const priorMatch = prior.find((p: any) => {
+      const pk = norm(p?.dishName || p?.originalName || p?.name || p?.keyword);
+      return pk && (pk === key || pk.includes(key) || key.includes(pk));
+    });
+    if (!priorMatch) continue;
+    // A panel holding only a serving size is not printed truth (same rule as
+    // logScoutItemSummaries' rawLabelHasRealData).
+    const priorHasLabel = priorMatch.rawNutritionLabel && typeof priorMatch.rawNutritionLabel === 'object'
+      && Object.entries(priorMatch.rawNutritionLabel).some(([k, v]: [string, any]) => {
+        if (k === 'servingSize' || k === 'serving' || k === 'weight' || k === 'servingsPerContainer') return false;
+        return v !== undefined && v !== null && v !== '' && v !== '-' && v !== '--';
+      });
+    if (!priorHasLabel) continue;
+
+    for (const f of labelFields) {
+      const incoming = item[f];
+      const isEmpty = incoming === undefined || incoming === null || incoming === '';
+      if (!isEmpty) continue;
+      const fromPrior = priorMatch[f];
+      if (fromPrior === undefined || fromPrior === null || fromPrior === '') continue;
+      item[f] = fromPrior;
+      if (f === 'rawNutritionLabel') restored.push(key);
+    }
+  }
+  return { restored };
+}
+
+/**
  * Per-image grounding inventory: which input images the scout's dishes came
  * from. Prefers the model's own 'perImage' block (required by the INGESTION
  * rule); falls back to deriving coverage from dishes' sourceImageIndex.

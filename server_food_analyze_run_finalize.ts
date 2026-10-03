@@ -255,6 +255,7 @@ export async function executeFinalizePhase(
         activeMeal: ctx.req.body?.activeMeal,
         scoutItems: updatedScoutItems,
         diningEnvironment: ctx.diningEnvironment,
+        degradedStages: ctx.scoutDegradedReasons,
       });
       if (ctx.portionClarify) {
         if (pendingFoodLog) (pendingFoodLog as any).portionClarify = ctx.portionClarify;
@@ -330,6 +331,7 @@ export async function executeFinalizePhase(
       activeMeal: ctx.req.body?.activeMeal,
       scoutItems: finalScoutItems,
       diningEnvironment: ctx.diningEnvironment,
+      degradedStages: ctx.scoutDegradedReasons,
     });
     if (ctx.portionClarify) {
       if (pendingFoodLog) (pendingFoodLog as any).portionClarify = ctx.portionClarify;
@@ -393,6 +395,7 @@ export async function executeFinalizePhase(
       priorLocks: activeMeal?.userLockedSlots || [],
       turn: scoutTurnNumberForEdit,
       portionChoices: ctx.req.body?.portionChoices,
+      isRecheckRequest: ctx.isRecheckRequest,
     });
     for (const note of result.notes) ctx.addDebugLog(`[Single-Path Edit] ${note}`);
     if (Array.isArray((result as any).appliedCommands) && (result as any).appliedCommands.length > 0) {
@@ -519,6 +522,7 @@ export async function executeFinalizePhase(
       activeMeal: ctx.req.body?.activeMeal,
       scoutItems: syncedScoutItemsForEdit,
       diningEnvironment: activeMeal?.diningEnvironment,
+      degradedStages: ctx.scoutDegradedReasons,
     });
     mealBuild.staleDietNarrative = false;
     if (pendingFoodLog && Array.isArray(activeMeal.userLockedSlots)) {

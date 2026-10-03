@@ -23,6 +23,7 @@ import { executeScoutComposePhase } from './server_food_analyze_run_scout_compos
 import { executeFinalizePhase } from './server_food_analyze_run_finalize.js';
 
 import { collectImagePayloads, decideWeightRefine } from './src/server/food/server_food_session_setup.js';
+import { classifyEditIntent } from './src/server/food/server_food_edit_intent.js';
 import {
   inheritActiveMealScoutItems,
   resolvePriorScoutItems,
@@ -152,6 +153,21 @@ export function createAnalyzeRunContext(
   let effectiveActiveMeal = activeMeal;
   const hasUploadedNewImages = Boolean(imagePayloads && imagePayloads.length > 0);
 
+  // A free-text follow-up that only expresses dissatisfaction ("this is
+  // incorrect check again") is a re-analysis request, not an edit. Without this
+  // the edit instruction below offers the model replace|add|delete and it
+  // reaches for `delete` — job_1791044439374_4x4srekyi emptied a meal that way.
+  const editIntent = classifyEditIntent({
+    userMessage: message,
+    items: activeMeal?.itemsBreakdown || activeMeal?.items || [],
+  });
+  const isRecheckRequest = Boolean(hasActiveMealDocument && editIntent.kind === 'recheck');
+  if (isRecheckRequest) {
+    addDebugLog(
+      `[Recheck] "${(message || '').substring(0, 80)}" → full re-analysis (${editIntent.reason}); the targeted-edit instruction is withheld.`
+    );
+  }
+
   if (
     !hasActiveMealDocument &&
     !isWeightModification &&
@@ -228,6 +244,9 @@ export function createAnalyzeRunContext(
     portionClarify: null,
     effectiveActiveMeal,
     hasUploadedNewImages,
+    isRecheckRequest,
+    editIntent,
+    scoutDegradedReasons: [] as string[],
   };
 }
 
