@@ -4597,22 +4597,24 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
     if (reply?.text) {
       await api.sendMessage(chatId, reply.text, reply.markdown ? { parse_mode: 'Markdown' } : undefined).catch(() => {});
-      // Persist this turn's measured usage beside the cumulative chat totals,
-      // the same record the coder path keeps: without it /status_all can only
-      // show — for a seat that answers in this room every day.
-      if (seatUsage.tokens > 0 || seatUsage.cost > 0) {
-        try {
-          await noteUsage({
-            chatId,
-            result: { usage: { tokens: { total: seatUsage.tokens }, cost: seatUsage.cost } },
-            eff: { ...eff, model: seatUsage.model || eff.model },
-            config,
-            caches,
-            totals,
-            lastUsage,
-          });
-        } catch {}
-      }
+      // Persist this turn beside the cumulative chat totals, the same record
+      // the coder path keeps: without it /status_all can only show — for a
+      // seat that answers in this room every day. A council answer is a
+      // stateless one-shot and the lane reports no token events for it
+      // (verified against the live CLI), so this is usually runs-only until
+      // the lane measures more; the snapshot (agent, limit, timestamp) is
+      // still kept for the compaction question.
+      try {
+        await noteUsage({
+          chatId,
+          result: { usage: { tokens: { total: seatUsage.tokens }, cost: seatUsage.cost } },
+          eff: { ...eff, model: seatUsage.model || eff.model },
+          config,
+          caches,
+          totals,
+          lastUsage,
+        });
+      } catch {}
     }
     if (reply?.answered) {
       if (healthTurn.mode === 'seat') forgetTaxGroup(taxWorkspace, chatId);

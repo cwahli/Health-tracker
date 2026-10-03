@@ -738,8 +738,15 @@ export function usageCell(r) {
   }
   if (t > 0) return formatTokens(t);
   if (!r.totals) return '—';
+  // Cumulative chat totals. A council answer is a stateless one-shot — the
+  // lane reports no token events for it (verified against the live CLI: no
+  // step_finish on a text turn) — so a seat that only ever answers here has
+  // runs but zero measured tokens. Show the honest parts only, never `·0`.
+  const parts = [`${r.totals.runs} run${r.totals.runs === 1 ? '' : 's'}`];
+  if ((Number(r.totals.tokens) || 0) > 0) parts.push(formatTokens(r.totals.tokens));
   const spend = Number(r.totals.cost) || 0;
-  return `${r.totals.runs}·${formatTokens(r.totals.tokens)}${spend > 0 ? `·$${spend.toFixed(spend < 0.01 ? 5 : 4)}` : ''}`;
+  if (spend > 0) parts.push(`$${spend.toFixed(spend < 0.01 ? 5 : 4)}`);
+  return parts.join('·');
 }
 
 /**

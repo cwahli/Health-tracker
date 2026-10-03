@@ -115,7 +115,7 @@ describe('formatFleetStatusTable', () => {
     const vm = lines.find((l) => l.startsWith('vm '));
     expect(vm).toContain('coordinator');
     expect(vm).toContain('working');
-    expect(vm).toContain('2·1.5k');
+    expect(vm).toContain('2 runs·1.5k');
     expect(vm).toContain('ses_1234');
     expect(lines.find((l) => l.startsWith('vm2'))).toContain('data_steward');
     expect(lines.find((l) => l.startsWith('vm2'))).toContain('other-proj');
@@ -201,6 +201,14 @@ describe('fleet-status-html', () => {
     const { usageCell } = await import('../scripts/lib/fleet-status.mjs');
     expect(usageCell(rows[0])).toBe('310k (31%)');
     expect(usageCell(rows[1])).toBe('—');
+  });
+
+  it('shows honest run counts when the lane reports no tokens', async () => {
+    const { usageCell } = await import('../scripts/lib/fleet-status.mjs');
+    const run = (totals) => ({ lastUsage: null, totals });
+    expect(usageCell(run({ runs: 1, tokens: 0, cost: 0 }))).toBe('1 run');
+    expect(usageCell(run({ runs: 3, tokens: 0, cost: 0 }))).toBe('3 runs');
+    expect(usageCell(run({ runs: 2, tokens: 1500, cost: 0.01234 }))).toBe('2 runs·1.5k·$0.0123');
   });
 
   it('builds skill-pipeline data: positional rows matching the columns', async () => {
@@ -330,5 +338,36 @@ describe('runSeatModel usage passthrough', () => {
       runOpencodeImpl: async () => ({ finalText: 'hello', lastError: '' }),
     });
     expect(res.usage).toBeNull();
+  });
+});
+
+describe('noteUsage runs-only record', () => {
+  it('keeps a runs-only turn with its snapshot instead of skipping it', async () => {
+    const prevHome = process.env.HOME;
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'status-all-noteusage-zero-'));
+    process.env.HOME = fakeHome;
+    const { noteUsage } = await import('../scripts/bot-host.mjs');
+    try {
+      // bot-host captures HOME at import, so assert the in-memory record
+      // (the disk path is covered by the persistence test above).
+      const totals = new Map();
+      const lastUsage = new Map();
+      await noteUsage({
+        chatId: '9',
+        result: { usage: { tokens: { total: 0 }, cost: 0 } },
+        eff: { model: 'opencode/nemotron-free', agent: 'build' },
+        config: { id: 'probe-zero' },
+        caches: {},
+        totals,
+        lastUsage,
+      });
+      const kept = totals.get('9');
+      expect(kept.runs).toBe(1);
+      expect(kept.tokens).toBe(0);
+      expect(Number(kept.last.at)).toBeGreaterThan(0);
+    } finally {
+      process.env.HOME = prevHome;
+      fs.rmSync(fakeHome, { recursive: true, force: true });
+    }
   });
 });
