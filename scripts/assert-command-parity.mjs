@@ -5,8 +5,9 @@
  * WHY THIS EXISTS
  * ---------------
  * `/help` was a hand-maintained string separate from BOT_COMMANDS, so new
- * commands (/free, /tax) shipped in the autocomplete popup with no help line —
- * and the drift was invisible until a user asked. Separately, the autocomplete
+ * commands (/tax, and the /free that was removed in 2026-10-03) shipped in the
+ * autocomplete popup with no help line — and the drift was invisible until a
+ * user asked. Separately, the autocomplete
  * itself can be shadowed: Telegram resolves the narrowest setMyCommands scope
  * first, so a stale `all_private_chats` list (this happened on vm: an old
  * 27-command list with `abort`/`watch`/`project_external_*` hid /forge in

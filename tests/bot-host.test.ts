@@ -50,7 +50,6 @@ import {
   formatFreeLabel,
   listFreeOpenCode,
   buildFreeModelList,
-  formatFreeModelText,
   CLINE_FREE_MODELS,
   GEMINI_MODELS,
 } from '../scripts/lib/freemodels.mjs';
@@ -937,7 +936,7 @@ describe('pickers', () => {
     expect(compactUnsupported('collab', 'gpu tunnels')).toContain('/compact');
   });
 
-  it('keeps one command source of truth including /free + /compact', async () => {
+  it('keeps one command source of truth including /compact', async () => {
     expect(assertValidCommands()).toBe(true);
     // every advertised command has a handler case in bot-host.mjs
     const src = (await import('node:fs')).readFileSync(
@@ -946,15 +945,28 @@ describe('pickers', () => {
     for (const name of COMMAND_NAMES) {
       expect(src).toContain(`case '${name}'`);
     }
-    expect(COMMAND_NAMES).toContain('free');
     expect(COMMAND_NAMES).toContain('compact');
     // every advertised command has a help line (menu/help/handlers stay one surface)
     const help = helpText({ name: 'b', agent: {} }, {});
     for (const name of COMMAND_NAMES) {
       expect(help).toContain(`/${name}`);
     }
-    expect(helpText({ name: 'b', agent: {} }, {})).toContain('/free');
-    expect(toTelegramCommands().find((c) => c.command === 'free')?.description.length).toBeGreaterThan(0);
+    // /free was removed on 2026-10-03: it was the raw-catalog text list that
+    // /freemodel replaced with the canonical lane list and a tappable keyboard.
+    // It must not come back through any of the three surfaces at once — the
+    // popup, /help, or a handler case. Asserted as an absence because that is
+    // the whole shape of the change: there is no `case 'free'` left to find.
+    expect(COMMAND_NAMES).not.toContain('free');
+    // Boundary-matched, because "/free" is a prefix of "/freemodel" — a plain
+    // substring check fails on the replacement command, which is the whole point
+    // of keeping it.
+    expect(help).not.toMatch(/\/free(?![A-Za-z0-9_-])/);
+    expect(toTelegramCommands().find((c) => c.command === 'free')).toBeUndefined();
+    expect(src).not.toContain("case 'free'");
+    // The replacement is still there and still published — removing the old name
+    // must not have taken the surface the reader is meant to use instead.
+    expect(COMMAND_NAMES).toContain('freemodel');
+    expect(toTelegramCommands().find((c) => c.command === 'freemodel')?.description.length).toBeGreaterThan(0);
     expect(BOT_COMMANDS.length).toBe(new Set(COMMAND_NAMES).size);
     const shim = await import('../scripts/lib/bot-commands.mjs');
     expect(shim.BOT_COMMANDS).toEqual(BOT_COMMANDS);
@@ -1047,10 +1059,11 @@ describe('freemodels', () => {
     });
     const cline = entries.filter((e) => e.surface === 'cline');
     expect(cline.map((e) => e.ref)).toEqual(CLINE_FREE_MODELS.map((id) => `cline:${id}`));
-    const text = formatFreeModelText(entries, { current: 'opencode/big-pickle' });
-    expect(text).toContain('opencode/big-pickle');
-    expect(text).toContain('daily free cap');
-    expect(text).toContain('4 cline');
+    // Asserted on the entries, not on rendered text: the renderer that turned
+    // this list into prose was formatFreeModelText, removed with /free because
+    // /freemodel's keyboard is the only surface that lists free models now.
+    expect(cline.filter((e) => e.selectable !== false)).toHaveLength(CLINE_FREE_MODELS.length);
+    expect(cline.some((e) => String(e.note || '').includes('daily free cap'))).toBe(true);
   });
 
   it('omits cline models when the local CLI or auth is missing', () => {
@@ -1118,8 +1131,6 @@ describe('freemodels', () => {
     // No SELECTABLE standalone gemini picker entries — only the pending setup row.
     expect(entries.filter((e) => e.surface === 'gemini').every((e) => e.selectable === false)).toBe(true);
     expect(entries.some((e) => String(e.pendingAction || '').includes('GEMINI_API_KEY'))).toBe(true);
-    const text = formatFreeModelText(entries, { current: 'opencode/big-pickle' });
-    expect(text).toContain('GEMINI_API_KEY');
   });
 });
 
