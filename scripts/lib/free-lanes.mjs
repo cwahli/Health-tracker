@@ -152,7 +152,7 @@ export function isConnectionFailure(msg) {
  * failure classifiers to avoid a cycle with agent-opencode.
  */
 const HARD_MODEL_FAILURE_RE =
-  /model (is |was )?(unavailable|not found|not available|does not exist|removed|deprecated|discontinued)|no such model|unknown ([\w-]+\s+)?model|model .* not (found|available|supported|enabled)|unsupported model/i;
+  /model (is |was )?(unavailable|not found|not available|does not exist|removed|deprecated|discontinued)|invalid model( reference)?|no such model|unknown ([\w-]+\s+)?model|model .* not (found|available|supported|enabled)|unsupported model/i;
 
 export function isHardModelFailure(msg) {
   const text = String(msg || "");
@@ -527,9 +527,30 @@ export function effectiveProviderOf(lane) {
 
 /** toModelRef lives in freemodels; a local shim keeps this module standalone. */
 function toModelRefShim(provider, model) {
-  if (provider === "cline") return `cline:${model}`;
-  if (provider === "gemini") return `gemini:${model}`;
-  return model;
+  return laneWalkRef(provider, model);
+}
+
+/**
+ * The executable chat ref for a walk lane. Mirrored in freemodels.toModelRef
+ * (this module stays standalone for the router vendor mirror — keep both in
+ * sync). `google/` catalog rows run through the direct Gemini runner, not the
+ * OpenCode `google/` provider: that provider is unavailable on hosts without
+ * a wired OpenCode google credential (live VPS 2026-10-03, `Model
+ * unavailable: google/gemini-3.8-flash`), while GEMINI_API_KEY answers
+ * directly (pinged `ok` 2026-10-03).
+ */
+export function laneWalkRef(provider, model) {
+  const surface = String(provider || '');
+  if (surface === 'cline') return `cline:${model}`;
+  if (surface === 'gemini' || surface === 'google') {
+    const id = String(model || '');
+    return `gemini:${id.startsWith('gemini/') ? id : `gemini/${id}`}`;
+  }
+  // Mirror freemodels.toModelRef: a bare chat-only id keeps its vendor so the
+  // walk emits a routable ref instead of an `Invalid model reference` burn.
+  if (!surface || surface === 'opencode') return model;
+  if (String(model || '').includes('/')) return model;
+  return `${surface}/${model}`;
 }
 
 /**
@@ -816,7 +837,7 @@ export function formatResetIn(isoOrMs, now = Date.now()) {
   return `${m}m`;
 }
 
-/** Short plan code: CF / CL / OC / TH / FB. */
+/** Short plan code: CF / CL / OC / OG / TH / FB. */
 export function planCodeForLane(lane) {
   const provider = String(lane?.provider || "").toLowerCase();
   const model = String(lane?.model || "").toLowerCase();
@@ -824,6 +845,10 @@ export function planCodeForLane(lane) {
   if (provider === "cloudflare" || model.includes("cloudflare/") || bucket.includes("cloudflare")) return "CF";
   if (provider === "cline" || model.startsWith("cline")) return "CL";
   if (provider === "freebuff" || bucket.includes("freebuff")) return "FB";
+  // The go-plan pool is separate quota from the zen pool: it gets its own code
+  // so the two space-bunny rows survive the canonical dedupe as two rows and
+  // read as two pools (live VM5 2026-10-03).
+  if (provider === "opencode-go" || model.startsWith("opencode-go/")) return "OG";
   // Token Harbor free bar = TH for both paths: the OpenCode `tokenharbor/…`
   // tools lane and the chat-only `provider: tokenharbor` lane are the same
   // shared `tokenharbor-free` bucket, so they share one public plan code.
@@ -1812,10 +1837,19 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
   // The same model reaches the catalog under more than one surface prefix:
   // `opencode/space-bunny-free`, `opencode-go/space-bunny-free` and
   // `cline:cline-free/kat-coder-pro` all name a model the table may already carry
-  // under its own path. Matching on provider+model therefore folded in a second
+  // under its own path. Matching on the bare model id therefore folded in a second
   // row for it and the table showed the same model twice under two plan codes, so
-  // the model id is compared with the vendor prefix and the surface stripped.
-  const known = new Set(lanes.map((l) => modelKey(l.model)).filter(Boolean));
+  // the model id is compared with the vendor prefix and the surface stripped —
+  // but qualified by the EFFECTIVE provider: `opencode/space-bunny-free` and
+  // `opencode-go/space-bunny-free` are different free pools (both cost-0, live
+  // 2026-10-03) and each deserves its own row and quota, while the
+  // `opencode/tokenharbor/x` + `tokenharbor/x` twins share one bar and stay one.
+  const foldKey = (provider, model) => {
+    const k = modelKey(model);
+    if (!k) return '';
+    return `${effectiveProviderOf({ provider, model }).toLowerCase()}/${k}`;
+  };
+  const known = new Set(lanes.map((l) => foldKey(l.provider, l.model)).filter(Boolean));
   for (const entry of entries || []) {
     const ref = typeof entry === "string" ? entry : entry?.ref || "";
     if (!ref) continue;
@@ -1823,7 +1857,7 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
     // it is already reported as a gap by /setup.
     if (typeof entry === "object" && entry && (entry.status === "pending-signin" || /^pending:/.test(ref))) continue;
     for (const route of routeCandidates(ref)) {
-      const key = modelKey(route.model);
+      const key = foldKey(route.provider, route.model);
       if (!key || known.has(key)) continue;
       known.add(key);
       nextPref += 1;
@@ -1837,10 +1871,18 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
         .replace(/^[a-z][a-z0-9-]*:\s*/i, "")
         .replace(/\s*\(free\)\s*$/i, "")
         .trim();
+      // Store the model without its own redundant vendor prefix so quota keys
+      // stay single (`opencode-go/space-bunny-free`, not the doubled form the
+      // legacy table rows carry): a folded row has no live stamps to preserve,
+      // so it starts clean. Matching still works via tail comparison.
+      const ownPrefix = `${String(route.provider || '').toLowerCase()}/`;
+      const storedModel = String(route.model || '').toLowerCase().startsWith(ownPrefix)
+        ? String(route.model).slice(String(route.provider).length + 1)
+        : route.model;
       const lane = {
         pref: nextPref,
         provider: route.provider,
-        model: route.model,
+        model: storedModel,
         label: cleanLabel || shortModelName(route.model) || route.model,
         // `available` means "not known to be spent". The projection is what refuses
         // to offer it — a missing credential, a terminal-only tool or a live
@@ -2211,14 +2253,30 @@ function writeJsonAtomic(filePath, obj) {
  * session.quota (route + shared-bucket keys) and overlays the table —
  * pref order untouched. Returns { stamped, keys } or { stamped: false, reason }.
  */
-export function stampCooldown({ stateDir, provider, model, errText, kind = "connection-failed", ttlMs = CONNECTION_FAILED_COOLDOWN_MS, now = Date.now() } = {}) {
+/**
+ * How long a hard model failure keeps a lane out of the walk.
+ *
+ * A dead lane is not a spent quota: no credential, no such model, or an
+ * unroutable ref will not heal in 10 minutes, and re-probing it every few
+ * minutes is what turned one exhausted evening into an endless 10-hop walk
+ * (live VM5 2026-10-03: user retries ~35min apart, every turn re-burned the
+ * same dead lanes whose 10min stamps had just expired). So dead lanes rest
+ * like an unknown quota (6h), while transport blips keep the short cooldown.
+ * An explicit ttlMs still wins for callers that know better.
+ */
+export const HARD_MODEL_FAILURE_COOLDOWN_MS = 6 * 3600 * 1000;
+
+export function stampCooldown({ stateDir, provider, model, errText, kind = "connection-failed", ttlMs = null, now = Date.now() } = {}) {
+  const ttl = Number(ttlMs) > 0
+    ? Number(ttlMs)
+    : kind === "model-unavailable" ? HARD_MODEL_FAILURE_COOLDOWN_MS : CONNECTION_FAILED_COOLDOWN_MS;
   return stampDepleted({
     stateDir,
     provider,
     model,
     errText,
     kind,
-    depletedUntil: now + Math.max(1000, Number(ttlMs) || CONNECTION_FAILED_COOLDOWN_MS),
+    depletedUntil: now + Math.max(1000, ttl),
   });
 }
 

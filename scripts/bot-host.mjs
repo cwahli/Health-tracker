@@ -99,6 +99,7 @@ import {
   isHardModelFailure,
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
+  HARD_MODEL_FAILURE_COOLDOWN_MS,
   freemodelDisplayTier,
   sortFreemodelTierRows,
   freemodelRatingOf,
@@ -742,7 +743,8 @@ export function stampLaneCooldown({ botId, model, errText, kind = 'connection-fa
     const { dir } = ensureBotLedger(botId || 'default');
     const stamped = stampCooldown({ stateDir: dir, provider, model: m, errText, kind, now });
     if (stamped.stamped) {
-      console.log(`[${botId}] connection cooldown on ${provider}/${m} until ${new Date(now + CONNECTION_FAILED_COOLDOWN_MS).toISOString()}`);
+      const until = Date.now() + (kind === 'model-unavailable' ? HARD_MODEL_FAILURE_COOLDOWN_MS : CONNECTION_FAILED_COOLDOWN_MS);
+      console.log(`[${botId}] ${kind} cooldown on ${provider}/${m} until ${new Date(until).toISOString()}`);
     }
     return stamped;
   } catch {
@@ -986,7 +988,10 @@ export function trackRunQuota({ botId, modelRef, result }) {
     const filtered = extractLogError(result.stderr || '') || String(result.lastError || '');
     if (text || !filtered || !isQuotaOrLimitError(filtered)) return null;
     const { provider, model } = freemodelRefToRoute(modelRef || '');
-    if (!provider || !model || provider === 'gemini') return null;
+    // Keyed Gemini lanes stamp like any other lane: the key carries its own
+    // quota (vendor countdown or default TTL) and the host-account mirror
+    // shares it, so a spent key is skipped instead of re-burned every turn.
+    if (!provider || !model) return null;
     const { dir } = ensureBotLedger(botId || 'default');
     // Carry the vendor's own retry countdown into the stamp: a Cline daily
     // cap ("try again in 22h") must not decay to the 6h default TTL, or the
@@ -1130,13 +1135,26 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   // double-list problem one level down.
   const seen = new Set();
   const buttons = [];
-  for (const g of tierGroups) {
+  // Keyed (non-free) rows leave their tier group for one trailing group: the
+  // keyboard spends free lanes first and the user's own key last (live VM5
+  // 2026-10-03). The groups above keep their counts honest — a moved row is
+  // not counted twice.
+  const isKeyedRow = (r) => (r.plan || (r.lane ? planCodeForLane(r.lane) : '')) === 'GM';
+  const keyedFallback = [];
+  const displayGroups = tierGroups
+    .map((g) => ({ ...g, rows: (g.rows || []).filter((r) => {
+      if (isKeyedRow(r)) { keyedFallback.push(r); return false; }
+      return true;
+    }) }))
+    .filter((g) => (g.rows || []).length > 0);
+  if (keyedFallback.length) displayGroups.push({ tier: 'keyed', rows: keyedFallback });
+  for (const g of displayGroups) {
     // A keyboard has no subheadings, so the tier title is a row of its own:
     // `VPS Standard model (10)` — location-scoped, with the group's count.
     // `noop` is the callback the router already uses for a non-actionable
     // keyboard row, and the tap handler answers it silently.
-    if (tierGroups.length > 1) {
-      buttons.push({ text: headingWidth(`${freemodelDisplayTier(g.tier, location || 'vps')} (${g.rows.length})`), data: 'noop', header: true });
+    if (displayGroups.length > 1) {
+      buttons.push({ text: headingWidth(g.tier === 'keyed' ? `VPS Keyed fallback (${g.rows.length})` : `${freemodelDisplayTier(g.tier, location || 'vps')} (${g.rows.length})`), data: 'noop', header: true });
     }
   for (const r of g.rows) {
     const label = r.laneLabel || r.label;
@@ -3827,11 +3845,11 @@ export function stickyModelAfterTurn({ chatModel, answeredModel, answered }) {
  * the old one was skipped. A host with no ledger yet keeps the old two-entry
  * chain, so a fresh install behaves exactly as before.
  */
-export function selectTurnLanes({ botId, model, fallback, now = Date.now(), readiness = null } = {}) {
+export function selectTurnLanes({ botId, model, fallback, now = Date.now(), readiness = null, catalogEntries = null } = {}) {
   const legacy = failoverModels(model, fallback);
   let ledger;
   try {
-    ledger = loadFreeLaneLedger({ stateDir: ensureBotLedger(botId || 'default').dir });
+    ledger = loadFreeLaneLedger({ stateDir: ensureBotLedger(botId || 'default').dir, catalogEntries });
   } catch {
     return { models: legacy, skipped: [], fromLedger: false };
   }
@@ -3842,7 +3860,7 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   // The same projection /allowance and /freemodel read, so the walk can only
   // offer what those two surfaces call selectable.
   const projection = projectLanes(table, ledger.session || {}, { now, location: botId, readiness });
-  const lanes = projection.filter((r) => r.selectable).map((r) => ({ provider: r.provider, model: r.model, pref: r.pref, family: r.family, label: r.label }));
+  const lanes = projection.filter((r) => r.selectable).map((r) => ({ provider: r.provider, model: r.model, pref: r.pref, family: r.family, label: r.label, plan: r.plan }));
   const skipped = projection.filter((r) => !r.selectable).map((r) => ({
     provider: r.provider,
     model: r.model,
@@ -3885,9 +3903,13 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
     if (ra.rank !== rb.rank) return ra.rank - rb.rank;
     return (Number(a.pref) || 0) - (Number(b.pref) || 0);
   };
-  const byTierThenRating = (a, b) => (walkTierRank(a.model) - walkTierRank(b.model)) || byRating(a, b);
+  // Keyed (non-free) lanes are the last resort in every tier: they spend the
+  // user's own key, so free lanes of any tier go first (live VM5 2026-10-03).
+  const keyedRank = (l) => (l?.plan === 'GM' ? 1 : 0);
+  const byTierThenRating = (a, b) => (keyedRank(a) - keyedRank(b)) || (walkTierRank(a.model) - walkTierRank(b.model)) || byRating(a, b);
+  const bySameTier = (a, b) => (keyedRank(a) - keyedRank(b)) || byRating(a, b);
   const orderedLanes = model
-    ? [...fallbackLanes].filter((l) => tierOf(l) === currentGroup).sort(byRating)
+    ? [...fallbackLanes].filter((l) => tierOf(l) === currentGroup).sort(bySameTier)
       .concat([...fallbackLanes].filter((l) => tierOf(l) !== currentGroup).sort(byTierThenRating))
     : [...fallbackLanes].sort(byTierThenRating);
   const codingLeft = orderedLanes.filter((l) => tierOf(l) === 'high').length;
@@ -4899,7 +4921,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           const pack = await resolvePackPath({
             manifest: handed.packManifest,
             failedLane: handed.model || '',
-            lanesFn: async () => (selectTurnLanes({ botId: config.id, model: eff.model, fallback: config.agent.model }).models || []),
+            lanesFn: async () => (selectTurnLanes({ botId: config.id, model: eff.model, fallback: config.agent.model, readiness: hostReadiness(caches, config.id), catalogEntries: await getFreeModels(caches, config) }).models || []),
             summarizeFn: async ({ model: lane, manifest: man }) => (await runOpencode({
               prompt: `Summarize this handoff pack in 10 lines or less (files changed, what the next turn needs):\n${(man.files || []).map((f) => `- ${f.path} (${f.bytes} bytes)`).join('\n')}`,
               model: lane,
@@ -4930,10 +4952,16 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     };
     // The ledger picks the walk. A lane it already stamped is not retried, an
     // ended lane is never offered, and a terminal-only row is never chosen.
+    // Readiness is passed so a vendor with no credential on this host reads as
+    // needs-setup (not selectable) instead of burning a turn on `Model
+    // unavailable` every message (live VM5 2026-10-03: tokenharbor/cloudflare
+    // have no key on the VPS).
     const laneChoice = selectTurnLanes({
       botId: config.id,
       model: eff.model,
       fallback: config.agent.model,
+      readiness: hostReadiness(caches, config.id),
+      catalogEntries: await getFreeModels(caches, config),
     });
     if (laneChoice.exhausted) {
       // QS-9: the local ledger is empty, but that verdict only covers this
