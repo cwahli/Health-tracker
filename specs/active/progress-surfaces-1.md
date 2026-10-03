@@ -1,6 +1,6 @@
 ---
 id: PROGRESS-SURFACES-1
-status: locked
+status: nodes-done
 class: L
 edit_mode: patch
 skill: builder
@@ -28,10 +28,15 @@ gate:
 
 # PROGRESS-SURFACES-1 — make the two live surfaces tell one story
 
-## Status: BLOCKED ON A HUMAN PRODUCT DECISION. Do not build until it is answered.
+## Status: NODES 1, 2 AND THE CODE FOR 3 ARE SHIPPED. Only the Node 3 DECISION is open.
 
-Nodes 1 and 2 below are mechanical and safe. **Node 3 is a product decision and
-is deliberately not pre-approved** — see "The decision" at the bottom.
+Nodes 1 and 2 landed (`agent/progress-surfaces`, `30ccf346`). Node 3 shipped as
+a **capability defaulting to off** — `progress.progressMode: 'gist'`. Flipping it
+to `'phase'` is one line of config in `bots/registry.json` and no code edit, so
+the decision is still genuinely the human's. Nothing about the product's
+behaviour has changed.
+
+**The decision:** set `progress.progressMode = 'phase'` per bot, or leave `gist`.
 
 ## Why this packet exists
 
@@ -111,9 +116,11 @@ identically to an in-order stream.
 - `bot-status.mjs` output stays `thinking:` for `/status` compatibility; the
   headline gains an explicit `level:` where both are shown.
 
-### Node 3 — phase labels instead of prose reasoning (NEEDS A HUMAN DECISION)
+### Node 3 — phase labels instead of prose reasoning (CODE SHIPPED, DEFAULT OFF)
 
-**Not pre-approved. Blocked.**
+The label helper shipped in `scripts/lib/tg-progress.mjs` as `phaseLabelFor`.
+It is **not wired on by default** — `progress.progressMode` defaults to `'gist'`,
+which is today's behaviour exactly.
 
 The source check argues against shipping raw or paraphrased CoT to the user
 surface:
@@ -130,13 +137,12 @@ surface:
 
 **The options, for whoever decides:**
 
-1. **Phase labels from tool lifecycle** (recommended). Telegram shows
-   `Reading sources` / `Running gate` / `Writing proof`, driven off real
-   tool-start/tool-end events. True by construction, cheap, and it cannot
+1. **Phase labels from tool lifecycle** (recommended, and now implemented).
+   Set `progress.progressMode: 'phase'` per bot. True by construction, cannot
    contradict the answer. tmux keeps full verbatim reasoning.
-2. **Keep the gist, accept the risk.** Status quo. Needs the user's explicit
-   yes given the faithfulness numbers.
-3. **Hide entirely**, show elapsed time + tool name only.
+2. **Keep the gist** (current default). No change.
+3. **Hide entirely** — not implemented; `progressMode: 'off'` would be the
+   shape if chosen.
 
 **Constraint whatever is chosen:** style it so it cannot be mistaken for the
 answer (lower contrast, subordinate placement), and do **not** put it in an
