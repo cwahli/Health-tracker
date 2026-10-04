@@ -3,19 +3,16 @@ name: agent-hygiene
 # The retirement step for agent branches (plan/AGENT_HYGIENE.md). Runs without
 # a human on a timer; the audit is the accountability, not an approval click.
 #
-# Scope is deliberately Tier 1 ONLY (provably-safe deletes: a merged PR, or a
-# tip reachable from main — content that is on main by definition). Tiers 2/3
-# need the cross-machine liveness story first: heartbeats are emitted by one
-# dispatch path today and the process scan only sees this box, so closing a
-# Mac/phone agent's PR or reaping its branch from here could eat live work.
-# Until every dispatch path beats (see agent-heartbeat.mjs), Tier 2/3 stay
-# report-only: they print in this run's log every week for owners to act on.
-# Widening to `--apply` without a tier filter is a conscious step, not a flag
-# flip — it requires heartbeat coverage on all locations (mobile, VM, Mac,
-# VPS, Collab).
+# Scope is full `--apply`: Tier 1 (provably-safe deletes) plus Tiers 2/3, held
+# back by four independent vetoes — a fresh heartbeat, a live process in a
+# worktree, an open PR on the branch, and the grace windows (48h head age for
+# PRs, 7d branch age plus the closed-PR grace for branches). The cross-machine
+# caveat stands: unpushed work is invisible off-box, so the finish-the-turn
+# rule (AGENTS.md L19: push + PR-or-delete every turn) is what keeps "no
+# signal" meaning "nobody home". Narrowing back to `--tier=1` is one flag.
 #
 # Manual: workflow_dispatch, or `node scripts/agent-hygiene.mjs` (dry run)
-# / `--apply --tier=1` from any checkout. Never touches `main`.
+# / `--apply` from any checkout. Never touches `main`.
 
 on:
   schedule:
@@ -43,7 +40,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Retire Tier 1, report Tiers 2/3
+      - name: Retire landed branches, report the rest
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/agent-hygiene.mjs --apply --tier=1
+        run: node scripts/agent-hygiene.mjs --apply
