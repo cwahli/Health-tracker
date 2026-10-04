@@ -145,22 +145,15 @@ export function resolveCommandName(cmd) {
 }
 
 /**
- * Chat-answer contract, appended to the turn prompt (review 2026-10-04).
- *
- * Open questions ("what's left?") came back as status novels: process
- * narrative, self-assigned follow-up work, and "want me to…" solicitations,
- * plus conclusions that outran verification. `opencode run` has no system
- * channel (no --system flag), so one bracketed line per turn is the smallest
- * durable form — the full paragraph used to live here and polluted the
- * shared transcript the TUI shows (operator: "shouldn't be permanent").
+ * The chat-answer contract used to live here: one bracketed line appended to
+ * every turn prompt (`opencode run` has no --system flag, so per-turn text was
+ * the only channel). Removed 2026-10-04 at the operator's call: it rendered
+ * verbatim in the shared session the TUI shows, same as the ping scaffolding
+ * before it. Spread the risk knowingly — without it, open answers may drift
+ * back toward status narrative and "want me to…" solicitations; if that
+ * regresses, the fix must be a channel that never lands in the transcript,
+ * not another per-turn suffix.
  */
-const CHAT_ANSWER_CONTRACT = '[chat: answer only; no narrative, work orders, or solicitation; mark unverified]';
-
-export function withChatContract(prompt) {
-  const body = String(prompt ?? '').trim();
-  if (!body) return CHAT_ANSWER_CONTRACT;
-  return `${body}\n\n${CHAT_ANSWER_CONTRACT}`;
-}
 
 /**
  * True when the name is a bot command (published, hidden, or alias target).

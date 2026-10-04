@@ -75,7 +75,6 @@ import {
   resolveCommandName,
   isKnownCommand,
   greetingReply,
-  withChatContract,
   BOT_COMMANDS,
   COMMAND_NAMES,
   toTelegramCommands,
@@ -3280,27 +3279,26 @@ describe('TG streaming — the work record survives a lost bubble', () => {
   });
 });
 
-describe('TG review — chat-answer contract rides the prompt', () => {
-  it('withChatContract appends the answer-only rules without touching the ask', () => {
-    // One bracketed line: opencode run has no system channel, and the full
-    // paragraph polluted the shared transcript the TUI shows.
-    const out = withChatContract('count the files');
-    expect(out.startsWith('count the files')).toBe(true);
-    expect(out).toContain('[chat: answer only;');
-    expect(out).toContain('mark unverified]');
-    expect(out.split('\n').length).toBeLessThanOrEqual(3);
+describe('TG review — no per-turn scaffolding in the shared transcript', () => {
+  it('the turn path appends no contract line (removed 2026-10-04: it rendered verbatim in the TUI)', () => {
+    // opencode run has no --system flag, so any per-turn suffix lands in the
+    // stored user row. The contract was that suffix; now nothing may be.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).not.toContain('withChatContract');
+    expect(src).not.toContain('[chat: answer only;');
   });
 
-  it('the turn path applies the contract (source-pinned, like the TDZ sensor)', () => {
-    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    expect(src).toContain('finalPrompt = withChatContract(finalPrompt);');
+  it('commands.mjs exports no contract helper to reattach', () => {
+    const src = fs.readFileSync(new URL('../scripts/lib/commands.mjs', import.meta.url), 'utf8');
+    expect(src).not.toContain('CHAT_ANSWER_CONTRACT');
+    expect(src).not.toMatch(/export function withChatContract/);
   });
 
   it('every turn-path helper is actually imported (live 2026-10-04: withChatContract was called but never imported, killing the turn)', () => {
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
     const m = src.match(/import\s*\{[\s\S]*?\}\s*from\s*'\.\/lib\/commands\.mjs'/);
     expect(m).not.toBeNull();
-    for (const name of ['withChatContract', 'greetingReply', 'isKnownCommand']) {
+    for (const name of ['greetingReply', 'isKnownCommand']) {
       expect(m[0]).toContain(name);
     }
   });
