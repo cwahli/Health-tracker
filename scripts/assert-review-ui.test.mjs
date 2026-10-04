@@ -62,6 +62,16 @@ const QUEUE = [
       { id: 'file-1', name: 'shot-two.png', mimeType: 'image/png' },
       { id: 'file-2', name: 'shot-three.png', mimeType: 'image/png' },
     ],
+    answers: [
+      {
+        id: 'ans-0',
+        name: 'human-review-20261004-091200-screen.png',
+        mimeType: 'image/png',
+        text: 'the mobile pane is blank in this shot',
+        target: 'left',
+        at: '2026-10-04T09:12:00.000Z',
+      },
+    ],
   },
   {
     row: 3,
@@ -76,6 +86,7 @@ const QUEUE = [
     gate: '',
     lastActivity: '12:05 - 2 oct (UK)',
     proofs: [],
+    answers: [],
   },
 ];
 
@@ -97,6 +108,7 @@ async function withPage(fn) {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 420, height: 900 } });
   const posts = [];
+  const answers = [];
   const proofFetches = [];
   await page.route('**/review/api/state**', (r) => r.fulfill({
     status: 200, contentType: 'application/json',
@@ -117,11 +129,23 @@ async function withPage(fn) {
   await page.route('**/review/api/approve*', (route) => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }),
   }));
+  await page.route('**/review/api/answer*', (route) => {
+    const sent = JSON.parse(route.request().postData() || '{}');
+    answers.push(sent);
+    const name = `human-review-20261004-101010-${(sent.image && sent.image.name) || 'picture'}.png`;
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true, key: sent.key, target: sent.target, uploaded: name,
+        stamped: `[human 4 Oct] ${sent.text || ''} — see ${name}`,
+      }),
+    });
+  });
 
   try {
     await page.goto(`${base}/review/app?token=x`);
     await page.waitForSelector('.stage img');
-    return await fn({ page, base, posts, proofFetches });
+    return await fn({ page, base, posts, answers, proofFetches });
   } finally {
     await browser.close();
     server.close();
@@ -173,19 +197,115 @@ test('the image owns the majority of the screen on every tab', async (t) => {
   if (ran === null) t.skip('playwright not installed');
 });
 
-test('three one-word tabs, a heart, and no send button', async (t) => {
+test('four one-word tabs (Info/Request/To do/Answer), a heart, and no send button', async (t) => {
   const ran = await withPage(async ({ page }) => {
     const tabs = await page.$$eval('#tabs button', (bs) => bs.map((b) => ({
       label: (b.textContent || '').replace(/[\u00a0\s]+/g, ' ').trim(),
       tab: b.getAttribute('data-tab'),
     })));
-    assert.deepEqual(tabs.map((x) => x.tab), ['info', 'request', 'todo']);
+    // Answer sits next to To do: the reader's own verdict belongs beside the
+    // work list it is a verdict on.
+    assert.deepEqual(tabs.map((x) => x.tab), ['info', 'request', 'todo', 'answer']);
     for (const x of tabs) assert.match(x.label, /^[\w ]+$/, `tab label is one word: ${x.label}`);
-    assert.equal(tabs.length, 3);
     assert.ok(await page.$('.heart'), 'heart button present');
     assert.equal(await page.$('.btn-send'), null, 'no send button');
-    const sendCount = await page.$$eval('.actions button, .btn-send', (bs) => bs.length).catch(() => 0);
-    assert.equal(sendCount, 0);
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
+
+test('To do shows the Whats-left column and names it; Request shows the request column', async (t) => {
+  const ran = await withPage(async ({ page }) => {
+    await page.click('#tabs button[data-tab="todo"]');
+    await page.waitForTimeout(80);
+    const todo = await page.textContent('.view[data-view="todo"]');
+    assert.match(todo, /What\u2019s left to do/, 'the tab names the column it shows');
+    // Item 2 of the queue is the one with a What's-left value.
+    await page.click('#btn-next');
+    await page.click('#tabs button[data-tab="todo"]');
+    await page.waitForTimeout(80);
+    const todo2 = await page.textContent('.view[data-view="todo"]');
+    assert.match(todo2, /one more pass/, 'the column content is on screen');
+    await page.click('#tabs button[data-tab="request"]');
+    await page.waitForTimeout(80);
+    const req = await page.textContent('.view[data-view="request"]');
+    assert.match(req, /Original request/);
+    assert.match(req, /Other work/);
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
+
+test('Answer shows the picture with the words the human wrote', async (t) => {
+  const ran = await withPage(async ({ page, proofFetches }) => {
+    await page.click('#tabs button[data-tab="answer"]');
+    await page.waitForTimeout(120);
+    const card = await page.textContent('.answers');
+    assert.match(card, /the mobile pane is blank in this shot/, 'the note rides with the picture');
+    assert.match(card, /What\u2019s left to do/, 'and says which column it went to');
+    assert.ok(proofFetches.includes('ans-0'), 'the answer image is fetched through the guarded proof route');
+    assert.equal(await page.$$eval('.answers img', (i) => i.length), 1);
+
+    // An item with nothing sent back says so instead of showing nothing.
+    await page.click('#btn-next');
+    await page.click('#tabs button[data-tab="answer"]');
+    await page.waitForTimeout(120);
+    const none = await page.textContent('.answers');
+    assert.match(none, /Nothing sent back yet/);
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
+
+test('a picture attaches and Enter sends it as an answer with the note', async (t) => {
+  const ran = await withPage(async ({ page, answers, posts }) => {
+    // 1. No picture, no words: nothing is sent.
+    await page.click('#comment');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+    assert.equal(answers.length, 0);
+    assert.equal(posts.length, 0);
+
+    // 2. A picture alone is a valid answer (pointing at the shot is the message).
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR42mNkYPj/n4GBgYGJAQoAHgQCAf6O8b8AAAAASUVORK5CYII=',
+      'base64',
+    );
+    await page.setInputFiles('#file', { name: 'mobile pane.png', mimeType: 'image/png', buffer: png });
+    await page.waitForFunction(() => !document.getElementById('attachment').hidden, null, { timeout: 5000 });
+    assert.equal(await page.isVisible('#attachment'), true, 'the attachment is previewed before sending');
+    assert.match(await page.textContent('#attach-name'), /mobile pane/);
+    await page.click('#comment');
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes('/review/api/answer'), { timeout: 5000 }),
+      page.keyboard.press('Enter'),
+    ]);
+    await page.waitForFunction(() => document.getElementById('attachment').hidden, null, { timeout: 5000 });
+    assert.equal(answers.length, 1, 'the picture went to the answer endpoint');
+    assert.equal(answers[0].key, 'req:test-a');
+    assert.equal(answers[0].target, 'left');
+    assert.ok(answers[0].image && answers[0].image.data, 'the bytes rode along');
+    assert.match(answers[0].image.data, /^[A-Za-z0-9+/=]+$/, 'base64, not a data: prefix');
+    assert.equal(await page.isVisible('#attachment'), false, 'the preview clears after a send');
+
+    // 3. It shows up in the Answer tab immediately, without a page reload.
+    await page.click('#tabs button[data-tab="answer"]');
+    await page.waitForTimeout(120);
+    const card = await page.textContent('.answers');
+    assert.match(card, /Your answers/);
+    assert.equal(await page.$$eval('.answers img', (i) => i.length), 2, 'the new picture is there too');
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
+
+test('a non-picture or an oversize picture is refused before any send', async (t) => {
+  const ran = await withPage(async ({ page, answers }) => {
+    await page.setInputFiles('#file', {
+      name: 'notes.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4'),
+    });
+    await page.waitForTimeout(250);
+    assert.equal(await page.isVisible('#attachment'), false, 'a PDF is not an answer picture');
+    assert.match(await page.textContent('.toast'), /Only a picture/);
+    assert.equal(answers.length, 0);
   });
   if (ran === null) t.skip('playwright not installed');
 });

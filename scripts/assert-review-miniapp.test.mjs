@@ -37,8 +37,11 @@ import {
   getReviewItems,
   approveReviewItem,
   commentReviewItem,
+  answerReviewItem,
   verifyProofFile,
   resetReviewState,
+  ANSWER_PREFIX,
+  REVIEW_IMAGE_MAX,
 } from './lib/review-status.mjs';
 
 function makeInitData(botToken, { user = { id: 123456, first_name: 'Test' }, authDate = Math.floor(Date.now() / 1000) } = {}) {
@@ -99,7 +102,13 @@ function fakeDeps(calls = {}) {
             files: [
               { id: 'img1', name: 'a.png', mimeType: 'image/png' },
               { id: 'img2', name: 'b.png', mimeType: 'image/png' },
-              { id: 'doc1', name: 'notes.md', mimeType: 'text/markdown' },
+              { doc1: 0, id: 'doc1', name: 'notes.md', mimeType: 'text/markdown' },
+              {
+                id: 'ans1',
+                name: `${ANSWER_PREFIX}20261004-091200-screen.png`,
+                mimeType: 'image/png',
+                appProperties: { humanText: 'the Mac pane is missing here', humanTarget: 'left', humanAt: '2026-10-04T09:12:00.000Z' },
+              },
             ],
           },
         };
@@ -107,6 +116,16 @@ function fakeDeps(calls = {}) {
       return { ok: true, json: { files: [] } };
     },
     downloadFile: async (fileId) => ({ ok: fileId === 'img1', bytes: fileId === 'img1' ? Buffer.from([1, 2, 3]) : null, error: 'nope' }),
+    createFile: async (folderId, name, opts) => {
+      calls.created = calls.created || [];
+      calls.created.push({ folderId, name, mimeType: opts?.mimeType });
+      return { ok: true, id: `new-${name}` };
+    },
+    uploadBinary: async (folderId, name, bytes, opts, token) => {
+      calls.uploads = calls.uploads || [];
+      calls.uploads.push({ folderId, name, bytes: bytes.length, mimeType: opts?.mimeType, appProperties: opts?.appProperties });
+      return { ok: true, id: 'up1' };
+    },
   };
 }
 
@@ -171,8 +190,15 @@ test('getReviewItems returns only review rows with their proof images', async ()
   assert.deepEqual(res.items.map((i) => i.key), ['req:test-1', 'req:test-3']);
   const first = res.items[0];
   assert.equal(first.row, 2);
-  assert.deepEqual(first.proofs.map((p) => p.id), ['img1', 'img2']);
+  assert.deepEqual(first.proofs.map((p) => p.id), ['img1', 'img2', 'ans1']);
+  // The human's own uploads, with the words they wrote, off the same folder.
+  assert.equal(first.answers.length, 1);
+  assert.equal(first.answers[0].id, 'ans1');
+  assert.equal(first.answers[0].text, 'the Mac pane is missing here');
+  assert.equal(first.answers[0].target, 'left');
+  assert.ok(first.answers[0].name.startsWith(ANSWER_PREFIX));
   assert.equal(res.items[1].proofs.length, 0);
+  assert.equal(res.items[1].answers.length, 0);
 });
 
 test('verifyProofFile admits only listed images of the item', async () => {
@@ -239,6 +265,98 @@ test('commentReviewItem rejects empty, oversize, and mistargeted comments', asyn
   assert.equal((await commentReviewItem('req:test-2', 'hi', 'left', { env: {}, deps })).ok, false);
 });
 
+test('answerReviewItem puts the picture in the ticket folder and notes it in the sheet', async () => {
+  resetReviewState();
+  const calls = {};
+  const png = Buffer.from('89504e470d0a1a0a', 'hex');
+  const res = await answerReviewItem('req:test-1', {
+    target: 'left',
+    text: 'the mobile pane is blank in this shot',
+    image: { name: 'screen shot.png', mimeType: 'image/png', data: png.toString('base64') },
+  }, { env: {}, deps: fakeDeps(calls) });
+
+  assert.equal(res.ok, true);
+  assert.ok(res.uploaded.startsWith(ANSWER_PREFIX), `name must mark it as the human\u2019s: ${res.uploaded}`);
+  assert.ok(res.uploaded.endsWith('.png'));
+  assert.equal(calls.uploads.length, 1);
+  assert.equal(calls.uploads[0].folderId, 'fld1', 'the ticket\u2019s own folder, next to the agent\u2019s proof');
+  assert.equal(calls.uploads[0].bytes, png.length);
+  assert.equal(calls.uploads[0].appProperties.humanText, 'the mobile pane is blank in this shot');
+  assert.equal(calls.uploads[0].appProperties.humanTarget, 'left');
+  // The sheet note names the file, so the agent sees it without opening Drive.
+  assert.equal(calls.updated[0].range, 'current!D2');
+  const cell = calls.updated[0].values[0][0];
+  assert.match(cell, /the mobile pane is blank in this shot/);
+  assert.match(cell, new RegExp(res.uploaded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(cell, /^\[human \d{1,2} \w{3}\]/);
+});
+
+test('answerReviewItem creates the ticket folder when the agent filed no proof', async () => {
+  resetReviewState();
+  const calls = {};
+  const deps = fakeDeps(calls);
+  // No folder for this key: the listing must be asked to make one.
+  const realList = deps.listFolder;
+  deps.listFolder = async (folderId, token, opts) => {
+    if (folderId === PROOF_DRIVE_FOLDER) return realList(folderId, token, opts);
+    return { ok: true, json: { files: [] } };
+  };
+  const res = await answerReviewItem('req:test-3', {
+    target: 'original',
+    image: { name: 'p.png', mimeType: 'image/png', data: Buffer.from('x').toString('base64') },
+  }, { env: {}, deps });
+  assert.equal(res.ok, true, res.error || '');
+  assert.ok(calls.created && calls.created.some((c) => c.name === 'req:test-3' && c.mimeType.includes('folder')), 'folder created for the key');
+  assert.equal(calls.uploads[0].folderId, 'new-req:test-3');
+  assert.equal(calls.updated[0].range, 'current!B4', 'an original-request answer writes that column');
+  assert.match(calls.updated[0].values[0][0], /see human-review-/);
+});
+
+test('answerReviewItem refuses: nothing sent, wrong type, too big, not in review', async () => {
+  resetReviewState();
+  const deps = fakeDeps();
+  const big = { name: 'p.png', mimeType: 'image/png', data: Buffer.alloc(REVIEW_IMAGE_MAX + 1).toString('base64') };
+  const cases = [
+    [{ target: 'left', text: '' }, /needs a picture or a note/],
+    [{ text: 'hi', image: { name: 'p.pdf', mimeType: 'application/pdf', data: 'AAA=' } }, /unsupported image type/],
+    [{ text: 'hi', image: big }, /limit 4MB/],
+  ];
+  for (const [payload, want] of cases) {
+    const res = await answerReviewItem('req:test-1', payload, { env: {}, deps });
+    assert.equal(res.ok, false, JSON.stringify(payload).slice(0, 60));
+    assert.match(res.error, want);
+  }
+  // A picture with no words is allowed (pointing at the shot is the message).
+  const okBare = await answerReviewItem('req:test-1', {
+    target: 'left',
+    image: { name: 'p.png', mimeType: 'image/png', data: Buffer.from('x').toString('base64') },
+  }, { env: {}, deps });
+  assert.equal(okBare.ok, true);
+  // …but an item that is not awaiting review never takes an answer.
+  const notReview = await answerReviewItem('req:test-2', { text: 'hi' }, { env: {}, deps });
+  assert.equal(notReview.ok, false);
+  assert.match(notReview.error, /not review|not found/);
+});
+
+test('answerReviewItem reports a partial success when Drive took the shot but the cell failed', async () => {
+  resetReviewState();
+  const calls = {};
+  const deps = fakeDeps(calls);
+  const realUpdate = deps.updateValues;
+  deps.updateValues = async (sheetId, range, values) => {
+    if (String(range).startsWith('current!D')) return { ok: false, error: 'HTTP 429 rate limited' };
+    return realUpdate(sheetId, range, values);
+  };
+  const res = await answerReviewItem('req:test-1', {
+    target: 'left',
+    text: 'look here',
+    image: { name: 'p.png', mimeType: 'image/png', data: Buffer.from('x').toString('base64') },
+  }, { env: {}, deps });
+  assert.equal(res.ok, false);
+  assert.equal(res.uploaded.startsWith(ANSWER_PREFIX), true, 'the file name is reported so it is findable');
+  assert.match(res.error, /in Drive as human-review-/);
+});
+
 test('gateway /review auth door admits valid initData and refuses bad HMAC', async () => {
   const botToken = '123456789:ABCdefGHIjklMNOpqrSTUvwxYZ';
   const secret = 'gateway-test-secret-12345';
@@ -299,7 +417,7 @@ test('gateway /review routes: landing, app, state, proof guard, write validation
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({}),
     });
-    assert.equal(approveRes.status, 200);
+    assert.equal(approveRes.status, 400);
     assert.equal((await approveRes.json()).ok, false);
 
     const commentRes = await fetch(`${base}/review/api/comment`, {
@@ -307,8 +425,18 @@ test('gateway /review routes: landing, app, state, proof guard, write validation
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ key: 'x', target: 'elsewhere', text: 'hi' }),
     });
-    assert.equal(commentRes.status, 200);
+    assert.equal(commentRes.status, 400);
     assert.equal((await commentRes.json()).ok, false);
+
+    // The answer endpoint answers with the same verdict shape, and refuses an
+    // empty answer rather than writing an empty note.
+    const answerRes = await fetch(`${base}/review/api/answer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'x', target: 'left', text: '' }),
+    });
+    assert.equal(answerRes.status, 400);
+    assert.match((await answerRes.json()).error, /needs a picture or a note/);
   } finally {
     server.close();
   }
@@ -326,6 +454,7 @@ test('gateway /review/api routes refuse without a token outside test auth', asyn
     assert.equal((await fetch(`${base}/review/api/state`)).status, 401);
     assert.equal((await fetch(`${base}/review/api/proof?key=a&file=b`)).status, 401);
     assert.equal((await fetch(`${base}/review/api/approve`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 401);
+    assert.equal((await fetch(`${base}/review/api/answer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 401);
   } finally {
     server.close();
   }

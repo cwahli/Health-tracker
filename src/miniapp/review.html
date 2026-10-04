@@ -67,6 +67,15 @@
   .kv .gate { color: #fbbf24; }
   .text { padding: 14px var(--gutter); font-size: 15px; color: #e2e8f0;
           white-space: pre-wrap; overflow-wrap: break-word; }
+  .colname { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+             color: #64748b; margin-bottom: 6px; }
+  .answers { padding: 12px var(--gutter); }
+  .answers .none { color: #64748b; font-size: 13px; }
+  .answer { margin: 0 0 14px; }
+  .answer img { width: 100%; max-height: 40vh; object-fit: contain; display: block;
+                background: #000; border-radius: 8px; border: 1px solid #1e293b; }
+  .answer figcaption { font-size: 13px; color: #e2e8f0; margin-top: 5px; white-space: pre-wrap; }
+  .answer figcaption.where { font-size: 10.5px; color: #64748b; }
 
   /* --- image stage: pinch, pan, swipe, all gestures are ours --------- */
   .stage { position: relative; flex: 1 1 auto; min-height: 0; background: #000; overflow: hidden; }
@@ -110,6 +119,22 @@
   /* --- composer: no send button, keyboard sends ----------------------- */
   .composer { flex: 0 0 auto; background: #0b1220; border-top: 1px solid #1e293b;
               padding: 6px var(--gutter) calc(6px + env(safe-area-inset-bottom)); }
+  .attach {
+    width: 34px; height: 34px; flex: 0 0 34px; border-radius: 8px; cursor: pointer;
+    background: #111c33; border: 1px solid #1e293b; color: #93c5fd; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .attach[disabled] { opacity: 0.45; }
+  .attachrow { display: flex; gap: 8px; align-items: flex-end; }
+  .attachrow textarea { flex: 1 1 auto; }
+  .attachment[hidden] { display: none; }
+  .attachment {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+    background: #111c33; border: 1px solid #1e293b; border-radius: 8px; padding: 6px 8px;
+  }
+  .attachment img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; background: #000; }
+  .attachment .name { flex: 1 1 auto; font-size: 11.5px; color: #93c5fd; overflow-wrap: anywhere; }
+  .attachment .drop { background: none; border: none; color: #f87171; font-size: 15px; cursor: pointer; padding: 2px 4px; }
   .target { display: flex; gap: 6px; margin-bottom: 6px; }
   .target button {
     cursor: pointer; padding: 4px 12px; font-size: 11.5px; font-weight: 600;
@@ -153,6 +178,7 @@
   <button data-tab="info">Info</button>
   <button data-tab="request">Request</button>
   <button data-tab="todo">To&nbsp;do</button>
+  <button data-tab="answer">Answer</button>
 </div>
 
 <div class="panel" id="panel"></div>
@@ -162,8 +188,17 @@
     <button data-target="left">To&nbsp;do</button>
     <button data-target="original">Request</button>
   </div>
-  <textarea id="comment" rows="1" placeholder="Comment for the agent…"></textarea>
-  <div class="hint">Enter sends · Shift+Enter new line</div>
+  <div class="attachment" id="attachment" hidden>
+    <img id="attach-preview" alt="attached">
+    <span class="name" id="attach-name"></span>
+    <button class="drop" id="attach-drop" title="Remove" aria-label="Remove attached picture">✕</button>
+  </div>
+  <div class="attachrow">
+    <button class="attach" id="attach" title="Attach a picture" aria-label="Attach a picture">📎</button>
+    <textarea id="comment" rows="1" placeholder="Comment for the agent…"></textarea>
+  </div>
+  <input type="file" id="file" accept="image/*" hidden>
+  <div class="hint">Enter sends · Shift+Enter new line · 📎 attaches a picture</div>
 </div>
 
 <script>
@@ -177,7 +212,7 @@
     }
   } catch (e) {}
 
-  var state = { items: [], idx: 0, tab: 'proof', infoOpen: false, target: 'left', busy: false };
+  var state = { items: [], idx: 0, tab: 'proof', infoOpen: false, target: 'left', busy: false, pending: null };
   var query = location.search || '';
   var builtKey = null;      // item key currently in the DOM — the blink guard
   var view = null;          // per-item picture view: slides, zoom, gestures
@@ -475,8 +510,29 @@
       + '<div class="kv"><h3>Work done</h3><p>' + esc(it.workDone) + '</p></div>'
       + '<div class="kv"><h3>Proof</h3><p>' + (proofs.length ? proofs.map(function (p) { return esc(p.name); }).join('\n') : 'none filed') + '</p></div>'
       + '</div>';
-    views += '<div class="view scroll text" data-view="request"><div id="pane-request">' + esc(it.originalRequest) + '</div></div>';
-    views += '<div class="view scroll text" data-view="todo"><div id="pane-todo">' + esc(it.whatsLeft) + '</div></div>';
+    // The two column tabs name the sheet column they show, so a reader can
+    // never be guessing which cell is on screen.
+    views += '<div class="view scroll text" data-view="request">'
+      + '<div class="colname">Original request</div><div id="pane-request">' + esc(it.originalRequest) + '</div></div>';
+    views += '<div class="view scroll text" data-view="todo">'
+      + '<div class="colname">What\u2019s left to do</div><div id="pane-todo">'
+      + (it.whatsLeft ? esc(it.whatsLeft) : '<span style="color:#475569">the What\u2019s left to do column is empty</span>')
+      + '</div></div>';
+
+    var answers = it.answers || [];
+    views += '<div class="view scroll answers" data-view="answer">'
+      + '<div class="colname">Your answers</div>'
+      + (answers.length
+        ? answers.map(function (a, i) {
+            return '<figure class="answer">'
+              + '<img src="' + proofUrl(it.key, a.id) + '" alt="your answer ' + (i + 1) + '" loading="lazy">'
+              + (a.text ? '<figcaption>' + esc(a.text) + '</figcaption>' : '')
+              + '<figcaption class="where">' + esc(a.target === 'original' ? 'added to Original request' : 'added to What\u2019s left to do')
+              + (a.at ? ' \u00b7 ' + esc(String(a.at).slice(0, 16).replace('T', ' ')) : '') + '</figcaption>'
+              + '</figure>';
+          }).join('')
+        : '<p class="none">Nothing sent back yet. Tap 📎, pick a picture of what is wrong, and press Enter \u2014 it lands in this item\u2019s Drive folder for the agent to open.</p>')
+      + '</div>';
 
     var stage = '';
     if (proofs.length) {
@@ -584,6 +640,69 @@
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendComment(); }
   });
 
+  /* --- 📎 a picture of what is wrong -----------------------------------
+     The picture is not decoration: it goes into the item's own Drive folder
+     (where the agent's proof already is), carrying the note in the file's
+     properties, and the sheet cell gets the stamped line. That is the whole
+     point — the agent opens the same folder it already knows. */
+  var MAX_UPLOAD = 4 * 1024 * 1024;
+  var fileInput = document.getElementById('file');
+
+  function clearAttachment() {
+    state.pending = null;
+    var box = document.getElementById('attachment');
+    if (box) box.hidden = true;
+    var pv = document.getElementById('attach-preview');
+    if (pv) pv.removeAttribute('src');
+    var nm = document.getElementById('attach-name');
+    if (nm) nm.textContent = '';
+    if (fileInput) fileInput.value = '';
+  }
+
+  document.getElementById('attach').addEventListener('click', function () { fileInput.click(); });
+  document.getElementById('attach-drop').addEventListener('click', clearAttachment);
+
+  fileInput.addEventListener('change', function () {
+    var f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    var okType = /^image\/(png|jpeg|webp|gif)$/i.test(f.type || '');
+    if (!okType) { toast('Only a picture (png, jpeg, webp, gif)'); clearAttachment(); return; }
+    if (f.size > MAX_UPLOAD) { toast('Picture is too big (max 4MB)'); clearAttachment(); return; }
+    var fr = new FileReader();
+    fr.onerror = function () { toast('Could not read that picture'); clearAttachment(); };
+    fr.onload = function () {
+      state.pending = { file: f, dataUrl: String(fr.result || '') };
+      document.getElementById('attach-preview').src = state.pending.dataUrl;
+      document.getElementById('attach-name').textContent = f.name + ' \u00b7 ' + Math.round(f.size / 1024) + 'KB';
+      document.getElementById('attachment').hidden = false;
+    };
+    fr.readAsDataURL(f);
+  });
+
+  // Paste a picture straight into the box, the way a reader would.
+  document.getElementById('comment').addEventListener('paste', function (e) {
+    var items = (e.clipboardData && e.clipboardData.items) || [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type && items[i].type.indexOf('image/') === 0) {
+        var f = items[i].getAsFile();
+        if (f) { e.preventDefault(); setPasted(f); }
+        return;
+      }
+    }
+  });
+
+  function setPasted(f) {
+    if (f.size > MAX_UPLOAD) { toast('Picture is too big (max 4MB)'); return; }
+    var fr = new FileReader();
+    fr.onload = function () {
+      state.pending = { file: f, dataUrl: String(fr.result || '') };
+      document.getElementById('attach-preview').src = state.pending.dataUrl;
+      document.getElementById('attach-name').textContent = 'pasted picture \u00b7 ' + Math.round(f.size / 1024) + 'KB';
+      document.getElementById('attachment').hidden = false;
+    };
+    fr.readAsDataURL(f);
+  }
+
   function onHeart() {
     var btn = document.getElementById('heart');
     var it = state.items[state.idx];
@@ -607,28 +726,81 @@
     }).catch(function () { state.busy = false; btn.textContent = '🤍'; toast('Approve failed: network'); });
   }
 
+  /** Read the picked file as base64 (no data: prefix) for the answer endpoint. */
+  function readAsBase64(file) {
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onerror = function () { reject(new Error('could not read the file')); };
+      fr.onload = function () {
+        var out = String(fr.result || '');
+        var i = out.indexOf(',');
+        resolve(i >= 0 ? out.slice(i + 1) : out);
+      };
+      fr.readAsDataURL(file);
+    });
+  }
+
   function sendComment() {
     var ta = document.getElementById('comment');
     var it = state.items[state.idx];
     if (!it || state.busy) return;
     var text = ta.value.trim();
-    if (!text) return;
+    var pending = state.pending;
+    if (!text && !pending) return;
     state.busy = true;
-    api('/review/api/comment', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: it.key, target: state.target, text: text }),
+
+    var ready = pending
+      ? readAsBase64(pending.file).then(function (b64) {
+          return {
+            key: it.key,
+            target: state.target,
+            text: text,
+            image: { name: pending.file.name || 'picture', mimeType: pending.file.type || 'image/png', data: b64 },
+          };
+        })
+      : Promise.resolve({ key: it.key, target: state.target, text: text });
+
+    ready.then(function (payload) {
+      var path = payload.image ? '/review/api/answer' : '/review/api/comment';
+      return api(path, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
     }).then(function (r) {
       state.busy = false;
       if (r.body && r.body.ok) {
         var pane = document.getElementById(state.target === 'left' ? 'pane-todo' : 'pane-request');
-        var before = pane ? pane.innerHTML : '';
-        if (pane) pane.innerHTML = before + '\n' + esc(r.body.stamped);
+        if (pane) pane.innerHTML = (pane.innerHTML || '') + '\n' + esc(r.body.stamped);
         ta.value = '';
-        toast('Sent → ' + (state.target === 'left' ? 'To do' : 'Request'));
+        clearAttachment();
+        if (r.body.uploaded) {
+          // Show it straight away: the Answer tab is where the reader looks next.
+          var card = document.createElement('figure');
+          card.className = 'answer';
+          var img = document.createElement('img');
+          img.src = pending.dataUrl;
+          img.alt = 'your answer';
+          var cap = document.createElement('figcaption');
+          cap.textContent = text || '';
+          var where = document.createElement('figcaption');
+          where.className = 'where';
+          where.textContent = 'added to ' + (state.target === 'left' ? 'What\u2019s left to do' : 'Original request');
+          card.appendChild(img);
+          if (text) card.appendChild(cap);
+          card.appendChild(where);
+          var holder = document.querySelector('.answers');
+          var none = holder && holder.querySelector('.none');
+          if (none) none.remove();
+          if (holder) holder.insertBefore(card, holder.children[1] || null);
+        }
+        toast(r.body.uploaded ? 'Answer sent \u2192 the agent\u2019s folder' : 'Sent \u2192 ' + (state.target === 'left' ? 'To do' : 'Request'));
       } else {
         toast('Send failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
       }
-    }).catch(function () { state.busy = false; toast('Send failed: network'); });
+    }).catch(function (e) {
+      state.busy = false;
+      toast('Send failed: ' + (e && e.message ? e.message : 'network'));
+    });
   }
 
   /* --- render: only rebuilds when the item actually changes ----------- */
@@ -647,7 +819,7 @@
       return;
     }
     var it = state.items[state.idx];
-    if (builtKey !== it.key) build(it);
+    if (builtKey !== it.key) { clearAttachment(); build(it); }
     showProof();
   }
 
