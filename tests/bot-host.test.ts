@@ -101,6 +101,7 @@ import {
   listTypedSkills,
   warmTurnCaches,
   resolveFreemodelTap,
+  pickOfferedVariant,
   loadLeases,
   saveLeases,
   recordRunStart,
@@ -3195,5 +3196,18 @@ describe('TG TUI — /tui status must not die in the temporal dead zone', () => 
       expect(useAt).toBeGreaterThan(-1);
       expect(useAt).toBeGreaterThan(declAt);
     }
+  });
+});
+
+describe('TG opencode lane — variant travels only when offered', () => {
+  it('pickOfferedVariant passes an offered level and drops anything else', async () => {
+    expect(pickOfferedVariant('high', ['low', 'high'])).toBe('high');
+    // Live 2026-10-04: ring-2.6-1t-free#xhigh died as Invalid model
+    // reference and burned three failover lanes before gemini answered.
+    expect(pickOfferedVariant('xhigh', [])).toBeUndefined();
+    expect(pickOfferedVariant('xhigh', ['low'])).toBeUndefined();
+    expect(pickOfferedVariant('xhigh', null)).toBeUndefined();
+    expect(pickOfferedVariant(undefined, ['high'])).toBeUndefined();
+    expect(pickOfferedVariant('', ['high'])).toBeUndefined();
   });
 });

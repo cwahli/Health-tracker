@@ -654,6 +654,20 @@ async function getVariants(config, caches, modelId) {
   return entry?.variants || [];
 }
 
+/**
+ * The variant the next `-m` argument may carry (plan/TG_TOOL_SURFACE.md M3).
+ *
+ * A stored level the model does not offer must never reach the child argv:
+ * `ring-2.6-1t-free#xhigh` dies as "Invalid model reference" and burns the
+ * whole failover walk (live 2026-10-04: three lanes down before gemini
+ * answered). Models with no variants run bare — same shape as the Cline
+ * branch, which only forwards levels in CLINE_THINKING_LEVELS.
+ */
+export function pickOfferedVariant(variant, offered) {
+  if (!variant) return undefined;
+  return Array.isArray(offered) && offered.includes(variant) ? variant : undefined;
+}
+
 async function getContextLimit(config, caches, modelId) {
   if (!caches.verbose) {
     caches.verbose = parseModelsVerbose(
@@ -708,6 +722,18 @@ export async function warmTurnCaches(config, caches) {
     await getFreeModels(caches, config);
   } catch {
     /* the turn path rebuilds this */
+  }
+  // The variant gate on the turn path (pickOfferedVariant) reads the verbose
+  // catalog: warm it here so the first turn after boot does not pay a
+  // `models --verbose` spawn inside the send→session-row budget.
+  try {
+    if (!caches.verbose) {
+      caches.verbose = parseModelsVerbose(
+        await listModelsVerbose({ opencodeBin: config?.agent?.opencodeBin, env: opencodeEnv(config) }),
+      );
+    }
+  } catch {
+    /* getVariants rebuilds this */
   }
   return caches;
 }
@@ -5239,7 +5265,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       fanoutProgressEvent({ renderer, observer, event, context: observerContext });
     };
     let lastAttemptModel = eff.model;
-    const runSurfaceModel = (model) => {
+    const runSurfaceModel = async (model) => {
       const candidate = parseModelRef(model);
       if (candidate.surface === 'cline') {
         return runCline({
@@ -5264,10 +5290,22 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
         });
       }
+      // Only a level this model offers travels as `#variant`. Anything else
+      // runs bare: an unoffered suffix is a hard "Invalid model reference"
+      // on strict models (see pickOfferedVariant). The verbose catalog is
+      // warmed at boot, so this is a cache read on a warm poller.
+      let opencodeVariant;
+      if (eff.variant) {
+        try {
+          opencodeVariant = pickOfferedVariant(eff.variant, await getVariants(config, caches, model));
+        } catch {
+          opencodeVariant = undefined;
+        }
+      }
       return runOpencode({
         prompt: finalPrompt,
         model,
-        variant: eff.variant,
+        variant: opencodeVariant,
         workspace: effectiveWorkspace,
         thinking: config.agent.thinking,
         timeoutMs: config.agent.timeoutMs,
