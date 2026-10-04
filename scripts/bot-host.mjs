@@ -2649,7 +2649,31 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       saveSessions(config.id, sessions);
       clearFollowups(chatId);
       clearActiveThread(chatId);
-      await api.sendMessage(chatId, 'Started a fresh session.');
+      // Failproof-sync: an open terminal belongs to the OLD session. Leaving
+      // it up guarantees the "TUI shows another conversation" desync, so /new
+      // takes it down (verified kill, same path as /tui off) and the next /tui
+      // tap rebuilds on the fresh session. The old session itself is untouched.
+      let paneNote = '';
+      const stalePane = readTuiPane(config.id);
+      if (stalePane && hasTuiPane(stalePane)) {
+        killTuiPane(stalePane);
+        if (!hasTuiPane(stalePane)) {
+          try {
+            fs.rmSync(tuiLeasePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          try {
+            fs.rmSync(tuiPanePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          paneNote = `\nClosed the old terminal pane (\`${stalePane}\`) — it showed the previous session. \`/tui\` opens a fresh one on the new session.`;
+        } else {
+          paneNote = `\n⚠️ Could not close the old terminal pane (\`${stalePane}\`) — it still shows the previous session. \`/tui off\` retries the kill.`;
+        }
+      }
+      await api.sendMessage(chatId, `Started a fresh session.${paneNote}`);
       return;
 
     case 'compact': {
@@ -3069,6 +3093,41 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
             'Your scrollback went with it, and it costs nothing while closed. `/tui` opens a fresh one on this same conversation whenever you want it back.',
           ].join('\n')
           : `⚠️ Could not close \`${pane}\` — tmux refused. It may already be gone; \`/tui status\` will say.`);
+        return;
+      }
+      // The universal resync: whatever the pane shows (stale session after a
+      // lane failover, a stuck boot like VM-tui-vm3 on the 742-row session, a
+      // half-dead attach), killing it verified-dead and reopening rebuilds on
+      // THIS chat's current session via the attach-time resolution. /new does
+      // this kill automatically; refresh is the manual version. Reopening
+      // always needs a fresh tap — ttyd only runs the attach on a new client.
+      if (tuiSub === 'refresh' || tuiSub === 'reopen' || tuiSub === 'reload' || tuiSub === 'resync') {
+        const refreshPane = readTuiLease(config.id, tuiSessionId)?.pane || readTuiPane(config.id);
+        if (!refreshPane || !hasTuiPane(refreshPane)) {
+          try {
+            fs.rmSync(tuiPanePath(config.id), { force: true });
+          } catch {
+            /* nothing published either way */
+          }
+          await api.sendMessage(chatId, '⌨️ No terminal pane is running — nothing to refresh. `/tui` opens one on this chat\'s current session.');
+          return;
+        }
+        killTuiPane(refreshPane);
+        if (!hasTuiPane(refreshPane)) {
+          try {
+            fs.rmSync(tuiLeasePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          try {
+            fs.rmSync(tuiPanePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          await api.sendMessage(chatId, `🔄 Closed \`${refreshPane}\`. Tap \`/tui\` again — the new pane attaches to this chat's current session.`);
+        } else {
+          await api.sendMessage(chatId, `⚠️ Could not close \`${refreshPane}\` — tmux refused. \`/tui status\` will say what survived.`);
+        }
         return;
       }
       // The actual TUI: ttyd serves a real PTY and mounts it under the same

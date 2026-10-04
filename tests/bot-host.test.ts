@@ -3361,3 +3361,24 @@ describe('TG TUI — a kept pane with no lease stays closeable', () => {
     }
   });
 });
+
+describe('TG TUI failproof sync — reset and resync paths', () => {
+  const botSrc = () => fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+
+  it('/new takes down the stale pane with a verified kill', () => {
+    // Live failure: after /new the open terminal kept showing the old
+    // session. /new must kill the published pane and say to reopen.
+    const src = botSrc();
+    expect(src).toContain('const stalePane = readTuiPane(config.id);');
+    expect(src).toContain('Closed the old terminal pane');
+  });
+
+  it('/tui refresh kills verified-dead and points at reopen', () => {
+    // Manual resync for stuck boots and post-failover staleness: kill, then
+    // a fresh tap rebuilds via attach-time resolution (ttyd only attaches on
+    // a new client, so no auto-reopen is possible here).
+    const src = botSrc();
+    expect(src).toContain("tuiSub === 'refresh'");
+    expect(src).toContain('the new pane attaches to this chat');
+  });
+});
