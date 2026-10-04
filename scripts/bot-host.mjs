@@ -536,7 +536,10 @@ function shortProviderModel(model) {
  * → `deepseek-v4.1-flash`, `tokenharbor/deepseek-v4.1-flash:free` →
  * `tokenharbor/deepseek-v4.1-flash` (the vendor dir stays because the
  * headline provider for that bar reads OpenCode), `opencode/space-bunny-free`
- * → `space-bunny-free`. Plain ids pass through untouched, so unit-test
+ * → `space-bunny-free`. `opencode-go/space-bunny-free` keeps its prefix:
+ * it is a different free pool from `opencode/space-bunny-free`, and stripping
+ * both to `space-bunny-free` made a failover line read "X is depleted — ran
+ * on X instead". Plain ids pass through untouched, so unit-test
  * lanes like `m1` render exactly as before. Display only — routing still
  * uses the full ref.
  */
@@ -546,9 +549,33 @@ export function chatLaneName(ref) {
   s = s.replace(/^cline-free\//i, '').replace(/:free$/i, '');
   if (r.provider && s.toLowerCase().startsWith(`${String(r.provider).toLowerCase()}/`)) {
     const rest = s.slice(String(r.provider).length + 1);
-    if (!/^tokenharbor\//i.test(s)) s = rest;
+    const provider = String(r.provider || '').toLowerCase();
+    // The prefixes that disambiguate distinct pools stay. tokenharbor shares
+    // one bar with its opencode twin but reads under the OpenCode headline,
+    // so the dir carries the meaning; opencode-go is a separate pool from
+    // opencode (live 2026-10-04: one depleted while the other answered).
+    if (!/^tokenharbor\//i.test(s) && provider !== 'opencode-go') s = rest;
   }
   return s || String(ref || '');
+}
+
+/**
+ * A bare `PONG` is not an answer. Connectivity pings ("reply PONG") circulate
+ * on the shared opencode service (TUI-side checks, lane watchers), and a turn
+ * resuming a session that last saw one can come back with a lone `PONG` to a
+ * prompt that never asked for it — which the chat then receives as the reply.
+ * True only for the bare word (optional trailing punctuation); a prompt that
+ * actually requests it alongside a request verb (reply/say/ping/…) is
+ * honoured. Deliberately pong-only: a bare `ok` can be a legitimate
+ * acknowledgement, and the failover sensors use it as their success fixture.
+ */
+export function isUnpromptedProbeEcho(text, prompt) {
+  const t = String(text ?? '').trim().toLowerCase().replace(/[!.\s]+$/, '');
+  if (t !== 'pong') return false;
+  const p = String(prompt ?? '');
+  if (p.length <= 120 && /\bpong\b/i.test(p)
+    && /\b(reply|say|send|respond|repeat|ping|test|probe|answer|echo)\b/i.test(p)) return false;
+  return true;
 }
 
 /**
@@ -4257,6 +4284,24 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
         midstreamDead.push(model);
         attemptResult = { ...attemptResult, finalText: '' };
       }
+      // A bare connectivity-probe echo (PONG) is not an answer: it
+      // leaks in through the shared opencode session and must never be
+      // delivered as the turn's reply. Empty it so the failover chain tries
+      // the next lane; on the last lane the run surfaces as an error.
+      // Never throws: a filter hiccup must not cost the chat its answer.
+      try {
+        const echoText = String(attemptResult?.finalText || '').trim();
+        if (echoText && isUnpromptedProbeEcho(echoText, prompt) && !isAborted()) {
+          console.log(`[${config?.id}] ${model} answered bare probe echo ${JSON.stringify(echoText.slice(0, 40))}; treating as no answer`);
+          attemptResult = {
+            ...attemptResult,
+            finalText: '',
+            lastError: `bare probe echo (${echoText.slice(0, 40)}) instead of an answer — nothing was computed, send your message again`,
+          };
+        }
+      } catch {
+        // fall through with the original attempt result
+      }
       // One retry, and only for a transport failure. A quota answer is final
       // for that lane and the ledger stamp already says so. Two ECONNREFUSEDs
       // in a row is not a blip, so the lane gets a short cooldown and the walk
@@ -4818,9 +4863,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   // terminal looks, from the chat, like the bot ran something twice. The note
   // rides the progress line's first paint rather than being its own message, so
   // an ordinary turn is not made noisier by it.
-  // Assigned inside the turn body, once the workspace is known. Declared out here
-  // because the presence note below is emitted before that code runs. Absent
+  // Assigned inside the turn body, once the workspace is known. Absent
   // means "no session for this workspace yet" — the first turn after a switch.
+  // The TUI presence note below reads it, so it runs after the resolve.
   let turnSessionId = null;
 
   busy.add(chatId);
@@ -4879,21 +4924,6 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // at once; the old lazy path left only bare typing until the first
     // model event, which on a slow lane looks stuck.
     await renderer.announce().catch(() => {});
-    // A TUI is open on this same conversation, so the user can watch this turn
-    // happen in the terminal as well. It shares the session, so what runs here
-    // shows up there — one turn at a time, never two at once.
-    //
-    // Only true on a lane with a shared session. Cline's terminal resumes the
-    // LAST Cline thread and each new message starts a fresh one, so claiming
-    // "same session" there would be a lie the user discovers by watching a turn
-    // that never appears. Say the true thing instead.
-    if (tuiIsAttached(config.id, turnSessionId)) {
-      const openSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
-      await api.sendMessage(chatId, openSurface.sharedSession
-        ? '⌨️ A TUI is open on this conversation — you can watch this turn in the terminal. Same session, so it shows up in both; one turn at a time.'
-        : `⌨️ A ${openSurface.tool} terminal is open, but ${openSurface.tool} cannot resume a thread headlessly — this turn will not appear there. The terminal stays on the last ${openSurface.tool} thread.`
-      ).catch(() => {});
-    }
     const handoff = prefFor(prefs, chatId).handoff || '';
     const quotedPrompt = buildQuotedPrompt(text, message.reply_to_message);
     const basePrompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${quotedPrompt}` : quotedPrompt;
@@ -5004,6 +5034,27 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
         ? workSession.opencodeSessionId
         : undefined);
+
+    // A TUI is open on this same conversation, so the user can watch this turn
+    // happen in the terminal as well. It shares the session, so what runs here
+    // shows up there — one turn at a time, never two at once.
+    //
+    // Only true on a lane with a shared session. Cline's terminal resumes the
+    // LAST Cline thread and each new message starts a fresh one, so claiming
+    // "same session" there would be a lie the user discovers by watching a turn
+    // that never appears. Say the true thing instead.
+    //
+    // This runs AFTER the resolve above on purpose: it used to run before the
+    // headline announce with turnSessionId still null, and a null wanted
+    // matches any lease — so the chat was told "same session" for a TUI on a
+    // different conversation. No session yet (first turn) means no claim.
+    if (turnSessionId && tuiIsAttached(config.id, turnSessionId)) {
+      const openSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
+      await api.sendMessage(chatId, openSurface.sharedSession
+        ? '⌨️ A TUI is open on this conversation — you can watch this turn in the terminal. Same session, so it shows up in both; one turn at a time.'
+        : `⌨️ A ${openSurface.tool} terminal is open, but ${openSurface.tool} cannot resume a thread headlessly — this turn will not appear there. The terminal stays on the last ${openSurface.tool} thread.`
+      ).catch(() => {});
+    }
 
     // Only when a tx view is NOT live: with one, the session comes from the
     // work-session row instead. The id is workspace-scoped now, so a chat that
