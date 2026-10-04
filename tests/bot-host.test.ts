@@ -74,6 +74,7 @@ import {
   parseCommand,
   resolveCommandName,
   isKnownCommand,
+  greetingReply,
   BOT_COMMANDS,
   COMMAND_NAMES,
   toTelegramCommands,
@@ -3209,5 +3210,62 @@ describe('TG opencode lane — variant travels only when offered', () => {
     expect(pickOfferedVariant('xhigh', null)).toBeUndefined();
     expect(pickOfferedVariant(undefined, ['high'])).toBeUndefined();
     expect(pickOfferedVariant('', ['high'])).toBeUndefined();
+  });
+});
+
+describe('TG cleaner answers — greetings never start turns', () => {
+  it('greetingReply answers bare smalltalk and nothing else', async () => {
+    expect(greetingReply('hi')).toBe('Hey! What are we working on?');
+    expect(greetingReply('  Hi!  ')).toBe('Hey! What are we working on?');
+    expect(greetingReply('/hi')).toBe('Hey! What are we working on?');
+    expect(greetingReply('thanks')).toBe('Anytime — happy to help.');
+    expect(greetingReply('ok')).toBe('Got it.');
+    // Anything with content falls through to a real turn.
+    for (const t of ['hi, can you check the build', 'hello there', '/do-verify', '/compact', '/model x', 'high', '']) {
+      expect(greetingReply(t)).toBeNull();
+    }
+  });
+});
+
+describe('TG streaming — the work record survives a lost bubble', () => {
+  const makeApi = () => {
+    const sent = [];
+    return {
+      sent,
+      api: {
+        sendMessage: async (_c, text) => {
+          sent.push(text);
+          return { message_id: sent.length };
+        },
+      },
+    };
+  };
+
+  it('finish sends the settled bubble first when none was ever created', async () => {
+    const { renderer, sent } = (() => {
+      const { sent, api } = makeApi();
+      return { renderer: new ProgressRenderer({ api: api, chatId: 1 }), sent };
+    })();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm test' } });
+    await renderer.finish({ code: 0, finalText: 'the answer', lastError: '', stderr: '' });
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toContain('bash');
+    expect(sent[1]).toContain('the answer');
+    renderer.stopTyping();
+  });
+
+  it('finish does not duplicate the bubble when it already exists', async () => {
+    const { sent, api } = makeApi();
+    const throttle = { submit: (fn) => Promise.resolve().then(fn), pause: () => {} };
+    const renderer = new ProgressRenderer({ api: api, throttle: throttle, chatId: 1 });
+    await renderer.announce();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'completed', input: 'x' });
+    await new Promise((r) => setImmediate(r));
+    const before = sent.length;
+    await renderer.finish({ code: 0, finalText: 'the answer', lastError: '', stderr: '' });
+    // One bubble (created at announce) + the answer; no extra bubble send.
+    expect(sent.filter((t) => t.includes('the answer'))).toHaveLength(1);
+    expect(sent.length).toBeLessThanOrEqual(before + 2);
+    renderer.stopTyping();
   });
 });

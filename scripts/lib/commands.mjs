@@ -177,6 +177,32 @@ export function assertValidCommands(commands = BOT_COMMANDS) {
   return true;
 }
 
+/**
+ * One-line replies for bare smalltalk (plan: cleaner answers).
+ *
+ * A lone "hi" must never become a full agentic turn: no session burn, no
+ * quota, no shell, no invented status novel (live 2026-10-04: "hi" ran a
+ * 15s erroring shell probe and answered with fabricated commits/sessions).
+ * Only an exact bare greeting matches — anything with content ("hi, can
+ * you…") falls through to the normal turn. A single leading slash is
+ * tolerated ("/hi"); skill lines never match this map.
+ */
+const GREETING_REPLIES = [
+  [/^(hi|hello|hey|yo|hiya|howdy)$/, 'Hey! What are we working on?'],
+  [/^(thanks|thank you|thx)$/, 'Anytime — happy to help.'],
+  [/^(ok|okay|k|got it|noted)$/, 'Got it.'],
+];
+
+export function greetingReply(text) {
+  let t = String(text ?? '').trim().toLowerCase();
+  if (t.startsWith('/')) t = t.slice(1).trim();
+  t = t.replace(/[!?.,…]+$/, '').trim();
+  for (const [re, reply] of GREETING_REPLIES) {
+    if (re.test(t)) return reply;
+  }
+  return null;
+}
+
   export function parseCommand(text) {
     const raw = String(text ?? '').trim();
     if (!raw.startsWith('/')) return null;

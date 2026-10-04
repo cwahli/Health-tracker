@@ -125,6 +125,7 @@ import {
   parseCommand,
   resolveCommandName,
   isKnownCommand,
+  greetingReply,
   isAddressedToUs,
   resolveGroupAddressing,
   recordActiveThread,
@@ -1828,6 +1829,20 @@ export class ProgressRenderer {
 
   async finish(result, { footer = '' } = {}) {
     this.stopTyping();
+    // The bubble may never have been created (every create/edit failed or
+    // was throttled away): without this, a turn whose progress never
+    // painted delivers only the answer and the whole work record — tools,
+    // durations, thinking — is silently lost ("everything at once at the
+    // end", live 2026-10-04). So when no bubble exists, send the settled
+    // body as its own message first; the answer below stays separate.
+    // Never throws: the answer must still go out.
+    if (this.messageId == null && !this.dryRun) {
+      try {
+        await this.deliver(this._render());
+      } catch {
+        /* the answer below matters more */
+      }
+    }
     const withFooter = (body) => (footer ? `${body}\n\n${footer}` : body);
     const partial = String(result.finalText || '').trim();
     const errText = String(result.lastError || '').trim();
@@ -4776,6 +4791,17 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   if (cmd && isKnownCommand(route)) {
     await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd: { ...cmd, name: route }, userId, kind: chatKind(message) });
     return;
+  }
+
+  // Bare smalltalk in a direct chat gets one line, never a turn: no session
+  // burn, no quota, no shell, no invented status (see greetingReply). Group
+  // rooms keep existing behavior; media always takes the normal path.
+  if (chatKind(message) !== 'group' && !hasMedia) {
+    const greet = greetingReply(text);
+    if (greet) {
+      await api.sendMessage(chatId, greet).catch(() => {});
+      return;
+    }
   }
 
   // A named health seat, or a bare question to the room, is answered here.
