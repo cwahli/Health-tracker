@@ -148,17 +148,13 @@ export function resolveCommandName(cmd) {
  * Chat-answer contract, appended to the turn prompt (review 2026-10-04).
  *
  * Open questions ("what's left?") came back as status novels: process
- * narrative ("my probe failed on modelID, I fixed it"), self-assigned
- * follow-up work, and "want me to…" solicitations, plus conclusions that
- * outran verification (a pushed branch that does not exist). Structure
- * cannot fix a model, but an explicit output contract at the prompt moves
- * the shape: answer only, mark the unverified, stop when done.
+ * narrative, self-assigned follow-up work, and "want me to…" solicitations,
+ * plus conclusions that outran verification. `opencode run` has no system
+ * channel (no --system flag), so one bracketed line per turn is the smallest
+ * durable form — the full paragraph used to live here and polluted the
+ * shared transcript the TUI shows (operator: "shouldn't be permanent").
  */
-const CHAT_ANSWER_CONTRACT = [
-  '[CHAT ANSWER CONTRACT]',
-  'Answer the request and stop: no process narrative, no self-assigned follow-up work, no "want me to…" solicitation.',
-  'Name only what you verified live; mark the rest [unverified]. Keep it as short as the question allows.',
-].join('\n');
+const CHAT_ANSWER_CONTRACT = '[chat: answer only; no narrative, work orders, or solicitation; mark unverified]';
 
 export function withChatContract(prompt) {
   const body = String(prompt ?? '').trim();

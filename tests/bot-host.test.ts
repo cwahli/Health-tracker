@@ -3230,7 +3230,7 @@ describe('TG connectivity ping — greetings run a one-word turn', () => {
 
   it('the turn path rewrites greetings to the PONG ping (source-pinned)', () => {
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    expect(src).toContain('reply with exactly PONG. Do not use any tools.');
+    expect(src).toContain('reply with exactly PONG, no tools');
   });
 });
 
@@ -3279,11 +3279,13 @@ describe('TG streaming — the work record survives a lost bubble', () => {
 
 describe('TG review — chat-answer contract rides the prompt', () => {
   it('withChatContract appends the answer-only rules without touching the ask', () => {
+    // One bracketed line: opencode run has no system channel, and the full
+    // paragraph polluted the shared transcript the TUI shows.
     const out = withChatContract('count the files');
     expect(out.startsWith('count the files')).toBe(true);
-    expect(out).toContain('[CHAT ANSWER CONTRACT]');
-    expect(out).toContain('no self-assigned follow-up work');
-    expect(out).toContain('[unverified]');
+    expect(out).toContain('[chat: answer only;');
+    expect(out).toContain('mark unverified]');
+    expect(out.split('\n').length).toBeLessThanOrEqual(3);
   });
 
   it('the turn path applies the contract (source-pinned, like the TDZ sensor)', () => {

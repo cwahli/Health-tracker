@@ -4801,7 +4801,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   // auto-reply would prove nothing; the raw greeting invites a rambling
   // turn. Group rooms keep existing behavior; media takes the normal path.
   if (chatKind(message) !== 'group' && !hasMedia && greetingReply(text)) {
-    text = `The user just said ${JSON.stringify(text.trim())}. This is a connectivity check: reply with exactly PONG. Do not use any tools.`;
+    text = `[connectivity ping for ${JSON.stringify(text.trim())}: reply with exactly PONG, no tools]`;
   }
 
   // A named health seat, or a bare question to the room, is answered here.
