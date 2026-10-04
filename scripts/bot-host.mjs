@@ -1357,6 +1357,20 @@ export function readTuiUrl(env = process.env, file = miniappUrlFile()) {
   return readMiniappUrl(file);
 }
 
+/**
+ * The URL `/tui` hands out for the opencode web UI (split solution: opencode
+ * chats read/scroll in the DOM web UI, cline/grok/freebuff keep the TUI).
+ * Served by opencode-web.service on localhost, fronted by Caddy on its own
+ * hostname behind the same Telegram-initData gate as the TUI — no Tailscale.
+ * `OPENCODE_WEB_URL` overrides (tests); empty when unset-and-no-default
+ * would apply, so callers can hide the button instead of handing out a dead one.
+ */
+export function readWebUiUrl(env = process.env) {
+  const raw = String(env.OPENCODE_WEB_URL ?? 'https://web.health-tracking.duckdns.org').trim().replace(/\/+$/, '');
+  if (/^https:\/\/[A-Za-z0-9.-]+$/.test(raw)) return raw;
+  return '';
+}
+
 export class ProgressRenderer {
   constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, heartbeatMs, progressMode = 'gist', dryRun = false, providerLabel = '', modelLabel = '', thinking = '', onMessageId = null }) {
     this.api = api;
@@ -2909,6 +2923,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       } catch {
         // fall through to the button below
       }
+      // Split solution (plan/WEBUI_MIGRATION.md): opencode chats get the DOM web
+      // UI first (native scroll, real text, same sessions via serve) with the
+      // terminal as fallback; every other lane keeps the TUI button only —
+      // cline/grok/freebuff have no web UI to point at.
+      const webUiUrl = tuiSurface.sharedSession ? readWebUiUrl() : '';
+      const openButtons = [
+        ...(webUiUrl ? [{ text: '🌐 Open web UI', web_app: { url: `${webUiUrl}/?bot=${config.id}` } }] : []),
+        { text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } },
+      ];
       await api.sendMessage(chatId, [
         moved ? '⚠️ *The tunnel was reconnected*, so any earlier /tui button is dead — use this one.' : null,
         tuiSurface.sharedSession
@@ -2922,8 +2945,9 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           ? 'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.'
           : 'It runs under tmux, so closing the Mini App keeps your place, and you can reopen the same thread whenever you want.',
         'We both keep working with it open. The terminal waits for a turn I am running, and I wait for a turn you started — one at a time, never two writers at once. Opening it proves you are the Telegram user this chat belongs to, so there is no password to remember.',
+        ...(webUiUrl ? ['🌐 Prefer reading over typing? The *web UI* shows this same conversation as a normal page — scrolls natively, no terminal frames.'] : []),
       ].filter(Boolean).join('\n'), {
-        reply_markup: { inline_keyboard: [[{ text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } }]] },
+        reply_markup: { inline_keyboard: [openButtons] },
       });
       return;
     }
