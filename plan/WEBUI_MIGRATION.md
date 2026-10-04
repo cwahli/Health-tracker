@@ -17,6 +17,7 @@ is DOM/native clients; opencode itself ships one (`opencode web` / `serve`).
 | opencode (all free models) | TUI + bot turns via `run` on background service | **Yes, if** `serve` shares the background-service sessions (Phase 0 proves it) |
 | cline | Own TUI (`cline -i`), no headless resume (`tui-surface.mjs`: `sharedSession: false`) | **No.** Needs its own client or a lane-retirement decision |
 | gemini | API-only, single-shot, no terminal at all | **No terminal to replace** — the Telegram chat itself is already its surface |
+| grok (Grok Build CLI) | Headless prompts, no session resume (`lane-contract.mjs`); no TUI surface entry — `/tui` on a grok chat already opens an opencode terminal | **No.** No vendor web UI; nothing to point the Mini App at |
 | freebuff | TUI/login only, no one-shot, no serve/ACP (`lane-contract.mjs`: TG lane is opt-in tmux scrape) | **No.** Terminal is its only driver; removal = retiring the lane |
 
 ## Phase 0 — prove session sharing (gate for everything below)
@@ -52,8 +53,26 @@ is DOM/native clients; opencode itself ships one (`opencode web` / `serve`).
   a terminal — document which.
 - gemini: no action (chat is the surface); confirm nothing in the TUI flow
   depends on a gemini terminal (there is none: `terminal: false`).
+- grok: no vendor client exists and a grok chat's `/tui` already opens a
+  mismatched opencode terminal — record whether grok chats use the TUI at all;
+  if they don't, grok needs nothing from the gate.
 - freebuff: explicit decision — terminal-only lane means TUI removal retires
   freebuff from Telegram. Owner signs that off, or the TUI stays for it.
+
+## The universal question: one client for all five lanes?
+
+There isn't one, vendor-side. opencode's web UI covers opencode; Cline,
+Grok Build, and Freebuff ship TUIs-or-nothing; Gemini ships API-only. No
+single screen spans all five, and no vendor is building it.
+
+The universal surface already exists — it's the Telegram chat. bot-host's
+runners (`runOpencode` / `runCline` / `runGemini` / TG lanes) already drive
+every lane from chat; that path is lane-complete today and stays so
+regardless of this migration. A *visual* universal client would mean building
+a thin aggregator page on top of those same runners — one web UI, per-lane
+adapters — which duplicates the chat without adding coverage. Recommendation:
+universal = chat (keep), visual = opencode web for the opencode majority
+(this roadmap), TUI retained while any lane in the table needs it.
 
 ## Phase 4 — TUI removal gate (all must hold)
 
