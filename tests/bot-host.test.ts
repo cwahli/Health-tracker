@@ -75,6 +75,7 @@ import {
   resolveCommandName,
   isKnownCommand,
   greetingReply,
+  withChatContract,
   BOT_COMMANDS,
   COMMAND_NAMES,
   toTelegramCommands,
@@ -3267,5 +3268,20 @@ describe('TG streaming — the work record survives a lost bubble', () => {
     expect(sent.filter((t) => t.includes('the answer'))).toHaveLength(1);
     expect(sent.length).toBeLessThanOrEqual(before + 2);
     renderer.stopTyping();
+  });
+});
+
+describe('TG review — chat-answer contract rides the prompt', () => {
+  it('withChatContract appends the answer-only rules without touching the ask', () => {
+    const out = withChatContract('count the files');
+    expect(out.startsWith('count the files')).toBe(true);
+    expect(out).toContain('[CHAT ANSWER CONTRACT]');
+    expect(out).toContain('no self-assigned follow-up work');
+    expect(out).toContain('[unverified]');
+  });
+
+  it('the turn path applies the contract (source-pinned, like the TDZ sensor)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('finalPrompt = withChatContract(finalPrompt);');
   });
 });

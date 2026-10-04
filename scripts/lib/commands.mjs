@@ -145,6 +145,28 @@ export function resolveCommandName(cmd) {
 }
 
 /**
+ * Chat-answer contract, appended to the turn prompt (review 2026-10-04).
+ *
+ * Open questions ("what's left?") came back as status novels: process
+ * narrative ("my probe failed on modelID, I fixed it"), self-assigned
+ * follow-up work, and "want me to…" solicitations, plus conclusions that
+ * outran verification (a pushed branch that does not exist). Structure
+ * cannot fix a model, but an explicit output contract at the prompt moves
+ * the shape: answer only, mark the unverified, stop when done.
+ */
+const CHAT_ANSWER_CONTRACT = [
+  '[CHAT ANSWER CONTRACT]',
+  'Answer the request and stop: no process narrative, no self-assigned follow-up work, no "want me to…" solicitation.',
+  'Name only what you verified live; mark the rest [unverified]. Keep it as short as the question allows.',
+].join('\n');
+
+export function withChatContract(prompt) {
+  const body = String(prompt ?? '').trim();
+  if (!body) return CHAT_ANSWER_CONTRACT;
+  return `${body}\n\n${CHAT_ANSWER_CONTRACT}`;
+}
+
+/**
  * True when the name is a bot command (published, hidden, or alias target).
  * A leading `/` that is NOT known here is forwarded to the tool as the user
  * prompt (plan/TG_TOOL_SURFACE.md M3) — that is how typed `/do-*` skills

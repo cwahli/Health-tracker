@@ -5213,6 +5213,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       finalPrompt = `[KNOWN DEAD ENDS — do not repeat these]\n${deadEnds.map((r) => `- ${r.text}`).join('\n')}\n\n${finalPrompt}`;
       console.log(`[${config.id}] injected ${deadEnds.length} dead-end note(s) into a ${turnKindFor(text)} turn`);
     }
+    // Chat-answer contract (review 2026-10-04): answer only, no process
+    // narrative, no self-assigned work, mark the unverified. Rides every
+    // lane — runOpencode, runCline, and runGemini all take finalPrompt.
+    finalPrompt = withChatContract(finalPrompt);
 
     const ref = parseModelRef(eff.model);
     // The chat's saved /location wins over this process's env: env dies on
