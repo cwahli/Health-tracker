@@ -538,10 +538,12 @@ import {
 } from './lib/fleet-status.mjs';
 
 import {
+  REVIEW_IMAGE_MAX,
   getReviewContext as getReviewContextStatus,
   getReviewItems as getReviewItemsStatus,
   approveReviewItem as approveReviewItemStatus,
   commentReviewItem as commentReviewItemStatus,
+  answerReviewItem as answerReviewItemStatus,
   verifyProofFile as verifyProofFileStatus,
   resetReviewState as resetReviewStateStatus,
 } from './lib/review-status.mjs';
@@ -1356,6 +1358,24 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       }
     }
 
+    if (url.pathname === '/review/api/answer' && req.method === 'POST') {
+      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      // A picture rides as base64 in the JSON body, so this route's cap is the
+      // picture cap plus slack; review-status enforces the real limit per field.
+      const parsed = await readJsonBody(req, { maxBytes: REVIEW_IMAGE_MAX + 65536 });
+      if (!parsed.ok) {
+        res.writeHead(413, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: parsed.error }));
+      }
+      const out = await answerReviewItemStatus(parsed.json?.key, parsed.json || {}, { env });
+      res.writeHead(out.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify(out));
+    }
+
     if ((url.pathname === '/review/api/approve' || url.pathname === '/review/api/comment') && req.method === 'POST') {
       const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
       if (!verdict.ok) {
@@ -1371,7 +1391,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       const out = url.pathname === '/review/api/approve'
         ? await approveReviewItemStatus(data.key, { env })
         : await commentReviewItemStatus(data.key, data.text, data.target, { env });
-      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.writeHead(out.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify(out));
     }
 

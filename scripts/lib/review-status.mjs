@@ -15,7 +15,7 @@
  * queue's governed writer, and the only writer that edits sheet cells in place.
  */
 
-import { loadHostEnv, identityFromEnv, accessToken, readTab, appendRows, updateValues, deleteSheetRows, getSheet, listFolder, downloadFile } from './google-store.mjs';
+import { loadHostEnv, identityFromEnv, accessToken, readTab, appendRows, updateValues, deleteSheetRows, getSheet, listFolder, downloadFile, createFile, uploadBinary } from './google-store.mjs';
 import { pmSheetId } from './pm-sheet.mjs';
 
 export const REVIEW_TAB = 'current';
@@ -28,8 +28,12 @@ export const PROOF_DRIVE_FOLDER = '1G7dhvqRy7iOmRg7AfN9a6g8cbIhz14yS';
 export const REVIEW_CACHE_TTL_MS = 15000;
 export const REVIEW_FOLDER_CACHE_TTL_MS = 60000;
 export const REVIEW_COMMENT_MAX = 2000;
+/** The human's own uploads are named so an agent can tell them from proof. */
+export const ANSWER_PREFIX = 'human-review-';
+export const REVIEW_IMAGE_MAX = 4 * 1024 * 1024;
+export const REVIEW_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
-const _deps = { readTab, appendRows, updateValues, deleteSheetRows, getSheet, listFolder, downloadFile, loadHostEnv, identityFromEnv, accessToken, pmSheetId };
+const _deps = { readTab, appendRows, updateValues, deleteSheetRows, getSheet, listFolder, downloadFile, createFile, uploadBinary, loadHostEnv, identityFromEnv, accessToken, pmSheetId };
 
 let reviewCache = { cachedAt: 0, rows: [] };
 let proofFolderCache = { cachedAt: 0, map: new Map() };
@@ -172,8 +176,12 @@ function headerSplit(values) {
   return { headerIdx, header, numbered };
 }
 
-/** Subfolder id per ticket key under "Work done" (60s cache). */
-export async function proofFolderMap(ctx, { refresh = false, deps = _deps } = {}) {
+/**
+ * Subfolder id per ticket key under "Work done" (60s cache), creating the
+ * folder when a human answers an item whose agent filed no proof: an answer
+ * must land somewhere even when there is nothing to answer to.
+ */
+export async function proofFolderMap(ctx, { refresh = false, deps = _deps, createFor = '' } = {}) {
   const now = Date.now();
   if (!refresh && proofFolderCache.cachedAt && now - proofFolderCache.cachedAt < REVIEW_FOLDER_CACHE_TTL_MS && proofFolderCache.map.size) {
     return { ok: true, map: proofFolderCache.map, cached: true };
@@ -184,22 +192,41 @@ export async function proofFolderMap(ctx, { refresh = false, deps = _deps } = {}
   for (const f of res.json?.files || []) {
     if (f?.mimeType === 'application/vnd.google-apps.folder' && f.name && f.id) map.set(f.name, f.id);
   }
+  const wanted = String(createFor || '').trim();
+  if (wanted && !map.has(wanted)) {
+    const made = await deps.createFile(PROOF_DRIVE_FOLDER, wanted, { mimeType: 'application/vnd.google-apps.folder' }, ctx.token);
+    if (made.ok && made.id) map.set(wanted, made.id);
+  }
   proofFolderCache = { cachedAt: now, map };
   return { ok: true, map, cached: false };
 }
 
-/** Image files inside one ticket's proof folder. */
+/** Image files inside one ticket's folder: the agent's proof AND the human's answers. */
 export async function listProofImages(ctx, key, { deps = _deps } = {}) {
   const folders = await proofFolderMap(ctx, { deps });
   if (!folders.ok) return { ok: false, reason: folders.reason };
   const folderId = folders.map.get(String(key));
-  if (!folderId) return { ok: true, images: [] };
-  const res = await deps.listFolder(folderId, ctx.token, { pageSize: 100, fields: 'files(id,name,mimeType,modifiedTime)' });
+  if (!folderId) return { ok: true, images: [], folderId: '' };
+  const res = await deps.listFolder(folderId, ctx.token, { pageSize: 100, fields: 'files(id,name,mimeType,modifiedTime,appProperties)' });
   if (!res.ok) return { ok: false, reason: res.error || 'proof images list failed' };
-  const images = (res.json?.files || [])
+  const files = res.json?.files || [];
+  const images = files
     .filter((f) => String(f?.mimeType || '').startsWith('image/') && f.id)
     .map((f) => ({ id: f.id, name: f.name || 'proof.png', mimeType: f.mimeType || 'image/png' }));
-  return { ok: true, images, folderId };
+  // The human's answers are the human-review-* images, and what the human said
+  // about each rides in the file's appProperties — one listing, no sidecar read.
+  const answers = files
+    .filter((f) => String(f?.name || '').startsWith(ANSWER_PREFIX) && String(f?.mimeType || '').startsWith('image/'))
+    .map((f) => ({
+      id: f.id,
+      name: f.name,
+      mimeType: f.mimeType || 'image/png',
+      text: String(f.appProperties?.humanText || ''),
+      target: f.appProperties?.humanTarget === 'original' ? 'original' : 'left',
+      at: f.appProperties?.humanAt || f.modifiedTime || '',
+    }))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  return { ok: true, images, answers, folderId };
 }
 
 /**
@@ -215,8 +242,12 @@ export async function getReviewItems({ env = process.env, root = null, refresh =
   for (const { rowNumber, vals } of current.numbered) {
     const item = mapReviewRow(vals, current.header, rowNumber);
     if (!item.key || !isReviewStatus(item.status)) continue;
-    const proofs = await listProofImages(ctx, item.key, { deps });
-    items.push({ ...item, proofs: proofs.ok ? proofs.images : [] });
+    const listed = await listProofImages(ctx, item.key, { deps });
+    items.push({
+      ...item,
+      proofs: listed.ok ? listed.images : [],
+      answers: listed.ok ? (listed.answers || []) : [],
+    });
   }
   return { ok: true, google: true, items };
 }
@@ -293,6 +324,108 @@ export async function commentReviewItem(key, text, target, { env = process.env, 
   }
   reviewCache = { cachedAt: 0, rows: [] };
   return { ok: true, key: k, target, stamped };
+}
+
+/**
+ * 💬 + 📎 Answer: the human's picture goes into the SAME Drive folder as the
+ * agent's proof (one folder per ticket key), carrying the words in the file's
+ * appProperties, and the sheet cell gets the stamped note so an agent reading
+ * the sheet sees the verdict without opening the folder.
+ *
+ * The upload happens BEFORE the cell write, and a failed cell write is reported
+ * as a partial success with the file's name: a picture in Drive with no sheet
+ * note is recoverable, whereas a sheet note pointing at a picture that was
+ * never written is a lie the agent will chase.
+ */
+export async function answerReviewItem(key, payload, { env = process.env, deps = _deps, now = Date.now() } = {}) {
+  const k = String(key || '').trim();
+  if (!k) return { ok: false, error: 'missing key' };
+  const target = payload?.target === 'original' ? 'original' : 'left';
+  const text = String(payload?.text || '').trim();
+  const image = payload?.image && typeof payload.image === 'object' ? payload.image : null;
+
+  if (!text && !image) return { ok: false, error: 'an answer needs a picture or a note' };
+  if (text.length > REVIEW_COMMENT_MAX) return { ok: false, error: `answer over ${REVIEW_COMMENT_MAX} chars` };
+
+  let bytes = null;
+  let mimeType = '';
+  if (image) {
+    mimeType = String(image.mimeType || '').toLowerCase();
+    if (!REVIEW_IMAGE_TYPES.includes(mimeType)) {
+      return { ok: false, error: `unsupported image type ${mimeType || 'unknown'} (png, jpeg, webp, gif)` };
+    }
+    const b64 = String(image.data || '').replace(/^data:[^;]+;base64,/, '');
+    if (!b64) return { ok: false, error: 'empty image payload' };
+    try {
+      bytes = Buffer.from(b64, 'base64');
+    } catch {
+      return { ok: false, error: 'image payload is not base64' };
+    }
+    if (!bytes.length) return { ok: false, error: 'empty image payload' };
+    if (bytes.length > REVIEW_IMAGE_MAX) {
+      return { ok: false, error: `picture is ${Math.round(bytes.length / 1024 / 1024)}MB, limit ${Math.round(REVIEW_IMAGE_MAX / 1024 / 1024)}MB` };
+    }
+  }
+
+  const ctx = await getReviewContext({ env, deps });
+  if (!ctx.ok) return { ok: false, error: ctx.reason };
+  const current = await readCurrentRows(ctx, { refresh: true, deps });
+  if (!current.ok) return { ok: false, error: current.reason };
+  const found = current.numbered.find(({ vals }) => mapReviewRow(vals, current.header, 0).key === k);
+  if (!found) return { ok: false, error: 'item not found on current tab' };
+  const fields = mapReviewRow(found.vals, current.header, found.rowNumber);
+  if (!isReviewStatus(fields.status)) return { ok: false, error: `item is ${fields.status || 'not awaiting review'}, not review` };
+
+  const at = new Date(now).toISOString();
+  const stamp = formatHumanStamp(now);
+  let fileName = '';
+  if (bytes) {
+    const folders = await proofFolderMap(ctx, { deps, createFor: k });
+    if (!folders.ok) return { ok: false, error: folders.reason };
+    const folderId = folders.map.get(k);
+    if (!folderId) return { ok: false, error: 'could not open the ticket folder in Drive' };
+    const slug = String(image?.name || 'picture')
+      .replace(/\.[A-Za-z0-9]+$/, '')
+      .replace(/[^A-Za-z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'picture';
+    const ext = mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1] || 'png';
+    fileName = `${ANSWER_PREFIX}${at.replace(/[-:]/g, '').replace('T', '-').slice(0, 15)}-${slug}.${ext}`;
+    const up = await deps.uploadBinary(folderId, fileName, bytes, {
+      mimeType,
+      appProperties: { humanText: text, humanTarget: target, humanAt: at, humanBy: 'human' },
+    }, ctx.token);
+    if (!up.ok) return { ok: false, error: up.error || 'picture upload failed' };
+  }
+
+  const colName = target === 'left' ? "what's left to do" : 'original request';
+  const colIdx = current.header.indexOf(colName);
+  const actIdx = current.header.indexOf('last_activity');
+  if (colIdx < 0) return { ok: false, error: `column ${colName} missing`, uploaded: fileName || null };
+  const note = fileName
+    ? `${text ? `${text} — ` : ''}see ${fileName}`
+    : text;
+  const existing = target === 'left' ? fields.whatsLeft : fields.originalRequest;
+  const merged = existing ? `${existing}\n${stamp} ${note}` : `${stamp} ${note}`;
+  const wrote = await deps.updateValues(ctx.sheetId, `${REVIEW_TAB}!${colLetter(colIdx)}${found.rowNumber}`, [[merged]], ctx.token);
+  if (!wrote.ok) {
+    return {
+      ok: false,
+      error: `picture is in Drive as ${fileName} but the sheet note failed: ${wrote.error || 'unknown'}`,
+      uploaded: fileName || null,
+    };
+  }
+  if (actIdx >= 0) {
+    await deps.updateValues(ctx.sheetId, `${REVIEW_TAB}!${colLetter(actIdx)}${found.rowNumber}`, [[formatLastActivity(now)]], ctx.token);
+  }
+  reviewCache = { cachedAt: 0, rows: [] };
+  return {
+    ok: true,
+    key: k,
+    target,
+    stamped: `${stamp} ${note}`,
+    uploaded: fileName || null,
+  };
 }
 
 /** Verify a Drive file id belongs to a ticket's proof folder (anti-open-proxy). */
