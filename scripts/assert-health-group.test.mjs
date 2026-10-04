@@ -52,9 +52,11 @@ import {
   classifyHealthGroupTurn,
   dedicatedHealthRoleIds,
   acceptHealthReply,
+  formatDocLinks,
   formatHealthGroupReply,
   healthAnswerPrompt,
   isHealthAsk,
+  isLinkAsk,
 } from './lib/health-group.mjs';
 import { formatRefreshText } from './health-runner.mjs';
 import { answerBriefAsk } from './bot-host.mjs';
@@ -428,6 +430,96 @@ for (const ask of TRANSCRIPT_ASKS.slice(0, 3)) {
 }
 const transcriptBrief = await answerBriefAsk({ refresh: async () => { briefRuns.push(1); return briefResult; } });
 check('the brief ask runs the publisher instead of the seats', transcriptBrief.text === formatRefreshText(briefResult) && transcriptBrief.usedModel === false && !/couldn't put that answer together/.test(transcriptBrief.text));
+
+// The second transcript, 2026-10-04: the room asked twice for a document link.
+// "Give link to document" was answered by the council model with a paragraph
+// that described the four documents and contained no URL; "Give the link here"
+// was answered with `health group council fell back: model failed: timed out
+// after 120000ms`. A URL is a lookup in the workspace's own registry, so both
+// asks are pinned here as a `link` turn that calls no model and cannot time
+// out — and the clinical question that merely *mentions* a link stays a
+// council ask, so the loose match cannot swallow real questions.
+const LINK_ASKS = ['Give link to document', 'Give the link here', 'send me the link to the test plan', "what's the docs url", 'where are the documents'];
+for (const ask of LINK_ASKS) {
+  check(`"${ask}" is a link turn`, isLinkAsk(ask) === true);
+  const turn = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: ask, projectId: 'external-health' });
+  check(`"${ask}" is answered as a link, not by the seats`, turn?.mode === 'link' && turn.roleId === null, turn?.mode);
+}
+check('a link ask is not stolen by another external project', LINK_ASKS.every((ask) => classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: ask, projectId: 'external-2' }) == null));
+// The false-positive sweep, held as cases. Each of these names a link or a
+// document and is still a real question, so the seats answer it. A link path
+// loose enough to swallow these would replace a timeout with a wrong answer,
+// which is not better.
+const NOT_LINK_ASKS = [
+  'is there a link between low vitamin D and low energy?',
+  'what is the link between my sheet and the app?',
+  'the link between HbA1c and fasting glucose',
+  'does that link still hold',
+  'is my biomarker data linked to any diagnosis?',
+  'what do the documents say',
+  'where are the gaps in my data?',
+];
+for (const ask of NOT_LINK_ASKS) {
+  check(`"${ask}" is not a link turn`, isLinkAsk(ask) === false && classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: ask, projectId: 'external-health' })?.mode === 'council');
+}
+check('a link ask never steals the brief ask', classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'Can you work on the brief?', projectId: 'external-health' })?.mode === 'brief');
+check('a link word in the brief is still a link, not a publish', classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'give me the link to the brief', projectId: 'external-health' })?.mode === 'link');
+
+// The answer contract: the recorded ids, no model call, no fallback line. The
+// lane is a landmine here on purpose — if a link ask ever reaches it again,
+// this turn throws instead of quietly spending another 120s.
+const linkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doc-links-'));
+fs.mkdirSync(path.join(linkDir, 'result'), { recursive: true });
+fs.writeFileSync(path.join(linkDir, 'result', 'health-docs.json'), JSON.stringify({
+  folderId: 'FOLDER1',
+  docs: {
+    snapshot: { id: 'DOC_SNAPSHOT', title: 'Health Snapshot', at: '2026-10-01T21:16:39.996Z', open: 8 },
+    conditions: { id: 'DOC_CONDITIONS', title: 'Conditions & Actions', at: '2026-10-01T21:16:39.996Z', open: 8 },
+    test_plan: { id: '', title: 'Test Plan', at: undefined, open: 8 },
+    insights: { id: 'DOC_INSIGHTS', title: 'Medical Insights', at: '2026-10-01T21:16:39.996Z', open: 8 },
+  },
+}));
+fs.writeFileSync(path.join(linkDir, 'result', 'health-refresh.json'), JSON.stringify({
+  at: '2026-10-01T21:16:39.996Z',
+  mode: 'draft',
+  counts: { created: 0, updated: 4, skipped: 0, failed: 0 },
+  gate: { allowed: false, open: ['H-1'], stale: false },
+  refused: ['Candidate conditions'],
+}));
+const linkReply = await answerHealthGroup({
+  mode: 'link',
+  roleId: null,
+  question: 'Give the link here',
+  workspace: linkDir,
+  artifact: null,
+  runModel: async () => { throw new Error('a link ask must never reach a model'); },
+});
+check('a link ask posts the recorded url for each written document', ['DOC_SNAPSHOT', 'DOC_CONDITIONS', 'DOC_INSIGHTS'].every((id) => linkReply.text.includes(`https://docs.google.com/document/d/${id}/edit`)), linkReply.text);
+check('a link ask calls no model and has no fallback reason', linkReply.answered === true && linkReply.usedModel === false && linkReply.fallbackReason === '' && !/couldn't put that answer together/.test(linkReply.text));
+check('a link ask needs no verify artifact', !/verify artifact/.test(linkReply.text), linkReply.text);
+check('a document with no recorded id is named, not linked', /Not written yet: Test Plan/.test(linkReply.text) && !/document\/d\/\/edit/.test(linkReply.text), linkReply.text);
+check('a link answer says the documents are drafts while repairs are open', /drafts/i.test(linkReply.text) && /repair item/.test(linkReply.text), linkReply.text);
+check('a link answer carries the written date, not the day it was asked', /2026-10-01/.test(linkReply.text), linkReply.text);
+check('a link ask naming one written document leads with that document', formatDocLinks({ workspace: linkDir, question: 'give me the link to the health snapshot' }).startsWith('Health Snapshot'));
+check('a link ask naming an unwritten document gets no url for it', /Not written yet: Test Plan/.test(formatDocLinks({ workspace: linkDir, question: 'send me the link to the test plan' })));
+
+const emptyLinkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doc-links-empty-'));
+fs.mkdirSync(path.join(emptyLinkDir, 'result'), { recursive: true });
+const emptyLinkReply = await answerHealthGroup({ mode: 'link', roleId: null, question: 'Give link to document', workspace: emptyLinkDir });
+check('a workspace with no registry names no url at all', !/https:\/\//.test(emptyLinkReply.text) && /\/health refresh/.test(emptyLinkReply.text) && emptyLinkReply.usedModel === false, emptyLinkReply.text);
+
+// A registry with ids but no refresh receipt is a real state (the receipt is
+// written by the same run, and a half-copied workspace has one without the
+// other). It must print the links and stay silent about what was withheld —
+// "nothing has been published" would be a claim, and a false one.
+const noReceiptDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doc-links-noreceipt-'));
+fs.mkdirSync(path.join(noReceiptDir, 'result'), { recursive: true });
+fs.copyFileSync(path.join(linkDir, 'result', 'health-docs.json'), path.join(noReceiptDir, 'result', 'health-docs.json'));
+const noReceiptReply = await answerHealthGroup({ mode: 'link', roleId: null, question: 'Give the link here', workspace: noReceiptDir });
+check('a missing refresh receipt silences the withheld line, it does not invent one', /DOC_SNAPSHOT/.test(noReceiptReply.text) && !/nothing has been published|drafts/i.test(noReceiptReply.text), noReceiptReply.text);
+fs.rmSync(linkDir, { recursive: true, force: true });
+fs.rmSync(emptyLinkDir, { recursive: true, force: true });
+fs.rmSync(noReceiptDir, { recursive: true, force: true });
 
 // The typo'd command the user actually typed. A message that starts with "/"
 // is a command to the host before it is ever a health turn — so the seats must

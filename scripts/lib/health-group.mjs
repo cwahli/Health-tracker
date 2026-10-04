@@ -15,6 +15,16 @@
  * mentions the brief is a normal answer, and the brief's own state (last
  * refresh, the four documents, what is withheld) rides along as facts.
  *
+ * A link ask — "give me the link", "where are the documents" — is neither of
+ * those either, and it is not a model turn at all. The four document ids live
+ * in the workspace's own registry, so a URL is a lookup, not a claim: asking
+ * for one costs no model call, cannot time out, and is answered the same way
+ * whether the data gate is open or closed. The live room answered two link
+ * asks with two 120s model calls — the first describing the documents without
+ * posting a single URL, the second falling back to "the model call failed"
+ * (journal: `health group council fell back: model failed: timed out after
+ * 120000ms`). A registry with no id is named as missing, never guessed.
+ *
  * The data gate still bounds the answer. While it is open the model may talk
  * about the open repairs and must not name a disease, a drug, or a number
  * the repairs do not already contain. A lab test may be named only when the
@@ -107,6 +117,32 @@ export function isBriefAsk(text) {
 }
 
 /**
+ * An ask for a document's URL — "give me the link", "give the link here",
+ * "send me the link to the test plan", "what's the docs url", "where are the
+ * documents".
+ *
+ * Three shapes, and the two exclusions matter more than the shapes. A link noun
+ * plus a give/show verb is the ordinary case. A document noun plus a locating
+ * verb catches "where are the documents", which never says "link". What is *not*
+ * a link ask is the relational question — "what is the link between my sheet and
+ * the app", "is there a link between vitamin D and fatigue" — which names a
+ * link and asks about a relationship. That is a council ask and the seats
+ * answer it, so the relational reading is checked first and wins over both.
+ */
+const LINK_NOUN = /\b(?:link|url|href)\b/i;
+const LINK_VERB = /\b(?:give|send|share|show|open|get|have|paste|post|drop|forward|resend|need|want|please|where|whats|what)\b/i;
+const DOC_NOUN = /\b(?:document|documents|doc|docs)\b/i;
+const LOCATE_VERB = /\b(?:where|find|locate)\b/i;
+const RELATIONAL = /\b(?:link|links|relationship|relationships|connection|connections|correlation)\s+(?:between|of)\b/i;
+
+export function isLinkAsk(text) {
+  const t = plainQuestion(text);
+  if (RELATIONAL.test(t)) return false;
+  if (LINK_NOUN.test(t) && LINK_VERB.test(t)) return true;
+  return DOC_NOUN.test(t) && LOCATE_VERB.test(t);
+}
+
+/**
  * What this group message should do, after addressing has already picked a bot.
  * `null` means the normal turn. `skip` means this bot was addressed and the
  * text is not a question.
@@ -125,6 +161,10 @@ export function classifyHealthGroupTurn({ kind, addr, text, projectId, taxChat }
   const healthChat = !projectId || projectId === 'health-tracker' || projectId === 'external-health';
   if (addr.isBroadcast && healthChat && projectId !== 'chiwah-tax') {
     if (!isHealthAsk(question)) return { mode: 'skip' };
+    // A link ask is answered from the registry, so it is checked before the
+    // brief ask: "give me the link to the brief" wants a URL, and must never
+    // be read as a request to re-publish the four documents.
+    if (isLinkAsk(question)) return { mode: 'link', roleId: null, question };
     if (isBriefAsk(question)) return { mode: 'brief', roleId: null, question };
     return { mode: 'council', roleId: null, question };
   }
@@ -279,6 +319,94 @@ function briefContext(brief) {
   return lines.join('\n');
 }
 
+/* ------------------------------------------------------------------ the links */
+
+/** The Drive URL for one published document id. */
+function docUrl(id) {
+  return `https://docs.google.com/document/d/${encodeURIComponent(id)}/edit`;
+}
+
+/** The document this ask names, if it names one ("the link to the test plan"). */
+function askedDoc(question) {
+  const t = plainQuestion(question).toLowerCase();
+  return DOC_SPECS.find((spec) => t.includes(spec.title.toLowerCase())) || null;
+}
+
+function writtenDay(doc) {
+  const at = String(doc?.at || doc?.modifiedTime || '');
+  return /^\d{4}-\d{2}-\d{2}/.test(at) ? at.slice(0, 10) : 'an unknown date';
+}
+
+/**
+ * What is still held back, as one honest line — or nothing at all.
+ *
+ * Everything here is read out of the refresh receipt. A missing receipt says
+ * nothing: it does not mean "nothing was published", so it prints nothing
+ * rather than a sentence about the documents that would itself be a claim.
+ */
+function withheldLine(refresh) {
+  if (!refresh) return '';
+  const refused = Array.isArray(refresh.refused) ? refresh.refused : [];
+  const open = Number(refresh.gate?.open?.length) || 0;
+  const parts = [];
+  if (open) parts.push(`${open} repair item${open === 1 ? '' : 's'} still open`);
+  if (refused.length) parts.push(`${refused.length} analysis section${refused.length === 1 ? '' : 's'} withheld`);
+  if (!parts.length) return '';
+  const label = refresh.mode === 'published' ? 'As of that write:' : 'These are drafts:';
+  return `${label} ${parts.join(', ')}. /health refresh rewrites them in place.`;
+}
+
+/**
+ * The document links, read from the workspace's own registry.
+ *
+ * A URL is a location, not a claim, so this never touches the data gate and
+ * never calls a model: what it prints is exactly what the publisher recorded.
+ * A document the registry has no id for is named as unwritten rather than
+ * given a URL built from a title, and a workspace with no registry says so
+ * instead of inventing one. No date, count or id here is computed — each is
+ * copied out of the registry or the refresh receipt, or not printed at all.
+ */
+export function formatDocLinks({ workspace, question = '' } = {}) {
+  const { registry, refresh } = readBriefState(workspace);
+  const docs = registry?.docs || {};
+  const written = DOC_SPECS.filter((spec) => docs[spec.key]?.id);
+  if (!written.length) {
+    return 'No document ids are recorded in the health workspace, so I have no link to give and will not guess one. /health refresh publishes the four documents and records their ids here.';
+  }
+  const folder = registry?.folderId ? `https://drive.google.com/drive/folders/${encodeURIComponent(registry.folderId)}` : '';
+  const one = askedDoc(question);
+  const line = (spec) => {
+    const doc = docs[spec.key] || {};
+    return `${spec.title} — written ${writtenDay(doc)}${Number.isFinite(doc.open) ? `, ${doc.open} repair item${doc.open === 1 ? '' : 's'} open at the write` : ''}\n${docUrl(doc.id)}`;
+  };
+  if (one && docs[one.key]?.id) {
+    const rest = written.filter((spec) => spec.key !== one.key);
+    return [
+      line(one),
+      // No full stop after a URL — it reads as part of the address.
+      rest.length
+        ? `The other ${rest.length} (${rest.map((s) => s.title).join(', ')}) ${rest.length === 1 ? 'is' : 'are'} in the same folder${folder ? `:\n${folder}` : ''}`
+        : (folder ? `Whole folder:\n${folder}` : ''),
+      withheldLine(refresh),
+    ].filter(Boolean).join('\n\n');
+  }
+  const unwritten = DOC_SPECS.filter((spec) => !docs[spec.key]?.id).map((spec) => spec.title);
+  return [
+    written.length === DOC_SPECS.length
+      ? 'The four health documents:'
+      : `The ${written.length} health document${written.length === 1 ? '' : 's'} written so far:`,
+    ...written.map((spec) => line(spec)),
+    // An unwritten document is named, not counted: "1 not written yet" leaves
+    // the room guessing which one, and the id it has no URL for is the whole
+    // reason the ask could not be answered.
+    unwritten.length
+      ? `Not written yet: ${unwritten.join(', ')}. /health refresh publishes ${unwritten.length === 1 ? 'it' : 'them'} and records the id here.`
+      : '',
+    folder ? `All of them in one folder:\n${folder}` : '',
+    withheldLine(refresh),
+  ].filter(Boolean).join('\n\n');
+}
+
 /** One prompt. The seats collaborate in the text. One model call posts it. */
 export function healthAnswerPrompt({ mode, roleId, question, artifact, refusal = '', brief = null } = {}) {
   const gate = gateFromArtifact(artifact);
@@ -398,8 +526,19 @@ function clipReply(text) {
  * that fails — falls back to one short line naming the reason, and
  * `fallbackReason` carries that reason (or the thrown error) so the host can
  * log it. It never throws into the website coder.
+ *
+ * A `link` turn returns before any of that: it reads the registry, prints the
+ * recorded ids, and reports `usedModel: false` with no fallback reason. There
+ * is no failure mode to fall back from, which is the point.
  */
 export async function answerHealthGroup({ mode, roleId, question, workspace, artifact = undefined, runModel } = {}) {
+  // A link is a registry lookup. It is answered before the artifact is read and
+  // before `runModel` is looked at, so it cannot be turned into a model call by
+  // a slow or dead lane — which is the whole point: the room asked twice for a
+  // URL and got two 120s waits and no URL.
+  if (mode === 'link') {
+    return { answered: true, usedModel: false, text: clipReply(formatDocLinks({ workspace, question })), fallbackReason: '' };
+  }
   const loaded = artifact !== undefined ? artifact : readHealthVerify(workspace);
   const brief = workspace ? readBriefState(workspace) : null;
   const gate = loaded ? gateFromArtifact(loaded) : null;

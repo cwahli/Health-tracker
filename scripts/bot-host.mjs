@@ -4562,6 +4562,17 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
     busy.add(chatId);
     const workspace = KNOWN_PROJECTS['external-health'].workspace;
+    // A link ask is a registry lookup: no seats, no lane, no typing indicator,
+    // and nothing to wait for. It is answered and posted here, and the guard is
+    // released immediately because no turn is occupying the room — which is also
+    // why it is not turned away by one that is. Purely additive: the seat path
+    // below is untouched.
+    if (healthTurn.mode === 'link') {
+      busy.delete(chatId);
+      const linkReply = await answerHealthGroup({ ...healthTurn, workspace });
+      if (linkReply?.text) await api.sendMessage(chatId, linkReply.text).catch(() => {});
+      return;
+    }
     console.log(`[${config.id}] health group ${healthTurn.mode}${healthTurn.roleId ? ` ${healthTurn.roleId}` : ''}`);
     let reply;
     let typing;
