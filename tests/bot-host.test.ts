@@ -3177,3 +3177,23 @@ describe('TG tool surface M4 — freebuff tap resolves (plan/TG_TOOL_SURFACE.md)
     expect(resolveFreemodelTap({ annotated, value: '#3' }).hit).toBeNull();
   });
 });
+
+describe('TG TUI — /tui status must not die in the temporal dead zone', () => {
+  it('tuiSessionId is declared before its first use in case tui', () => {
+    // Live 2026-10-04: /tui status and /tui off answered NOTHING. The const
+    // was declared on the open path below its uses in the status/off
+    // branches — a ReferenceError before any reply. This sensor pins the
+    // order: declaration first, uses after.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const caseStart = src.indexOf("case 'tui': {");
+    expect(caseStart).toBeGreaterThan(-1);
+    const caseBody = src.slice(caseStart);
+    const declAt = caseBody.indexOf('const tuiSessionId =');
+    expect(declAt).toBeGreaterThan(-1);
+    for (const use of ['tuiStatusLine(config.id, tuiSessionId)', 'readTuiLease(config.id, tuiSessionId)']) {
+      const useAt = caseBody.indexOf(use);
+      expect(useAt).toBeGreaterThan(-1);
+      expect(useAt).toBeGreaterThan(declAt);
+    }
+  });
+});

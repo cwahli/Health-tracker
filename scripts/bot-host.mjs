@@ -2956,6 +2956,16 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // drift the first time either side changed, and a wrong name means killing
       // nothing while reporting success.
       const tuiSub = String(cmd.args || '').trim().toLowerCase();
+      // The workspace this chat is actually in right now — the same expression
+      // the turn uses. Resolved up here (not only on the open path) because
+      // /tui status and /tui off below already need the session id: declaring
+      // it after them is a temporal-dead-zone ReferenceError that answers
+      // neither (every /tui status went silently missing).
+      const tuiProject = getChatProject(chatId);
+      const tuiWorkspace = tuiProject.type === 'external' ? tuiProject.workspace : config.agent.workspace;
+      // Scoped, so /tui hands tui-attach.sh the session for the workspace the
+      // chat is in — the identical id the next turn passes.
+      const tuiSessionId = sessionForWorkspace(sessions, chatId, tuiWorkspace);
       if (tuiSub === 'status') {
         await api.sendMessage(chatId, `⌨️ ${tuiStatusLine(config.id, tuiSessionId)}`);
         return;
@@ -3041,15 +3051,8 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const moved = lastMiniappUrl && lastMiniappUrl !== tuiUrl;
       lastMiniappUrl = tuiUrl;
       const tuiSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
-      // The workspace this chat is actually in right now — the same expression
-      // the turn uses. Advertising config.agent.workspace unconditionally is what
-      // let a /tui in an external chat promise the website repo while the chat
-      // was pointed somewhere else entirely.
-      const tuiProject = getChatProject(chatId);
-      const tuiWorkspace = tuiProject.type === 'external' ? tuiProject.workspace : config.agent.workspace;
-      // Scoped, so /tui hands tui-attach.sh the session for the workspace the
-      // chat is in — the identical id the next turn passes.
-      const tuiSessionId = sessionForWorkspace(sessions, chatId, tuiWorkspace);
+      // tuiProject/tuiWorkspace/tuiSessionId are resolved at the top of this
+      // case (status/off need them too).
       if (!tuiSurface.terminal) {
         // An API-only lane has no screen to attach to. Handing it a PTY anyway
         // would be a scraped badge, not a terminal.
