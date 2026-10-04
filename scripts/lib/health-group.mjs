@@ -326,10 +326,31 @@ function docUrl(id) {
   return `https://docs.google.com/document/d/${encodeURIComponent(id)}/edit`;
 }
 
-/** The document this ask names, if it names one ("the link to the test plan"). */
+/**
+ * The document this ask names, if it names one.
+ *
+ * Matched on the title's own words, not the whole title: people say "insights"
+ * for Medical Insights and "test plan" for Test Plan, and an ask that named a
+ * document in spirit should not be answered with all four. Every word of every
+ * title here is distinct across the four documents, so a single whole-word hit
+ * identifies one document and cannot be ambiguous — `snapshot` is Health
+ * Snapshot and nothing else, `insights` is Medical Insights and nothing else.
+ */
+const TITLE_STOPWORDS = new Set(['and', 'the', 'for', 'with', 'a', 'of']);
+
 function askedDoc(question) {
-  const t = plainQuestion(question).toLowerCase();
-  return DOC_SPECS.find((spec) => t.includes(spec.title.toLowerCase())) || null;
+  const t = ` ${plainQuestion(question).toLowerCase()} `;
+  let best = null;
+  let bestWords = 0;
+  for (const spec of DOC_SPECS) {
+    const words = spec.title.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !TITLE_STOPWORDS.has(w));
+    const hits = words.filter((w) => t.includes(` ${w} `) || t.includes(` ${w}s `)).length;
+    if (hits > bestWords) {
+      best = spec;
+      bestWords = hits;
+    }
+  }
+  return bestWords > 0 ? best : null;
 }
 
 function writtenDay(doc) {

@@ -501,6 +501,12 @@ check('a document with no recorded id is named, not linked', /Not written yet: T
 check('a link answer says the documents are drafts while repairs are open', /drafts/i.test(linkReply.text) && /repair item/.test(linkReply.text), linkReply.text);
 check('a link answer carries the written date, not the day it was asked', /2026-10-01/.test(linkReply.text), linkReply.text);
 check('a link ask naming one written document leads with that document', formatDocLinks({ workspace: linkDir, question: 'give me the link to the health snapshot' }).startsWith('Health Snapshot'));
+// The words people actually type. Measured live: `/health link insights` came
+// back with all four documents, because the match wanted the whole title.
+check('a short name picks the right document: insights', formatDocLinks({ workspace: linkDir, question: 'insights' }).startsWith('Medical Insights'), formatDocLinks({ workspace: linkDir, question: 'insights' }).slice(0, 80));
+check('a short name picks the right document: snapshot', formatDocLinks({ workspace: linkDir, question: 'snapshot' }).startsWith('Health Snapshot'));
+check('a short name picks the right document: conditions', formatDocLinks({ workspace: linkDir, question: 'conditions' }).startsWith('Conditions & Actions'));
+check('a word that names no document still gets all four', /^The 3 health documents/.test(formatDocLinks({ workspace: linkDir, question: 'document' })), formatDocLinks({ workspace: linkDir, question: 'document' }).slice(0, 80));
 check('a link ask naming an unwritten document gets no url for it', /Not written yet: Test Plan/.test(formatDocLinks({ workspace: linkDir, question: 'send me the link to the test plan' })));
 
 const emptyLinkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doc-links-empty-'));
