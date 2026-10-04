@@ -1,0 +1,1 @@
+{"failed_hypotheses": [{"hypothesis": "Anonymous docs export/gviz/pub/view fetch can read a privately shared Google Sheet", "signature": "401 login HTML ~9.1k on export+gviz+pub+view; gcloud token 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT; SA impersonation PERMISSION_DENIED", "blocked": true}], "slug": "sheets-oauth-read-20261004"}
