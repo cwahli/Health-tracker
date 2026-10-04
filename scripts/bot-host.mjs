@@ -4780,7 +4780,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   if (addr.delayMs && addr.delayMs > 0) {
     await new Promise((r) => setTimeout(r, addr.delayMs));
   }
-  const text = (addr.cleanText || message.text || message.caption || '').trim();
+  let text = (addr.cleanText || message.text || message.caption || '').trim();
   const hasMedia = selectInboundMedia(message).length > 0;
   if (!text && !hasMedia) return;
 
@@ -4794,15 +4794,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     return;
   }
 
-  // Bare smalltalk in a direct chat gets one line, never a turn: no session
-  // burn, no quota, no shell, no invented status (see greetingReply). Group
-  // rooms keep existing behavior; media always takes the normal path.
-  if (chatKind(message) !== 'group' && !hasMedia) {
-    const greet = greetingReply(text);
-    if (greet) {
-      await api.sendMessage(chatId, greet).catch(() => {});
-      return;
-    }
+  // Bare greetings become a one-word connectivity ping, not smalltalk and
+  // not a canned reply: the operator uses "hi" to check the whole chain is
+  // alive, so it must exercise the real turn path (session, model, reply) —
+  // cheaply, with no tools and an exact echo to check against. A static
+  // auto-reply would prove nothing; the raw greeting invites a rambling
+  // turn. Group rooms keep existing behavior; media takes the normal path.
+  if (chatKind(message) !== 'group' && !hasMedia && greetingReply(text)) {
+    text = `The user just said ${JSON.stringify(text.trim())}. This is a connectivity check: reply with exactly PONG. Do not use any tools.`;
   }
 
   // A named health seat, or a bare question to the room, is answered here.

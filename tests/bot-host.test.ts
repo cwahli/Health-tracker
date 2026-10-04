@@ -3214,17 +3214,23 @@ describe('TG opencode lane — variant travels only when offered', () => {
   });
 });
 
-describe('TG cleaner answers — greetings never start turns', () => {
-  it('greetingReply answers bare smalltalk and nothing else', async () => {
-    expect(greetingReply('hi')).toBe('Hey! What are we working on?');
-    expect(greetingReply('  Hi!  ')).toBe('Hey! What are we working on?');
-    expect(greetingReply('/hi')).toBe('Hey! What are we working on?');
-    expect(greetingReply('thanks')).toBe('Anytime — happy to help.');
-    expect(greetingReply('ok')).toBe('Got it.');
-    // Anything with content falls through to a real turn.
+describe('TG connectivity ping — greetings run a one-word turn', () => {
+  it('greetingReply detects bare greetings and nothing else', async () => {
+    // The detector returns the greeting (truthy); the turn path rewrites it
+    // to an exact-echo ping. No canned replies anywhere: a static reply
+    // would prove nothing about the chain.
+    for (const t of ['hi', '  Hi!  ', '/hi', 'hello', 'thanks', 'thank you!', 'ok', 'k', 'got it']) {
+      expect(greetingReply(t)).toBeTruthy();
+    }
+    // Anything with content falls through untouched.
     for (const t of ['hi, can you check the build', 'hello there', '/do-verify', '/compact', '/model x', 'high', '']) {
       expect(greetingReply(t)).toBeNull();
     }
+  });
+
+  it('the turn path rewrites greetings to the PONG ping (source-pinned)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('reply with exactly PONG. Do not use any tools.');
   });
 });
 

@@ -200,27 +200,26 @@ export function assertValidCommands(commands = BOT_COMMANDS) {
 }
 
 /**
- * One-line replies for bare smalltalk (plan: cleaner answers).
+ * Bare-greeting detector (plan: cleaner answers + connectivity checks).
  *
- * A lone "hi" must never become a full agentic turn: no session burn, no
- * quota, no shell, no invented status novel (live 2026-10-04: "hi" ran a
- * 15s erroring shell probe and answered with fabricated commits/sessions).
- * Only an exact bare greeting matches — anything with content ("hi, can
- * you…") falls through to the normal turn. A single leading slash is
- * tolerated ("/hi"); skill lines never match this map.
+ * The operator uses "hi" to check the whole chain is alive, so a greeting
+ * must exercise the real turn path — it just does so cheaply (see the
+ * substitution in handleMessage). Only an exact bare greeting matches:
+ * anything with content ("hi, can you…") is untouched, and skill lines
+ * never match this map.
  */
-const GREETING_REPLIES = [
-  [/^(hi|hello|hey|yo|hiya|howdy)$/, 'Hey! What are we working on?'],
-  [/^(thanks|thank you|thx)$/, 'Anytime — happy to help.'],
-  [/^(ok|okay|k|got it|noted)$/, 'Got it.'],
+const GREETING_RES = [
+  /^(hi|hello|hey|yo|hiya|howdy)$/,
+  /^(thanks|thank you|thx)$/,
+  /^(ok|okay|k|got it|noted)$/,
 ];
 
 export function greetingReply(text) {
   let t = String(text ?? '').trim().toLowerCase();
   if (t.startsWith('/')) t = t.slice(1).trim();
   t = t.replace(/[!?.,…]+$/, '').trim();
-  for (const [re, reply] of GREETING_REPLIES) {
-    if (re.test(t)) return reply;
+  for (const re of GREETING_RES) {
+    if (re.test(t)) return t;
   }
   return null;
 }
