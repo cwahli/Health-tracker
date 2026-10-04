@@ -35,7 +35,7 @@ export const BOT_COMMANDS = [
   { command: 'project', description: 'View or switch project (e.g. /project external 1)' },
   { command: 'council', description: 'Run a council stage by name or number (/council <stage>, /council all, /council status)' },
   { command: 'role', description: 'Switch active agent role (/role legal, /role sim, etc.)' },
-  { command: 'health', description: 'Personal Health Coach: /health status | verify | ingest | refresh | analyze | readiness | research "<what to look up>" | doctor' },
+  { command: 'health', description: 'Personal Health Coach: /health status | verify | ingest | refresh | analyze | readiness | link ["which document"] | research "<what to look up>" | doctor' },
   { command: 'tax', description: 'Chiwah LTD tax: /tax snapshot | sweep | status | deadlines | saving | doc' },
   { command: 'location', description: 'Show or switch active compute location / pool' },
 ];
