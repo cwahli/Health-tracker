@@ -13,6 +13,19 @@
 
 export const CANONICAL_TREE = '/home/ubuntu/bot-host-r14';
 export const TTYD_CRED = 'tui:vqBsHTWmvZUxmD49YnuDtBvk';
+// Provisioned bots: id -> { port, route }. Ports 8896/8899/8900 are taken by
+// vm/vm2/vm3, 8897 is the gateway, 8890-8892/8898 are other services —
+// allocate upward from 8901. This table is the only assignment list; emit and
+// check both derive from it so a rerun can never disagree about a bot.
+export const PROVISIONED = {
+  vm: { port: 8896, route: '/tty/' },
+  vm2: { port: 8899, route: '/tty2/' },
+  vm3: { port: 8900, route: '/tty3/' },
+  android: { port: 8901, route: '/tty4/' },
+  opencode: { port: 8902, route: '/tty5/' },
+  vm4: { port: 8903, route: '/tty6/' },
+  vm5: { port: 8904, route: '/tty7/' },
+};
 // Routes the gateway knows without env rows (its TTYD_ROUTES defaults).
 // Mirrored here so the audit does not demand env for vm/vm2; if the gateway
 // defaults ever move, this check fails loudly on the live file, not silently.
