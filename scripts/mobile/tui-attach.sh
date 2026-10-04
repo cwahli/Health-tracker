@@ -396,6 +396,14 @@ case "$DECISION" in
     ;;
 esac
 echo "$MARK" > "$SID_MARK"
+# Publish the pane name for the bot. /tui off and /tui status cannot read
+# TUI_TMUX_NAME out of the service file, and the lease only exists while a
+# client is attached — so without this, a kept pane with no lease is
+# uncloseable and unreportable (live 2026-10-04: /tui off answered
+# "nothing to close" with VM-tui-vm2 alive). Written on every attach, never
+# deleted here: only a verified kill clears it, and a missing session reads
+# as already gone. The bot clears it; this script never has to.
+printf '%s' "$TMUX_NAME" > "$STATE/tui-pane" 2>/dev/null || true
 
 case "$SURFACE" in
   cline)

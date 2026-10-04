@@ -104,6 +104,9 @@ import {
   warmTurnCaches,
   resolveFreemodelTap,
   pickOfferedVariant,
+  readTuiPane,
+  hasTuiPane,
+  tuiStatusLine,
   loadLeases,
   saveLeases,
   recordRunStart,
@@ -3315,5 +3318,48 @@ describe('TG ping turns leave no scaffolding in the chat transcript', () => {
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
     expect(src).toContain('if (isPingTurn) turnSessionId = null;');
     expect(src).toContain('if (result.sessionID && !isPingTurn) {');
+  });
+});
+
+describe('TG TUI — a kept pane with no lease stays closeable', () => {
+  const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tui-pane-'));
+
+  it('readTuiPane returns the published name, null when absent', () => {
+    const dir = tmpRoot();
+    try {
+      expect(readTuiPane('vm2', dir)).toBeNull();
+      fs.writeFileSync(path.join(dir, 'tui-pane'), 'VM-tui-vm2\n');
+      expect(readTuiPane('vm2', dir)).toBe('VM-tui-vm2');
+      fs.writeFileSync(path.join(dir, 'tui-pane'), '  \n');
+      expect(readTuiPane('vm2', dir)).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('hasTuiPane asks tmux and survives a refusal', () => {
+    expect(hasTuiPane('VM-tui-vm2', () => true)).toBe(true);
+    expect(hasTuiPane('VM-tui-vm2', () => { throw new Error('no tmux'); })).toBe(false);
+    expect(hasTuiPane('', () => true)).toBe(false);
+    expect(hasTuiPane(null, () => true)).toBe(false);
+  });
+
+  it('tuiStatusLine reports a kept pane when the lease is gone', () => {
+    // Live 2026-10-04: VM-tui-vm2 alive with no lease after detach, and
+    // both /tui status (before the TDZ fix) and /tui off missed it.
+    const dir = tmpRoot();
+    try {
+      const none = tuiStatusLine('no-such-bot-xyz', 'ses_none', () => false, dir);
+      expect(none).toContain('none open');
+      fs.writeFileSync(path.join(dir, 'tui-pane'), 'VM-tui-vm2');
+      const kept = tuiStatusLine('no-such-bot-xyz', 'ses_none', () => true, dir);
+      expect(kept).toContain('VM-tui-vm2');
+      expect(kept).toContain('pane kept');
+      expect(kept).toContain('/tui off closes it');
+      const gone = tuiStatusLine('no-such-bot-xyz', 'ses_none', () => false, dir);
+      expect(gone).toContain('none open');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
