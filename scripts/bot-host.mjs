@@ -147,8 +147,13 @@ import {
 import {
   buildStatusSnapshot,
   formatStatusPlain,
-  COMPACT_SUMMARY_PROMPT,
 } from './lib/bot-status.mjs';
+import {
+  compactSession,
+  formatCompactEmpty,
+  formatCompactFailure,
+  formatCompactReceipt,
+} from './lib/compact-session.mjs';
 import {
   fleetChatStatus,
   formatFleetStatusTable,
@@ -2458,51 +2463,42 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         compactProject.type === 'external' ? compactProject.workspace : config.agent.workspace,
       );
       if (!compactSessionId) {
-        await api.sendMessage(chatId, 'Nothing to compact — no active session in this chat yet.');
+        await api.sendMessage(chatId, formatCompactEmpty());
         return;
       }
-      await api.sendMessage(chatId, 'Compacting — summarizing this session, then starting fresh…');
+      // One bubble, edited in place when the answer lands. Compaction is slow
+      // enough that a second "done" message is just noise above the receipt.
+      const notice = await api.sendMessage(chatId, 'Compacting this session…');
+      const receipt = (text) => (notice && typeof api.editMessageText === 'function'
+        ? api.editMessageText(chatId, notice.messageId, text).catch(() => api.sendMessage(chatId, text))
+        : api.sendMessage(chatId, text));
       try {
-        // Compact the session the chat is actually on. On an external project
-        // that is the external folder, with the same restricted child env as
-        // a normal turn, not the website checkout.
+        // Compact the session the chat is actually on, in place: the tool
+        // collapses the transcript into one summary entry and the same session
+        // id carries the next turn, so there is nothing to rebind and no
+        // handoff brief to inject. On an external project that is the external
+        // folder, with the same restricted child env as a normal turn, not the
+        // website checkout.
         const compactProject = getChatProject(chatId);
         const compactExternal = compactProject.type === 'external';
-        const result = await runOpencode({
-          prompt: COMPACT_SUMMARY_PROMPT,
-          model: eff.model,
-          variant: eff.variant,
+        running.set(chatId, { aborted: false });
+        const outcome = await compactSession({
+          sessionId: compactSessionId,
           workspace: compactExternal ? compactProject.workspace : config.agent.workspace,
-          thinking: config.agent.thinking,
-          timeoutMs: config.agent.timeoutMs,
-          opencodeBin: config.agent.opencodeBin,
-          onSpawn: (child) => running.set(chatId, { child, aborted: false }),
-          extraArgs: ['--session', compactSessionId],
           env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
           envMode: compactExternal ? 'project' : 'inherit',
+          opencodeBin: config.agent.opencodeBin,
+          timeoutMs: config.agent.timeoutMs,
         });
-        if (running.get(chatId)?.aborted) {
-          await api.sendMessage(chatId, 'Aborted — session kept as-is.');
-        } else if (result.code !== 0 || !result.finalText?.trim()) {
-          await api.sendMessage(chatId, `Compact failed (${result.lastError || `exit ${result.code}`}) — session kept as-is.`);
+        if (outcome.ok) {
+          await receipt(formatCompactReceipt(outcome));
+        } else if (outcome.reason === 'empty') {
+          await receipt(formatCompactEmpty());
         } else {
-          const brief = result.finalText.trim().slice(0, 2000);
-          setPref(prefs, chatId, { handoff: brief });
-          savePrefs(config.id, prefs);
-          // Drop the old project's session row. Without this the chat kept a
-        // session id from the workspace it just left, and the TUI — which
-        // resolves its session from this same file — went on attaching the
-        // previous project's conversation after a switch.
-        sessions.delete(String(chatId));
-          saveSessions(config.id, sessions);
-          const compactUsage = await noteUsage({ chatId, result, eff, config, caches, totals, lastUsage });
-          await api.sendMessage(
-            chatId,
-            `Compacted. Fresh session starts on your next message; the brief below carries over once.\n\n${brief}${compactUsage ? `\n\n${compactUsage}` : ''}`,
-          );
+          await receipt(formatCompactFailure({ sessionId: compactSessionId, reason: outcome.reason }));
         }
       } catch (err) {
-        await api.sendMessage(chatId, `Compact failed: ${err.message} — session kept as-is.`).catch(() => {});
+        await receipt(formatCompactFailure({ sessionId: compactSessionId, reason: err.message })).catch(() => {});
       } finally {
         running.delete(chatId);
       }
