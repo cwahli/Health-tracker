@@ -75,6 +75,7 @@ import {
   resolveCommandName,
   isKnownCommand,
   greetingReply,
+  normalizeSkillCommand,
   BOT_COMMANDS,
   COMMAND_NAMES,
   toTelegramCommands,
@@ -3405,5 +3406,35 @@ describe('TG TUI failproof sync — no split sessions, no false same-session cla
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
     expect(src).toContain('if (wanted && held !== wanted) return null;');
     expect(src).not.toContain('if (held && wanted && held !== wanted) return null;');
+  });
+});
+
+describe('TG skills match — menu autocompletes, agent keeps the skill', () => {
+  it('normalizeSkillCommand restores hyphens on the command word only', () => {
+    expect(normalizeSkillCommand('/do_github_sync')).toBe('/do-github-sync');
+    expect(normalizeSkillCommand('/do_github_sync please sync now')).toBe('/do-github-sync please sync now');
+    expect(normalizeSkillCommand('/do-github-sync')).toBe('/do-github-sync');
+    expect(normalizeSkillCommand('/status')).toBe('/status');
+    expect(normalizeSkillCommand('hello there')).toBe('hello there');
+    expect(normalizeSkillCommand('/do_a_b x_y')).toBe('/do-a-b x_y');
+  });
+
+  it('menu entries exist but are not bot commands, so taps still forward', () => {
+    // Telegram forbids hyphens in commands, hence underscore form in the
+    // menu. COMMAND_NAMES must NOT contain them or a tap would hit
+    // handleCommand instead of falling through to the turn path (M3).
+    const menu = toTelegramCommands().map((c) => c.command);
+    for (const name of ['do_check_source', 'do_github_sync', 'do_plan_handoff', 'do_verify']) {
+      expect(menu).toContain(name);
+      expect(isKnownCommand(name)).toBe(false);
+    }
+  });
+
+  it('the turn path imports the normalizer (source-pinned)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('text = normalizeSkillCommand(text);');
+    const m = src.match(/import\s*\{[\s\S]*?\}\s*from\s*'\.\/lib\/commands\.mjs'/);
+    expect(m).not.toBeNull();
+    expect(m[0]).toContain('normalizeSkillCommand');
   });
 });

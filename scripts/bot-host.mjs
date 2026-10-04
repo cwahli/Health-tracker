@@ -126,6 +126,7 @@ import {
   resolveCommandName,
   isKnownCommand,
   greetingReply,
+  normalizeSkillCommand,
   isAddressedToUs,
   resolveGroupAddressing,
   recordActiveThread,
@@ -4917,6 +4918,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     await new Promise((r) => setTimeout(r, addr.delayMs));
   }
   let text = (addr.cleanText || message.text || message.caption || '').trim();
+  // Menu-tapped skills arrive underscored (/do_github_sync — Telegram forbids
+  // hyphens in commands). Restore the hyphen form before anything parses, so
+  // a tap behaves exactly like the typed line.
+  text = normalizeSkillCommand(text);
   const hasMedia = selectInboundMedia(message).length > 0;
   if (!text && !hasMedia) return;
 
@@ -5211,7 +5216,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       await api.sendMessage(chatId, 'Freebuff runs in the terminal — it cannot take a headless turn from chat. No session was started and nothing was spent. Pick another lane with /freemodel.');
       return;
     }
-    if (lane === 'cline' && /^\/do-[a-z]/i.test(String(text || '').trim())) {
+    if (lane === 'cline' && /^\/do[-_][a-z]/i.test(String(text || '').trim())) {
       try { releaseFiles(claimed, claimId); } catch {}
       await api.sendMessage(chatId, 'Cline cannot load that skill — it runs without the opencode skill library, so this text was not run and nothing was spent. Switch lane with /model, or run it in the terminal. (Cline’s screen is its own thread, not this chat.)');
       return;

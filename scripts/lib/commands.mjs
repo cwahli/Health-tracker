@@ -106,8 +106,36 @@ export const HELP_USAGE = {
 };
 
 /** Payload for Telegram `setMyCommands` (strips nothing — already valid). */
+/**
+ * Menu-only skill entries. Telegram commands allow [a-z0-9_] (no hyphens),
+ * so the shared skills (do-github-sync, …) cannot appear verbatim: they are
+ * published in underscore form purely so they autocomplete. They are NOT bot
+ * commands — COMMAND_NAMES is untouched, so a tapped entry still falls
+ * through to the turn path as a prompt (M3), and normalizeSkillCommand below
+ * restores the hyphen form the skill library expects. Static on purpose: the
+ * menu must be identical on every host, not host-dependent.
+ */
+export const SKILL_MENU_COMMANDS = [
+  { command: 'do_check_source', description: 'check a plan against literature and best practice' },
+  { command: 'do_github_sync', description: 'sync checkouts with GitHub, signed and recorded' },
+  { command: 'do_plan_handoff', description: 'pack a plan for another agent and push to GitHub' },
+  { command: 'do_verify', description: 'verify actions before mutating commands and commits' },
+];
+
+/**
+ * `/do_github_sync …` -> `/do-github-sync …`: restore the hyphen form of a
+ * menu-tapped skill line. Only the command word is touched; the rest of the
+ * line (arguments, prose) passes through byte-identical.
+ */
+export function normalizeSkillCommand(text) {
+  const m = /^\/do_([A-Za-z0-9_]+)/.exec(String(text || ''));
+  if (!m) return text;
+  return `/do-${m[1].replace(/_/g, '-')}${String(text).slice(m[0].length)}`;
+}
+
 export function toTelegramCommands() {
-  return BOT_COMMANDS.map(({ command, description }) => ({ command, description }));
+  return BOT_COMMANDS.map(({ command, description }) => ({ command, description }))
+    .concat(SKILL_MENU_COMMANDS.map(({ command, description }) => ({ command, description })));
 }
 
 /**
