@@ -126,6 +126,7 @@ import {
   resolveCommandName,
   isKnownCommand,
   greetingReply,
+  withChatContract,
   isAddressedToUs,
   resolveGroupAddressing,
   recordActiveThread,

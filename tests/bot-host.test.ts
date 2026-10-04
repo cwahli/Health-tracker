@@ -3284,4 +3284,13 @@ describe('TG review — chat-answer contract rides the prompt', () => {
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
     expect(src).toContain('finalPrompt = withChatContract(finalPrompt);');
   });
+
+  it('every turn-path helper is actually imported (live 2026-10-04: withChatContract was called but never imported, killing the turn)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const m = src.match(/import\s*\{[\s\S]*?\}\s*from\s*'\.\/lib\/commands\.mjs'/);
+    expect(m).not.toBeNull();
+    for (const name of ['withChatContract', 'greetingReply', 'isKnownCommand']) {
+      expect(m[0]).toContain(name);
+    }
+  });
 });
