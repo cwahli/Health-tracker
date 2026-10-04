@@ -6330,7 +6330,7 @@ config.me = { id: Number(me.id) || 0, username: String(me.username || '') };
   try {
     assertValidCommands(BOT_COMMANDS);
     await api.call('setMyCommands', { commands: toTelegramCommands() });
-    console.log(`[${config.id}] published ${BOT_COMMANDS.length} bot commands`);
+    console.log(`[${config.id}] published ${toTelegramCommands().length} bot commands`);
   } catch (err) {
     console.error(`[${config.id}] setMyCommands failed (non-fatal): ${err.message}`);
   }
