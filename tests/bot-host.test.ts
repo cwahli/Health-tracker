@@ -3382,3 +3382,27 @@ describe('TG TUI failproof sync — reset and resync paths', () => {
     expect(src).toContain('the new pane attaches to this chat');
   });
 });
+
+describe('TG TUI failproof sync — no split sessions, no false same-session claim', () => {
+  it('attach refuses a sessionless opencode open before any tmux runs', () => {
+    // Live 2026-10-04: a pre-message tap launched bare opencode on "" while
+    // the turn bound ses_ef7b… — blank terminal beside a live conversation.
+    const sh = fs.readFileSync(new URL('../scripts/mobile/tui-attach.sh', import.meta.url), 'utf8');
+    const refuseAt = sh.indexOf('nothing shared to attach to.');
+    const tmuxAt = sh.indexOf('tmux new-session -d -A');
+    expect(refuseAt).toBeGreaterThan(-1);
+    expect(tmuxAt).toBeGreaterThan(refuseAt);
+    const exitAt = sh.indexOf('exit 0', refuseAt);
+    expect(exitAt).toBeGreaterThan(refuseAt);
+    expect(exitAt).toBeLessThan(tmuxAt);
+  });
+
+  it('a lease naming no session never backs the same-session claim', () => {
+    // readTuiLease must return null when the turn has a session and the
+    // lease names none — otherwise the chat promises "same session" while
+    // the terminal sits on a blank one.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('if (wanted && held !== wanted) return null;');
+    expect(src).not.toContain('if (held && wanted && held !== wanted) return null;');
+  });
+});

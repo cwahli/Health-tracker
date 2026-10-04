@@ -4770,9 +4770,14 @@ function readTuiLease(botId, sessionId) {
   if (!heartbeat || Date.now() - heartbeat > TUI_LEASE_MAX_AGE_MS) return null;
   const held = String(lease?.session || '');
   const wanted = String(sessionId || '');
-  // A lease with no session id predates the id, so treat it as "a TUI is open"
-  // rather than guessing. A lease for a *different* session is not ours.
-  if (held && wanted && held !== wanted) return null;
+  // The lease names its session and the caller names the turn's: attach only
+  // when they are the same conversation. A lease with no session id is a
+  // terminal on nothing shared (a pre-message tap that launched bare) — with
+  // a turn session in hand that is NOT our terminal, so it must not trigger
+  // the "same session" claim (live 2026-10-04: VM-tui-vm3 opened blank on ""
+  // while the turn ran on ses_ef7b…, and the chat still promised both match).
+  // With no turn session yet (status right after /new) any live lease counts.
+  if (wanted && held !== wanted) return null;
   const since = Number(lease?.since || 0);
   return {
     session: held || null,
