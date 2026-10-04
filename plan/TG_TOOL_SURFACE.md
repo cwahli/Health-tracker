@@ -196,6 +196,8 @@ After the VM2 evidence is a pass, port the same diff to `/home/ubuntu/deploy/Hea
 
 **Acceptable.** One live tap witnessed end to end: the Telegram transcript (button reply, no silent miss), a gateway `/authz` line, a `tui-attach.log` decision line, `tmux ls` showing the session, a live lease, and the tool visible in the Mini App (operator screenshot for the last step — phone rendering is witnessed on-device only). A failed tap names which link broke (button, gateway auth, attach refusal, dead pane).
 
+**Network note (2026-10-04).** The operator's network answers the Mini App with a FortiGuard block: category *Dynamic DNS* kills every `*.duckdns.org` hostname before the page loads, so no tap can ever reach the gateway from that network. "Works" therefore includes reachability from the operator's networks: either a non-dynamic-DNS hostname for the TUI (a real domain with an A record; Caddy mints the cert) or a documented unfiltered path (mobile data while the WiFi filters). Until one of those holds, Milestone T cannot pass no matter how green the server side is.
+
 ## Order
 
 0, then 1, then 2, then 3, on VM2 local OpenCode. Then 4, then 5, then 6. **T runs after 4** (the terminal follows the chat's lane, so lane behavior must be known first) **and must pass before the VM port step in Milestone 5.** Do not open the next milestone on a failed evidence file.
