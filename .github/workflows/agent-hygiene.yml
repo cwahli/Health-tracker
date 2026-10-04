@@ -1,0 +1,49 @@
+name: agent-hygiene
+
+# The retirement step for agent branches (plan/AGENT_HYGIENE.md). Runs without
+# a human on a timer; the audit is the accountability, not an approval click.
+#
+# Scope is deliberately Tier 1 ONLY (provably-safe deletes: a merged PR, or a
+# tip reachable from main — content that is on main by definition). Tiers 2/3
+# need the cross-machine liveness story first: heartbeats are emitted by one
+# dispatch path today and the process scan only sees this box, so closing a
+# Mac/phone agent's PR or reaping its branch from here could eat live work.
+# Until every dispatch path beats (see agent-heartbeat.mjs), Tier 2/3 stay
+# report-only: they print in this run's log every week for owners to act on.
+# Widening to `--apply` without a tier filter is a conscious step, not a flag
+# flip — it requires heartbeat coverage on all locations (mobile, VM, Mac,
+# VPS, Collab).
+#
+# Manual: workflow_dispatch, or `node scripts/agent-hygiene.mjs` (dry run)
+# / `--apply --tier=1` from any checkout. Never touches `main`.
+
+on:
+  schedule:
+    - cron: '23 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: agent-hygiene
+  cancel-in-progress: false
+
+jobs:
+  clean:
+    name: retire-landed-branches
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # fetch-depth 0, not the default 1: Tier 1 judges ancestry
+          # (merge-base --is-ancestor), which a shallow clone cannot answer.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Retire Tier 1, report Tiers 2/3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/agent-hygiene.mjs --apply --tier=1
