@@ -59,6 +59,7 @@ import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { tuiSurfaceFor as tuiSurface, latestClineSessionId } from './lib/tui-surface.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
+import { parsePermissionCallback, startPermissionWatch, stopPermissionWatch } from './lib/permission-bridge.mjs';
 import { recordError, noteHealthy, recordRecoveryAttempt, classifyErrorKind, evaluateRecovery } from './lib/error-log.mjs';
 import {
   parseModelRef,
@@ -3808,6 +3809,19 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
       await api.answerCallbackQuery(query.id);
       return;
     }
+    if (kind === 'perm') {
+      // Permission tap for a live run: resolve the watcher waiting on this
+      // chat. A tap with no waiter is a stale keyboard from an ended run.
+      const parsed = parsePermissionCallback(value);
+      const waiter = running?.get(chatId)?.permWait;
+      if (!parsed || !waiter || waiter.token !== parsed.token) {
+        await api.answerCallbackQuery(query.id, { text: 'Expired — the run already moved on.' });
+        return;
+      }
+      waiter.resolve(parsed.decision);
+      await api.answerCallbackQuery(query.id, { text: parsed.decision });
+      return;
+    }
     if (kind === 'mp') {
       const models = await getModels(config, caches);
       const eff = effective(config, prefs, chatId);
@@ -5316,6 +5330,21 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       return;
     }
 
+    // A bot turn (`opencode run`, stdin ignored) that hits a permission would
+    // hang to the turn timeout with no word in the chat. Watch its session and
+    // ask here instead: Allow once / Always / Reject, timeout rejects. The
+    // dev-TUI external-directory dialog is a different process and is not
+    // bridged — approve that one in the TUI.
+    const permWatch = startPermissionWatch({
+      api,
+      chatId,
+      running,
+      getSessionId: () => turnSessionId,
+      workspace: effectiveWorkspace,
+      env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+      envMode: turnEnvMode,
+      opencodeBin: config.agent.opencodeBin,
+    });
     const result = await runOpencodeWithFailover({
       api,
       config,
@@ -5352,6 +5381,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       },
       isAborted: () => Boolean(running.get(chatId)?.aborted),
     });
+    await stopPermissionWatch(permWatch);
     // The OpenCode surface already reports through onAttemptComplete. Other
     // surfaces (Cline, Gemini) report nothing, so their terminal state is
     // written here. The old call was writeObserverTerminal(result), which does
