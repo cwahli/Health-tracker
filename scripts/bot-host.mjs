@@ -4745,6 +4745,16 @@ export function hasTuiPane(pane, tmux = defaultTmuxRunner) {
   }
 }
 
+/** The `<surface>:<session>` mark tui-attach.sh wrote on its last run, or null. */
+export function readTuiMark(botId) {
+  try {
+    const name = String(fs.readFileSync(path.join(os.tmpdir(), `tui-session-id-${botId}`), 'utf8') || '').trim();
+    return name || null;
+  } catch {
+    return null;
+  }
+}
+
 export function tuiIsAttached(botId, sessionId) {
   return Boolean(readTuiLease(botId, sessionId));
 }
@@ -5960,6 +5970,41 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         };
       }
       await renderer.finish(displayResult, { footer: usageText });
+      // Failproof-sync (turn-end hook): the pane shows whatever the last
+      // attach resolved; the chat follows whatever just bound. On a
+      // shared-session lane a mismatch means the open terminal is showing
+      // another conversation — take it down verified-dead so the next tap
+      // rebuilds on this one (live 2026-10-04: VM-tui-vm3 sat blank on ""
+      // while the turn bound ses_ef7b…). Cline excluded: a fresh thread per
+      // message makes mismatch normal there. Ping turns excluded: a
+      // connectivity check must not move anything. Best-effort, never
+      // breaking delivery; fires only on genuine mismatch, so matching
+      // turns cost two file reads.
+      if (!isPingTurn && resultSurface === 'opencode' && result?.sessionID) {
+        try {
+          const turnMark = `opencode:${result.sessionID}`;
+          const paneMark = readTuiMark(config.id);
+          const paneName = readTuiPane(config.id);
+          if (paneMark && paneMark !== turnMark && paneName && hasTuiPane(paneName)) {
+            killTuiPane(paneName);
+            if (!hasTuiPane(paneName)) {
+              try {
+                fs.rmSync(tuiLeasePath(config.id), { force: true });
+              } catch {
+                /* the pane is gone either way */
+              }
+              try {
+                fs.rmSync(tuiPanePath(config.id), { force: true });
+              } catch {
+                /* the pane is gone either way */
+              }
+              await api.sendMessage(chatId, `🔄 The open terminal was on another session, so I closed \`${paneName}\`. Tap \`/tui\` again — the new pane follows this conversation.`).catch(() => {});
+            }
+          }
+        } catch {
+          /* sync must never break delivery */
+        }
+      }
     }
   } catch (err) {
     if (observer && !observerTerminalWritten) {

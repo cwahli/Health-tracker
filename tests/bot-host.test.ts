@@ -105,6 +105,7 @@ import {
   pickOfferedVariant,
   readTuiPane,
   hasTuiPane,
+  readTuiMark,
   tuiStatusLine,
   loadLeases,
   saveLeases,
