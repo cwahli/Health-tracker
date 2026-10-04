@@ -73,6 +73,7 @@ import {
 import {
   parseCommand,
   resolveCommandName,
+  isKnownCommand,
   BOT_COMMANDS,
   COMMAND_NAMES,
   toTelegramCommands,
@@ -97,6 +98,9 @@ import {
   ProgressRenderer,
   fanoutProgressEvent,
   buildQuotedPrompt,
+  listTypedSkills,
+  warmTurnCaches,
+  resolveFreemodelTap,
   loadLeases,
   saveLeases,
   recordRunStart,
@@ -2941,5 +2945,235 @@ describe('ledger depletion visibility (stamped routes)', () => {
       process.env.HOME = OLD_HOME;
       try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
     }
+  });
+});
+
+describe('TG tool surface M2 — progress ledger (plan/TG_TOOL_SURFACE.md)', () => {
+  const makeRenderer = (opts: Record<string, unknown> = {}) => {
+    const sent: string[] = [];
+    const edited: string[] = [];
+    const api = {
+      sendMessage: async (_c: unknown, text: string) => {
+        sent.push(text);
+        return { message_id: sent.length };
+      },
+      editMessageText: async (_c: unknown, _id: unknown, text: string) => {
+        edited.push(text);
+        return true;
+      },
+      sendChatAction: async () => ({}),
+    };
+    const throttle = { submit: (fn: () => unknown) => Promise.resolve().then(fn), pause: () => {} };
+    const renderer = new ProgressRenderer({ api: api as never, throttle: throttle as never, chatId: 1, ...opts });
+    const flush = async () => {
+      for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
+    };
+    return { renderer, sent, edited, flush };
+  };
+
+  it('lists every tool with target and duration under So far:', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'read', status: 'completed', input: { file_path: 'src/a.ts' } });
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm run build' } });
+    const body = renderer._render();
+    expect(body).toContain('So far:');
+    expect(body).toContain('read');
+    expect(body).toContain('src/a.ts');
+    expect(body).toContain('bash');
+    expect(body).toContain('npm run build');
+    expect(body).toMatch(/· \d+s/);
+  });
+
+  it('keeps six tools, dropping the oldest', () => {
+    const { renderer } = makeRenderer();
+    for (let i = 0; i < 8; i += 1) {
+      renderer.onEvent({ kind: 'tool', tool: `tool${i}`, status: 'completed', input: `target${i}` });
+    }
+    expect(renderer.steps).toHaveLength(6);
+    const body = renderer._render();
+    expect(body).not.toContain('tool0');
+    expect(body).not.toContain('tool1');
+    expect(body).toContain('tool7');
+  });
+
+  it('a repeated tool replaces its line without resetting its clock', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm test' } });
+    renderer.steps[0].startedAt -= 20_000;
+    const clock = renderer.steps[0].startedAt;
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'completed', input: { command: 'npm test' } });
+    expect(renderer.steps).toHaveLength(1);
+    expect(renderer.steps[0].startedAt).toBe(clock);
+    expect(renderer.steps[0].status).toBe('completed');
+  });
+
+  it('identical consecutive calls collapse to one line with a count', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'read', status: 'running', input: { file_path: 'x' } });
+    renderer.onEvent({ kind: 'tool', tool: 'read', status: 'running', input: { file_path: 'x' } });
+    expect(renderer.steps).toHaveLength(1);
+    expect(renderer._render()).toContain('×2');
+  });
+
+  it('Result is ~140 chars and clears when the next tool has no output', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'completed', input: 'build', output: 'y'.repeat(500) });
+    const resultLine = renderer._render().split('\n').find((l) => l.startsWith('Result:')) || '';
+    expect(resultLine.length).toBeLessThanOrEqual(160);
+    renderer.onEvent({ kind: 'tool', tool: 'read', status: 'running', input: { file_path: 'z' } });
+    expect(renderer._render()).not.toContain('Result:');
+  });
+
+  it('streaming answer text does not replace the tool story', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm test' } });
+    renderer.onEvent({ kind: 'text', text: 'a long streaming answer that must not wipe the bubble' });
+    const body = renderer._render();
+    expect(body).toContain('bash');
+    expect(body).not.toContain('a long streaming answer');
+  });
+
+  it('thinking is a single line capped at maxChars', () => {
+    const { renderer } = makeRenderer({ maxChars: 220 });
+    renderer.onEvent({ kind: 'reasoning', text: 'First I will explore the repository structure to understand the codebase layout and find the relevant modules.' });
+    renderer.onEvent({ kind: 'reasoning', text: 'Because the failure is in the freemodel ledger, I should check the stamping logic next before changing anything.' });
+    const line = renderer._render().split('\n').find((l) => l.startsWith('Thinking:')) || '';
+    expect(line).not.toContain('\n');
+    expect(line.length).toBeLessThanOrEqual('Thinking: '.length + 220);
+  });
+
+  it('a tool change still paints after maxEdits is spent', async () => {
+    const { renderer, edited, flush } = makeRenderer({ maxEdits: 2 });
+    renderer.onEvent({ kind: 'reasoning', text: 'first substantive exploration of the codebase structure here' });
+    await flush();
+    for (let i = 0; i < 6; i += 1) {
+      renderer.onEvent({ kind: 'reasoning', text: `follow-up investigation number ${i} into test files here` });
+    }
+    await flush();
+    const before = edited.length;
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm test' } });
+    await flush();
+    expect(edited.length).toBeGreaterThan(before);
+    expect(edited[edited.length - 1]).toContain('bash');
+  });
+
+  it('deliver is never gated by the edit budget', async () => {
+    const { renderer, sent, flush } = makeRenderer({ maxEdits: 0 });
+    renderer.onEvent({ kind: 'reasoning', text: 'first substantive exploration of the codebase structure here' });
+    await flush();
+    await renderer.deliver('the final answer');
+    expect(sent.join('\n')).toContain('the final answer');
+    renderer.stopTyping();
+  });
+
+  it('settle keeps the step list under Done / Stopped / Aborted', async () => {
+    for (const [label, needle] of [['✓ Done', '✓ Done'], ['Stopped', 'Stopped'], ['Aborted', 'Aborted']] as const) {
+      const { renderer, edited, flush } = makeRenderer();
+      renderer.messageId = 7;
+      renderer.startedAt = Date.now() - 47_000;
+      renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'completed', input: { command: 'npm test' } });
+      await flush();
+      renderer.settle(label);
+      await flush();
+      const bubble = edited[edited.length - 1];
+      expect(bubble).toContain(needle);
+      expect(bubble).toContain('bash');
+      expect(bubble).toMatch(/47s|46s|48s/);
+      renderer.stopTyping();
+    }
+  });
+});
+
+describe('TG tool surface M3 — slash forward + /skills (plan/TG_TOOL_SURFACE.md)', () => {
+  it('bot commands win, everything else is a tool prompt', () => {
+    for (const known of ['compact', 'thinking', 'model', 'new', 'skills', 'status_all', 'store', 'setup', 'freemodels', 'freemodel']) {
+      expect(isKnownCommand(resolveCommandName({ name: known, args: '', raw: `/${known}` }))).toBe(true);
+    }
+    for (const forwarded of ['do-verify', 'do-check-source', 'do-github-sync', 'do-plan-handoff', 'frob']) {
+      expect(isKnownCommand(resolveCommandName(parseCommand(`/${forwarded} with args`)!))).toBe(false);
+    }
+  });
+
+  it('/skills is published and lists the /do-* skills on disk', () => {
+    expect(BOT_COMMANDS.some((c) => c.command === 'skills')).toBe(true);
+    expect(() => assertValidCommands()).not.toThrow();
+    const typed = listTypedSkills({ agent: { sharedSkills: ['/home/ubuntu/.agents/skills'], workspace: '/tmp' } });
+    const names = typed.map(([cmd]) => cmd);
+    for (const skill of ['/do-verify', '/do-check-source', '/do-github-sync', '/do-plan-handoff']) {
+      expect(names).toContain(skill);
+    }
+  });
+
+  it('/compact no longer promises a fresh session', () => {
+    const compact = BOT_COMMANDS.find((c) => c.command === 'compact')!;
+    expect(compact.description).not.toMatch(/start fresh/i);
+  });
+
+  it('/status compact line no longer promises a fresh session', async () => {
+    const { buildStatusSnapshot } = await import('../scripts/lib/bot-status.mjs');
+    const snap = buildStatusSnapshot({
+      bot: { id: 'x' }, platform: 't', effective: {}, session: null,
+      capabilities: { compact: true },
+    });
+    expect(String(snap.compact)).not.toMatch(/start fresh/i);
+    expect(String(snap.compact)).toMatch(/in place|stays on it/i);
+  });
+});
+
+describe('TG tool surface M1 — one --session (plan/TG_TOOL_SURFACE.md)', () => {
+  it('buildOpencodeArgs carries --session exactly once via sessionId', () => {
+    for (const args of [
+      buildOpencodeArgs({ prompt: 'hi', sessionId: 'ses_1' }),
+      buildOpencodeArgs({ prompt: 'hi', sessionId: 'ses_1', extraArgs: [] }),
+      buildOpencodeArgs({ prompt: 'hi', sessionId: 'ses_1', extraArgs: ['--agent', 'build'] }),
+    ]) {
+      expect(args.filter((a) => a === '--session')).toHaveLength(1);
+      expect(args[args.indexOf('--session') + 1]).toBe('ses_1');
+    }
+  });
+});
+
+describe('TG tool surface M1 — boot warmup (plan/TG_TOOL_SURFACE.md)', () => {
+  it('warmTurnCaches populates the turn-path caches without throwing', async () => {
+    const caches = { models: null, verbose: null, agents: null, free: null, readiness: null };
+    await warmTurnCaches({ id: 'test-warm', agent: {} }, caches);
+    expect(Array.isArray(caches.free)).toBe(true);
+    expect(caches.free.length).toBeGreaterThan(0);
+    expect(caches.readiness).toBeTruthy();
+  }, 30000);
+
+  it('a warmed cache serves the free list from memory', async () => {
+    const caches = { models: null, verbose: null, agents: null, free: null, readiness: null };
+    await warmTurnCaches({ id: 'test-warm', agent: {} }, caches);
+    const t0 = Date.now();
+    await warmTurnCaches({ id: 'test-warm', agent: {} }, caches);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  }, 30000);
+});
+
+describe('TG tool surface M4 — freebuff tap resolves (plan/TG_TOOL_SURFACE.md)', () => {
+  // Live fixture 2026-10-04: the Freebuff keyboard button carries
+  // `fm:deepseek/deepseek-v4.1-flash` while the catalog row is keyed
+  // `freebuff/deepseek/deepseek-v4.1-flash` (surface prefix stripped).
+  // Before the suffix fallback the tap died with "Expired, run /freemodel
+  // again" and never reached the terminal-only refusal.
+  const annotated = [
+    { ref: 'opencode/deepseek-v4.1-flash', label: 'DeepSeek V4.1', selectable: true },
+    { ref: 'freebuff/deepseek/deepseek-v4.1-flash', label: '❌ DeepSeek V4.1 FB', selectable: false, terminalOnly: true },
+  ];
+
+  it('a vendorless freebuff tap resolves to the terminal-only row', () => {
+    const { hit } = resolveFreemodelTap({ annotated, value: 'deepseek/deepseek-v4.1-flash' });
+    expect(hit?.ref).toBe('freebuff/deepseek/deepseek-v4.1-flash');
+  });
+
+  it('an exact selectable match still wins over the suffix', () => {
+    const { hit } = resolveFreemodelTap({ annotated, value: 'opencode/deepseek-v4.1-flash' });
+    expect(hit?.ref).toBe('opencode/deepseek-v4.1-flash');
+  });
+
+  it('an unknown value resolves to nothing (expired path)', () => {
+    expect(resolveFreemodelTap({ annotated, value: 'nope/nothing' }).hit).toBeNull();
+    expect(resolveFreemodelTap({ annotated, value: '#3' }).hit).toBeNull();
   });
 });

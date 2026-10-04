@@ -124,6 +124,7 @@ import {
 import {
   parseCommand,
   resolveCommandName,
+  isKnownCommand,
   isAddressedToUs,
   resolveGroupAddressing,
   recordActiveThread,
@@ -684,6 +685,31 @@ async function getFreeModels(caches, config) {
     caches.freeLocation = location;
   }
   return caches.free;
+}
+
+/**
+ * Boot warmup for the turn path (plan/TG_TOOL_SURFACE.md M1).
+ *
+ * The first turn after a restart paid ~3s building the free-model list
+ * inside the send→session-row budget (M1 proof runs measured 6.8s/7.4s
+ * against a 5s budget; buildFreeModelList alone is ~2.6s cold on this host).
+ * These are the same zero-burn local reads the turn would do anyway
+ * (catalog/auth files, `--version` probes) — warming them once at boot
+ * moves the cost out of the message path. Best-effort: the turn rebuilds
+ * whatever is still missing.
+ */
+export async function warmTurnCaches(config, caches) {
+  try {
+    hostReadiness(caches, config?.id);
+  } catch {
+    /* the turn path recomputes this */
+  }
+  try {
+    await getFreeModels(caches, config);
+  } catch {
+    /* the turn path rebuilds this */
+  }
+  return caches;
 }
 
 /**
@@ -1391,6 +1417,17 @@ export class ProgressRenderer {
     this.tool = '';
     this.toolDetail = '';
     this.toolStartedAt = null;
+    // M2 ledger (plan/TG_TOOL_SURFACE.md): the last six tools, each with
+    // name, status, target, and a duration that starts when that tool starts.
+    // A repeated call of the same tool replaces that tool's line without
+    // resetting its clock; identical consecutive calls collapse with a count.
+    this.steps = [];
+    // Set when the tool list changes since the last paint: tool changes (and
+    // heartbeats) still paint after the reasoning edit budget is spent, so
+    // the bubble coalesces to the latest body instead of freezing.
+    this.toolChangedSincePaint = false;
+    // Settle label for the final bubble: '✓ Done', 'Stopped', or 'Aborted'.
+    this.settledLabel = '';
     this.lastOutput = '';
     this.lastEventAt = null;
     this.lastRendered = '';
@@ -1436,17 +1473,22 @@ export class ProgressRenderer {
     const lines = [];
     const now = Date.now();
     const elapsedSec = this.startedAt ? (now - this.startedAt) / 1000 : 0;
-    lines.push(
-      formatWorkingHeadline({
-        providerLabel: this.providerLabel || 'Agent',
-        modelLabel: this.modelLabel,
-        thinking: this.thinkingLevel,
-        elapsedSec,
-        used: this.usedTokens,
-        ctxLimit: ctxLimitFor(this.modelLabel),
-        detail: this.status,
-      }),
-    );
+    if (this.settledLabel) {
+      const modelBit = [this.providerLabel, this.modelLabel].filter(Boolean).join(' ');
+      lines.push(`${this.settledLabel}${modelBit ? ` · ${modelBit}` : ''} · ${Math.max(0, Math.round(elapsedSec))}s`);
+    } else {
+      lines.push(
+        formatWorkingHeadline({
+          providerLabel: this.providerLabel || 'Agent',
+          modelLabel: this.modelLabel,
+          thinking: this.thinkingLevel,
+          elapsedSec,
+          used: this.usedTokens,
+          ctxLimit: ctxLimitFor(this.modelLabel),
+          detail: this.status,
+        }),
+      );
+    }
     // Node 3 (PROGRESS-SURFACES-1) ships as a CAPABILITY, off by default.
     //
     // The evidence says the user surface should carry a truthful phase label
@@ -1459,17 +1501,22 @@ export class ProgressRenderer {
     // today's behaviour byte-for-byte; flipping it to `phase` is a one-word
     // config change and needs no code edit.
     if (this.progressMode === 'phase') {
-      const phase = phaseLabelFor(this.tool, this.status);
+      const phase = phaseLabelFor(this.tool, this.settledLabel ? 'done' : this.status);
       if (phase) lines.push(`Phase: ${phase}`);
     } else if (this.thinkingText) {
-      lines.push(`Thinking: ${this.thinkingText}`);
+      lines.push(`Thinking: ${String(this.thinkingText).replace(/\s+/g, ' ').trim()}`);
     }
-    if (this.tool) {
+    if (this.steps.length > 1) {
+      lines.push('So far:');
+      for (const step of this.steps) lines.push(`· ${this._stepLine(step, now)}`);
+    } else if (this.steps.length === 1) {
+      lines.push(`Tool: ${this._stepLine(this.steps[0], now)}`);
+    } else if (this.tool) {
       const running = this.toolStartedAt ? ` · ${Math.max(0, Math.round((now - this.toolStartedAt) / 1000))}s` : '';
       const detail = this.toolDetail ? ` ${this._tail(this.toolDetail, 90)}` : '';
       lines.push(`Tool: ${this.tool}${running}${detail}`);
     }
-    if (this.lastOutput) lines.push(`Out: ${this._tail(this.lastOutput, 180)}`);
+    if (this.lastOutput) lines.push(`Result: ${this._tail(this.lastOutput, 140)}`);
     if (this.startedAt) {
       const idleSec = Math.max(0, Math.round((now - (this.lastEventAt || this.startedAt)) / 1000));
       if (idleSec >= 45) lines.push(`⚠️ no update ${idleSec}s — still running (long tool or stuck?)`);
@@ -1551,6 +1598,46 @@ export class ProgressRenderer {
     this._stopHeartbeat();
   }
 
+  /** One ledger line per tool step (plan/TG_TOOL_SURFACE.md M2). */
+  _stepLine(step, now) {
+    const secs = Math.max(0, Math.round(((now || Date.now()) - step.startedAt) / 1000));
+    const count = step.count > 1 ? ` ×${step.count}` : '';
+    const target = step.target ? ` ${this._tail(step.target, 60)}` : '';
+    return `${step.label}${count} (${step.status})${target} · ${secs}s`;
+  }
+
+  _recordTool(name, status, target, output) {
+    const now = Date.now();
+    const label = String(name || 'tool');
+    const key = label;
+    const cleanTarget = String(target || '').replace(/\s+/g, ' ').trim();
+    const out = output != null ? String(output) : '';
+    const last = this.steps.length ? this.steps[this.steps.length - 1] : null;
+    const existing = this.steps.find((s) => s.key === key);
+    if (last && last.key === key && last.status === status && last.target === cleanTarget && !out.trim()) {
+      // Identical consecutive call: one line with a count, clock untouched.
+      last.count = (last.count || 1) + 1;
+      last.updatedAt = now;
+    } else if (existing) {
+      // Repeated call of the same tool: replace that tool's line, keep its clock.
+      existing.status = status;
+      if (cleanTarget) existing.target = cleanTarget;
+      existing.count = 1;
+      existing.updatedAt = now;
+    } else {
+      this.steps.push({ key, label, status, target: cleanTarget, startedAt: now, updatedAt: now, count: 1 });
+      if (this.steps.length > 6) this.steps.shift();
+    }
+    // Legacy single-tool fields stay for lastActivityLine() compat.
+    this.tool = `${label} (${status})`;
+    const clock = existing || this.steps[this.steps.length - 1];
+    this.toolStartedAt = clock ? clock.startedAt : now;
+    this.toolDetail = cleanTarget || (out ? out : '');
+    // One Result: line from tool output; cleared when the next tool has none.
+    this.lastOutput = out.trim() ? out : '';
+    this.toolChangedSincePaint = true;
+  }
+
   onEvent(event) {
     if (!event || typeof event !== 'object') return;
     if (event.kind === 'reasoning' && event.text) {
@@ -1572,23 +1659,21 @@ export class ProgressRenderer {
       this._schedule();
     } else if (event.kind === 'tool') {
       this.lastEventAt = Date.now();
-      this.tool = `${event.tool} (${event.status})`;
-      this.toolStartedAt = Date.now();
       const inp = event.input;
-      let detail = '';
-      if (typeof inp === 'string') detail = inp;
+      let target = '';
+      if (typeof inp === 'string') target = inp;
       else if (inp && typeof inp === 'object') {
-        detail = String(inp.command || inp.file_path || inp.path || inp.filePath || inp.pattern || inp.glob || '');
+        target = String(inp.command || inp.file_path || inp.path || inp.filePath || inp.pattern || inp.glob || '');
       }
       const out = event.output != null ? String(event.output) : '';
-      if (!detail && out) detail = out;
-      this.toolDetail = detail;
-      if (out.trim()) this.lastOutput = out;
+      if (!target && out) target = out;
+      this._recordTool(event.tool, event.status, target, out);
       this.status = 'working';
       this._schedule();
     } else if (event.kind === 'text' && event.text) {
+      // Answer streaming is proof of life only: it must not replace the tool
+      // story in the bubble (the final answer is its own message on settle).
       this.lastEventAt = Date.now();
-      this.lastOutput = String(event.text);
       if (this.status === 'starting') this.status = 'working';
       this._schedule();
     } else if (event.kind === 'step_finish') {
@@ -1642,14 +1727,18 @@ export class ProgressRenderer {
     }
     // Content edits keep the maxEdits budget (spam guard). Heartbeats bypass
     // it so the clock + freshness line keep moving on long runs — they are
-    // still throttled to one edit per throttle window.
+    // still throttled to one edit per throttle window. Tool changes also
+    // still paint after the reasoning budget is spent: skipping the
+    // intermediate reasoning edits is how flood control is handled, and the
+    // next tool change or heartbeat paints the coalesced latest body.
     if (!isHeartbeat) {
-      if (this.edits >= this.maxEdits) return;
+      if (this.edits >= this.maxEdits && !this.toolChangedSincePaint) return;
       this.edits += 1;
     }
     const body = this._render();
     if (body === this.lastRendered) return;
     this.lastRendered = body;
+    this.toolChangedSincePaint = false;
     this.throttle
       .submit(() => this._guarded(() => this.api.editMessageText(this.chatId, this.messageId, this._render())))
       .catch(() => {});
@@ -1700,6 +1789,17 @@ export class ProgressRenderer {
     }
   }
 
+  /** Final bubble: label + elapsed + the same step list (M2). Bypasses the
+   * reasoning edit budget like a heartbeat; the final answer stays a
+   * separate send and is never gated. */
+  settle(label) {
+    this.settledLabel = label;
+    if (label === '✓ Done') this.status = 'done';
+    else if (label === 'Aborted') this.status = 'aborted';
+    else this.status = 'stopped';
+    if (this.messageId != null) this._schedule(true);
+  }
+
   async finish(result, { footer = '' } = {}) {
     this.stopTyping();
     const withFooter = (body) => (footer ? `${body}\n\n${footer}` : body);
@@ -1712,7 +1812,7 @@ export class ProgressRenderer {
     const killedNoOutput = result.code == null && !errText && stderrBlank && !partial;
     if (killedNoOutput) {
       this.status = 'failed';
-      if (this.messageId != null) this._schedule(true);
+      this.settle('Stopped');
       await this.deliver(
         withFooter(
           'Interrupted before the model produced output (the bot process restarted mid-run). Nothing was computed — just send your request again.',
@@ -1722,7 +1822,7 @@ export class ProgressRenderer {
     }
     if (errText && !partial) {
       this.status = 'failed';
-      if (this.messageId != null) this._schedule(true);      const friendly = humanizeRunError(errText);
+      this.settle('Stopped');      const friendly = humanizeRunError(errText);
       let hint = '';
       let lead = `Error: ${friendly}`;
       if (isTimeoutError(errText)) {
@@ -1735,7 +1835,7 @@ export class ProgressRenderer {
       return;
     }
     this.status = 'done';
-    if (this.messageId != null) this._schedule(true);
+    this.settle('✓ Done');
     if (!partial) {
       const code = result.code === 0 ? '' : ` (exit ${result.code})`;
       await this.deliver(withFooter(`Done${code}, but the model returned no text output.`));
@@ -2306,6 +2406,65 @@ async function bugsListText() {
   return formatBugsListText(parsed);
 }
 
+/**
+ * `/do-*` skills the operator can type (plan/TG_TOOL_SURFACE.md M3).
+ * Telegram menus cannot register a hyphen, so these are typed, not buttons —
+ * and the slash-forward in handleMessage delivers them to the tool as the
+ * prompt. Sources: the canonical `~/.agents/skills` plus this bot's
+ * `agent.sharedSkills` (workspace-relative entries resolve against the
+ * workspace, `~` against home). A skill counts when its directory holds a
+ * SKILL.md.
+ */
+export function listTypedSkills(config) {
+  const found = new Map();
+  const roots = [];
+  try {
+    roots.push(path.join(os.homedir(), '.agents', 'skills'));
+  } catch {}
+  const shared = config?.agent?.sharedSkills;
+  const list = Array.isArray(shared) ? shared : [];
+  for (const raw of list) {
+    const value = String(raw ?? '').trim();
+    if (!value) continue;
+    if (value === '~') roots.push(os.homedir());
+    else if (value.startsWith('~/')) roots.push(path.join(os.homedir(), value.slice(2)));
+    else if (path.isAbsolute(value)) roots.push(value);
+    else roots.push(path.resolve(config?.agent?.workspace || '.', value));
+  }
+  for (const root of roots) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry || typeof entry.isDirectory !== 'function' || !entry.isDirectory()) continue;
+      const dirName = String(entry.name || '');
+      if (!dirName.startsWith('do-')) continue;
+      const skillFile = path.join(root, dirName, 'SKILL.md');
+      let readable = false;
+      try {
+        readable = fs.statSync(skillFile).isFile();
+      } catch {
+        readable = false;
+      }
+      if (!readable) continue;
+      const cmd = `/${dirName}`;
+      if (!found.has(cmd)) {
+        let blurb = '';
+        try {
+          const head = String(fs.readFileSync(skillFile, 'utf8')).slice(0, 1200);
+          const m = head.match(/^\s*description\s*:\s*>?-?\s*(.+)$/m);
+          if (m) blurb = m[1].trim().slice(0, 120);
+        } catch {}
+        found.set(cmd, blurb);
+      }
+    }
+  }
+  return [...found.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+}
+
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId = 0, kind = 'direct' }) {
   const eff = effective(config, prefs, chatId);
 
@@ -2749,8 +2908,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     case 'thinking': {
       const ref = parseModelRef(eff.model);
       // Gemini is single-shot: no variants, no opencode verbose lookup.
+      // One refusal, no turn, no stored level (plan/TG_TOOL_SURFACE.md M4).
+      if (ref.surface === 'gemini') {
+        await api.sendMessage(chatId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.');
+        return;
+      }
       const variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : ref.surface === 'gemini' ? [] : await getVariants(config, caches, eff.model);
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
       if (!cmd.args) {
         if (!variants.length) {
           await api.sendMessage(chatId, `No thinking levels exposed for ${eff.model}.`);
@@ -2769,6 +2933,17 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       setPref(prefs, chatId, { variant: target });
       savePrefs(config.id, prefs);
       await api.sendMessage(chatId, `Thinking level set to ${target}.`);
+      return;
+    }
+
+    case 'skills': {
+      const typed = listTypedSkills(config);
+      if (!typed.length) {
+        await api.sendMessage(chatId, 'No /do-* skills found on this host. The canonical copy is ~/.agents/skills.');
+        return;
+      }
+      const lines = typed.map(([cmd, blurb]) => (blurb ? `${cmd} — ${blurb}` : cmd));
+      await api.sendMessage(chatId, `Skills you can type here (typed, not buttons — just send the line):\n${lines.join('\n')}`);
       return;
     }
 
@@ -3792,6 +3967,32 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
   }
 }
 
+/**
+ * Resolve a /freemodel keyboard tap to its annotated row (plan/TG_TOOL_SURFACE.md M4).
+ *
+ * A tap carries the button's route identity (`fm:<route>`), but terminal-only
+ * rows are keyed with their vendor (`freebuff/deepseek/deepseek-v4.1-flash`)
+ * while the button carries the vendorless route
+ * (`deepseek/deepseek-v4.1-flash` — surface prefix stripped). Without the
+ * suffix fallback the tap resolves to nothing and the chat gets "Expired, run
+ * /freemodel again" instead of the terminal-only refusal. The fallback only
+ * matches terminal-only rows, so a selectable row is never reached through
+ * an ambiguous tap; exact matches always win.
+ */
+export function resolveFreemodelTap({ annotated = [], value } = {}) {
+  const wanted = String(value || '').replace(/^❌\s*/, '').trim();
+  const direct = (annotated || []).find(
+    (a) => a.ref === value || a.laneLabel === wanted || a.label === wanted || a.ref === wanted,
+  );
+  if (direct) return { hit: direct };
+  if (!wanted || wanted.startsWith('#')) return { hit: null };
+  const terminal = (annotated || []).find(
+    (a) => (a.terminalOnly || /^freebuff\//i.test(String(a.ref || '')))
+      && (String(a.ref || '') === wanted || String(a.ref || '').endsWith(`/${wanted}`)),
+  );
+  return { hit: terminal || null };
+}
+
 async function handleCallback({ api, config, prefs, caches, running = null, query }) {
   // String once, at the boundary: Map keys written with the raw Telegram id
   // never match the same keys after a disk round-trip stringifies them, so
@@ -3902,9 +4103,7 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
             return (available.length ? available : selectable)[Number(wanted.slice(1))] || null;
           })()
         : null;
-      const hit = byPosition || (bundle.annotated || []).find(
-        (a) => a.ref === value || a.laneLabel === wanted || a.label === wanted || a.ref === wanted,
-      );
+      const hit = byPosition || resolveFreemodelTap({ annotated: bundle.annotated || [], value }).hit;
       const entries = bundle.entries?.length ? bundle.entries : await getFreeModels(caches, config);
       const entry = hit
         ? entries.find((e) => e.ref === hit.ref) || hit
@@ -3922,6 +4121,17 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
         const route = freemodelRefToRoute(entry.ref);
         await sendHtml(api, chatId, `That lane is depleted (reset in ${hit?.resetIn || 'unknown'}).\nNext up: ${next ? `${next.label} (${next.ref})` : 'none — wait for reset'}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location: workLocation(), readiness: hostReadiness(caches) })}`);
         return;
+      }
+      // Terminal-only rows (Freebuff) are shown for visibility but must not
+      // become the chat's model: the keyboard never starts a headless turn
+      // (plan/TG_TOOL_SURFACE.md M4). One reply, pref untouched.
+      {
+        const annHit = (bundle.annotated || []).find((a) => a.ref === entry.ref);
+        if (annHit?.terminalOnly || /^freebuff\//i.test(String(entry.ref || ''))) {
+          await api.answerCallbackQuery(query.id, { text: 'Terminal-only lane' });
+          await api.sendMessage(chatId, 'Freebuff runs in the terminal — it cannot take a headless turn from chat. Your model is unchanged and nothing was spent.');
+          return;
+        }
       }
       setPref(prefs, chatId, { model: entry.ref });
       savePrefs(config.id, prefs);
@@ -3967,9 +4177,14 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
       const eff = effective(config, prefs, chatId);
       const ref = parseModelRef(eff.model);
       // Cline models expose fixed thinking levels, not opencode model variants.
-      // Gemini exposes none (single-shot lane).
+      // Gemini exposes none (single-shot lane): one refusal, nothing stored.
+      if (ref.surface === 'gemini') {
+        await api.answerCallbackQuery(query.id, { text: 'No levels on this model' });
+        await api.editMessageText(chatId, messageId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.').catch(() => {});
+        return;
+      }
       let variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : ref.surface === 'gemini' ? [] : await getVariants(config, caches, eff.model);
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
       // New buttons carry the name (`v:high`); old keyboards carry an index
       // (`v:0`). Support both so already-shown keyboards keep working.
       let variant = variants.includes(value) ? value : variants[Number(value)];
@@ -4525,8 +4740,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   if (!text && !hasMedia) return;
 
   const cmd = text ? parseCommand(text) : null;
-  if (cmd) {
-    await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId, kind: chatKind(message) });
+  // A leading `/` that is not a bot command is NOT a command: it falls
+  // through to the turn path as the user prompt (plan/TG_TOOL_SURFACE.md M3).
+  // That is how typed `/do-*` skills reach the tool. Bot commands win.
+  const route = cmd ? resolveCommandName(cmd) : null;
+  if (cmd && isKnownCommand(route)) {
+    await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd: { ...cmd, name: route }, userId, kind: chatKind(message) });
     return;
   }
 
@@ -4782,6 +5001,27 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     worktree: config.agent.workspace,
   }).claimed;
 
+  // Lane preflight, before the turn starts (plan/TG_TOOL_SURFACE.md M4).
+  // Freebuff is terminal-only (laneSupports('freebuff','headless') === false):
+  // the model keyboard must not start a headless turn. Cline cannot load the
+  // opencode `/do-*` skill library. Each is one recorded refusal: no session
+  // is burned and no turn runs. Gemini `/do-*` is run as a normal prompt.
+  {
+    const laneEff = effective(config, prefs, chatId);
+    const laneRef = parseModelRef(laneEff.model);
+    const lane = laneRef.surface === 'cline' ? 'cline' : laneRef.surface === 'gemini' ? 'gemini' : 'opencode';
+    if (/^freebuff\//i.test(String(laneEff.model || ''))) {
+      try { releaseFiles(claimed, claimId); } catch {}
+      await api.sendMessage(chatId, 'Freebuff runs in the terminal — it cannot take a headless turn from chat. No session was started and nothing was spent. Pick another lane with /freemodel.');
+      return;
+    }
+    if (lane === 'cline' && /^\/do-[a-z]/i.test(String(text || '').trim())) {
+      try { releaseFiles(claimed, claimId); } catch {}
+      await api.sendMessage(chatId, 'Cline cannot load that skill — it runs without the opencode skill library, so this text was not run and nothing was spent. Switch lane with /model, or run it in the terminal. (Cline’s screen is its own thread, not this chat.)');
+      return;
+    }
+  }
+
   // A TUI attached to this same conversation does NOT stop a turn.
   //
   // This used to defer every message while the terminal was open, queue it as a
@@ -4956,8 +5196,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
     // A `/freemodel` switch after `/tx on` must move the live view with the
     // lane: stale OpenCode TUI panes are dropped for Cline/Gemini and the TUI
-    // is re-ensured when the lane comes back to OpenCode.
-    if (workSession.tx) {
+    // is re-ensured when the lane comes back to OpenCode. Only for an
+    // already-live TUI view (plan/TG_TOOL_SURFACE.md M1): a stale `tx: true`
+    // row must not boot a private `opencode serve` on an ordinary message.
+    if (workSession.tx && workSession.viewMode === 'tui' && workSession.serverUrl && workSession.opencodeSessionId) {
       try {
         workSession = await reconcileWorkViewForLane({
           session: workSession,
@@ -4982,11 +5224,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         ? workSession.opencodeSessionId
         : undefined);
 
-    // Only when a tx view is NOT live: with one, the session comes from the
-    // work-session row instead. The id is workspace-scoped now, so a chat that
-    // switched project passes nothing here rather than the previous project's
-    // conversation — which the tool would happily resume, in the wrong tree.
-    if (workSession.viewMode !== 'tui' && turnSessionId) extraArgs.push('--session', turnSessionId);
+    // The session id travels once, via runOpencode's `sessionId`
+    // (buildOpencodeArgs appends `--session` when it is set). The turn path
+    // used to also push `--session` into extraArgs here, so the child argv
+    // carried the flag twice — remove that push, pass it once.
     try { observer = createObserver(workSession); } catch {}
     observerContext = { model: eff.model, attempt: 1, surface: ref.surface, provider: ref.surface };
     // Local fanout: headline + observer log always. The feed is
@@ -5160,7 +5401,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         // thread that just ran — otherwise /tx keeps showing the conversation
         // from the previous host until something else rewrites it.
         workSession = setWorkView(workSession.id, { opencodeSessionId: handed.sessionID }) || workSession;
-        if (workSession.tx) {
+        if (workSession.tx && workSession.viewMode === 'tui' && workSession.serverUrl && workSession.opencodeSessionId) {
           try {
             workSession = await reconcileWorkViewForLane({
               session: workSession,
@@ -5209,6 +5450,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       // arrived 26s after the abort ack because this call had no aborted check.
       if (running.get(chatId)?.aborted) {
         renderer.status = 'aborted';
+        renderer.settle('Aborted');
         await renderer.deliver('Aborted.').catch(() => {});
       } else {
         await renderer.finish(
@@ -5469,6 +5711,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
     if (running.get(chatId)?.aborted) {
       renderer.status = 'aborted';
+      renderer.settle('Aborted');
       await renderer.deliver('Aborted.');
     } else {
       // Sticky failover: the chat asked for eff.model but the answer came from
@@ -5584,6 +5827,9 @@ async function runLoop({ api, config }) {
   const health = { okAt: 0, errAt: 0, err: '' };
   let offset = loadOffset(config.id);
   let running_ = true;
+  // M1 boot warmup (see warmTurnCaches): the first turn after a restart must
+  // not pay the ~3s cold catalog build inside the send→session-row budget.
+  await warmTurnCaches(config, caches);
   // In-flight update handlers. On SIGTERM (service restart/redeploy) we stop
   // polling for NEW updates but let running requests finish (bounded) so a
   // restart no longer kills runs into "exit null, no text output".

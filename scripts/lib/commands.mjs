@@ -14,7 +14,7 @@ export const BOT_COMMANDS = [
   { command: 'status', description: 'Show session, model, agent, usage' },
   { command: 'status_all', description: 'Show fleet-wide status across agents in this chat' },
   { command: 'new', description: 'Start a fresh session' },
-  { command: 'compact', description: 'Summarize session and start fresh' },
+  { command: 'compact', description: "Compact this chat's session in place (stays on it)" },
   { command: 'model', description: 'Pick a model (or set it directly)' },
   { command: 'models', description: 'List available models' },
   { command: 'freemodel', description: "List this host's available free models" },
@@ -23,6 +23,7 @@ export const BOT_COMMANDS = [
   { command: 'build', description: 'Switch to the build agent' },
   { command: 'plan', description: 'Switch to the plan agent' },
   { command: 'thinking', description: 'Pick the thinking level (variant)' },
+  { command: 'skills', description: 'List /do-* skills you can type here' },
   { command: 'tui', description: 'Open the opencode TUI for this conversation (Mini App)' },
   { command: 'bugs', description: 'Open the shared bug board (Mini App)' },
   { command: 'fleet', description: 'Open the live fleet dashboard (Mini App)' },
@@ -71,7 +72,7 @@ export const HELP_USAGE = {
   status: { args: '', text: 'show session, model, agent, workspace, usage' },
   status_all: { args: '', text: 'fleet-wide status table across agents in this chat' },
   new: { args: '', text: 'start a fresh session' },
-  compact: { args: '', text: 'summarize session and start fresh' },
+  compact: { args: '', text: "compact this chat's session in place (stays on it)" },
   model: { args: '[name]', text: 'pick a model (or set it directly)' },
   models: { args: '', text: 'list available models' },
   freemodel: { args: '', text: "list free models available on this host" },
@@ -80,6 +81,7 @@ export const HELP_USAGE = {
   build: { args: '', text: 'switch to the build agent' },
   plan: { args: '', text: 'switch to the plan agent' },
   thinking: { args: '[level]', text: 'pick the thinking level (variant)' },
+  skills: { args: '', text: 'list /do-* skills you can type here (typed, not buttons)' },
   tui: {
     args: '', text: 'open this conversation in a real terminal (Mini App button)',
     extra: [
@@ -140,6 +142,22 @@ export function resolveCommandName(cmd) {
   // command, not two.
   if (COMMAND_ALIASES[name]) return COMMAND_ALIASES[name];
   return cmd?.name;
+}
+
+/**
+ * True when the name is a bot command (published, hidden, or alias target).
+ * A leading `/` that is NOT known here is forwarded to the tool as the user
+ * prompt (plan/TG_TOOL_SURFACE.md M3) — that is how typed `/do-*` skills
+ * reach the tool instead of dying as "Unknown command". Bot commands win.
+ */
+export function isKnownCommand(name) {
+  const n = String(name || '').toLowerCase();
+  if (!n) return false;
+  if (COMMAND_NAMES.includes(n)) return true;
+  if (Object.hasOwn(HIDDEN_COMMANDS, n)) return true;
+  if (Object.hasOwn(COMMAND_ALIASES, n)) return true;
+  if (Object.values(COMMAND_ALIASES).includes(n)) return true;
+  return false;
 }
 
 /** Validate against Telegram Bot API limits; throws on violation. */
