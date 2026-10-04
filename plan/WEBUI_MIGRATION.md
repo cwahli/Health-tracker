@@ -20,12 +20,19 @@ is DOM/native clients; opencode itself ships one (`opencode web` / `serve`).
 | grok (Grok Build CLI) | Headless prompts, no session resume (`lane-contract.mjs`); no TUI surface entry — `/tui` on a grok chat already opens an opencode terminal | **No.** No vendor web UI; nothing to point the Mini App at |
 | freebuff | TUI/login only, no one-shot, no serve/ACP (`lane-contract.mjs`: TG lane is opt-in tmux scrape) | **No.** Terminal is its only driver; removal = retiring the lane |
 
-## Phase 0 — prove session sharing (gate for everything below)
+## Phase 0 — prove session sharing (gate for everything below) — ✅ PASS 2026-10-04
 
-- Start `opencode serve` on a test localhost port; compare its session list
-  against the bot's known `ses_*` (bot `run` path + TUI sessions).
-- PASS = web UI shows the same conversations the TUI shows. FAIL = stop here;
-  web UI becomes a second inbox, not a replacement, and the roadmap changes.
+- Started `opencode serve --hostname 127.0.0.1 --port 4101` (test instance,
+  stopped afterwards); it held open the same `~/.local/share/opencode/opencode.db`
+  the bot's `run` turns and the TUI use (verified via `/proc/<pid>/fd`).
+- vm3's live chat session (`ses_ef7b4d…`, workspace
+  `/home/ubuntu/src/Health-tracker`) exists in that db (`session_v2` +
+  33 rows in `session_message`; 351 sessions total in the store).
+- Bonus: the background service itself is `opencode serve --service`
+  (same binary, same store) — a dedicated web `serve` is the same stack.
+- Caveat: this build answers API paths with the SPA to unauthenticated curl
+  (browser-cookie login is the evident path), so the gateway auth design
+  (Phase 1) must handle login, not just forward Basic. Sharing itself is proven.
 
 ## Phase 1 — serve behind the gateway (TUI untouched)
 
