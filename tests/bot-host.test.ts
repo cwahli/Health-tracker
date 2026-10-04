@@ -3302,3 +3302,18 @@ describe('TG review — chat-answer contract rides the prompt', () => {
     }
   });
 });
+
+describe('TG ping turns leave no scaffolding in the chat transcript', () => {
+  it('isPingTurn is declared before the greeting assignment (never TDZ)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const declAt = src.indexOf('let isPingTurn = false;');
+    expect(declAt).toBeGreaterThan(-1);
+    expect(src.indexOf('isPingTurn = true;')).toBeGreaterThan(declAt);
+  });
+
+  it('ping turns force a fresh session and never bind back', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('if (isPingTurn) turnSessionId = null;');
+    expect(src).toContain('if (result.sessionID && !isPingTurn) {');
+  });
+});

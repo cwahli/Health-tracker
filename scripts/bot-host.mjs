@@ -4800,8 +4800,13 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   // cheaply, with no tools and an exact echo to check against. A static
   // auto-reply would prove nothing; the raw greeting invites a rambling
   // turn. Group rooms keep existing behavior; media takes the normal path.
+  // Connectivity pings run on a throwaway session: their scaffolding must
+  // never land in the chat's transcript or the TUI (declared here, ahead of
+  // use — a later `let` would be a temporal-dead-zone throw on every ping).
+  let isPingTurn = false;
   if (chatKind(message) !== 'group' && !hasMedia && greetingReply(text)) {
     text = `[connectivity ping for ${JSON.stringify(text.trim())}: reply with exactly PONG, no tools]`;
+    isPingTurn = true;
   }
 
   // A named health seat, or a bare question to the room, is answered here.
@@ -5282,6 +5287,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
         ? workSession.opencodeSessionId
         : undefined);
+    // Connectivity pings run throwaway: force a fresh session so their
+    // scaffolding never lands in the chat's transcript or the TUI.
+    if (isPingTurn) turnSessionId = null;
 
     // The session id travels once, via runOpencode's `sessionId`
     // (buildOpencodeArgs appends `--session` when it is set). The turn path
@@ -5720,7 +5728,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // turn stored nothing at all (runCline always resolved null), so the TUI
     // kept attaching to whatever stale opencode id was left in the map.
     const resultSurface = parseModelRef(lastAttemptModel).surface;
-    if (result.sessionID) {
+    // Ping turns never bind back: the throwaway session belongs to the
+    // check, not the chat. Everything else (usage, ledger, sticky lane)
+    // behaves exactly like a normal turn.
+    if (result.sessionID && !isPingTurn) {
       if (resultSurface === 'cline') {
         const clineSessions = loadClineSessions(config.id);
         clineSessions.set(chatId, result.sessionID);
