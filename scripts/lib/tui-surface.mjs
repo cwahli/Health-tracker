@@ -12,7 +12,7 @@
  *
  * - `opencode` — a background server serialises turns, so the bot and the
  *   terminal are two clients of ONE session. `sharedSession: true`.
- * - `cline`    — no headless resume. Measured on 3.0.65: `cline --id <id> --json`
+ * - `cline`    — no headless resume. Measured on 3.0.65, re-verified on 3.0.68 2026-10-04: `cline --id <id> --json`
  *   answers "JSON output mode requires a prompt argument or piped stdin
  *   (interactive mode is unsupported)" and `cline --id <id>` without a TTY
  *   answers "interactive mode requires a TTY". `-i` is the only mode that

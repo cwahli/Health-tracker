@@ -1682,7 +1682,7 @@ describe('agent-cline', () => {
 // /tui terminal to resume. Before this, runCline resolved `sessionID: null` for
 // every run, so `sessions.json` kept a stale opencode id from before the chat
 // moved to Cline and the terminal opened that instead — a different agent on a
-// different thread. Cline cannot be TOLD which id to use (measured on 3.0.65:
+// different thread. Cline cannot be TOLD which id to use (measured on 3.0.65, re-verified on 3.0.68 2026-10-04:
 // `--id` with `--json` answers "interactive mode is unsupported", `--id` without
 // a TTY answers "interactive mode requires a TTY"), so the id can only be read
 // back out of the sessions directory.
