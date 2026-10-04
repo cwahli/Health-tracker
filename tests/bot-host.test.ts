@@ -111,7 +111,6 @@ import {
   formatStatusPlain,
   compactUnsupported,
   formatAgo,
-  COMPACT_SUMMARY_PROMPT,
 } from '../scripts/lib/bot-status.mjs';
 
 describe('telegram reply quote prompt', () => {
@@ -935,7 +934,6 @@ describe('pickers', () => {
     );
     expect(failing).toContain('poll: FAILING since 1m ago (fetch failed)');
     expect(formatAgo(0)).toBe('never');
-    expect(COMPACT_SUMMARY_PROMPT.length).toBeGreaterThan(20);
     expect(compactUnsupported('collab', 'gpu tunnels')).toContain('/compact');
   });
 
