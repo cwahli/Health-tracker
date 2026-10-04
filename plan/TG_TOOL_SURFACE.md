@@ -183,9 +183,22 @@ After the VM2 evidence is a pass, port the same diff to `/home/ubuntu/deploy/Hea
 
 **Acceptable.** One evidence file and one pass. Session ids, thinking level, skill text, and the tool list agree between Telegram and the tool record at each hop. A skipped hop names the reason.
 
+## Milestone T — The terminal opens
+
+**Objective.** `/tui` is a working terminal, not a button to nowhere. The operator killed the `VM-tui-vm2` tmux session by hand on 2026-10-04 and `/tui on` after that opened nothing: no attach attempt ever reached `tui-attach.sh` (no log line), and `/tui status` answered nothing at all (a temporal-dead-zone ReferenceError, fixed and sensor-pinned). A terminal the operator can delete out from under the system must come back on the next open.
+
+**Work.**
+
+- `/tui status` and `/tui off` answer on every lane. The session id they report on is resolved before the branches that use it (the TDZ sensor in `tests/bot-host.test.ts` pins the order).
+- `/tui` (open) delivers a fresh `web_app` button for this bot's gateway URL and records `tui-open.json` for the chat's lane and session. A missing URL is one honest reply, never a dead button.
+- Tapping the button reaches the gateway (an `/authz` line for a good tap, a named refusal otherwise), runs `tui-attach.sh`, and creates (or reuses) the `VM-tui-<id>` tmux session plus a live `tui-lease.json`. Killing the tmux session by hand must not block the next open: no live lease, no live pane, next tap rebuilds both.
+- The Mini App shows the tool for the chat's lane (OpenCode shared session, Cline last thread — never an API-only lane, which is refused with `/freemodel` as the way out).
+
+**Acceptable.** One live tap witnessed end to end: the Telegram transcript (button reply, no silent miss), a gateway `/authz` line, a `tui-attach.log` decision line, `tmux ls` showing the session, a live lease, and the tool visible in the Mini App (operator screenshot for the last step — phone rendering is witnessed on-device only). A failed tap names which link broke (button, gateway auth, attach refusal, dead pane).
+
 ## Order
 
-0, then 1, then 2, then 3, on VM2 local OpenCode. Then 4, then 5, then 6. Do not open the next milestone on a failed evidence file.
+0, then 1, then 2, then 3, on VM2 local OpenCode. Then 4, then 5, then 6. **T runs after 4** (the terminal follows the chat's lane, so lane behavior must be known first) **and must pass before the VM port step in Milestone 5.** Do not open the next milestone on a failed evidence file.
 
 ## Tests
 
