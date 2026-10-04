@@ -694,5 +694,14 @@ check('the brief branch sits under the same busy guard as the seats', healthAt >
 check('the brief turn runs the publisher and releases the guard', HOST.includes('answerBriefAsk({ projectId') && releaseAt > briefAt);
 check('the brief reply goes out as markdown', HOST.includes("reply.markdown ? { parse_mode: 'Markdown' }"));
 
+// `/health link` is the same lookup with the ambiguity taken out: the room does
+// not have to phrase an ask for the command to find the documents. Judged on
+// the source, because the dispatcher is a switch no test seam reaches.
+const COMMANDS = fs.readFileSync(path.join(HERE, 'lib', 'commands.mjs'), 'utf8');
+check('the health command advertises the link subcommand', /readiness \| link \["which document"\] \| research/.test(COMMANDS), 'commands.mjs description needs `link`');
+const linkBranch = HOST.slice(HOST.indexOf("sub === 'link' || sub.startsWith('link ')"), HOST.indexOf("if (sub === 'doctor')"));
+check('/health link is a lookup, not a guarded job', /answerHealthGroup\(\{ mode: 'link'/.test(linkBranch) && !/running\.get\(chatId\)/.test(linkBranch), linkBranch.slice(0, 240));
+check('/health link is the same turn as the room ask, one registry reader', /answerHealthGroup/.test(linkBranch) && /mode: 'link'/.test(linkBranch));
+
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);

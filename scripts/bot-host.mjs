@@ -3598,6 +3598,18 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         }
         return;
       }
+      if (sub === 'link' || sub.startsWith('link ')) {
+        // The four document links, from the workspace registry. A lookup, so it
+        // is not under the running-guard (nothing is written and no lane is
+        // called) and it needs no argument to be useful: `/health link` gives
+        // all four, `/health link test plan` gives one and where the rest are.
+        // Routed through answerHealthGroup so the command and the room's plain
+        // "give me the link" are the same turn, not two readers of the registry.
+        const ws = KNOWN_PROJECTS[projectId]?.workspace || KNOWN_PROJECTS['external-health'].workspace;
+        const res = await answerHealthGroup({ mode: 'link', roleId: null, question: rawArgs.slice(4).trim(), workspace: ws });
+        await api.sendMessage(chatId, res.text);
+        return;
+      }
       if (sub === 'doctor') {
         // The seat that checks the other seats. It writes only its own report;
         // a refusal (no credential, a report the checker refuses) writes
