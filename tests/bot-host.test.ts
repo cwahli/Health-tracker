@@ -739,18 +739,14 @@ describe('commands', () => {
     expect(parseCommand('/resume 5')).toEqual({ name: 'resume', args: '5', raw: '/resume 5' });
   });
 
-  it('advertises /web with a handler, help line, telegram payload, and a live personal link', async () => {
-    expect(COMMAND_NAMES).toContain('web');
-    const entry = BOT_COMMANDS.find((c) => c.command === 'web');
-    expect(entry?.description.length).toBeGreaterThan(0);
-    expect(toTelegramCommands().find((c) => c.command === 'web')?.description).toBe(entry?.description);
-    expect(helpText({ name: 'b', agent: {} }, {})).toContain('/web');
+  it('hands /tui a fresh personal web link (never a fixed Mini App URL) plus a live minter', async () => {
     const src = (await import('node:fs')).readFileSync(
       new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8',
     );
-    expect(src).toContain("case 'web'");
     expect(src).toContain('personalWebUiLink');
-    expect(parseCommand('/web')).toEqual({ name: 'web', args: '', raw: '/web' });
+    expect(src).toContain('freshWebLink');
+    expect(src).not.toContain("case 'web'");
+    expect(COMMAND_NAMES).not.toContain('web');
     const { personalWebUiLink, gatewaySecretFromHostEnv, WEB_LINK_TTL_SEC } =
       await import('../scripts/bot-host.mjs');
     expect(WEB_LINK_TTL_SEC).toBe(900);

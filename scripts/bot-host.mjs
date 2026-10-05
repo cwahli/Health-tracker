@@ -3034,8 +3034,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // terminal as fallback; every other lane keeps the TUI button only —
       // cline/grok/freebuff have no web UI to point at.
       const webUiUrl = tuiSurface.sharedSession ? readWebUiUrl() : '';
+      const freshWebLink = webUiUrl
+        ? personalWebUiLink({ webUrl: webUiUrl, botId: config.id, chatId, secret: gatewaySecretFromHostEnv() })
+        : '';
       const openButtons = [
-        ...(webUiUrl ? [{ text: '🌐 Open web UI', web_app: { url: `${webUiUrl}/?bot=${config.id}` } }] : []),
+        ...(freshWebLink
+          ? [{ text: '🌐 Open web UI', url: freshWebLink }]
+          : webUiUrl
+            ? [{ text: '🌐 Open web UI', web_app: { url: `${webUiUrl}/?bot=${config.id}` } }]
+            : []),
         { text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } },
       ];
       await api.sendMessage(chatId, [
@@ -3051,7 +3058,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           ? 'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.'
           : 'It runs under tmux, so closing the Mini App keeps your place, and you can reopen the same thread whenever you want.',
         'We both keep working with it open. The terminal waits for a turn I am running, and I wait for a turn you started — one at a time, never two writers at once. Opening it proves you are the Telegram user this chat belongs to, so there is no password to remember.',
-        ...(webUiUrl ? ['🌐 Prefer reading over typing? The *web UI* shows this same conversation as a normal page — scrolls natively, no terminal frames.'] : []),
+        ...(webUiUrl ? [`🌐 Prefer reading over typing? The *web UI* shows this same conversation as a normal page — scrolls natively, no terminal frames.${freshWebLink ? ' The button above is minted fresh for this tap and lasts 15 minutes.' : ''}`] : []),
       ].filter(Boolean).join('\n'), {
         reply_markup: { inline_keyboard: [openButtons] },
       });
@@ -3234,29 +3241,6 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
-    case 'web': {
-      // Personal login link: a token URL minted seconds ago always loads
-      // live, where the Mini App button's fixed URL can be answered from a
-      // stale client-side copy. Plain `url` button (not web_app) so it opens
-      // a fresh browser view every tap. 15 minutes, this chat only.
-      const webUrl = readWebUiUrl();
-      if (!webUrl) {
-        await api.sendMessage(chatId, '🌐 The web UI is not configured on this host — nothing to link to.');
-        return;
-      }
-      const link = personalWebUiLink({ webUrl, botId: config.id, chatId, secret: gatewaySecretFromHostEnv() });
-      if (!link) {
-        await api.sendMessage(chatId, '🌐 The web UI door has no key on this host — ask the operator to check TUI_GATEWAY_SECRET.');
-        return;
-      }
-      await api.sendMessage(chatId,
-        '🌐 *Fresh web UI login* — valid 15 minutes. Opens the live app directly:',
-        {
-          parse_mode: 'Markdown',
-          reply_markup: { inline_keyboard: [[{ text: '🌐 Open web UI', url: link }]] },
-        });
-      return;
-    }
 
     case 'resume': {
       if (running.get(chatId)) {
