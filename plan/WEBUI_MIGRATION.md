@@ -36,7 +36,7 @@ is DOM/native clients; opencode itself ships one (`opencode web` / `serve`).
 
 ## Phase 1 — serve behind the gateway (TUI untouched)
 
-- `opencode serve --hostname 127.0.0.1 --port <P>` as a user systemd unit
+- `opencode serve --hostname 127.0.0.1 --port 4096` as a user systemd unit
   (same pattern as `tui-ttyd-<id>.service`); `OPENCODE_SERVER_PASSWORD` set,
   held in gateway env like today's ttyd credential — browser never sees it.
 - Gateway route + Caddy host (e.g. `web.health-tracking.duckdns.org` with
@@ -44,6 +44,16 @@ is DOM/native clients; opencode itself ships one (`opencode web` / `serve`).
   sub-path: the web UI is a SPA with absolute asset paths.
 - Mini App gains a second button (`🌐 Web` next to `⌨️ Terminal`). Both live,
   same auth, same sessions (per Phase 0).
+
+As-built 2026-10-05 (differs in two points — both forced by measurement):
+
+- The JSON API lives under `/api/*` (page paths serve the SPA; basic auth is
+  ignored everywhere else). Serve scopes `/api/session` by its cwd project —
+  root the unit at `$HOME` so all workspaces' sessions are visible.
+- Caddy does NOT proxy to serve directly: the gateway is the only thing that
+  can exchange Telegram initData, so a direct proxy 401s with no way to log
+  in. The gateway fronts the whole web host instead (same door, landing
+  exchanges back to `/?token=`), injecting serve's Basic per request.
 
 ## Phase 2 — web UI primary, TUI fallback
 
