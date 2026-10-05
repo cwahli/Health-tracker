@@ -67,6 +67,7 @@ import {
   parseRetryAfter,
 } from './lib/agent-opencode.mjs';
 import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from './lib/opencode-tui.mjs';
+import { issueToken } from './tui-gateway.mjs';
 import { KNOWN_HOSTS, workerStatus, isLocalHost, machineLabel } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
@@ -1416,6 +1417,37 @@ export function readWebUiUrl(env = process.env) {
   const raw = String(env.OPENCODE_WEB_URL ?? 'https://web.health-tracking.duckdns.org').trim().replace(/\/+$/, '');
   if (/^https:\/\/[A-Za-z0-9.-]+$/.test(raw)) return raw;
   return '';
+}
+
+/** Short-lived personal web UI links minted by /web. */
+export const WEB_LINK_TTL_SEC = 900;
+
+/**
+ * The gateway signing secret, read at call time from the host's own env
+ * file (same pattern as the seat-tags credentials: host files, never the
+ * repo). Empty when absent — the caller says so instead of minting.
+ */
+export function gatewaySecretFromHostEnv({ readFile = fs.readFileSync, home = os.homedir() } = {}) {
+  try {
+    for (const line of String(readFile(path.join(home, '.config', 'bot-host', 'tui-gateway.env'), 'utf8')).split('\n')) {
+      const m = line.match(/^TUI_GATEWAY_SECRET=(.+)$/);
+      if (m) return m[1].trim().replace(/^["']|["']$/g, '');
+    }
+  } catch { /* host may not have this file */ }
+  return String(process.env.TUI_GATEWAY_SECRET || '').trim();
+}
+
+/**
+ * A personal web UI login link: a freshly minted ?token= URL no cache or
+ * snapshot has ever seen, so it always loads live (the Mini App button's
+ * fixed URL can be served a stale saved copy with no server signal). Same
+ * short-lived chat-bound bearer the gateway accepts on query; nothing new
+ * is trusted. Pure (sensor-covered); '' when anything is missing.
+ */
+export function personalWebUiLink({ webUrl, botId, chatId, secret, ttlSec = WEB_LINK_TTL_SEC, now = Date.now() } = {}) {
+  if (!webUrl || !botId || chatId === undefined || chatId === null || String(chatId) === '' || !secret) return '';
+  const token = issueToken({ botId: String(botId), chatId: String(chatId), secret, ttlSec, now });
+  return `${String(webUrl).replace(/\/+$/, '')}/?token=${encodeURIComponent(token)}`;
 }
 
 export class ProgressRenderer {
@@ -3199,6 +3231,30 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       await api.sendMessage(chatId, on
         ? '🔔 Finish alerts are on for this chat. `/notify off` silences them.'
         : '🔕 Finish alerts are off for this chat. `/notify on` brings them back.');
+      return;
+    }
+
+    case 'web': {
+      // Personal login link: a token URL minted seconds ago always loads
+      // live, where the Mini App button's fixed URL can be answered from a
+      // stale client-side copy. Plain `url` button (not web_app) so it opens
+      // a fresh browser view every tap. 15 minutes, this chat only.
+      const webUrl = readWebUiUrl();
+      if (!webUrl) {
+        await api.sendMessage(chatId, '🌐 The web UI is not configured on this host — nothing to link to.');
+        return;
+      }
+      const link = personalWebUiLink({ webUrl, botId: config.id, chatId, secret: gatewaySecretFromHostEnv() });
+      if (!link) {
+        await api.sendMessage(chatId, '🌐 The web UI door has no key on this host — ask the operator to check TUI_GATEWAY_SECRET.');
+        return;
+      }
+      await api.sendMessage(chatId,
+        '🌐 *Fresh web UI login* — valid 15 minutes. Opens the live app directly:',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '🌐 Open web UI', url: link }]] },
+        });
       return;
     }
 
