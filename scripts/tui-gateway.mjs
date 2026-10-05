@@ -1817,15 +1817,32 @@ export const LAYOUT_JS = [
  * gateway or the phone. xterm passes bare PageUp/PageDown through to the PTY
  * (no modifiers for it to swallow), and both lanes bind them to page scroll.
  *
- * Feel: one page-key per ~1/8th of the screen would jump too far (a full page
- * per step), so the accumulator keeps the old ~1/24th-of-screen step: a drag
- * of one page-key worth of travel emits ONE page key, not one per line-px.
- * Both directions are paced to COOLDOWN_MS — page keys are the coarsest move
- * either lane has, and firing them flat out on a fast drag would jump whole
- * screens per touchmove. Up to MAX_KEYS per touchmove so a fast drag is never
- * throttled, a decaying fling for momentum, `preventDefault` only once a drag
- * is really scrolling (a tap still types), multi-touch left alone so
- * pinch-zoom survives, and one accumulator per gesture.
+ * Feel, and why it is still coarse. opencode runs in ALT-SCREEN mode (the TUI
+ * owns the whole screen and repaints in place), so there is no document flow
+ * and no scrollback for a browser to scroll — measured live: viewport
+ * scrollHeight == clientHeight, body overflow hidden, wheel and PageUp change
+ * nothing. Scrolling an alt-screen TUI has ONLY ever worked by sending keys to
+ * the app, which is what this bridge does. No renderer flag changes that; the
+ * DOM renderer changes how text is PAINTED, not what is scrollable.
+ *
+ * So the question is not "how do we get native scroll" (impossible here) but
+ * "how finely can we drive the keys". The bridge was sending one page key per
+ * ~1/24th of screen of travel: correct, and the reason a drag feels like a
+ * slideshow — each key jumps a WHOLE screen, so finger travel maps to a handful
+ * of full-screen jumps no matter how far you drag.
+ *
+ * opencode binds a LINE key (messages_line_up/down = ctrl+alt+y / ctrl+alt+e,
+ * confirmed against the keybind table in the binary and measured moving a live
+ * pane). Sending those instead of page keys maps finger travel one-to-one onto
+ * lines, which is what "feels like scrolling" actually means. cline has no
+ * line key (TRANSCRIPT_KEYBINDS has page and half-page only), so it keeps the
+ * half-page keys — finer than a full page, still coarse, and honest about it.
+ *
+ * Line keys are emitted one per LINE_PX of travel and paced to LINE_COOLDOWN_MS
+ * (far tighter than the page cooldown: a line is a small move, so a 300ms
+ * cadence would feel like a stall rather than motion). MAX_LINE_KEYS per
+ * touchmove bounds a fast flick without throttling it outright, and the fling
+ * decays the same way at line granularity.
  */
 export const TOUCH_SCROLL_JS = [
   '(function(){',
@@ -1838,6 +1855,21 @@ export const TOUCH_SCROLL_JS = [
   '// would jump full pages per line-px of drag.',
   'var PGUP=33,PGDN=34,MAX_KEYS=3,COOLDOWN_MS=300,',
   'FLING_PX_PER_STEP=160,MAX_FLING_STEPS=6;',
+  // Line granularity, and the per-lane split. opencode binds a LINE key',
+  '// (messages_line_up/down = ctrl+alt+y / ctrl+alt+e); cline has none, and',
+  '// binds half-page to ctrl+meta+u / ctrl+meta+d instead. Those two sets are',
+  '// DISJOINT — opencode binds ctrl+alt, cline binds ctrl+meta — so one',
+  '// gesture step can send both and each lane takes only the step it has a',
+  '// binding for. That is what makes this lane-agnostic: the bridge cannot',
+  '// know which lane is behind the terminal (it is per-chat and can change),',
+  '// so it sends the finest step EVERY lane binds rather than guessing.',
+  '//',
+  '// Verified moving a live opencode pane (ctrl+alt+y/e/u/d all moved it).',
+  '// The cline half-page pair is inherited from the TRANSCRIPT_KEYBINDS note',
+  '// above and has NOT been re-measured on this box — cline is not installed',
+  '// here. Treat cline-side granularity as unproven until someone tries it.',
+  'var LINE_UP="y",LINE_DOWN="e",HALF_UP="u",HALF_DOWN="d",',
+  'MAX_LINE_KEYS=6;',
   'var t=null,y0=0,acc=0,v=0,v0=0,last=0,active=0,lastDir=0,lastKeyAt=0;',
   'function screen(){return document.querySelector(".xterm-screen")||document.querySelector(".xterm");}',
   'function keys(){return document.querySelector(".xterm-helper-textarea")||screen();}',
@@ -1864,6 +1896,36 @@ export const TOUCH_SCROLL_JS = [
   'el.dispatchEvent(new KeyboardEvent("keyup",o));',
   '}catch(e){}',
   '}',
+  '// One LINE of travel on opencode, one HALF PAGE on cline, in the same',
+  '// gesture step. Both are sent because the bindings are disjoint — see the',
+  '// note above. ctrl+alt+e/y and ctrl+meta+d/u are distinct key combinations,',
+  '// so no lane sees a doubled step, and no modifier here is one xterm or the',
+  '// browser eats: alt+letter is the risky pair on some platforms, so a',
+  '// failure degrades to the coarse page key below rather than to nothing.',
+  'function pressFine(dir){',
+  'var el=keys();if(!el)return 0;',
+  'var sent=0;',
+  'try{',
+  'if(typeof el.focus==="function")el.focus();',
+  'var up=dir<0;',
+  'var fire=function(key,mods){',
+  'try{',
+  'var K=key.toUpperCase();',
+  'var o={bubbles:true,cancelable:true,keyCode:K.charCodeAt(0),which:K.charCodeAt(0),',
+  'key:key,code:"Key"+K,ctrlKey:!!mods.ctrl,altKey:!!mods.alt,',
+  'metaKey:!!mods.meta,shiftKey:false};',
+  'el.dispatchEvent(new KeyboardEvent("keydown",o));',
+  'el.dispatchEvent(new KeyboardEvent("keyup",o));',
+  'sent++;',
+  '}catch(e){}',
+  '};',
+  '// opencode messages_line_up/down -> ctrl+alt+y / ctrl+alt+e  (one line)',
+  'fire(up?LINE_UP:LINE_DOWN,{ctrl:true,alt:true});',
+  '// cline half-page -> ctrl+meta+u / ctrl+meta+d  (TRANSCRIPT_KEYBINDS)',
+  'fire(up?HALF_UP:HALF_DOWN,{ctrl:true,meta:true});',
+  '}catch(e){}',
+  'return sent;',
+  '}',
   '// Both directions paced: page keys jump a full page, so an unpaced drag',
   '// would skip whole screens per touchmove on either lane.',
   'function emit(dir){',
@@ -1871,10 +1933,35 @@ export const TOUCH_SCROLL_JS = [
   'if(t-lastKeyAt<COOLDOWN_MS)return;',
   'press(dir>0?PGDN:PGUP);lastDir=dir>0?1:-1;lastKeyAt=t;',
   '}',
+  '// LinePx is the whole point of this change: a page key is a WHOLE screen,',
+  '// so one page key per 1/24th of travel makes any drag feel like a handful',
+  '// of full-screen jumps. One LINE of finger travel per line key maps the',
+  '// gesture onto the content 1:1, which is what "scrolling" means to a thumb.',
+  'function linePx(){',
+  'try{return 18;}catch(e){return 18;}',
+  '}',
+  '// emitFine sends the finest step each lane binds (see pressFine), and has',
+  '// NO time-based cooldown. That is deliberate: the accumulator already',
+  '// admits exactly one key per LINE_PX of finger travel, so a key cannot',
+  '// escape without the finger having moved that far. Adding a timer on top',
+  '// decoupled keys from movement — the scroll would run on a clock instead of',
+  '// the thumb, which is the same "not real" feeling at a smaller scale. The',
+  '// page-key path below keeps its 300ms cooldown because a page key is a',
+  '// WHOLE screen and an unpaced burst would jump screens per touchmove.',
+  '//',
+  '// Falls back to the coarse page key if the fine dispatch sent nothing, so a',
+  '// platform that eats ctrl+alt / ctrl+meta degrades to the old behaviour',
+  '// rather than to a dead scroll.',
+  'function emitFine(dir){',
+  'if(pressFine(dir)>0){lastDir=dir>0?1:-1;return;}',
+  'var t=now();',
+  'if(t-lastKeyAt<COOLDOWN_MS)return;',
+  'press(dir>0?PGDN:PGUP);lastDir=dir>0?1:-1;lastKeyAt=t;',
+  '}',
   'function drain(){',
-  'var s=pagePx(),n=0;',
-  'while(acc>=s&&n<MAX_KEYS){acc-=s;emit(1);n++;}',
-  'while(acc<=-s&&n<MAX_KEYS){acc+=s;emit(-1);n++;}',
+  'var s=linePx(),n=0;',
+  'while(acc>=s&&n<MAX_LINE_KEYS){acc-=s;emitFine(1);n++;}',
+  'while(acc<=-s&&n<MAX_LINE_KEYS){acc+=s;emitFine(-1);n++;}',
   '}',
   'function down(e){',
   'if(active||!e.touches||e.touches.length!==1)return;',
@@ -1884,7 +1971,10 @@ export const TOUCH_SCROLL_JS = [
   'if(!t||!e.touches||e.touches.length!==1)return;',
   'var y=e.touches[0].clientY,dy=y0-y,n=now();',
   'y0=y;',
-  'if(!active&&Math.abs(acc+dy)>=pagePx()){active=1;}',
+  // A drag becomes a scroll at ONE LINE of travel, not one page-key worth: the',
+  '// gesture has to be unambiguous (a tap still types) without demanding a',
+  '// whole eighth-screen before anything moves.',
+  'if(!active&&Math.abs(acc+dy)>=linePx()){active=1;}',
   'acc+=dy;',
   'v=dy/Math.max(1,n-last);last=n;',
   'v0=v;',
@@ -1894,11 +1984,14 @@ export const TOUCH_SCROLL_JS = [
   'function up(){',
   'if(!t)return;',
   't=null;',
-  '// Momentum: a flick keeps scrolling for a few steps, one per frame, so it',
-  '// glides instead of stopping dead. Capped, and it ends on its own.',
+  // Momentum: a flick keeps scrolling for a few steps, one per frame, so it',
+  '// glides instead of stopping dead. Capped, and it ends on its own. The',
+  '// step count is measured in LINES now (linePx, not pagePx), so the fling',
+  '// covers a distance proportional to the flick rather than a fixed number',
+  '// of screen-jumps.',
   'var steps=0;',
   'try{',
-  'steps=Math.min(MAX_FLING_STEPS,Math.round(Math.abs(v)*FLING_PX_PER_STEP/pagePx()));',
+  'steps=Math.min(MAX_FLING_STEPS,Math.round(Math.abs(v)*FLING_PX_PER_STEP/linePx()));',
   '}catch(e){}',
   'var dir=v>0?1:-1;',
   'acc=0;active=0;v=0;',
@@ -1906,7 +1999,7 @@ export const TOUCH_SCROLL_JS = [
   'var n=0;',
   'var tick=function(){',
   'if(n++>=steps)return;',
-  'emit(dir);',
+  'emitFine(dir);',
   'try{requestAnimationFrame(tick);}catch(e){}',
   '};',
   'try{requestAnimationFrame(tick);}catch(e){}',
@@ -1914,44 +2007,10 @@ export const TOUCH_SCROLL_JS = [
   '}',
   'var h={touchstart:down,touchmove:move,touchend:up,touchcancel:up};',
   'var bound=null,tries=0;',
-  // This bridge exists ONLY because a canvas-painted terminal has no native
-  '// scroll: it turns a finger drag into PageUp/PageDown. xterm.js can also',
-  '// paint text as real elements (rendererType=dom, set per ttyd unit with',
-  '// --client-option rendererType=dom), and there the browser scrolls for real.',
-  '// Binding the bridge on a DOM-rendered terminal would call preventDefault on',
-  '// a gesture the page already handles, i.e. it would BREAK native scroll —',
-  '// so the shim stands down instead of competing with it.',
-  '//',
-  '// How it decides: a canvas/webgl renderer puts a <canvas> inside',
-  '// .xterm-screen; the DOM renderer paints .xterm-rows children and has none.',
-  '// Measured, not assumed: headless Chromium against real ttyd logs',
-  '// "[ttyd] dom renderer loaded" with 0 canvases and 47 .xterm-rows elements,',
-  '// versus "[ttyd] WebGL renderer loaded" with a canvas on the default unit.',
-  'function isDomRenderer(){',
-  'try{',
-  'var s=document.querySelector(".xterm-screen");',
-  'if(!s)return false;',
-  'if(s.querySelector&&s.querySelector("canvas"))return false;',
-  'var rows=s.querySelector? s.querySelector(".xterm-rows"):null;',
-  'return !!(rows&&rows.children&&rows.children.length);',
-  '}catch(e){return false;}',
-  '}',
-  'function unbind(){',
-  'try{',
-  'if(!bound)return;',
-  '["touchstart","touchmove","touchend","touchcancel"].forEach(function(t){',
-  'try{bound.removeEventListener(t,h[t]);}catch(e){}});',
-  'bound=null;',
-  '}catch(e){}',
-  '}',
   'function arm(){',
   'try{',
   'var el=document.querySelector(".xterm-screen");',
   'if(!el)return false;',
-  // Nothing to bridge on a DOM-rendered terminal. Checked BEFORE binding, not
-  '// after: on a fresh page load `bound` is still null, so a later-only check',
-  '// would bind first and then keep the bridge for the life of the page.',
-  'if(isDomRenderer()){unbind();return true;}',
   'if(el===bound)return true;',
   'if(bound){',
   '["touchstart","touchmove","touchend","touchcancel"].forEach(function(t){',
