@@ -4713,10 +4713,20 @@ export async function sendPeerHandoff({ config, args = '', api = null, stateDirP
     return refuse('LEDGER_WRITE', `could not record the send: ${err.message}`);
   }
 
+  // Where the bytes land. A private bot-to-bot chat has exactly two members —
+  // the two bots — so a handoff sent there is invisible to the operator, which
+  // is what "I didn't see anything on tg" turned out to mean. When
+  // TG_B2B_GROUP_ID is set, the human's group is the transport instead; the
+  // envelope still names the SEAT, so the receiving half is unchanged and a
+  // group message and a private one are the same message.
+  const groupId = String(process.env.TG_B2B_GROUP_ID || '').trim();
+  const wireTo = groupId || named.username;
+  const where = groupId ? `group ${groupId}` : `dm ${named.username}`;
+
   const telegram = api || new TelegramApi(resolveToken(config));
   try {
     const res = await telegram.call('sendMessage', {
-      chat_id: named.username,
+      chat_id: wireTo,
       text: built.text,
       // LOUD by default. This started silent, on the reasoning that a handoff is
       // machine traffic and the operator does not want a buzz per message. Then
@@ -4735,7 +4745,7 @@ export async function sendPeerHandoff({ config, args = '', api = null, stateDirP
       code: 'SENT',
       envelope: bounded.envelope,
       messageId: res?.message_id ?? null,
-      text: `📨 handed to ${named.username} — ${ref} (depth ${bounded.envelope.depth}, id ${bounded.envelope.id})`,
+      text: `📨 handed to ${wireTo} — ${ref} (depth ${bounded.envelope.depth}, id ${bounded.envelope.id}, via ${where})`,
     };
   } catch (err) {
     return refuse('SEND_FAILED', `${named.username}: ${err.message}`);
@@ -4865,7 +4875,7 @@ function handlePeerHandoff({ config, message, verdict }) {
   try {
     fs.mkdirSync(path.dirname(inbox), { recursive: true });
     fs.appendFileSync(inbox, `${line}\n`, 'utf8');
-    console.log(`[${config.id}] b2b proposal from ${verdict.seat} ref ${verdict.envelope.ref} -> ${inbox}`);
+    console.log(`[${config.id}] b2b proposal from ${verdict.seat} ref ${verdict.envelope.ref} in chat ${message?.chat?.id ?? '?'} -> ${inbox}`);
   } catch (err) {
     console.error(`[${config.id}] b2b proposal could not be filed: ${err.message} (envelope ${verdict.envelope.id})`);
   }
