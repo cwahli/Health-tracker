@@ -3245,7 +3245,8 @@ describe('B2B-1 /tell send path', () => {
     expect(second.ok).toBe(false);
     expect(second.code).toBe('COOLDOWN');
     expect(calls).toHaveLength(0);
-
+  });
+});
 
 describe('TG tool surface M2 — progress ledger (plan/TG_TOOL_SURFACE.md)', () => {
   const makeRenderer = (opts: Record<string, unknown> = {}) => {
