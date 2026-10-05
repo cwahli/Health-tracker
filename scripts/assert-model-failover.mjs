@@ -93,6 +93,61 @@ try {
   check('fail-then-succeed delivers the second result', res.finalText === 'ok');
   check('switch line names from → to', sent.length === 1 && /m1.*switching to.*m2/.test(sent[0]));
 
+  // 5b. A timeout on the first candidate must still advance the chain.
+  // This drives the real timeout timer (m1 emits nothing and never closes on
+  // its own) rather than string-matching a timeout error, so it reproduces the
+  // exact production failure of 2026-10-05: `defaultIsRetryable` used to treat
+  // `timed out after Nms` as terminal, so a dead primary lane held the turn for
+  // the whole budget and returned empty while the healthy fallback sat unused.
+  const stubSpawnTimeout = (bin, args) => {
+    const model = String(args[args.indexOf('-m') + 1]);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => { child.emit('close', 1); };
+    if (model !== 'm1') {
+      queueMicrotask(() => {
+        child.stdout.emit('data', Buffer.from('{"type":"text","part":{"text":"ok"}}\n'));
+        child.emit('close', 0);
+      });
+    }
+    return child;
+  };
+  const sent2 = [];
+  const api2 = { sendMessage: async (chatId, text) => { sent2.push(text); return {}; } };
+  const seen2 = [];
+  const res2 = await runOpencodeWithFailover({
+    api: api2, chatId: 1, prompt: 'x', models: ['m1', 'm2'],
+    workspace: '/tmp', timeoutMs: 120, spawnImpl: stubSpawnTimeout,
+    onAttemptStart: ({ model }) => { seen2.push(model); },
+  });
+  check('a timed-out candidate still fails over to the next one', res2.finalText === 'ok');
+  check('the timeout switch line names from → to',
+    sent2.length === 1 && /m1.*switching to.*m2/.test(sent2[0]));
+  check('the chain stopped after the healthy candidate (no third attempt)',
+    seen2.length === 2 && seen2[0] === 'm1' && seen2[1] === 'm2');
+
+  // A deliberate cancel must NOT burn the rest of the chain.
+  const stubSpawnAbort = (bin, args) => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => { child.emit('close', 1); };
+    queueMicrotask(() => {
+      child.stderr.emit('data', Buffer.from('level=ERROR msg="x" error.error="aborted"\n'));
+      child.emit('close', 1);
+    });
+    return child;
+  };
+  const seen3 = [];
+  const res3 = await runOpencodeWithFailover({
+    api, chatId: 1, prompt: 'x', models: ['m1', 'm2'],
+    workspace: '/tmp', timeoutMs: 5000, spawnImpl: stubSpawnAbort,
+    onAttemptStart: ({ model }) => { seen3.push(model); },
+  });
+  check('a user cancel is not retried on another model',
+    seen3.length === 1 && seen3[0] === 'm1');
+
   // 6. The run's argv must only contain flags the installed opencode CLI
   //    accepts. CLI 2.0.18 answers an unknown flag or a bad enum value by
   //    printing help and exiting 1 with NO stdout, so the bot can only report
