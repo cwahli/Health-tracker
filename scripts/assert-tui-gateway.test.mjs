@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal, isWebStatic } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -1011,6 +1011,27 @@ console.log('assert-tui-gateway:');
     webAuthShimJs().includes('/__shim_diag?u=') && webAuthShimJs().includes('&p=1') && webAuthShimJs().includes('keepalive'));
   check('the shim unregisters stale service workers',
     webAuthShimJs().includes('getRegistrations') && webAuthShimJs().includes('unregister'));
+  // Static bypass (live 2026-10-05: parser-fired bundle + worker install run
+  // outside every page patch, so gating public build output bricks the app).
+  check('static build output is public code, data routes are not',
+    isWebStatic('/_assets/index-x.js') && isWebStatic('/sw.js')
+    && isWebStatic('/site.webmanifest') && isWebStatic('/favicon.ico')
+    && isWebStatic('/icons/prod/favicon.ico')
+    && !isWebStatic('/') && !isWebStatic('/api/session')
+    && !isWebStatic('/api/event') && !isWebStatic('/__shim_diag'));
+  check('dot-segment escape still lands behind the door',
+    await (async () => {
+      const n = seen.length;
+      const r = await call('/_assets/../api/session', { host: 'web.test' });
+      return r.code === 401 && seen.length === n;
+    })());
+  check('a credential-less bundle fetch reaches serve, stripped and Basic-only',
+    await (async () => {
+      seen.length = 0;
+      const r = await call('/_assets/index-x.js', { host: 'web.test' });
+      return r.code === 200 && seen.some((s) => s.url === '/_assets/index-x.js')
+        && seen.every((s) => s.auth === `Basic ${Buffer.from('opencode:servepw').toString('base64')}`);
+    })());
   check('proxied html clears site caches so no stale shell survives',
     planted.h['clear-site-data'] === '"cache"');
   serve.close();
