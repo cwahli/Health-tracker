@@ -323,6 +323,25 @@ export function webUiUpstream(env = process.env) {
   return String(env.OPENCODE_WEB_UPSTREAM || 'http://127.0.0.1:4096').replace(/\/+$/, '');
 }
 
+/**
+ * Static paths served without the Telegram door. These are build output and
+ * PWA plumbing — identical for every user, no session data — and the flows
+ * that fetch them cannot present a credential: the HTML parser fires bundle
+ * and stylesheet requests before any script runs, and the service worker
+ * install/update runs outside every page patch. Gating them bought obscurity
+ * at the price of a unloadable app on cookie-swallowing WebViews. Everything
+ * else on the host — the HTML shell, /api/*, SSE — keeps the full door, and
+ * serve's own Basic credential is still injected upstream, so the browser
+ * never holds it. Explicit list only: no extension sniffing that could ever
+ * match a data route (WHATWG URL pathname matching, dot-segments already
+ * normalized, so /_assets/../api/x resolves to /api/x and stays gated).
+ */
+export function isWebStatic(pathname) {
+  const p = String(pathname || '');
+  if (p === '/sw.js' || p === '/site.webmanifest' || p === '/favicon.ico') return true;
+  return p.startsWith('/_assets/') || p.startsWith('/icons/');
+}
+
 /** Host header the web UI is served on; requests there take the web branch. */
 export function webUiHost(env = process.env) {
   return String(env.OPENCODE_WEB_HOST || 'web.health-tracking.duckdns.org').trim().toLowerCase();
@@ -1068,6 +1087,12 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // parser-fired bundle and any unshimmed client pass the same door with no
     // code needing to run first. Same bearer, same token, no weaker door.
     if (isWebUiHost(req, env)) {
+      // Static build output skips the door (see isWebStatic): it carries no
+      // data and its fetchers carry no credential. Still proxied with the
+      // upstream Basic injected, token stripped, nothing secret downstream.
+      if (isWebStatic(url.pathname)) {
+        return proxyWebUi(req, res, url, env, { ttlSec: ttl });
+      }
       // Client-health beacon from the injected shim (booleans only: token in
       // URL / restored from storage / sent through the patched fetch). No
       // auth: it exists precisely for clients that cannot authenticate, and
