@@ -192,6 +192,7 @@
         "plan": false,
         "abort": false,
         "watch": false,
+        "notify": false,
         "debug": false,
         "handoff": false,
         "resume": false,
