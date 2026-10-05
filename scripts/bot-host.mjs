@@ -11,6 +11,26 @@ import { chunkForTelegram } from './lib/tg-copy-code.mjs';
 import { formatWorkingHeadline, ctxLimitFor, phaseLabelFor } from './lib/tg-progress.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
 import {
+  BOT,
+  HUMAN,
+  findSeatByUsername,
+  normalizePeers,
+  receiveVerdict,
+  resolvePolicy,
+  resolvePeerUsername,
+  sendVerdict,
+  senderTypeOf,
+} from './lib/tg-peers.mjs';
+import {
+  checkReceiveBounds,
+  checkSendBounds,
+  deadLetter,
+  decodeEnvelope,
+  emptyLedger,
+  encodeEnvelope,
+  proposalLine,
+} from './lib/tg-handoff.mjs';
+import {
   sessionKey,
   projectIdForWorkspace,
   resolveSession,
@@ -3734,6 +3754,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
       return;
     }
+    case 'tell': {
+      // B2B-1: one bounded message to one named seat. Everything about this is
+      // refusal-first — an unresolvable target, an absent --ref or a tripped
+      // bound all send nothing and say why in one line.
+      const verdict = await sendPeerHandoff({ config, args: cmd.args || '' });
+      await api.sendMessage(chatId, verdict.text);
+      break;
+    }
+
     case 'location': {
       const loc = workLocation();
       if (!cmd.args) {
@@ -4488,7 +4517,245 @@ export async function answerBriefAsk({ projectId = 'external-health', botId = ''
   return { answered: true, usedModel: false, text: formatRefreshText(res), markdown: true };
 }
 
+/**
+ * Build and send one b2b envelope (B2B-1). Exported so the sensor can prove the
+ * refusal paths without a network: every failure returns text that says what
+ * stopped it, and sends nothing.
+ */
+export async function sendPeerHandoff({ config, args = '', api = null, stateDirPath = null, policy = undefined, peers = undefined, now = Date.now() } = {}) {
+  const root = stateDirPath || path.join(HOME, '.local', 'state', 'bot-host');
+  const peersMap = peers === undefined ? peersFromEnv() : peers;
+  const resolvedPolicy = policy === undefined ? process.env.TG_SENDER_POLICY : policy;
+
+  const refuse = (code, reason, extra = '') => ({
+    ok: false,
+    code,
+    reason,
+    text: `🤖↔️ not sent — ${reason}${extra}`,
+    envelope: null,
+  });
+
+  const match = String(args).match(/^\s*(\S+)\s+([\s\S]+)$/);
+  if (!match) {
+    return refuse('BAD_ARGS', 'usage: /tell <bot> "<text>" --ref <ticket-key>');
+  }
+  const target = match[1].trim();
+  let body = match[2].trim();
+  const refMatch = body.match(/\s*--ref\s+(\S+)\s*$/);
+  const ref = refMatch ? refMatch[1] : '';
+  if (refMatch) body = body.slice(0, refMatch.index).trim();
+  if (!ref) return refuse('NO_REF', 'a handoff must name tracked work: add --ref <ticket-key>');
+  if (!body) return refuse('NO_BODY', 'nothing to say — /tell <bot> "<text>" --ref <ticket-key>');
+
+  const verdict = sendVerdict({ policy: resolvedPolicy, peers: peersMap, from: config.id, to: target });
+  if (!verdict.ok) {
+    const extra = verdict.peers?.length ? `\n\naddressable peers: ${verdict.peers.join(', ')}` : '';
+    return refuse(verdict.code, verdict.reason, extra);
+  }
+
+  const named = resolvePeerUsername(root, target);
+  if (!named.ok) return refuse(named.code, `${named.reason} (${named.botId || target})`);
+
+  const built = encodeEnvelope({
+    from: config.id,
+    to: target,
+    kind: 'ask',
+    ref,
+    body,
+    depth: 1,
+    now,
+  });
+  if (!built.ok) return refuse(built.code, built.reason);
+
+  // Root-relative, like the classifier's lookup: the caller owns the root, so a
+  // test can never write into a live seat's state dir.
+  const ledgerPath = path.join(root, config.id, 'handoff.json');
+  const bounded = checkSendBounds({
+    ledger: readJson(ledgerPath, emptyLedger()),
+    edge: verdict.edge,
+    now,
+    chainId: `tell:${config.id}:${target}`,
+    envelope: built.envelope,
+  });
+  if (!bounded.ok) {
+    const file = deadLetter(process.env.TG_DEAD_LETTER_DIR || path.join(process.cwd(), 'specs', 'bot-handoff-dead-letter'), {
+      envelope: built.envelope,
+      code: bounded.code,
+      reason: bounded.reason,
+      at: now,
+    });
+    return refuse(bounded.code, `${bounded.reason}${file ? '' : ' (dead-letter write also failed)'}`);
+  }
+  try {
+    writeJson(ledgerPath, bounded.ledger);
+  } catch (err) {
+    return refuse('LEDGER_WRITE', `could not record the send: ${err.message}`);
+  }
+
+  const telegram = api || new TelegramApi(resolveToken(config));
+  try {
+    const res = await telegram.call('sendMessage', {
+      chat_id: named.username,
+      text: built.text,
+      disable_notification: 'true',
+    });
+    return {
+      ok: true,
+      code: 'SENT',
+      envelope: bounded.envelope,
+      messageId: res?.message_id ?? null,
+      text: `📨 handed to ${named.username} — ${ref} (depth ${bounded.envelope.depth}, id ${bounded.envelope.id})`,
+    };
+  } catch (err) {
+    return refuse('SEND_FAILED', `${named.username}: ${err.message}`);
+  }
+}
+
+/**
+ * The peers map, from the environment. The registry is frozen for this packet,
+ * and it is the right call anyway: peers are a *deployment* fact about which
+ * seat may address which on this box, not a property of the bot.
+ */
+function peersFromEnv() {
+  const raw = String(process.env.TG_PEERS_JSON || '').trim();
+  if (!raw) return {};
+  try {
+    return normalizePeers(JSON.parse(raw));
+  } catch (err) {
+    console.error(`[b2b] TG_PEERS_JSON is not valid JSON, treating as empty: ${err.message}`);
+    return {};
+  }
+}
+
+/**
+ * Bot-to-bot ingress (B2B-1). Decides what an update is BEFORE the
+ * allowedUserIds gate, because that gate is a user-id check: once Telegram
+ * delivers `from.is_bot=true` on the existing long-poll, a bot sender is
+ * refused there and this code would never run.
+ *
+ * Three outcomes, and only the first may become a turn:
+ *   human       — the ordinary path, untouched
+ *   bot-handoff — a valid, in-bounds proposal from an allowlisted seat
+ *   bot-refused — anything else, dead-lettered with the reason
+ *
+ * A bot-sourced update NEVER starts an agent turn. It files one line in the
+ * location nudge inbox and returns. That is the whole loop defence on the
+ * receive side: 20.6% of confirmed infinite-agentic-loop findings in real
+ * projects are multi-agent chat without a turn bound.
+ *
+ * Exported for the sensor in tests/bot-host.test.ts — the classification is the
+ * contract, not the plumbing.
+ */
+export function classifyInboundSender({ message, stateDirPath, self, policy, peers, ledger = emptyLedger(), now = Date.now() } = {}) {
+  const from = message?.from;
+  const type = senderTypeOf(from);
+  if (type === null) return { kind: 'unknown', code: 'SENDER_UNKNOWN', reason: 'update has no sender id' };
+  if (type === HUMAN) return { kind: 'human' };
+
+  const resolvedPolicy = resolvePolicy(policy);
+  if (resolvedPolicy === 'humans-only') {
+    return {
+      kind: 'bot-refused',
+      code: 'POLICY_HUMANS_ONLY',
+      reason: 'bot-to-bot is off for this seat (TG_SENDER_POLICY)',
+    };
+  }
+
+  const seat = findSeatByUsername(stateDirPath, from?.username);
+  if (!seat) {
+    return {
+      kind: 'bot-refused',
+      code: 'SENDER_UNKNOWN_SEAT',
+      reason: `no seat claims @${String(from?.username || '').replace(/^@/, '')}`,
+    };
+  }
+
+  const verdict = receiveVerdict({ policy: resolvedPolicy, peers, from: seat.seat, to: self });
+  if (!verdict.ok) {
+    return {
+      kind: 'bot-refused',
+      code: verdict.code,
+      reason: verdict.reason,
+      seat: seat.seat,
+      addressable: verdict.peers || [],
+    };
+  }
+
+  const decoded = decodeEnvelope(message?.text || message?.caption || '');
+  if (!decoded.ok) {
+    return { kind: 'bot-refused', code: decoded.code, reason: decoded.reason, seat: seat.seat };
+  }
+  if (decoded.envelope.from !== seat.seat) {
+    return {
+      kind: 'bot-refused',
+      code: 'FROM_MISMATCH',
+      reason: `envelope claims from=${decoded.envelope.from} but the sender is ${seat.seat}`,
+      seat: seat.seat,
+    };
+  }
+
+  const bounded = checkReceiveBounds({ ledger, envelope: decoded.envelope, now, self });
+  if (!bounded.ok) {
+    return { kind: 'bot-refused', code: bounded.code, reason: bounded.reason, seat: seat.seat, envelope: decoded.envelope, ledger: bounded.ledger };
+  }
+  return { kind: 'bot-handoff', seat: seat.seat, envelope: bounded.envelope, ledger: bounded.ledger, edge: verdict.edge };
+}
+
+/**
+ * Run one bot-sourced update: persist the ledger, dead-letter a refusal, and
+ * file the proposal. Returns the classification so the caller can log it.
+ */
+function handlePeerHandoff({ config, message, verdict }) {
+  const dir = stateDir(config.id);
+  const deadLetterDir = process.env.TG_DEAD_LETTER_DIR
+    || path.join(process.cwd(), 'specs', 'bot-handoff-dead-letter');
+  try {
+    writeJson(path.join(dir, 'handoff.json'), verdict.ledger);
+  } catch (err) {
+    console.error(`[${config.id}] b2b ledger write failed: ${err.message}`);
+  }
+
+  if (verdict.kind === 'bot-refused') {
+    const file = deadLetter(deadLetterDir, {
+      envelope: verdict.envelope || null,
+      code: verdict.code,
+      reason: verdict.reason,
+    });
+    console.warn(
+      `[${config.id}] b2b refused ${verdict.code}${verdict.seat ? ` from ${verdict.seat}` : ''}: ${verdict.reason}`
+      + `${file ? ` -> ${file}` : ' (dead-letter write failed)'}`,
+    );
+    return verdict;
+  }
+
+  // A proposal, not a turn. The owning seat decides; this process does not act.
+  const inbox = path.join(os.homedir(), '.agents', 'nudges', `inbox-${workLocation()}.md`);
+  const line = proposalLine(verdict.envelope, { self: config.id });
+  try {
+    fs.mkdirSync(path.dirname(inbox), { recursive: true });
+    fs.appendFileSync(inbox, `${line}\n`, 'utf8');
+    console.log(`[${config.id}] b2b proposal from ${verdict.seat} ref ${verdict.envelope.ref} -> ${inbox}`);
+  } catch (err) {
+    console.error(`[${config.id}] b2b proposal could not be filed: ${err.message} (envelope ${verdict.envelope.id})`);
+  }
+  return verdict;
+}
+
 async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0 }) {
+  // Bot-to-bot first: a bot sender must be classified before the user-id gate,
+  // which would otherwise drop it silently and leave the operator guessing.
+  if (senderTypeOf(message?.from) === BOT) {
+    const verdict = classifyInboundSender({
+      message,
+      stateDirPath: path.join(HOME, '.local', 'state', 'bot-host'),
+      self: config.id,
+      policy: process.env.TG_SENDER_POLICY,
+      peers: peersFromEnv(),
+      ledger: readJson(path.join(stateDir(config.id), 'handoff.json'), emptyLedger()),
+    });
+    handlePeerHandoff({ config, message, verdict });
+    return;
+  }
   // Same boundary rule as handleCallback: one String type for chat ids
   // everywhere downstream, so disk round-trips stop invalidating sessions.
   const chatId = String(message.chat.id);
@@ -5850,6 +6117,19 @@ async function main() {
 // Group addressing needs to know who this process is. Without it, five bots in
 // one group would all answer everything.
 config.me = { id: Number(me.id) || 0, username: String(me.username || '') };
+  // Write down who we are, so another seat can address us by name without
+  // holding our token or asking Telegram on its message path. Read back by
+  // `resolvePeerUsername` / `findSeatByUsername` in lib/tg-peers.mjs.
+  try {
+    writeJson(path.join(stateDir(config.id), 'identity.json'), {
+      id: config.id,
+      username: config.me.username,
+      telegramId: config.me.id,
+      at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error(`[${config.id}] identity.json write failed (peer addressing unavailable): ${err.message}`);
+  }
   try {
     assertValidCommands(BOT_COMMANDS);
     await api.call('setMyCommands', { commands: toTelegramCommands() });
