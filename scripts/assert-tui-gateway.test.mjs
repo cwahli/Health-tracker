@@ -834,6 +834,45 @@ console.log('assert-tui-gateway:');
   const tuiRoot = await call('/', { host: 'tui.health-tracking.duckdns.org', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` });
   check('the same token on the tui host still gets the terminal bootstrap',
     tuiRoot.code === 200 && !tuiRoot.body.includes('serve index'));
+
+  // Cookie planting: subresource requests carry no token of their own, so a
+  // token-authed proxy plants the presented token as the cookie — otherwise
+  // every asset 401s one by one (live 2026-10-05: the whole SPA failed to
+  // boot in a cookie-swallowing WebView).
+  const planted = await (() => new Promise((resolve) => {
+    const res = {};
+    let code = 0; let hh = {}; const chunks = [];
+    res.writeHead = (c, h) => { code = c; hh = h || {}; };
+    res.write = (c) => { chunks.push(Buffer.from(c)); return true; };
+    res.end = (body) => { if (body) chunks.push(Buffer.from(body)); resolve({ code, h: hh, body: Buffer.concat(chunks).toString('utf8') }); };
+    const req = {
+      method: 'GET', url: `/?token=${encodeURIComponent(wtoken)}`,
+      headers: { host: 'web.test' },
+      [Symbol.asyncIterator]: async function* () {},
+    };
+    whandle(req, res).catch(() => resolve({ code: -1 }));
+    setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+  }))();
+  check('a token-authed page plants the cookie for subresources',
+    planted.code === 200 && String(planted.h['set-cookie'] || '').includes(encodeURIComponent(wtoken)));
+  check('an already-cookied proxy does not replant',
+    await (async () => {
+      let setCookie = null;
+      await new Promise((resolve) => {
+        const res = {};
+        res.writeHead = (c, h) => { setCookie = h?.['set-cookie'] || null; };
+        res.write = () => true;
+        res.end = () => resolve();
+        const req = {
+          method: 'GET', url: `/?token=${encodeURIComponent(wtoken)}`,
+          headers: { host: 'web.test', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` },
+          [Symbol.asyncIterator]: async function* () {},
+        };
+        whandle(req, res).catch(() => resolve());
+        setTimeout(resolve, 5000).unref?.();
+      });
+      return setCookie === null;
+    })());
   serve.close();
 }
 

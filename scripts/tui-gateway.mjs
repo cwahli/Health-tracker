@@ -402,7 +402,7 @@ const BOOTSTRAP_BUGS = [
  * target host is fixed (boardUpstream); only the path+query come from the
  * caller, so this cannot be aimed elsewhere.
  */
-async function proxyPass(req, res, target, { headers: extraHeaders = null } = {}) {
+async function proxyPass(req, res, target, { headers: extraHeaders = null, resHeaders: extraResHeaders = null } = {}) {
   try {
     const headers = {};
     for (const [k, v] of Object.entries(req.headers || {})) {
@@ -426,6 +426,9 @@ async function proxyPass(req, res, target, { headers: extraHeaders = null } = {}
     const outHeaders = { 'cache-control': 'no-store' };
     const ct = up.headers.get('content-type');
     if (ct) outHeaders['content-type'] = ct;
+    if (extraResHeaders) {
+      for (const [k, v] of Object.entries(extraResHeaders)) outHeaders[k] = v;
+    }
     res.writeHead(up.status, outHeaders);
     if (up.body) {
       for await (const c of up.body) {
@@ -448,16 +451,32 @@ function logGatewayError(err) {
  * Proxy to the opencode web UI past the Telegram door. Stateless per request
  * (Basic is injected every time), so no serve-side session is needed and
  * nothing credential-shaped reaches the browser. SSE streams chunk by chunk
- * through proxyPass rather than buffering.
+ * through proxyPass rather than buffering. When the caller authenticated with
+ * a query/Bearer token (no cookie yet — some Telegram WebViews swallow
+ * Set-Cookie on redirects), the token is planted as the cookie here so the
+ * page's subresource requests (which carry no token of their own) pass the
+ * same door instead of 401ing one by one.
  */
-async function proxyWebUi(req, res, url, env) {
+async function proxyWebUi(req, res, url, env, { secret = '', ttlSec = 900 } = {}) {
   const auth = webUiAuthHeader(env);
   if (!auth) {
     res.writeHead(503, { 'content-type': 'application/json' });
     return res.end(JSON.stringify({ ok: false, error: 'gateway has no OPENCODE_WEB_PASSWORD' }));
   }
+  const bearer = String(req?.headers?.authorization || '').startsWith('Bearer ')
+    ? String(req.headers.authorization).slice(7) : '';
+  const queryToken = String(url?.searchParams?.get('token') || '');
+  const hasCookie = String(req?.headers?.cookie || '').split(';')
+    .some((part) => part.trim().startsWith(`${COOKIE_NAME}=`));
+  // Plant only when the browser holds no cookie yet: with a cookie present
+  // there is nothing to fix, and a differing query token must not clobber it.
+  const plant = !hasCookie ? (bearer || queryToken) : '';
+  const resHeaders = plant
+    ? { 'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(plant)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttlSec}` }
+    : null;
   return proxyPass(req, res, `${webUiUpstream(env)}${url.pathname}${url.search}`, {
     headers: { authorization: auth },
+    ...(resHeaders ? { resHeaders } : {}),
   });
 }
 
@@ -828,7 +847,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       if (!initData) {
         if (webMode) {
           const early = verifyAnyToken(req, url, secret);
-          if (early.ok) return proxyWebUi(req, res, url, env);
+          if (early.ok) return proxyWebUi(req, res, url, env, { ttlSec: ttl });
         }
         // A cold WebView: Telegram gives initData to the page, not the URL.
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
@@ -926,7 +945,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: webVerdict.reason }));
       }
-      return proxyWebUi(req, res, url, env);
+      return proxyWebUi(req, res, url, env, { ttlSec: ttl });
     }
 
     // Caddy calls this before proxying the websocket. Answering 204 lets the
