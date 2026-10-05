@@ -460,7 +460,7 @@ function logGatewayError(err) {
  */
 export const WEB_AUTH_STORAGE_KEY = 'tui_token';
 export function webAuthShimJs(cookieName = COOKIE_NAME) {
-  return `<script>(function(){try{var k=${JSON.stringify(WEB_AUTH_STORAGE_KEY)};var cn=${JSON.stringify(cookieName)};var q;try{q=new URLSearchParams(location.search).get('token')||''}catch(e){q=''}if(q){try{sessionStorage.setItem(k,q)}catch(e){}try{document.cookie=cn+'='+encodeURIComponent(q)+'; Secure; Path=/; SameSite=Strict; Max-Age=900'}catch(e){}}var t=q;if(!t){try{t=sessionStorage.getItem(k)||''}catch(e){t=''}}if(!t)return;function add(u){try{var a=new URL(u,location.href);if(a.origin!==location.origin)return u;if(a.searchParams.get('token'))return u;a.searchParams.append('token',t);return a.pathname+a.search+a.hash}catch(e){return u}}if(window.fetch){var of=window.fetch;window.fetch=function(u,o){try{if(typeof u==='string'){u=add(u)}else if(u&&typeof u.url==='string'){var nu=add(u.url);if(nu!==u.url)u=new Request(nu,u)}}catch(e){}return of.call(this,u,o)}}if(window.XMLHttpRequest){var oo=window.XMLHttpRequest.prototype.open;window.XMLHttpRequest.prototype.open=function(m,u){try{arguments[1]=add(u)}catch(e){}return oo.apply(this,arguments)}}if(window.EventSource){var OE=window.EventSource;window.EventSource=function(u,c){try{u=add(u)}catch(e){}return new OE(u,c)};window.EventSource.prototype=OE.prototype}}catch(e){}})();</script>`;
+  return `<script>(function(){try{var k=${JSON.stringify(WEB_AUTH_STORAGE_KEY)};var cn=${JSON.stringify(cookieName)};var q;try{q=new URLSearchParams(location.search).get('token')||''}catch(e){q=''}if(q){try{sessionStorage.setItem(k,q)}catch(e){}try{document.cookie=cn+'='+encodeURIComponent(q)+'; Secure; Path=/; SameSite=Strict; Max-Age=900'}catch(e){}}var t=q;if(!t){try{t=sessionStorage.getItem(k)||''}catch(e){t=''}}try{fetch('/__shim_diag?u='+(q?1:0)+'&s='+((t&&!q)?1:0),{method:'GET',keepalive:true}).catch(function(){})}catch(e){}if(!t)return;function add(u){try{var a=new URL(u,location.href);if(a.origin!==location.origin)return u;if(a.searchParams.get('token'))return u;a.searchParams.append('token',t);return a.pathname+a.search+a.hash}catch(e){return u}}if(window.fetch){var of=window.fetch;window.fetch=function(u,o){try{if(typeof u==='string'){u=add(u)}else if(u&&typeof u.url==='string'){var nu=add(u.url);if(nu!==u.url)u=new Request(nu,u)}}catch(e){}return of.call(this,u,o)}}if(window.XMLHttpRequest){var oo=window.XMLHttpRequest.prototype.open;window.XMLHttpRequest.prototype.open=function(m,u){try{arguments[1]=add(u)}catch(e){}return oo.apply(this,arguments)}}if(window.EventSource){var OE=window.EventSource;window.EventSource=function(u,c){try{u=add(u)}catch(e){}return new OE(u,c)};window.EventSource.prototype=OE.prototype}try{fetch('/__shim_diag?u=1&p=1',{method:'GET',keepalive:true}).catch(function(){})}catch(e){}}catch(e){}})();</script>`;
 }
 
 /** Splice the auth shim into serve's HTML so it runs before the SPA bundle. */
@@ -933,6 +933,8 @@ export function describeWebRefusal(req, url) {
   }
   bits.push(url && url.searchParams.get('token') ? 'querytoken' : 'noquerytoken');
   if (String(req?.headers?.authorization || '').startsWith('Bearer ')) bits.push('bearer');
+  const ua = String(req?.headers?.['user-agent'] || '');
+  bits.push(/headless/i.test(ua) ? 'uaheadless' : /\bwv\b|; wv\)|\.wv/i.test(ua) ? 'uawv' : 'uastd');
   return bits.join(' ');
 }
 
@@ -1065,6 +1067,17 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // parser-fired bundle and any unshimmed client pass the same door with no
     // code needing to run first. Same bearer, same token, no weaker door.
     if (isWebUiHost(req, env)) {
+      // Client-health beacon from the injected shim (booleans only: token in
+      // URL / restored from storage / sent through the patched fetch). No
+      // auth: it exists precisely for clients that cannot authenticate, and
+      // it reveals nothing. Placed before the door so a failing client can
+      // still report. Never log values here.
+      if (url.pathname === '/__shim_diag') {
+        const flag = (k) => (url.searchParams.get(k) === '1' ? 1 : 0);
+        log(`shim-diag u=${flag('u')} s=${flag('s')} p=${flag('p')} ${describeWebRefusal(req, url)}`);
+        res.writeHead(204, { 'cache-control': 'no-store' });
+        return res.end();
+      }
       let webVerdict = verifyAnyToken(req, url, secret);
       if (!webVerdict.ok) {
         const rt = refererToken(req);

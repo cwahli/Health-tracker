@@ -988,10 +988,30 @@ console.log('assert-tui-gateway:');
     && refererToken({ headers: { host: 'web.test' } }) === ''
     && refererToken({ headers: { host: 'web.test', referer: 'not a url' } }) === '');
   check('refusal shapes name channels, never values',
-    describeWebRefusal({ headers: {} }, new URL('http://x/api/info')) === 'nocookie noreferer noquerytoken'
+    describeWebRefusal({ headers: {} }, new URL('http://x/api/info')) === 'nocookie noreferer noquerytoken uastd'
+    && describeWebRefusal({ headers: { 'user-agent': 'HeadlessChrome/120' } }, new URL('http://x/api/info')).includes('uaheadless')
+    && describeWebRefusal({ headers: { 'user-agent': 'Mozilla/5.0 (Linux; Android 14; Pixel) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120 Mobile Safari/537.36; wv)' } }, new URL('http://x/api/info')).includes('uawv')
     && describeWebRefusal({ headers: { host: 'web.test', referer: refOf(wtoken) } }, new URL('http://x/api/info')).includes('referertoken')
     && describeWebRefusal({ headers: { host: 'web.test', referer: 'https://evil.test/?token=abc' } }, new URL('http://x/api/info')).includes('refererforeign')
     && !describeWebRefusal({ headers: { host: 'web.test', referer: refOf(wtoken) } }, new URL('http://x/api/info')).includes(wtoken.slice(0, 8)));
+  // Shim beacon: unauthenticated 204 that logs booleans only, plus the
+  // request's own shape (proves whether the patched fetch attached).
+  check('the diag beacon answers without auth and logs booleans only',
+    await (async () => {
+      let logged = '';
+      const h = createGateway({ env: wenv, log: (m) => { logged += m + '\n'; } });
+      const r = await new Promise((resolve) => {
+        const res = {};
+        res.writeHead = (c, hh) => { res.code = c; };
+        res.end = () => resolve(res);
+        const req = { method: 'GET', url: '/__shim_diag?u=1&s=0&p=1', headers: { host: 'web.test' }, [Symbol.asyncIterator]: async function* () {} };
+        h(req, res).catch(() => resolve({ code: -1 }));
+        setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+      });
+      return r.code === 204 && /shim-diag u=1 s=0 p=1/.test(logged) && !logged.includes(wtoken.slice(0, 8));
+    })());
+  check('the shim phones home once unpatched and once through the patch',
+    webAuthShimJs().includes('/__shim_diag?u=') && webAuthShimJs().includes('&p=1') && webAuthShimJs().includes('keepalive'));
   serve.close();
 }
 
