@@ -3265,3 +3265,65 @@ describe('B2B-1 machine location naming', () => {
     expect(declared).not.toBe('vps'); // the pool name is the bug this test pins
   });
 });
+
+/* --------------------------------------------------- B2B-1 notify default ---
+ * The send is LOUD unless TG_B2B_NOTIFY=0. It shipped silent, which made a
+ * working channel indistinguishable from a broken one — three hops went past
+ * unseen. The cooldown and the global budget are what stop this being spam,
+ * not the mute.
+ */
+describe('B2B-1 handoff notifications', () => {
+  const OLD = process.env.TG_B2B_NOTIFY;
+  let stateRoot: string;
+  let calls: Array<Record<string, unknown>>;
+  const api = { call: async (_m: string, p: Record<string, unknown>) => { calls.push(p); return { message_id: 99 }; } };
+
+  beforeEach(() => {
+    stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'b2b-notify-'));
+    fs.mkdirSync(path.join(stateRoot, 'pm'), { recursive: true });
+    // the sender's own ledger directory, or the send refuses with LEDGER_WRITE
+    // — it will not put a message on the wire it cannot record
+    fs.mkdirSync(path.join(stateRoot, 'vm3'), { recursive: true });
+    fs.writeFileSync(
+      path.join(stateRoot, 'pm', 'identity.json'),
+      JSON.stringify({ id: 'pm', username: 'ht_pm_bot', telegramId: 7 }),
+    );
+    process.env.TG_DEAD_LETTER_DIR = path.join(stateRoot, 'dl');
+    calls = [];
+  });
+
+  afterEach(() => {
+    if (OLD === undefined) delete process.env.TG_B2B_NOTIFY;
+    else process.env.TG_B2B_NOTIFY = OLD;
+    try { fs.rmSync(stateRoot, { recursive: true, force: true }); } catch {}
+  });
+
+  it('notifies by default — silence made a working channel look broken', async () => {
+    delete process.env.TG_B2B_NOTIFY;
+    const v = await sendPeerHandoff({
+      config: { id: 'vm3' } as never,
+      args: 'pm hello --ref Sheet-03',
+      api: api as never,
+      stateDirPath: stateRoot,
+      policy: 'humans-and-allowlisted-bots',
+      peers: { vm3: { pm: {} } },
+    });
+    expect(v.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].disable_notification).toBe('false');
+  });
+
+  it('TG_B2B_NOTIFY=0 goes back to silent without a deploy', async () => {
+    process.env.TG_B2B_NOTIFY = '0';
+    const v = await sendPeerHandoff({
+      config: { id: 'vm3' } as never,
+      args: 'pm hello again --ref Sheet-04',
+      api: api as never,
+      stateDirPath: stateRoot,
+      policy: 'humans-and-allowlisted-bots',
+      peers: { vm3: { pm: {} } },
+    });
+    expect(v.ok).toBe(true);
+    expect(calls[0].disable_notification).toBe('true');
+  });
+});
