@@ -3691,6 +3691,52 @@ describe('TG TUI failproof sync — no split sessions, no false same-session cla
     expect(exitAt).toBeLessThan(tmuxAt);
   });
 
+  it('/tui offers no button when the chat has no session to attach to', () => {
+    // Live 2026-10-05: /new deleted the chat's session row, /tui ran 20s later,
+    // wrote tui-open.json with sessionId: null and sent the button anyway, and
+    // the tap printed the attach script's refusal on a phone. The gate has to sit
+    // BEFORE the snapshot write (a null session recorded looks like a fact about
+    // the chat) and before the button.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const gateAt = src.indexOf('if (!tuiCanOpen)');
+    const snapshotAt = src.indexOf("'tui-open.json'");
+    const buttonAt = src.indexOf("text: '⌨️ Open the TUI'");
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(snapshotAt).toBeGreaterThan(gateAt);
+    expect(buttonAt).toBeGreaterThan(gateAt);
+    // It answers in the chat and stops there — a `return` before the write.
+    expect(src.slice(gateAt, snapshotAt)).toContain('return;');
+    expect(src.slice(gateAt, snapshotAt)).toContain('tuiNoSessionAdvice');
+    // The advice names the action that fixes it, once, for all three answers
+    // that used to promise a terminal.
+    expect(src).toContain('const tuiNoSessionAdvice =');
+    expect(src).toMatch(/tuiNoSessionAdvice = 'Send me any message first/);
+    // The predicate is the shared decision, not a private re-implementation, and
+    // the Cline exemption stays in the module where the surface table lives.
+    expect(src).toContain("canOpenSharedTui } from './lib/tui-surface.mjs'");
+    expect(src).toContain('const tuiCanOpen = canOpenSharedTui(tuiSurface.surface, tuiSessionId);');
+  });
+
+  it('the refresh answers promise a terminal only when there is a session', () => {
+    // Sibling path, same lie: right after /new there is no pane to refresh, and
+    // both refresh answers used to tell the user to tap /tui for a terminal on
+    // "this chat's current session" — a session that does not exist yet. Two
+    // conditionals on the one predicate: nothing to refresh, and pane closed.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src.match(/tuiCanOpen\s*\?/g)?.length).toBe(2);
+    // Both conditionals fall back to the same honest advice, and so does the
+    // /tui gate: the const plus its three call sites, and no fourth promise.
+    expect(src.match(/tuiNoSessionAdvice/g)?.length).toBe(4);
+  });
+
+  it('/new stops promising a terminal it cannot open yet', () => {
+    // The sentence that caused it: "/tui opens a fresh one on the new session",
+    // said at the exact moment /new had deleted the row that /tui resolves from.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).not.toContain('`/tui` opens a fresh one on the new session');
+    expect(src).toContain('This chat has no session of its own yet');
+  });
+
   it('a lease naming no session never backs the same-session claim', () => {
     // readTuiLease must return null when the turn has a session and the
     // lease names none — otherwise the chat promises "same session" while
