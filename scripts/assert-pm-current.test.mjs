@@ -1,5 +1,5 @@
 /**
- * assert-pm-current.test.mjs — sensor for the `current` tab resolvers.
+ * assert-pm-current.test.mjs — sensor for the `fleet` tab resolvers.
  *
  * The tab is only as honest as its links: a guessed GitHub URL or a guessed
  * tree is worse than a blank cell. These drive the pure resolvers with
@@ -11,10 +11,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  CURRENT_COLUMNS,
+  FLEET_COLUMNS,
   colLetter,
-  currentReadRange,
-  currentRow,
+  fleetReadRange,
+  fleetRow,
   escapeMarkdownCell,
   goalFor,
   linkedTree,
@@ -93,15 +93,15 @@ test('a current row is the declared layout with author, github, tree', () => {
     key: 'card:t', kind: 'card', id: '#8', state: 'new', blocked: false,
     stallReason: '', owner: '', source: 'bugctl', branch: '', note: '', worktree: '', live: null,
   };
-  const row = currentRow(item, { at: 'T', author: 'a', github: 'g', goal: 'go', todo: 'do', tree: '/t', lastActivity: 'L' });
-  assert.equal(row.length, CURRENT_COLUMNS.length);
+  const row = fleetRow(item, { at: 'T', author: 'a', github: 'g', goal: 'go', todo: 'do', tree: '/t', lastActivity: 'L' });
+  assert.equal(row.length, FLEET_COLUMNS.length);
   for (const col of ['key', 'id', 'author', 'github', 'goal', 'todo', 'tree', 'last_activity', 'built_at']) {
-    assert.ok(row[CURRENT_COLUMNS.indexOf(col)] !== undefined, col);
+    assert.ok(row[FLEET_COLUMNS.indexOf(col)] !== undefined, col);
   }
-  assert.equal(row[CURRENT_COLUMNS.indexOf('author')], 'a');
-  assert.equal(row[CURRENT_COLUMNS.indexOf('goal')], 'go');
-  assert.equal(row[CURRENT_COLUMNS.indexOf('todo')], 'do');
-  assert.equal(row[CURRENT_COLUMNS.indexOf('built_at')], 'T');
+  assert.equal(row[FLEET_COLUMNS.indexOf('author')], 'a');
+  assert.equal(row[FLEET_COLUMNS.indexOf('goal')], 'go');
+  assert.equal(row[FLEET_COLUMNS.indexOf('todo')], 'do');
+  assert.equal(row[FLEET_COLUMNS.indexOf('built_at')], 'T');
 });
 
 test('goal is ten words from the packet goal, title, or ticket', () => {
@@ -184,10 +184,10 @@ test('the read range is exact — header + rows, never a guessed T57', () => {
   assert.equal(colLetter(0), 'A');
   assert.equal(colLetter(19), 'T', '20 columns ends at T');
   assert.equal(colLetter(26), 'AA');
-  assert.equal(CURRENT_COLUMNS.length, 20);
-  assert.equal(currentReadRange(0), 'current!A1:T1');
-  assert.equal(currentReadRange(1), 'current!A1:T2');
-  assert.equal(currentReadRange(55), 'current!A1:T56', '55 rows + header = 56, not T57');
+  assert.equal(FLEET_COLUMNS.length, 20);
+  assert.equal(fleetReadRange(0), 'fleet!A1:T1');
+  assert.equal(fleetReadRange(1), 'fleet!A1:T2');
+  assert.equal(fleetReadRange(55), 'fleet!A1:T56', '55 rows + header = 56, not T57');
 });
 
 test('markdown tables render pipes, never text blocks', () => {
@@ -201,9 +201,9 @@ test('markdown tables render pipes, never text blocks', () => {
 
 test('fleet summary is computed, never hand-counted', () => {
   const at = (agent_live, blocked = 'no') => {
-    const values = new Array(CURRENT_COLUMNS.length).fill('');
-    values[CURRENT_COLUMNS.indexOf('agent_live')] = agent_live;
-    values[CURRENT_COLUMNS.indexOf('blocked')] = blocked;
+    const values = new Array(FLEET_COLUMNS.length).fill('');
+    values[FLEET_COLUMNS.indexOf('agent_live')] = agent_live;
+    values[FLEET_COLUMNS.indexOf('blocked')] = blocked;
     return values;
   };
   const built = [

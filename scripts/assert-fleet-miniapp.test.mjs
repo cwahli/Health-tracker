@@ -557,9 +557,12 @@ test('ticket projection follows the live sheet headers (key, LAST ACTIVITY)', as
   for (const t of tickets) {
     // 'key' holds the ticket identity (spec:/req:/card:/sync:…); a bare row index means the id lookup missed.
     // `lane:` joined the prefixes on 2026-10-04: the current tab carries the
-    // orchestrator lane row, and it is a keyed item like any other. The intent
-    // is unchanged — a bare row index means the id lookup missed.
-    assert.match(t.id, /^(spec:|req:|card:|task:|proj:|sync:|lane:|bug-|fleet-|meal-|sheet-)/i, `ticket id keeps sheet key, got ${t.id}`);
+    // orchestrator lane row, and it is a keyed item like any other. `auto:`
+    // joined it the same day for the same reason — the activity watcher files
+    // machine rows as `auto:<box>:<cluster>` and the board carries them until
+    // they are claimed or triaged. The intent is unchanged — a bare row index
+    // means the id lookup missed.
+    assert.match(t.id, /^(spec:|req:|card:|task:|proj:|sync:|lane:|auto:|bug-|fleet-|meal-|sheet-)/i, `ticket id keeps sheet key, got ${t.id}`);
     // 'LAST ACTIVITY' header carries the timestamp; a dash means the lookup missed.
     assert.notEqual(t.lastActivity, '—', `lastActivity projected for ${t.id}`);
   }
@@ -602,8 +605,9 @@ test('a row projects from either current-tab layout, not just the curated one', 
     'Completion gate': 'tsc 0',
     'last_activity': '2026-10-04T01:00:00Z',
   };
-  // The projected layout: what pm-current writes, which is what the tab
-  // reverted to on 2026-10-04 and blanked five columns against.
+  // The projected layout: what pm-current used to write into `current` before
+  // the 2026-10-04 split (it now owns its own `fleet` tab). The fallback stays
+  // — a stale `current` once reverted to these headers and blanked five columns.
   const projected = {
     key: 'spec:x', goal: 'Do the thing', agent_note: 'Half of it',
     todo: 'The other half', owner: '', author: 'Space Bunny Free (high) VM',
