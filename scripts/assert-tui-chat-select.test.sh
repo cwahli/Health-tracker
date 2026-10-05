@@ -172,29 +172,35 @@ for unit in tui-ttyd-vm tui-ttyd-vm2 tui-ttyd-vm3; do
     echo "  FAIL  $unit caps clients (second device gets the reconnect loop)"; FAIL=$((FAIL + 1))
   fi
 done
-# 10e. The renderer decides whether the TUI is usable on a phone at all.
-#      ttyd's page hardcodes rendererType:"webgl" — a canvas, repainted whole
-#      per frame, with no native scroll and no selectable text. That is the
-#      "slow screenshot terminal" complaint, and it is a DEFAULT, not a property
-#      of ttyd: 1.7.7's own page accepts canvas|webgl|dom.
+# 10e. The terminal's SCROLL GRANULARITY, and the renderer flag that is NOT the
+#      answer. Both belong here because the same investigation produced both.
 #
-#      vm3 carries the flag today; vm/vm2 still default to webgl. That is a
-#      deliberate, measured rollout (one unit, phone-tested before the rest), so
-#      this check asserts the units that claim dom DO claim it — it does not
-#      force every unit to switch at once, which would be the untested thing
-#      this gate exists to prevent.
-grep -q -- '--client-option rendererType=dom' "$HERE/tui-ttyd-vm3.service" 2>/dev/null \
-  && { echo "  PASS  vm3 paints text as elements (rendererType=dom), not a canvas"; PASS=$((PASS + 1)); } \
-  || { echo "  FAIL  vm3 is back on the canvas renderer (no rendererType=dom)"; FAIL=$((FAIL + 1)); }
-# And the pairing that makes it work: TOUCH_SCROLL_JS bridges a finger drag to
-# PageUp/PageDown ONLY because a canvas cannot scroll natively. On a
-# DOM-rendered terminal the browser scrolls for real, and the bridge's
-# preventDefault would BREAK that scroll. scripts/assert-tui-gateway.test.mjs
-# drives that stand-down; here we only pin that the shim and the flag live in
-# the same change, so a later revert of one is visible in the diff.
-grep -q 'function isDomRenderer' "$HERE/tui-gateway.mjs" \
-  && { echo "  PASS  the drag bridge knows when to stand down"; PASS=$((PASS + 1)); } \
-  || { echo "  FAIL  the drag bridge still binds over native scrolling"; FAIL=$((FAIL + 1)); }
+#      opencode runs in alt-screen mode: it owns the whole screen and repaints in
+#      place, so there is NO document flow and NO scrollback. Measured live —
+#      viewport scrollHeight == clientHeight, body overflow hidden, wheel and
+#      PageUp change nothing. So a browser cannot scroll this terminal no matter
+#      how the text is painted, and scrolling has always worked by sending keys
+#      to the app.
+#
+#      rendererType=dom (ttyd's canvas->elements switch) was tried on vm3 and
+#      REVERTED: it made scrolling die on the phone and bought nothing, because
+#      painting is not scrolling. No unit may carry the flag; a unit that does is
+#      trading a working scroll for nothing.
+for unit in tui-ttyd-vm tui-ttyd-vm2 tui-ttyd-vm3; do
+  if grep -q 'rendererType' "$HERE/$unit.service" 2>/dev/null; then
+    echo "  FAIL  $unit sets a renderer flag (alt-screen has no native scroll to gain)"; FAIL=$((FAIL + 1))
+  else
+    echo "  PASS  $unit sets no renderer flag"; PASS=$((PASS + 1))
+  fi
+done
+# The scroll fix is the bridge sending LINE keys (opencode ctrl+alt+y/e), one per
+# line of finger travel, instead of a page key — a page key is a WHOLE screen,
+# which is what made a drag feel like a slideshow. Pinned in the gateway sensor;
+# here we only check the keys are named, so a rename cannot silently drop the
+# fine path back to pages.
+grep -q 'LINE_UP="y",LINE_DOWN="e"' "$HERE/tui-gateway.mjs" \
+  && { echo "  PASS  the bridge drives opencode's line keys"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the bridge no longer names the line keys (scroll is coarse again)"; FAIL=$((FAIL + 1)); }
 grep -q 'set-option -t "$TMUX_NAME" status off' "$ATTACH" \
   && { echo "  PASS  the tmux frame stays off the phone screen"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  the tmux frame stays off the phone screen"; FAIL=$((FAIL + 1)); }

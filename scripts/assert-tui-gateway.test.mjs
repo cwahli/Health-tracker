@@ -467,45 +467,54 @@ console.log('assert-tui-gateway:');
     check('a small nudge does not scroll', keys.length === t0);
     check('a nudge is not taken off the page', prevented === 0);
 
-    // Down: one page key per eighth of the screen. pagePx() = 700/8 = 88px,
-    // so a 300px upward drag crosses ~3 steps (paced: at most one key per
-    // 300ms window, so the first touchmove fires once).
+    // Fine granularity: a LINE of travel emits the line keys, not a page key.
+    // A page key is a WHOLE screen, so keying on pagePx made any drag feel
+    // like a few full-screen jumps however far the finger travelled. linePx is
+    // 18px, so a 300px drag crosses ~16 lines (capped at MAX_LINE_KEYS per
+    // touchmove, paced to LINE_COOLDOWN_MS).
     reset();
     let b = keys.length;
     drag(600, 300, 6);
-    const downKeys = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 34);
-    check('an upward drag scrolls later, as PageDown',
-      downKeys.length >= 1 && downKeys.length <= 3);
-    check('page keys carry no modifiers (both lanes bind the bare key)',
-      downKeys.every((k) => k.ctrlKey === false && k.altKey === false && k.metaKey === false));
-    check('page keys name the key both lanes bind',
-      downKeys.every((k) => k.key === 'PageDown' && k.code === 'PageDown'));
+    const fineDown = keys.slice(b).filter((k) => k.type === 'keydown');
+    // Per gesture step the bridge sends BOTH lanes' finest keys, because the
+    // two binding sets are disjoint (opencode ctrl+alt, cline ctrl+meta) and
+    // the bridge cannot know which lane is behind the terminal.
+    const lineKeys = fineDown.filter((k) => k.key === 'e');
+    const halfKeys = fineDown.filter((k) => k.key === 'd');
+    check('an upward drag sends the opencode LINE key (ctrl+alt+e)',
+      lineKeys.length >= 1 && lineKeys.every((k) => k.ctrlKey === true && k.altKey === true));
+    check('...and the cline half-page key (ctrl+meta+d), since the bridge',
+      halfKeys.length >= 1 && halfKeys.every((k) => k.ctrlKey === true && k.metaKey === true));
+    check('the two lanes never both fire on one binding (disjoint modifiers)',
+      lineKeys.every((k) => k.metaKey === false) && halfKeys.every((k) => k.altKey === false));
+    check('a drag emits more steps than the old one-page-per-drag bridge',
+      lineKeys.length >= 3, `only ${lineKeys.length} line keys`);
+    check('one touchmove never floods (MAX_LINE_KEYS per move)',
+      lineKeys.length <= 6 * 6);
     check('a key is released as well as pressed',
-      keys.slice(b).some((k) => k.type === 'keyup' && k.keyCode === 34));
+      keys.slice(b).some((k) => k.type === 'keyup' && k.key === 'e'));
     check('the drag is taken off the page once scrolling', prevented >= 1);
+    check('NO bare page key is sent while the fine path works',
+      fineDown.every((k) => k.key !== 'PageDown' && k.key !== 'PageUp'));
 
-    // Up: same pacing. Same distance, so without pacing it would be
-    // a burst; page keys jump a full page, so at most one may escape.
+    // A tap smaller than one line must not scroll: a tap still types.
+    // reset() first: drag() never sends touchend, so without it this gesture
+    // inherits the previous one's y0 and reads as a huge jump.
+    reset();
+    const t1 = keys.length;
+    handlers.touchstart({ touches: [{ clientY: 600 }] });
+    handlers.touchmove({ touches: [{ clientY: 594 }], preventDefault() { prevented += 1; } });
+    check('a sub-line nudge does not scroll', keys.length === t1);
+
+    // Up: the opposite direction sends y / u, not e / d.
     reset();
     b = keys.length;
     drag(300, 600, 6);
-    const upBurst = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 33).length;
-    check('a burst of up steps is paced to the cooldown', upBurst <= 1);
-
-    // After the cooldown, up scrolls again.
-    reset();
-    b = keys.length;
-    drag(300, 600, 6);
-    check('up scrolls again once the cooldown has passed',
-      keys.slice(b).some((k) => k.type === 'keydown' && k.keyCode === 33 && k.altKey === false));
-
-    // A long down drag is capped per touchmove, not throttled overall.
-    b = keys.length;
-    reset();
-    handlers.touchstart({ touches: [{ clientY: 700 }] });
-    handlers.touchmove({ touches: [{ clientY: 0 }], preventDefault() { prevented += 1; } });
-    const jump = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 34).length;
-    check('one touchmove never fires more than three pages', jump <= 3 && jump >= 1);
+    const fineUp = keys.slice(b).filter((k) => k.type === 'keydown');
+    check('a downward drag sends the opencode line key (ctrl+alt+y)',
+      fineUp.some((k) => k.key === 'y' && k.ctrlKey === true && k.altKey === true));
+    check('...and the cline half-page key (ctrl+meta+u)',
+      fineUp.some((k) => k.key === 'u' && k.ctrlKey === true && k.metaKey === true));
 
     // Multi-touch is left alone so pinch-zoom survives.
     reset();
@@ -524,58 +533,46 @@ console.log('assert-tui-gateway:');
       keys.slice(b).filter((k) => k.type === 'keydown').length <= 6);
   }
 
-  // 12a7. The bridge stands down on a DOM-rendered terminal. The bridge is a
-  //       workaround for a canvas having no native scroll; xterm.js can also
-  //       paint text as elements (rendererType=dom, set per ttyd unit), and
-  //       there the browser scrolls by itself. Calling preventDefault on that
-  //       gesture would BREAK the scroll it is supposed to enable — so the shim
-  //       must notice and unbind, not compete.
+  // 12a7. The bridge binds on EVERY renderer, and there is a reason it is
+  //       worth stating because getting it wrong cost a phone its scrolling.
   //
-  //       Renderer detection is measured, not guessed: a canvas/webgl renderer
-  //       puts a <canvas> inside .xterm-screen, the DOM renderer paints
-  //       .xterm-rows children and has none. Both cases are driven here.
+  //       A previous pass added a stand-down: "on a DOM-rendered terminal the
+  //       browser scrolls natively, so unbind". That reasoning was WRONG.
+  //       opencode runs in ALT-SCREEN mode — the TUI owns the screen and
+  //       repaints in place — so there is no document flow and no scrollback to
+  //       scroll. Measured live: viewport scrollHeight == clientHeight, body
+  //       overflow hidden, wheel and PageUp change nothing. The DOM renderer
+  //       changes how text is PAINTED, not what is scrollable, and the bridge
+  //       is not competing with native scroll: it IS the scroll.
+  //
+  //       So this now pins the opposite: both renderers must keep the bridge.
+  //       If someone re-adds a renderer-conditional unbind, this goes red.
   {
-    // One harness, parameterised by which renderer is "mounted", so the two
-    // cases cannot pass for each other.
     const runShim = (renderer) => {
       const bound = {};
-      const removed = [];
       const rows = { children: [1, 2, 3] };
       const screenEl = {
-        clientWidth: 360,
-        clientHeight: 700,
-        // canvas|dom decides what querySelector('canvas') finds.
+        clientWidth: 360, clientHeight: 700,
         querySelector: (sel) => (sel === 'canvas'
           ? (renderer === 'canvas' ? {} : null)
           : (sel === '.xterm-rows' ? rows : null)),
         addEventListener: (ev, fn) => { bound[ev] = fn; },
-        removeEventListener: (ev) => { removed.push(ev); delete bound[ev]; },
+        removeEventListener: () => {},
       };
-      const doc = {
-        querySelector: (s) => (s === '.xterm-screen' ? screenEl : null),
-      };
+      const doc = { querySelector: (s) => (s === '.xterm-screen' ? screenEl : null) };
       const timers = [];
       new Function('window', 'document', 'KeyboardEvent', 'performance', 'setInterval', 'clearInterval', 'requestAnimationFrame', TOUCH_SCROLL_JS)(
-        { addEventListener: () => {} },
-        doc,
+        { addEventListener: () => {} }, doc,
         function KeyboardEvent(type, init) { this.type = type; Object.assign(this, init); },
         { now: () => 1000 },
-        (fn) => { timers.push(fn); return timers.length; },
-        () => {},
-        () => 1,
+        (fn) => { timers.push(fn); return timers.length; }, () => {}, () => 1,
       );
       for (const t of timers) t();
-      return { bound, removed };
+      return bound;
     };
-
-    const onCanvas = runShim('canvas');
-    check('a canvas-rendered terminal still gets the drag bridge',
-      !!onCanvas.bound.touchmove && onCanvas.removed.length === 0);
-
-    const onDom = runShim('dom');
-    check('a DOM-rendered terminal is left to native scrolling',
-      !onDom.bound.touchmove && onDom.removed.length === 0,
-      );
+    check('a canvas-rendered terminal gets the drag bridge', !!runShim('canvas').touchmove);
+    check('a DOM-rendered terminal STILL gets it (alt-screen has no native scroll)',
+      !!runShim('dom').touchmove);
   }
 
   // 12a5. TEMP-DEBUG: the geometry readout rides on the landing redirect only
