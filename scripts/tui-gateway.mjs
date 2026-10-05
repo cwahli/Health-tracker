@@ -886,6 +886,56 @@ function verifyAnyToken(req, url, secret) {
   return verdict;
 }
 
+/**
+ * The token in the page URL that sent this request, if any. Same-origin
+ * subresource, fetch, XHR and SSE requests carry `Referer: <page url>` by
+ * default, and our landed page URL holds `?token=` — so a cookieless browser
+ * that loaded the page still presents its credential on every request the
+ * parser or any client (shimmed or not, worker or window) fires, without any
+ * code needing to run first. Same-host only, so an external page cannot spend
+ * a token it merely saw; and it is still just a bearer for the same
+ * short-lived chat-bound token the query already accepts — no weaker door.
+ * Exported for the sensor. Never log its value.
+ */
+export function refererToken(req) {
+  const ref = String(req?.headers?.referer || req?.headers?.referrer || '');
+  if (!ref) return '';
+  let u;
+  try {
+    u = new URL(ref);
+  } catch {
+    return '';
+  }
+  const reqHost = String(req?.headers?.host || '').split(':')[0].trim().toLowerCase();
+  if (!reqHost || u.hostname.toLowerCase() !== reqHost) return '';
+  return u.searchParams.get('token') || '';
+}
+
+/**
+ * Non-secret shape of a web refusal, for logs: which credential channels
+ * were present (never values). A stuck phone screen reads as identical `web
+ * refused` lines; the shape says whether the client sent nothing at all
+ * (client-side attach failed) or something invalid (replay/expiry).
+ */
+export function describeWebRefusal(req, url) {
+  const bits = [];
+  bits.push(String(req?.headers?.cookie || '').length ? 'cookie' : 'nocookie');
+  const ref = String(req?.headers?.referer || req?.headers?.referrer || '');
+  if (!ref) bits.push('noreferer');
+  else {
+    try {
+      const u = new URL(ref);
+      const same = u.hostname.toLowerCase() === String(req?.headers?.host || '').split(':')[0].trim().toLowerCase();
+      bits.push(same ? (u.searchParams.get('token') ? 'referertoken' : 'referernotoken') : 'refererforeign');
+    } catch {
+      bits.push('refererbad');
+    }
+  }
+  bits.push(url && url.searchParams.get('token') ? 'querytoken' : 'noquerytoken');
+  if (String(req?.headers?.authorization || '').startsWith('Bearer ')) bits.push('bearer');
+  return bits.join(' ');
+}
+
 function cookieValue(req, name) {
   const raw = req.headers.cookie || '';
   for (const part of raw.split(';')) {
@@ -1010,10 +1060,18 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // admits, because sessions are per-user rather than per-bot, and the
     // serve credential is substituted per request so the browser never holds
     // it. Placed after `/` and `/auth` so the exchange itself stays shared.
+    // Cookieless fallback: the landed page URL holds ?token=, and same-origin
+    // subresource/fetch/XHR/SSE requests carry it back as Referer — so the
+    // parser-fired bundle and any unshimmed client pass the same door with no
+    // code needing to run first. Same bearer, same token, no weaker door.
     if (isWebUiHost(req, env)) {
-      const webVerdict = verifyAnyToken(req, url, secret);
+      let webVerdict = verifyAnyToken(req, url, secret);
       if (!webVerdict.ok) {
-        log(`web refused (${webVerdict.reason})`);
+        const rt = refererToken(req);
+        if (rt) webVerdict = verifyToken(rt, secret);
+      }
+      if (!webVerdict.ok) {
+        log(`web refused (${webVerdict.reason}) ${describeWebRefusal(req, url)}`);
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: webVerdict.reason }));
       }
