@@ -23,6 +23,7 @@ import {
   sessionIdMatchesSurface,
   resolveTuiLaunch,
   tuiLaunchCommand,
+  canOpenSharedTui,
   latestClineSessionId,
 } from '../scripts/lib/tui-surface.mjs';
 
@@ -239,6 +240,29 @@ describe('the terminal launches the lane the chat is on', () => {
     expect(tuiSurfaceFor('cline:cline-free/deepseek-v4.1-flash').sharedSession).toBe(false);
     expect(tuiSurfaceFor('gemini:gemini-2.5-pro').sharedSession).toBe(false);
     expect(tuiSurfaceFor('gemini:gemini-2.5-pro').terminal).toBe(false);
+  });
+
+  it('will not offer the button on a shared lane with no session to share', () => {
+    // Live 2026-10-05: /new cleared the chat's session row, /tui ran 20s later
+    // and sent the button anyway, and the tap walked into the attach script's
+    // refusal. The button must not exist for a shared lane with nothing behind
+    // it — the refusal stays as the backstop for a stale button.
+    expect(canOpenSharedTui('opencode', 'ses_abc')).toBe(true);
+    expect(canOpenSharedTui('opencode', '')).toBe(false);
+    expect(canOpenSharedTui('opencode', null)).toBe(false);
+    // A cline-shaped id in the opencode map is the cross-tool bug, not a session.
+    expect(canOpenSharedTui('opencode', '1790714599861_80trx')).toBe(false);
+    // A model ref spells the same lane as the bare surface name.
+    expect(canOpenSharedTui('opencode/space-bunny-free', 'ses_abc')).toBe(true);
+    expect(canOpenSharedTui('opencode/space-bunny-free', '')).toBe(false);
+  });
+
+  it('keeps the button on cline, which opens a thread of its own', () => {
+    // Not a shared-session surface: no session here is a fresh Cline thread, so
+    // the gate must not take the button away from a lane that never claimed to
+    // share the turn session.
+    expect(canOpenSharedTui('cline', '')).toBe(true);
+    expect(canOpenSharedTui('cline:cline-free/deepseek-v4.1-flash', '')).toBe(true);
   });
 
   it('resumes the newest cline thread for the same workspace, and no other', () => {

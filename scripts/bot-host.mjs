@@ -56,7 +56,7 @@ import { routeState, routeFor, armRoute, confirmRoute, rollbackRoute, validateCa
 import { acquirePollerLease, releasePollerLease, renewPollerLease } from './lib/poller-lease.mjs';
 import { buildPack, packWithContents } from './lib/swap-pack.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
-import { tuiSurfaceFor as tuiSurface, latestClineSessionId } from './lib/tui-surface.mjs';
+import { tuiSurfaceFor as tuiSurface, latestClineSessionId, canOpenSharedTui } from './lib/tui-surface.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
 import { parsePermissionCallback, startPermissionWatch, stopPermissionWatch } from './lib/permission-bridge.mjs';
@@ -2669,7 +2669,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           } catch {
             /* the pane is gone either way */
           }
-          paneNote = `\nClosed the old terminal pane (\`${stalePane}\`) — it showed the previous session. \`/tui\` opens a fresh one on the new session.`;
+          // The honest half: /new deleted the session row above, so there is
+          // no session for /tui to attach to until the next message binds one.
+          // This used to promise /tui a fresh terminal on the new session, which
+          // cannot be true at this moment, and it is exactly what a user acted on
+          // 20s later to reach a terminal that refused to open
+          // (live 2026-10-05).
+          paneNote = `\nClosed the old terminal pane (\`${stalePane}\`) — it showed the previous session. This chat has no session of its own yet: the next message you send starts one, and \`/tui\` after that lands on it.`;
         } else {
           paneNote = `\n⚠️ Could not close the old terminal pane (\`${stalePane}\`) — it still shows the previous session. \`/tui off\` retries the kill.`;
         }
@@ -3032,6 +3038,17 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // Scoped, so /tui hands tui-attach.sh the session for the workspace the
       // chat is in — the identical id the next turn passes.
       const tuiSessionId = sessionForWorkspace(sessions, chatId, tuiWorkspace);
+      // The lane, and whether a terminal could be opened on THIS chat's session
+      // right now. Resolved here, above status/off/refresh, because all three
+      // name the session in their answers and two of them used to promise a
+      // terminal that could not be opened (see tuiCanOpen below).
+      const tuiSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
+      const tuiCanOpen = canOpenSharedTui(tuiSurface.surface, tuiSessionId);
+      // What to say instead of "tap /tui for a terminal" when there is no
+      // session behind the promise. Named once because three answers need it and
+      // a fresh chat has no session at all until its next message binds one
+      // (live 2026-10-05: /new then /tui twenty seconds later).
+      const tuiNoSessionAdvice = 'Send me any message first: that starts the conversation this chat shares with the terminal, and `/tui` after it lands on that conversation.';
       if (tuiSub === 'status') {
         await api.sendMessage(chatId, `⌨️ ${tuiStatusLine(config.id, tuiSessionId)}`);
         return;
@@ -3110,7 +3127,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           } catch {
             /* nothing published either way */
           }
-          await api.sendMessage(chatId, '⌨️ No terminal pane is running — nothing to refresh. `/tui` opens one on this chat\'s current session.');
+          await api.sendMessage(chatId, `⌨️ No terminal pane is running — nothing to refresh. ${tuiCanOpen ? '`/tui` opens one on this chat\'s current session.' : tuiNoSessionAdvice}`);
           return;
         }
         killTuiPane(refreshPane);
@@ -3125,7 +3142,9 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           } catch {
             /* the pane is gone either way */
           }
-          await api.sendMessage(chatId, `🔄 Closed \`${refreshPane}\`. Tap \`/tui\` again — the new pane attaches to this chat's current session.`);
+          await api.sendMessage(chatId, tuiCanOpen
+            ? `🔄 Closed \`${refreshPane}\`. Tap \`/tui\` again — the new pane attaches to this chat's current session.`
+            : `🔄 Closed \`${refreshPane}\`. ${tuiNoSessionAdvice}`);
         } else {
           await api.sendMessage(chatId, `⚠️ Could not close \`${refreshPane}\` — tmux refused. \`/tui status\` will say what survived.`);
         }
@@ -3176,15 +3195,35 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // broken.
       const moved = lastMiniappUrl && lastMiniappUrl !== tuiUrl;
       lastMiniappUrl = tuiUrl;
-      const tuiSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
-      // tuiProject/tuiWorkspace/tuiSessionId are resolved at the top of this
-      // case (status/off need them too).
+      // tuiSurface / tuiCanOpen are resolved at the top of this case, with the
+      // session they depend on (status, off and refresh all need it).
       if (!tuiSurface.terminal) {
         // An API-only lane has no screen to attach to. Handing it a PTY anyway
         // would be a scraped badge, not a terminal.
         await api.sendMessage(chatId, [
           `⌨️ No terminal for this chat — it is on \`${tuiSurface.tool}\`, which answers in one shot and has no session to attach to.`,
           '`/tx on` still gives you the live tool feed here, and `/freemodel` moves the chat to a lane with a real terminal if you want one.',
+        ].join('\n'));
+        return;
+      }
+      // No session to share means no terminal worth opening: tui-attach.sh
+      // refuses a sessionless opencode open (live 2026-10-04), so the button
+      // below would promise a conversation and deliver that refusal on the
+      // user's screen. Say it here, where the answer belongs. Asked BEFORE the
+      // tui-open.json write so a null session is never recorded as a fact about
+      // the chat — that snapshot with `sessionId: null` is what an auditor reads
+      // afterwards and cannot tell from a broken record.
+      //
+      // Live 2026-10-05: `/new` cleared the chat's session row at 10:54:23,
+      // `/tui` ran at 10:54:43, wrote the null snapshot and sent the button,
+      // and the tap 20s later printed "No chat session recorded yet — nothing
+      // shared to attach to" on a phone. tuiSessionId was already resolved at the
+      // top of this case; nothing read it on the open path.
+      if (!tuiCanOpen) {
+        await api.sendMessage(chatId, [
+          '⌨️ There is nothing for the terminal to attach to yet — this chat has no session.',
+          tuiNoSessionAdvice,
+          '(`/new` puts you here on purpose: a fresh chat has no session until your next message.)',
         ].join('\n'));
         return;
       }
