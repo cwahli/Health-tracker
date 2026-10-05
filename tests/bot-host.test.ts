@@ -112,7 +112,7 @@ import {
   compactUnsupported,
   formatAgo,
 } from '../scripts/lib/bot-status.mjs';
-import { classifyInboundSender, machineLocation, sendPeerHandoff } from '../scripts/bot-host.mjs';
+import { classifyInboundSender, delegationConfig, delegationSourcePath, machineLocation, sendPeerEnvelope, sendPeerHandoff } from '../scripts/bot-host.mjs';
 
 describe('telegram reply quote prompt', () => {
   it('prepends a direct text reply while preserving the new request', () => {
@@ -3402,5 +3402,136 @@ describe('B2B-1 group lane', () => {
     });
     expect(calls[0].chat_id).toBe('@ht_pm_bot');
     expect(v.ok).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------- B2B-2 delegation ---
+ * B2B-1 made peer traffic free: a bot message filed an inbox line and spent no
+ * tokens. That is also why two seats could never actually collaborate. These
+ * cases cover the deliberate exception — a peer message that may start a turn —
+ * and, more importantly, the switches that keep the exception from being a hole.
+ */
+describe('B2B-2 delegation configuration', () => {
+  const PEERS = { vm4: { vm5: { maxDepth: 3 } }, vm5: { vm4: { maxDepth: 3 } } };
+
+  it('is off unless BOTH switches are set — the default spends nothing', () => {
+    // The load-bearing default. Every existing deployment has TG_SENDER_POLICY
+    // set and no TG_B2B_DELEGATE, so nothing changes for them.
+    expect(delegationConfig({} as never, { self: 'vm4', peers: PEERS }).ok).toBe(false);
+    expect(delegationConfig({ TG_B2B_DELEGATE: '1' } as never, { self: 'vm4', peers: PEERS }).ok).toBe(false);
+    expect(delegationConfig({ TG_B2B_AUTO_PEER: 'vm5' } as never, { self: 'vm4', peers: PEERS }).ok).toBe(false);
+    // A value that is merely truthy is not consent.
+    expect(delegationConfig({ TG_B2B_DELEGATE: 'true', TG_B2B_AUTO_PEER: 'vm5' } as never, { self: 'vm4', peers: PEERS }).ok).toBe(false);
+  });
+
+  it('names the peer, the ref and the sheet when both switches are set', () => {
+    const c = delegationConfig(
+      { TG_B2B_DELEGATE: '1', TG_B2B_AUTO_PEER: 'vm5', TG_B2B_REF: 'gp-letter', TG_B2B_SHEET: 'abc123' } as never,
+      { self: 'vm4', peers: PEERS },
+    );
+    expect(c.ok).toBe(true);
+    expect(c.peer).toBe('vm5');
+    expect(c.ref).toBe('gp-letter');
+    expect(c.sheetId).toBe('abc123');
+  });
+
+  it('refuses a peer with no declared edge, so a typo cannot open a lane', () => {
+    const c = delegationConfig({ TG_B2B_DELEGATE: '1', TG_B2B_AUTO_PEER: 'ghost' } as never, { self: 'vm4', peers: PEERS });
+    expect(c.ok).toBe(false);
+    expect(c.code).toBe('TARGET_UNKNOWN');
+    // Directed: vm5 may reach vm4, but not the other way round.
+    const back = delegationConfig({ TG_B2B_DELEGATE: '1', TG_B2B_AUTO_PEER: 'vm4' } as never, { self: 'pm', peers: PEERS });
+    expect(back.ok).toBe(false);
+  });
+
+  it('caches source material under a filename that cannot escape its dir', () => {
+    const p = delegationSourcePath('/tmp/state', '../../etc/passwd');
+    expect(p.startsWith('/tmp/state/b2b-source/')).toBe(true);
+    expect(p).not.toContain('..');
+  });
+});
+
+describe('B2B-2 peer envelope send', () => {
+  const PEERS = { vm4: { vm5: { maxDepth: 3, maxTurns: 4, maxRounds: 2, cooldownMs: 0, ttlMs: 1_800_000 } } };
+  let stateRoot: string;
+  let calls: Array<Record<string, unknown>>;
+  const OLD_DL = process.env.TG_DEAD_LETTER_DIR;
+
+  beforeEach(() => {
+    stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'b2b-delegate-'));
+    process.env.TG_DEAD_LETTER_DIR = path.join(stateRoot, 'dl');
+    fs.mkdirSync(path.join(stateRoot, 'vm5'), { recursive: true });
+    fs.writeFileSync(path.join(stateRoot, 'vm5', 'identity.json'), JSON.stringify({ id: 'vm5', username: 'ht_vm5_bot', telegramId: 9 }));
+    fs.mkdirSync(path.join(stateRoot, 'vm4'), { recursive: true });
+    calls = [];
+  });
+
+  afterEach(() => {
+    if (OLD_DL === undefined) delete process.env.TG_DEAD_LETTER_DIR;
+    else process.env.TG_DEAD_LETTER_DIR = OLD_DL;
+    try { fs.rmSync(stateRoot, { recursive: true, force: true }); } catch {}
+  });
+
+  const config = { id: 'vm4' } as never;
+  const api = { call: async (_m: string, p: Record<string, unknown>) => { calls.push(p); return { message_id: 7 }; } };
+
+  it('puts a delegate on the wire with the chain id the whole round will share', async () => {
+    const v = await sendPeerEnvelope({
+      config, to: 'vm5', kind: 'delegate', ref: 'gp-letter', body: 'my draft',
+      chainId: 'gp-letter-r1', api, root: stateRoot, policy: 'humans-and-allowlisted-bots', peers: PEERS,
+    });
+    expect(v.ok).toBe(true);
+    const text = String(calls[0].text);
+    expect(text).toContain('kind=delegate');
+    expect(text).toContain('from=vm4 to=vm5');
+    expect(text).toContain('chain=gp-letter-r1');
+    expect(text).toContain('my draft');
+  });
+
+  it('refuses a delegate with no ref, and sends nothing', async () => {
+    const v = await sendPeerEnvelope({
+      config, to: 'vm5', kind: 'delegate', body: 'my draft', chainId: 'c', api, root: stateRoot,
+      policy: 'humans-and-allowlisted-bots', peers: PEERS,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.code).toBe('NO_REF');
+    expect(calls.length).toBe(0);
+  });
+
+  it('refuses to delegate to a seat with no edge, and sends nothing', async () => {
+    const v = await sendPeerEnvelope({
+      config, to: 'pm', kind: 'delegate', ref: 'gp-letter', body: 'x', chainId: 'c', api, root: stateRoot,
+      policy: 'humans-and-allowlisted-bots', peers: PEERS,
+    });
+    expect(v.ok).toBe(false);
+    expect(calls.length).toBe(0);
+  });
+
+  it('honours the group lane, so the operator watches the collaboration', async () => {
+    const OLD = process.env.TG_B2B_GROUP_ID;
+    process.env.TG_B2B_GROUP_ID = '-5461458468';
+    try {
+      const v = await sendPeerEnvelope({
+        config, to: 'vm5', kind: 'feedback', ref: 'gp-letter', body: 'my revision',
+        chainId: 'gp-letter-r1', api, root: stateRoot, policy: 'humans-and-allowlisted-bots', peers: PEERS,
+      });
+      expect(v.ok).toBe(true);
+      expect(calls[0].chat_id).toBe('-5461458468');
+      expect(String(calls[0].text)).toContain('kind=feedback');
+    } finally {
+      if (OLD === undefined) delete process.env.TG_B2B_GROUP_ID;
+      else process.env.TG_B2B_GROUP_ID = OLD;
+    }
+  });
+
+  it('records our own agreement on the send side, which is half of convergence', async () => {
+    const v = await sendPeerEnvelope({
+      config, to: 'vm5', kind: 'agree', ref: 'gp-letter', body: 'the letter as it stands',
+      chainId: 'gp-letter-r1', api, root: stateRoot, policy: 'humans-and-allowlisted-bots', peers: PEERS,
+    });
+    expect(v.ok).toBe(true);
+    const led = JSON.parse(fs.readFileSync(path.join(stateRoot, 'vm4', 'handoff.json'), 'utf8'));
+    expect(led.chains['gp-letter-r1'].ourAgree).toBe(1);
+    expect(led.chains['gp-letter-r1'].terminal).toBe(true);
   });
 });

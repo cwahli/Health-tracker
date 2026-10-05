@@ -35,8 +35,6 @@ import {
 
 import {
   DEFAULTS,
-  KINDS,
-  TERMINAL_KINDS,
   checkReceiveBounds,
   checkSendBounds,
   deadLetter,
@@ -45,6 +43,7 @@ import {
   encodeEnvelope,
   proposalLine,
 } from './lib/tg-handoff.mjs';
+import { KINDS, TERMINAL_KINDS } from './lib/b2b-collab.mjs';
 
 let passed = 0;
 const failures = [];
@@ -283,9 +282,12 @@ function ask(overrides = {}) {
   });
 }
 
-check('the six kinds are exactly the contract, and two of them end a chain', () => {
-  assert.deepEqual(KINDS, ['ask', 'answer', 'blocked', 'handoff-request', 'ack', 'close']);
-  assert.deepEqual(TERMINAL_KINDS, ['ack', 'close']);
+check('the kinds are exactly the contract, and three of them end a chain', () => {
+  assert.deepEqual(KINDS, [
+    'ask', 'answer', 'blocked', 'handoff-request', 'ack', 'close',
+    'delegate', 'feedback', 'agree',
+  ]);
+  assert.deepEqual(TERMINAL_KINDS, ['ack', 'close', 'agree']);
 });
 
 check('an envelope round-trips through the chat text', () => {
