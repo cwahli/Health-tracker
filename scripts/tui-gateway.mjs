@@ -457,7 +457,7 @@ function logGatewayError(err) {
  * page's subresource requests (which carry no token of their own) pass the
  * same door instead of 401ing one by one.
  */
-async function proxyWebUi(req, res, url, env, { secret = '', ttlSec = 900 } = {}) {
+async function proxyWebUi(req, res, url, env, { ttlSec = 900 } = {}) {
   const auth = webUiAuthHeader(env);
   if (!auth) {
     res.writeHead(503, { 'content-type': 'application/json' });
