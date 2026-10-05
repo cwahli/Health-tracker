@@ -64,9 +64,21 @@ describe('TUI presence is observable', () => {
     expect(mod.tuiIsAttached(BOT, SESSION)).toBe(false);
   });
 
-  it('treats a lease with no session id as present rather than guessing', () => {
+  it('never counts a sessionless lease as this conversation, and still reports it as open', () => {
+    // A lease naming no session is a terminal on nothing shared — a pre-message
+    // tap that launched bare (live 2026-10-04: VM-tui-vm3 open on "" while the
+    // turn ran on ses_ef7b…). With a turn session in hand that is NOT our
+    // terminal, so it must not back the same-session claim. With no turn session
+    // yet — /status right after /new — it is still a live client, and /tui off
+    // has to be able to name and close it.
+    //
+    // This asserted the opposite (`true`) and was left standing by the commit
+    // that changed the contract: the code, the comment above it and this
+    // expectation could not all be right. Separate commit on purpose: it is
+    // someone else's red, not this fix's.
     writeLease({ pid: 1234, heartbeat: Date.now() });
-    expect(mod.tuiIsAttached(BOT, SESSION)).toBe(true);
+    expect(mod.tuiIsAttached(BOT, SESSION)).toBe(false);
+    expect(mod.tuiIsAttached(BOT, '')).toBe(true);
   });
 
   it('reads a lease whose heartbeat has expired as gone', () => {
