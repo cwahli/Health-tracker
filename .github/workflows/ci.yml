@@ -294,6 +294,17 @@ jobs:
       - name: PM role gate (assert-pm-role)
         run: node scripts/assert-pm-role.test.mjs
 
+      # The model failover chain ran nowhere in CI, which is how the 2026-10-05
+      # outage shipped: `defaultIsRetryable` treated a timeout as terminal, so a
+      # dead primary lane held the turn for its full 900s budget and returned
+      # empty — "Done (exit 1), but the model returned no text output." — while
+      # the healthy fallback already in the chain was never attempted. The gate
+      # existed and passed 15/15 locally; it just was never run here. Its timeout
+      # case drives the real timer, and needs only node: builtins, so it is safe
+      # in a checkout with no node_modules.
+      - name: Model failover gate (assert-model-failover)
+        run: node scripts/assert-model-failover.mjs
+
       # The group surfaces ran nowhere in CI, which is how #458 merged green
       # while main was red: two bots were seated as health_analyst and two as
       # test_planner, and assert-health-group — the sensor that refuses exactly
