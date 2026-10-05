@@ -2,7 +2,7 @@
 name: google-workspace-routing
 description: Use when Health-tracker work needs Google Sheets, Drive or Docs - pick gws vs the fleet store, probe readiness first, and keep photos out of Google.
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   audience: health-tracker-agents
 ---
 
@@ -31,6 +31,76 @@ Zero-burn: mints a token, lists one page, writes nothing. It is `NOT READY` when
   Never fake a write, never invent an ID, never retry hoping the credential appears.
 
 The phone holds no key by design. A host without it hands off (QS-3), it does not fail silently.
+
+**Probe `gws` too, and do not switch clients silently.** `gws` is the §1 default
+for ad-hoc work, but it carries its own credentials and is frequently NOT logged
+in on a host where the fleet store is READY:
+
+```bash
+gws sheets spreadsheets get --params '{"spreadsheetId":"<id>"}'   # 401 ⇒ gws is unusable here
+```
+
+A 401 from `gws` is not a dead end and not a reason to fall through to
+`scripts/lib/google-store.mjs` without saying so. Name the switch out loud, so
+the reader knows which credential wrote the thing and which scope it needed.
+
+## 2a. Read the shape before you believe a read
+
+`scripts/lib/google-store.mjs` helpers return the envelope
+`{ ok, status, json }` — **the payload is nested under `.json`, not spread on the
+top level.** Getting this wrong makes every field `undefined`, which reads
+exactly like "the tab is empty":
+
+| Helper | Truth | The trap |
+|--------|-------|----------|
+| `readTab(sheetId, tab, token, {range})` | `r.json.values` | `r.values` → `undefined` → "empty tab" |
+| `getSheet(sheetId, token)` | `r.sheet.properties` | `r.properties` → `undefined` |
+| `appendRows(sheetId, tab, rows, token)` | `r.json.updates.updatedRange` | `r.updatedRange` |
+
+Measured 2026-10-05: `readTab` on a populated tab returned `undefined` at
+`r.values`, the agent concluded the tab was blank, and appended six rows
+expecting `A1`. They landed at `A3`, under an existing header and a populated
+row. Nothing was overwritten — `appendRows` only inserts — but the placement was
+wrong and the read that justified it was never true.
+
+Three rules that would have caught it:
+
+1. **First use of a helper in a session: log the whole response**, not the fields
+   you expect. `JSON.stringify(r)` is the whole fix, and it is what caught the
+   truth one command later.
+2. **`undefined` from a helper is a broken field path until proven otherwise**,
+   never evidence about the world. An absent value and an absent thing are not
+   the same claim.
+3. **A read returning "empty" and a write that returns success do not agree.**
+   If the tab looked empty, an append landing anywhere but the row you predicted
+   means the read was wrong. Resolve that before reporting the write as done.
+
+**Read back as proof, and check the range.** After a write, re-read and compare
+against what you intended — not against "did it not error". `updatedRange` is the
+honest report of where the rows actually went.
+
+**Hand back a pointer, not just a receipt.** "Appended 6 rows" is not something
+the reader can check. A spreadsheet link opens `activeTabId`, and when that is
+unset Sheets defaults to **index 0** — so writing to tab 3 of a six-tab sheet and
+replying with the plain sheet URL shows the reader tab 1 and looks like nothing
+happened. Measured 2026-10-05: six rows written to `request consultation`, the
+reader reported "I see no difference", because the URL opened `Test plan`.
+
+So report all three:
+
+* the **tab title**, quoted, so it can be matched against the tab bar
+* a link carrying `#gid=<sheetId>` and `&range=<the cells you wrote>`
+* the `sheetId` itself, which is the `gid` and is stable across renames
+
+```bash
+# gid + written range, from a metadata read
+gws sheets spreadsheets get --params '{"spreadsheetId":"<id>","fields":"sheets.properties"}'
+#   -> sheets.properties[].properties.sheetId / .title ; link as #gid=<sheetId>&range=A3:A8
+```
+
+If the reader says they cannot see the change, suspect the tab before suspecting
+the write. Re-read first, then send the `gid` link — in that order, because the
+re-read is what distinguishes "wrong tab" from "never written".
 
 ## 3. What goes where
 
