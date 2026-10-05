@@ -1009,6 +1009,10 @@ console.log('assert-tui-gateway:');
     })());
   check('the shim phones home once unpatched and once through the patch',
     webAuthShimJs().includes('/__shim_diag?u=') && webAuthShimJs().includes('&p=1') && webAuthShimJs().includes('keepalive'));
+  check('the shim unregisters stale service workers',
+    webAuthShimJs().includes('getRegistrations') && webAuthShimJs().includes('unregister'));
+  check('proxied html clears site caches so no stale shell survives',
+    planted.h['clear-site-data'] === '"cache"');
   serve.close();
 }
 
