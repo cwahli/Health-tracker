@@ -109,3 +109,15 @@ allowed only if the gate table says which lane keeps it and why.
 Every phase is reversible: Phase 1 adds without removing; Phase 2 is button
 order; Phase 4 disabling is a unit stop + Caddy comment-out, reverted the same
 way. No data migration at any step (sessions live in the opencode service).
+
+## Status 2026-10-05
+
+- Phase 0 PASS (session sharing proven at API level).
+- Phase 1 host wiring live: `opencode-web.service` on 127.0.0.1:4096,
+  `web.health-tracking.duckdns.org` issued and gated (401 without cookie).
+- Blocker cleared: #549 (b2b-peer) merged 2026-10-05; stranded
+  `agent/fleet-proof-shot` branch deleted (all its commits were already on
+  main) and the fixes-landed ratchet is 0 fail.
+- Left: merge this PR, post-merge deploy (restart tui-gateway.service,
+  flip the web. Caddy block to the gateway, restart bot-host@vm3 and drop
+  the TEMP-TEST port in the r14 tree), live phone test.
