@@ -118,6 +118,7 @@ way. No data migration at any step (sessions live in the opencode service).
 - Blocker cleared: #549 (b2b-peer) merged 2026-10-05; stranded
   `agent/fleet-proof-shot` branch deleted (all its commits were already on
   main) and the fixes-landed ratchet is 0 fail.
-- Left: merge this PR, post-merge deploy (restart tui-gateway.service,
-  flip the web. Caddy block to the gateway, restart bot-host@vm3 and drop
-  the TEMP-TEST port in the r14 tree), live phone test.
+- Left: merge this PR (#549 landed, main re-verified green), post-merge
+  deploy (restart tui-gateway.service, flip the web. Caddy block to the
+  gateway, restart bot-host@vm3 and drop the TEMP-TEST port in the r14
+  tree), live phone test.
