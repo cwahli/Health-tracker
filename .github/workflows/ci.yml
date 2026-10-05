@@ -302,8 +302,14 @@ jobs:
       # existed and passed 15/15 locally; it just was never run here. Its timeout
       # case drives the real timer, and needs only node: builtins, so it is safe
       # in a checkout with no node_modules.
+      #
+      # HOME is pinned because bot-host creates ~/.hermes as an import side
+      # effect, and assert-bug-pack treats "does ~/.hermes exist" as "am I on a
+      # real host?" — with a shared HOME this step silently flipped that gate to
+      # the real-profile path (3 failures) purely by running earlier. Keep the
+      # step hermetic so it neither depends on nor perturbs the gates around it.
       - name: Model failover gate (assert-model-failover)
-        run: node scripts/assert-model-failover.mjs
+        run: HOME="$(mktemp -d)" node scripts/assert-model-failover.mjs
 
       # The group surfaces ran nowhere in CI, which is how #458 merged green
       # while main was red: two bots were seated as health_analyst and two as
