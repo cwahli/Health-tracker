@@ -74,6 +74,7 @@ import {
   parseRetryAfter,
 } from './lib/agent-opencode.mjs';
 import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from './lib/opencode-tui.mjs';
+import { issueToken } from './tui-gateway.mjs';
 import { KNOWN_HOSTS, workerStatus, isLocalHost, machineLabel } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
@@ -1423,6 +1424,37 @@ export function readWebUiUrl(env = process.env) {
   const raw = String(env.OPENCODE_WEB_URL ?? 'https://web.health-tracking.duckdns.org').trim().replace(/\/+$/, '');
   if (/^https:\/\/[A-Za-z0-9.-]+$/.test(raw)) return raw;
   return '';
+}
+
+/** Short-lived personal web UI links minted by /web. */
+export const WEB_LINK_TTL_SEC = 900;
+
+/**
+ * The gateway signing secret, read at call time from the host's own env
+ * file (same pattern as the seat-tags credentials: host files, never the
+ * repo). Empty when absent — the caller says so instead of minting.
+ */
+export function gatewaySecretFromHostEnv({ readFile = fs.readFileSync, home = os.homedir() } = {}) {
+  try {
+    for (const line of String(readFile(path.join(home, '.config', 'bot-host', 'tui-gateway.env'), 'utf8')).split('\n')) {
+      const m = line.match(/^TUI_GATEWAY_SECRET=(.+)$/);
+      if (m) return m[1].trim().replace(/^["']|["']$/g, '');
+    }
+  } catch { /* host may not have this file */ }
+  return String(process.env.TUI_GATEWAY_SECRET || '').trim();
+}
+
+/**
+ * A personal web UI login link: a freshly minted ?token= URL no cache or
+ * snapshot has ever seen, so it always loads live (the Mini App button's
+ * fixed URL can be served a stale saved copy with no server signal). Same
+ * short-lived chat-bound bearer the gateway accepts on query; nothing new
+ * is trusted. Pure (sensor-covered); '' when anything is missing.
+ */
+export function personalWebUiLink({ webUrl, botId, chatId, secret, ttlSec = WEB_LINK_TTL_SEC, now = Date.now() } = {}) {
+  if (!webUrl || !botId || chatId === undefined || chatId === null || String(chatId) === '' || !secret) return '';
+  const token = issueToken({ botId: String(botId), chatId: String(chatId), secret, ttlSec, now });
+  return `${String(webUrl).replace(/\/+$/, '')}/?token=${encodeURIComponent(token)}`;
 }
 
 export class ProgressRenderer {
@@ -3009,8 +3041,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // terminal as fallback; every other lane keeps the TUI button only —
       // cline/grok/freebuff have no web UI to point at.
       const webUiUrl = tuiSurface.sharedSession ? readWebUiUrl() : '';
+      const freshWebLink = webUiUrl
+        ? personalWebUiLink({ webUrl: webUiUrl, botId: config.id, chatId, secret: gatewaySecretFromHostEnv() })
+        : '';
       const openButtons = [
-        ...(webUiUrl ? [{ text: '🌐 Open web UI', web_app: { url: `${webUiUrl}/?bot=${config.id}` } }] : []),
+        ...(freshWebLink
+          ? [{ text: '🌐 Open web UI', url: freshWebLink }]
+          : webUiUrl
+            ? [{ text: '🌐 Open web UI', web_app: { url: `${webUiUrl}/?bot=${config.id}` } }]
+            : []),
         { text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } },
       ];
       await api.sendMessage(chatId, [
@@ -3026,7 +3065,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           ? 'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.'
           : 'It runs under tmux, so closing the Mini App keeps your place, and you can reopen the same thread whenever you want.',
         'We both keep working with it open. The terminal waits for a turn I am running, and I wait for a turn you started — one at a time, never two writers at once. Opening it proves you are the Telegram user this chat belongs to, so there is no password to remember.',
-        ...(webUiUrl ? ['🌐 Prefer reading over typing? The *web UI* shows this same conversation as a normal page — scrolls natively, no terminal frames.'] : []),
+        ...(webUiUrl ? [`🌐 Prefer reading over typing? The *web UI* shows this same conversation as a normal page — scrolls natively, no terminal frames.${freshWebLink ? ' The button above is minted fresh for this tap and lasts 15 minutes.' : ''}`] : []),
       ].filter(Boolean).join('\n'), {
         reply_markup: { inline_keyboard: [openButtons] },
       });
@@ -3208,6 +3247,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         : '🔕 Finish alerts are off for this chat. `/notify on` brings them back.');
       return;
     }
+
 
     case 'resume': {
       if (running.get(chatId)) {

@@ -739,6 +739,29 @@ describe('commands', () => {
     expect(parseCommand('/resume 5')).toEqual({ name: 'resume', args: '5', raw: '/resume 5' });
   });
 
+  it('hands /tui a fresh personal web link (never a fixed Mini App URL) plus a live minter', async () => {
+    const src = (await import('node:fs')).readFileSync(
+      new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8',
+    );
+    expect(src).toContain('personalWebUiLink');
+    expect(src).toContain('freshWebLink');
+    expect(src).not.toContain("case 'web'");
+    expect(COMMAND_NAMES).not.toContain('web');
+    const { personalWebUiLink, gatewaySecretFromHostEnv, WEB_LINK_TTL_SEC } =
+      await import('../scripts/bot-host.mjs');
+    expect(WEB_LINK_TTL_SEC).toBe(900);
+    const link = personalWebUiLink({ webUrl: 'https://web.test', botId: 'vm', chatId: '42', secret: 's3cret', now: 1000 });
+    expect(link.startsWith('https://web.test/?token=')).toBe(true);
+    const { verifyToken } = await import('../scripts/tui-gateway.mjs');
+    expect(verifyToken(decodeURIComponent(link.split('token=')[1]), 's3cret', { now: 1000 }).ok).toBe(true);
+    expect(verifyToken(decodeURIComponent(link.split('token=')[1]), 's3cret', { now: 1000 + 901000 }).ok).toBe(false);
+    expect(personalWebUiLink({ webUrl: '', botId: 'vm', chatId: '42', secret: 's3cret' })).toBe('');
+    expect(personalWebUiLink({ webUrl: 'https://web.test', botId: 'vm', chatId: '', secret: 's3cret' })).toBe('');
+    expect(personalWebUiLink({ webUrl: 'https://web.test', botId: 'vm', chatId: '42', secret: '' })).toBe('');
+    expect(gatewaySecretFromHostEnv({ readFile: () => { throw new Error('no file'); } })).toBe('');
+    expect(gatewaySecretFromHostEnv({ readFile: () => 'A=1\nTUI_GATEWAY_SECRET=abc\n' })).toBe('abc');
+  });
+
   it('/bugs reads the live store in the handler and formats count + cards deterministically', async () => {
     const src = (await import('node:fs')).readFileSync(
       new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8',
