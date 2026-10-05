@@ -73,6 +73,8 @@ export function assistantTextOf(msg) {
 }
 
 export const GRACE_MS = Number(process.env.FINISH_WATCH_GRACE_MS) || 60000;
+/** Forward only after this much quiet: a run still talking is not finished. */
+export const SETTLE_MS = Number(process.env.FINISH_WATCH_SETTLE_MS) || 90000;
 
 /**
  * Which assistant messages to deliver. `messages` is the API list (newest
@@ -91,6 +93,16 @@ export function splitNewMessages(messages, watermarkId) {
   const forward = fresh.filter((m) => assistantTextOf(m));
   const last = ordered.filter((m) => m?.id).at(-1);
   return { forward, consumeTo: last?.id || watermarkId };
+}
+
+/** Newest activity stamp in a list (completed preferred, created fallback). */
+export function newestActivityMs(messages) {
+  let latest = 0;
+  for (const m of messages || []) {
+    const t = Number(m?.time?.completed || m?.time?.created || 0);
+    if (Number.isFinite(t) && t > latest) latest = t;
+  }
+  return latest;
 }
 
 /** Newest message id in a list, or null. */
@@ -237,17 +249,32 @@ export async function pollOnce({
         continue;
       }
       const { forward, consumeTo } = splitNewMessages(messages, markId);
-      setMark(consumeTo || markId, 0);
-      if (!forward.length) continue;
+      if (!forward.length) {
+        setMark(consumeTo || markId, 0);
+        continue;
+      }
+      // Settle: a session that talked recently is not finished. Hold delivery
+      // (latest-only on quiet, so rapid-fire chatter collapses to one), but
+      // still baseline an unseen session at its oldest message — otherwise a
+      // first sighting mid-chatter would consume-then-miss the backlog.
+      if (Date.now() - newestActivityMs(messages) < SETTLE_MS) {
+        if (!markId) {
+          const oldest = [...messages].reverse().find((m) => m?.id);
+          if (oldest) setMark(oldest.id, 0);
+        }
+        continue;
+      }
+      const m = forward.at(-1);
+      const text = assistantTextOf(m);
+      if (!text) {
+        setMark(consumeTo || markId, 0);
+        continue;
+      }
       const title = await titleOf(sessionId);
       const head = title ? `*${title}* finished` : 'A run finished';
-      for (const m of forward) {
-        const text = assistantTextOf(m);
-        if (!text) continue;
-        await deliver(botId, chatId, `🌐 ${head}:\n\n${text}`);
-        setMark(m.id, 0);
-        delivered.push({ botId, chatId, sessionId, messageId: m.id });
-      }
+      await deliver(botId, chatId, `🌐 ${head}:\n\n${text}`);
+      setMark(consumeTo || m.id, 0);
+      delivered.push({ botId, chatId, sessionId, messageId: m.id });
     }
   }
   if (persist) saveWatermarks(marks);

@@ -116,5 +116,22 @@ check('a serve failure delivers nothing and keeps no watermark',
   sent.length === 0 && !store.byBot.vm9?.ses_web);
 delete store.failServe;
 
+// 6. Settle: a session still talking holds delivery but baselines; when
+// quiet it delivers the latest only, collapsing rapid-fire chatter to one.
+const nowish = Date.now();
+const R = (id, text, at) => ({ id, type: 'assistant', time: { created: at, completed: at }, content: [{ type: 'text', text }] });
+writeState({ 1: 'ws\0ses_web' }, {}, {});
+store.byBot = {};
+msgs.ses_web = [R('r2', 'second', nowish), R('r1', 'first', nowish - 1000)];
+sent.length = 0;
+await run();
+check('an unsettled session delivers nothing yet', sent.length === 0);
+msgs.ses_web = [R('r3', 'third', nowish - 200000), R('r2', 'second', nowish - 201000), R('r1', 'first', nowish - 202000)];
+await run();
+check('a settled session delivers the latest only',
+  sent.length === 1 && sent[0].text.includes('third') && !sent[0].text.includes('second'));
+await run();
+check('the collapsed delivery never repeats', sent.length === 1);
+
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
