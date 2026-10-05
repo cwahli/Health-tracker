@@ -4718,7 +4718,17 @@ export async function sendPeerHandoff({ config, args = '', api = null, stateDirP
     const res = await telegram.call('sendMessage', {
       chat_id: named.username,
       text: built.text,
-      disable_notification: 'true',
+      // LOUD by default. This started silent, on the reasoning that a handoff is
+      // machine traffic and the operator does not want a buzz per message. Then
+      // the operator asked to be aware of the traffic as it happens, and a
+      // silent channel is indistinguishable from a broken one — three hops went
+      // past unseen before that was noticed.
+      //
+      // The bounds are what keep this from becoming spam, not the mute: the
+      // per-pair cooldown is 60s, so the worst case is one buzz per minute per
+      // pair, and the global send budget still applies on top.
+      // TG_B2B_NOTIFY=0 puts it back to silent without a deploy.
+      disable_notification: String(process.env.TG_B2B_NOTIFY ?? '1') === '0' ? 'true' : 'false',
     });
     return {
       ok: true,
