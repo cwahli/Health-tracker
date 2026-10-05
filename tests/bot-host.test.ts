@@ -123,6 +123,7 @@ import {
   compactUnsupported,
   formatAgo,
 } from '../scripts/lib/bot-status.mjs';
+import { classifyInboundSender, sendPeerHandoff } from '../scripts/bot-host.mjs';
 
 describe('telegram reply quote prompt', () => {
   it('prepends a direct text reply while preserving the new request', () => {
@@ -2954,6 +2955,297 @@ describe('ledger depletion visibility (stamped routes)', () => {
     }
   });
 });
+
+
+/* ---------------------------------------------------------------- B2B-1 ---
+ * Bot-to-bot ingress. The contract under test is the classification, because
+ * the whole loop defence on the receive side is "a bot-sourced update files a
+ * proposal and never becomes a turn". Anything less than three outcomes here is
+ * a fleet-wide loop waiting for a misread message.
+ */
+describe('B2B-1 bot-to-bot ingress classification', () => {
+  const PEERS = { vm3: { pm: { maxDepth: 2, cooldownMs: 60_000, ttlMs: 1_800_000 } } };
+  let stateRoot: string;
+  const OLD_HOME = process.env.HOME;
+
+  const envelopeText = (over: Record<string, string> = {}) => {
+    const head = [
+      '[b2b v1]',
+      `kind=${over.kind === undefined ? 'ask' : over.kind}`,
+      `ref=${over.ref === undefined ? 'spec:fleet-current-tab' : over.ref}`,
+      `depth=${over.depth || '1'}`,
+      `from=${over.from || 'vm3'}`,
+      `to=${over.to || 'pm'}`,
+      `expires=${new Date(Date.now() + 1_800_000).toISOString()}`,
+      `id=${over.id === undefined ? 'msg00001' : over.id}`,
+      `reply_to=${over.reply_to || '-'}`,
+    ].join(' ');
+    return `${head}\n${over.body || 'the current tab has no card rows — is D1 the source or the sheet?'}`;
+  };
+
+  const message = (over: Record<string, unknown> = {}) => ({
+    from: { id: 777000, is_bot: true, username: 'ht_vm3_bot', ...(over.from || {}) },
+    chat: { id: 6218257274 },
+    text: envelopeText(over.envelope || {}),
+  });
+
+  beforeEach(() => {
+    stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'b2b-ingress-'));
+    fs.mkdirSync(path.join(stateRoot, 'vm3'), { recursive: true });
+    fs.writeFileSync(
+      path.join(stateRoot, 'vm3', 'identity.json'),
+      JSON.stringify({ id: 'vm3', username: 'ht_vm3_bot', telegramId: 777000 }),
+    );
+  });
+
+  afterEach(() => {
+    try { fs.rmSync(stateRoot, { recursive: true, force: true }); } catch {}
+  });
+
+  it('passes a human update straight through, untouched by the policy', () => {
+    const v = classifyInboundSender({
+      message: { from: { id: 6218257274, is_bot: false }, chat: { id: 1 }, text: 'hi' },
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('human');
+  });
+
+  it('never treats an update with no sender id as anything but unknown', () => {
+    const v = classifyInboundSender({ message: { chat: { id: 1 }, text: 'x' }, stateDirPath: stateRoot, self: 'pm' });
+    expect(v.kind).toBe('unknown');
+  });
+
+  it('refuses a bot sender by default, before any peers lookup', () => {
+    const v = classifyInboundSender({ message: message(), stateDirPath: stateRoot, self: 'pm' });
+    expect(v.kind).toBe('bot-refused');
+    expect(v.code).toBe('POLICY_HUMANS_ONLY');
+  });
+
+  it('refuses a bot that no seat has claimed, even with the policy on', () => {
+    const v = classifyInboundSender({
+      message: message({ from: { username: 'stranger_bot' } }),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('bot-refused');
+    expect(v.code).toBe('SENDER_UNKNOWN_SEAT');
+  });
+
+  it('refuses a claimed bot that has no peers edge to this seat', () => {
+    const v = classifyInboundSender({
+      message: message(),
+      stateDirPath: stateRoot,
+      self: 'vm4',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('bot-refused');
+    expect(v.code).toBe('PEER_NOT_ALLOWED');
+  });
+
+  it('accepts an allowlisted, in-bounds envelope as a handoff — not a turn', () => {
+    const v = classifyInboundSender({
+      message: message(),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('bot-handoff');
+    expect(v.seat).toBe('vm3');
+    expect(v.envelope.kind).toBe('ask');
+    expect(v.envelope.ref).toBe('spec:fleet-current-tab');
+    // The classification carries no turn handle at all: there is nothing for a
+    // caller to dispatch, which is the point.
+    expect(Object.keys(v)).not.toContain('run');
+    expect(v.ledger.seen['in:msg00001']).toBeGreaterThan(0);
+  });
+
+  it('refuses an envelope addressed to another seat', () => {
+    const v = classifyInboundSender({
+      message: message({ envelope: { to: 'vm4' } }),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('bot-refused');
+    expect(v.code).toBe('TARGET_UNKNOWN');
+  });
+
+  it('refuses an envelope whose from= lies about the sender', () => {
+    const v = classifyInboundSender({
+      message: message({ envelope: { from: 'vm4' } }),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('bot-refused');
+    expect(v.code).toBe('FROM_MISMATCH');
+  });
+
+  it('refuses plain text from a bot, and a bot handoff with no ref', () => {
+    const plain = classifyInboundSender({
+      message: { from: { id: 777000, is_bot: true, username: 'ht_vm3_bot' }, chat: { id: 1 }, text: 'hello there' },
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(plain.code).toBe('BAD_HEADER');
+    const noRef = classifyInboundSender({
+      message: message({ envelope: { ref: '' } }),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(noRef.code).toBe('NO_REF'); // a well-formed header with no tracked work behind it
+  });
+
+  it('receives the same message id once: the second is a duplicate', () => {
+    const first = classifyInboundSender({
+      message: message(),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(first.kind).toBe('bot-handoff');
+    const replay = classifyInboundSender({
+      message: message(),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+      ledger: first.ledger,
+    });
+    expect(replay.kind).toBe('bot-refused');
+    expect(replay.code).toBe('DUPLICATE');
+  });
+
+  it('refuses an expired question rather than acting on stale intent', () => {
+    const stale = {
+      from: { id: 777000, is_bot: true, username: 'ht_vm3_bot' },
+      chat: { id: 1 },
+      text: `[b2b v1] kind=ask ref=spec:x depth=1 from=vm3 to=pm expires=${new Date(Date.now() - 1000).toISOString()} id=old00001 reply_to=-\ntoo late`,
+    };
+    const v = classifyInboundSender({
+      message: stale,
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('bot-refused');
+    expect(v.code).toBe('EXPIRED');
+  });
+});
+
+/* --------------------------------------------------------------- B2B-1 /tell ---
+ * The send side is refusal-first. These cases never touch the network: each one
+ * asserts that a refusal returned text and sent nothing, because a bound that
+ * fires *after* the send is not a bound.
+ */
+describe('B2B-1 /tell send path', () => {
+  const PEERS = { vm3: { pm: { maxDepth: 2, cooldownMs: 60_000, ttlMs: 1_800_000 } } };
+  let stateRoot: string;
+
+  const OLD_DL = process.env.TG_DEAD_LETTER_DIR;
+
+  beforeEach(() => {
+    stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'b2b-tell-'));
+    // Dead letters go to the throwaway dir: a sensor must never write into the
+    // repo, and the production path keeps its documented location.
+    process.env.TG_DEAD_LETTER_DIR = path.join(stateRoot, 'dead-letter');
+    fs.mkdirSync(path.join(stateRoot, 'pm'), { recursive: true });
+    fs.writeFileSync(
+      path.join(stateRoot, 'pm', 'identity.json'),
+      JSON.stringify({ id: 'pm', username: 'ht_pm_bot', telegramId: 555 }),
+    );
+    fs.mkdirSync(path.join(stateRoot, 'vm3'), { recursive: true });
+  });
+
+  afterEach(() => {
+    if (OLD_DL === undefined) delete process.env.TG_DEAD_LETTER_DIR;
+    else process.env.TG_DEAD_LETTER_DIR = OLD_DL;
+    try { fs.rmSync(stateRoot, { recursive: true, force: true }); } catch {}
+  });
+
+  const config = { id: 'vm3' } as never;
+  const ON = 'humans-and-allowlisted-bots';
+  let calls: Array<Record<string, unknown>> = [];
+  const fakeApi = { call: async (_m: string, payload: Record<string, unknown>) => { calls.push(payload); return { message_id: 4242 }; } };
+
+  beforeEach(() => { calls = []; });
+
+  it('refuses without a --ref and sends nothing', async () => {
+    const v = await sendPeerHandoff({ config, args: 'pm hello there', api: fakeApi, stateDirPath: stateRoot, policy: ON, peers: PEERS });
+    expect(v.ok).toBe(false);
+    expect(v.code).toBe('NO_REF');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses malformed usage and sends nothing', async () => {
+    const v = await sendPeerHandoff({ config, args: 'pm', api: fakeApi, stateDirPath: stateRoot, policy: ON, peers: PEERS });
+    expect(v.code).toBe('BAD_ARGS');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses an unlisted target and names the addressable peers', async () => {
+    const v = await sendPeerHandoff({ config, args: 'vm4 take this --ref Sheet-03', api: fakeApi, stateDirPath: stateRoot, policy: ON, peers: PEERS });
+    expect(v.ok).toBe(false);
+    expect(v.code).toBe('PEER_NOT_ALLOWED');
+    expect(v.text).toContain('pm');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses when the policy is humans-only, even for a listed peer', async () => {
+    const v = await sendPeerHandoff({ config, args: 'pm hello --ref Sheet-03', api: fakeApi, stateDirPath: stateRoot, policy: 'humans-only', peers: PEERS });
+    expect(v.code).toBe('POLICY_HUMANS_ONLY');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses a target with no identity file rather than guessing a username', async () => {
+    const v = await sendPeerHandoff({ config, args: 'ghost hello --ref Sheet-03', api: fakeApi, stateDirPath: stateRoot, policy: ON, peers: { vm3: { ghost: {} } } });
+    expect(v.ok).toBe(false);
+    expect(v.code).toBe('PEER_NO_IDENTITY_CACHE');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('sends one addressed envelope to the resolved @username and reports the depth', async () => {
+    const v = await sendPeerHandoff({
+      config,
+      args: 'pm "the current tab has no card rows" --ref spec:fleet-current-tab',
+      api: fakeApi,
+      stateDirPath: stateRoot,
+      policy: ON,
+      peers: PEERS,
+    });
+    expect(v.ok).toBe(true);
+    expect(v.messageId).toBe(4242);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].chat_id).toBe('@ht_pm_bot');
+    expect(String(calls[0].text)).toContain('[b2b v1] kind=ask ref=spec:fleet-current-tab depth=1 from=vm3 to=pm');
+    expect(String(calls[0].text)).not.toContain('--ref');
+  });
+
+  it('a second send inside the cooldown is refused before the network', async () => {
+    const args = 'pm hello --ref Sheet-03';
+    const first = await sendPeerHandoff({ config, args, api: fakeApi, stateDirPath: stateRoot, policy: ON, peers: PEERS });
+    expect(first.ok).toBe(true);
+    calls = [];
+    const second = await sendPeerHandoff({ config, args: 'pm again --ref Sheet-03', api: fakeApi, stateDirPath: stateRoot, policy: ON, peers: PEERS });
+    expect(second.ok).toBe(false);
+    expect(second.code).toBe('COOLDOWN');
+    expect(calls).toHaveLength(0);
+
 
 describe('TG tool surface M2 — progress ledger (plan/TG_TOOL_SURFACE.md)', () => {
   const makeRenderer = (opts: Record<string, unknown> = {}) => {

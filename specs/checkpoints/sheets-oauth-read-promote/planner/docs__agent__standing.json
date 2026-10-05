@@ -307,20 +307,6 @@
           "golden/scorecard/current/a11y"
         ]
       }
-    },
-    {
-      "id": "google_sheets_oauth_read",
-      "label": "Private Google Sheets read via repo OAuth user-creds refresh flow, Sheets v4",
-      "asked": "repeated",
-      "files_must_contain": {
-        "scripts/lib/google-store.mjs": [
-          "sheets.googleapis.com/v4/spreadsheets",
-          "fleet-store/1.0"
-        ],
-        "scripts/lib/health/sheet.mjs": [
-          "sheets.googleapis.com/v4/spreadsheets"
-        ]
-      }
     }
   ],
   "sibling_pairs": [

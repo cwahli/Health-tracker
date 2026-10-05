@@ -36,9 +36,10 @@ export const BOT_COMMANDS = [
   { command: 'project', description: 'View or switch project (e.g. /project external 1)' },
   { command: 'council', description: 'Run a council stage by name or number (/council <stage>, /council all, /council status)' },
   { command: 'role', description: 'Switch active agent role (/role legal, /role sim, etc.)' },
-  { command: 'health', description: 'Personal Health Coach: /health status | verify | ingest | refresh | analyze | readiness | research "<what to look up>" | doctor' },
+  { command: 'health', description: 'Personal Health Coach: /health status | verify | ingest | refresh | analyze | readiness | link ["which document"] | research "<what to look up>" | doctor' },
   { command: 'tax', description: 'Chiwah LTD tax: /tax snapshot | sweep | status | deadlines | saving | doc' },
   { command: 'location', description: 'Show or switch active compute location / pool' },
+  { command: 'tell', description: 'Send one bounded message to another seat (/tell <bot> <text> --ref <ticket>)' },
 ];
 
 /** Names handled by bot-host.mjs handleCommand (kept in sync). */
@@ -67,6 +68,15 @@ export const HIDDEN_COMMANDS = {
  * until a proper usage line is written.
  */
 export const HELP_USAGE = {
+  tell: {
+    args: '<bot> <text> --ref <key>',
+    text: [
+      'send ONE bounded message to another seat (bot-to-bot, Telegram 10.0+)',
+      '  /tell pm "the current tab has no card rows" --ref spec:fleet-current-tab',
+      '  the target must be a seat this bot may address; --ref is required',
+      '  the receiver files a proposal for its owner — it does not act on it',
+    ].join('\n'),
+  },
   start: { args: '', text: 'start the bot and show help' },
   help: { args: '', text: 'show available commands' },
   status: { args: '', text: 'show session, model, agent, workspace, usage' },
