@@ -912,6 +912,25 @@ function presentedTokens(req, url) {
   ].filter((t) => typeof t === 'string' && t.length > 0);
 }
 
+/**
+ * verifyAnyToken plus the page-URL fallback: parser-fired, worker and
+ * pre-patch clients present the landed ?token= as same-host Referer with no
+ * code needing to run. Same bearer, same short-lived chat-bound token — no
+ * weaker door, just one more channel. Exported for the sensor.
+ */
+export function verifyWithRefererFallback(req, url, secret, { renewGraceSec = 0 } = {}) {
+  const direct = verifyAnyToken(req, url, secret, { renewGraceSec });
+  if (direct.ok && !direct.renew) return direct;
+  // A live token presented as Referer beats a renewal anywhere else.
+  const rt = refererToken(req);
+  if (rt) {
+    const via = verifyToken(rt, secret, { renewGraceSec });
+    if (via.ok && !via.renew) return via;
+    if (via.ok) return via;
+  }
+  return direct;
+}
+
 /** Accept when ANY presented token verifies: a stale cookie must not shadow a fresh query token. */
 function verifyAnyToken(req, url, secret, { renewGraceSec = 0 } = {}) {
   let verdict = { ok: false, reason: 'bad token' };
@@ -1015,6 +1034,22 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         if (webMode) {
           const early = verifyAnyToken(req, url, secret);
           if (early.ok) return proxyWebUi(req, res, url, env, { ttlSec: ttl });
+        } else {
+          // Personal-link deep link: a verified token without initData goes
+          // straight to its own terminal path (same 302 shape as a fresh
+          // exchange, cookie planted the same way). No initData and no token
+          // is still just a cold WebView below.
+          const deep = verifyAnyToken(req, url, secret);
+          if (deep.ok) {
+            const raw = presentedTokens(req, url).find((t) => verifyToken(t, secret).ok) || '';
+            log(`admitted bot=${deep.botId} chat=${deep.chatId} (deep link)`);
+            res.writeHead(302, {
+              'location': landingLocationFor(deep.botId, raw, env),
+              'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(raw)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+              'cache-control': 'no-store',
+            });
+            return res.end();
+          }
         }
         // A cold WebView: Telegram gives initData to the page, not the URL.
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
@@ -1162,8 +1197,10 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       // was looping forever becomes the repair. It is also a browser-initiated
       // fetch, so the replacement cookie set below actually reaches the browser
       // — a Set-Cookie on the /authz response would be consumed by Caddy's
-      // auth_request instead, which is why /authz is left strict.
-      const verdict = verifyAnyToken(req, url, secret, { renewGraceSec: renewGrace });
+      // auth_request instead, which is why /authz is left strict. The referer
+      // channel joins here too (same grace): parser-fired and worker clients
+      // that never see a cookie still repair through it.
+      const verdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace });
       if (!verdict.ok) {
         log(`token refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
@@ -1196,7 +1233,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // the vm2 terminal and land in another bot's conversation map.
     const route = ttydRoutes(env)[url.pathname];
     if (route) {
-      const verdict = verifyAnyToken(req, url, secret);
+      const verdict = verifyWithRefererFallback(req, url, secret);
       if (!verdict.ok) {
         log(`page refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
