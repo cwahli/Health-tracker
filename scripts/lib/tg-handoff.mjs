@@ -58,12 +58,12 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+// What a peer may make this seat DO is b2b-collab.mjs's business: that is the
+// one part of this protocol which costs a model turn.
+import * as collab from './b2b-collab.mjs';
+
 export const VERSION = 1;
 export const HEADER_RE = /^\[b2b v(\d+)\][ \t]+([^\n]*)/;
-
-export const KINDS = ['ask', 'answer', 'blocked', 'handoff-request', 'ack', 'close'];
-/** Kinds that terminate a chain; nothing may follow them. */
-export const TERMINAL_KINDS = ['ack', 'close'];
 
 export const DEFAULTS = {
   maxDepth: 2,
@@ -73,12 +73,13 @@ export const DEFAULTS = {
   globalWindowMs: 60_000,
   dedupeTtlMs: 3_600_000,
   maxBodyChars: 3_000,
+  ...collab.COLLAB_DEFAULTS, // the turn budget: what a peer may make us DO
 };
 
 export const REFUSAL = {
   BAD_VERSION: 'unsupported envelope version',
   BAD_HEADER: 'not a b2b envelope header',
-  BAD_KIND: 'kind must be one of ask|answer|blocked|handoff-request|ack|close',
+  BAD_KIND: `kind must be one of ${collab.KINDS.join('|')}`,
   NO_REF: 'ref is required — a handoff must name tracked work',
   NO_BODY: 'body is required',
   BODY_TOO_LONG: 'body exceeds the length cap',
@@ -90,6 +91,7 @@ export const REFUSAL = {
   DUPLICATE: 'duplicate message id already seen',
   AFTER_TERMINAL: 'chain already terminated; nothing may follow ack or close',
   NO_CHAIN: 'unknown chain id',
+  ...collab.COLLAB_REFUSAL,
 };
 
 /** Short, collision-resistant enough for dedupe inside one chain. */
@@ -119,13 +121,13 @@ function parseHeaderPairs(rest) {
  * Build an envelope. `now` is injected so tests never read the clock.
  * Returns `{ ok: true, envelope }` or `{ ok: false, code, reason }`.
  */
-export function encodeEnvelope({ from, to, kind, ref, body, depth = 1, now = Date.now(), ttlMs, reply_to = '-', id } = {}) {
+export function encodeEnvelope({ from, to, kind, ref, body, depth = 1, now = Date.now(), ttlMs, reply_to = '-', id, chain } = {}) {
   const fromId = oneLine(from, 64);
   const toId = oneLine(to, 64);
   if (!fromId) return { ok: false, code: 'SENDER_UNKNOWN', reason: 'from is required' };
   if (!toId) return { ok: false, code: 'TARGET_UNKNOWN', reason: 'to is required' };
   if (fromId === toId) return { ok: false, code: 'SELF_ADDRESS', reason: REFUSAL.SELF_ADDRESS };
-  if (!KINDS.includes(String(kind))) return { ok: false, code: 'BAD_KIND', reason: REFUSAL.BAD_KIND };
+  if (!collab.KINDS.includes(String(kind))) return { ok: false, code: 'BAD_KIND', reason: REFUSAL.BAD_KIND };
 
   const refId = oneLine(ref, 120);
   if (!refId) return { ok: false, code: 'NO_REF', reason: REFUSAL.NO_REF };
@@ -145,6 +147,7 @@ export function encodeEnvelope({ from, to, kind, ref, body, depth = 1, now = Dat
     depth: Number(depth) > 0 ? Number(depth) : 1,
     expires: now + (Number(ttlMs) > 0 ? Number(ttlMs) : DEFAULTS.ttlMs),
     reply_to: oneLine(reply_to, 32) || '-',
+    chain: oneLine(chain, 32) || '', // see collab.chainIdOf()
   };
   return { ok: true, envelope, text: renderEnvelope(envelope) };
 }
@@ -161,8 +164,9 @@ export function renderEnvelope(envelope) {
     `expires=${new Date(envelope.expires).toISOString()}`,
     `id=${envelope.id}`,
     `reply_to=${envelope.reply_to}`,
-  ].join(' ');
-  return `${header}\n${envelope.body}`;
+  ];
+  if (envelope.chain) header.push(`chain=${envelope.chain}`); // last, for old readers
+  return `${header.join(' ')}\n${envelope.body}`;
 }
 
 /** Parse a chat message back into an envelope. Never throws. */
@@ -184,11 +188,12 @@ export function decodeEnvelope(text) {
     expires: pairs.expires ? Date.parse(pairs.expires) : 0,
     id: pairs.id || '',
     reply_to: pairs.reply_to || '-',
+    chain: pairs.chain || '',
     // Only the first line is the header: prose may contain newlines, and a body
     // that looks like a header must never be read as one.
     body: raw.slice(match[0].length).replace(/^[ \t]*\n?/, '').trim(),
   };
-  if (!KINDS.includes(envelope.kind)) return { ok: false, code: 'BAD_KIND', reason: REFUSAL.BAD_KIND };
+  if (!collab.KINDS.includes(envelope.kind)) return { ok: false, code: 'BAD_KIND', reason: REFUSAL.BAD_KIND };
   if (!envelope.ref) return { ok: false, code: 'NO_REF', reason: REFUSAL.NO_REF };
   if (!envelope.body) return { ok: false, code: 'NO_BODY', reason: REFUSAL.NO_BODY };
   return { ok: true, envelope };
@@ -196,7 +201,7 @@ export function decodeEnvelope(text) {
 
 /** An empty ledger. Pure functions below take one and return the next one. */
 export function emptyLedger() {
-  return { chains: {}, lastSentAt: {}, seen: {}, sent: [] };
+  return { chains: {}, lastSentAt: {}, seen: {}, sent: [], turns: [] };
 }
 
 function prune(ledger, now) {
@@ -205,11 +210,12 @@ function prune(ledger, now) {
     if (now - at < DEFAULTS.dedupeTtlMs) seen[key] = at;
   }
   const sent = (ledger.sent || []).filter((at) => now - at < DEFAULTS.globalWindowMs);
+  const turns = (ledger.turns || []).filter((at) => now - at < DEFAULTS.turnWindowMs);
   const chains = {};
   for (const [id, chain] of Object.entries(ledger.chains || {})) {
     if (now - (chain.lastAt || 0) < DEFAULTS.dedupeTtlMs) chains[id] = chain;
   }
-  return { ...ledger, seen, sent, chains };
+  return { ...ledger, seen, sent, turns, chains };
 }
 
 /**
@@ -222,7 +228,7 @@ export function checkSendBounds({ ledger = emptyLedger(), edge = {}, now = Date.
   const live = prune(ledger, now);
   const maxDepth = Number(edge.maxDepth) > 0 ? Number(edge.maxDepth) : DEFAULTS.maxDepth;
   const cooldownMs = Number(edge.cooldownMs) >= 0 ? Number(edge.cooldownMs) : DEFAULTS.cooldownMs;
-  const budget = Number(globalBudget) > 0 ? Number(globalBudget) : DEFAULTS.globalBudget;
+  const messageBudget = Number(globalBudget) > 0 ? Number(globalBudget) : DEFAULTS.globalBudget;
 
   if (!envelope || !envelope.id) return { ok: false, code: 'BAD_HEADER', reason: REFUSAL.BAD_HEADER, ledger: live };
 
@@ -231,14 +237,16 @@ export function checkSendBounds({ ledger = emptyLedger(), edge = {}, now = Date.
     return { ok: false, code: 'DUPLICATE', reason: REFUSAL.DUPLICATE, ledger: live };
   }
 
+  // The caller owns the chain id: a collaboration passes one for every round.
   const chain = live.chains[chainId] || { depth: 0, lastAt: 0, terminal: false };
 
   if (chain.terminal) {
     return { ok: false, code: 'AFTER_TERMINAL', reason: REFUSAL.AFTER_TERMINAL, ledger: live };
   }
 
-  // (1) depth, recomputed from local chain state — the payload's claim is not trusted.
-  const nextDepth = chain.depth + 1;
+  // (1) depth, recomputed from local chain state — the payload's claim is not
+  // trusted, and a reply inside an open round is not a hop.
+  const nextDepth = chain.depth + (collab.REPLY_KINDS.includes(String(envelope.kind)) ? 0 : 1);
   if (nextDepth > maxDepth) {
     return { ok: false, code: 'DEPTH_EXCEEDED', reason: REFUSAL.DEPTH_EXCEEDED, ledger: live };
   }
@@ -250,7 +258,7 @@ export function checkSendBounds({ ledger = emptyLedger(), edge = {}, now = Date.
   }
 
   // (3) global send budget for this window.
-  if (live.sent.length >= budget) {
+  if (live.sent.length >= messageBudget) {
     return { ok: false, code: 'GLOBAL_BUDGET', reason: REFUSAL.GLOBAL_BUDGET, ledger: live };
   }
 
@@ -261,21 +269,22 @@ export function checkSendBounds({ ledger = emptyLedger(), edge = {}, now = Date.
     sent: [...live.sent, now],
     chains: {
       ...live.chains,
-      [chainId]: {
-        depth: nextDepth,
-        lastAt: now,
-        terminal: TERMINAL_KINDS.includes(envelope.kind),
-      },
+      [chainId]: collab.sentChainRecord(chain, envelope, { depth: nextDepth, now }),
     },
   };
-  return { ok: true, ledger: next, envelope: { ...envelope, depth: nextDepth } };
+  return {
+    ok: true,
+    ledger: next,
+    // The chain id rides the wire so the peer's reply lands in the same chain.
+    envelope: { ...envelope, depth: nextDepth, chain: chainId },
+  };
 }
 
 /**
  * The receive-side bounds: TTL (5) and dedupe (4), plus the terminal rule.
  * A refused envelope is dead-lettered by the caller — never retried.
  */
-export function checkReceiveBounds({ ledger = emptyLedger(), envelope, now = Date.now(), self = '' } = {}) {
+export function checkReceiveBounds({ ledger = emptyLedger(), envelope, now = Date.now(), self = '', edge = {}, globalTurns } = {}) {
   const live = prune(ledger, now);
   if (!envelope || !envelope.id) return { ok: false, code: 'BAD_HEADER', reason: REFUSAL.BAD_HEADER, ledger: live };
 
@@ -284,12 +293,27 @@ export function checkReceiveBounds({ ledger = emptyLedger(), envelope, now = Dat
     return { ok: false, code: 'TARGET_UNKNOWN', reason: `envelope is addressed to ${envelope.to}`, ledger: live };
   }
 
+  // DEPTH AT RECEIVE, not only at send — the hole B2B-1 left open. The rule is
+  // collab.nextChainDepth() in b2b-collab.mjs.
+  const depthVerdict = collab.nextChainDepth({
+    chain: live.chains[collab.chainIdOf(envelope)] || {},
+    envelope,
+    edge,
+    claimed: envelope.depth,
+    fallbackMax: DEFAULTS.maxDepth,
+  });
+  if (!depthVerdict.ok) {
+    return { ok: false, code: depthVerdict.code, reason: depthVerdict.reason, ledger: live };
+  }
+  const honestDepth = depthVerdict.honestDepth;
+  const claimedDepth = depthVerdict.claimedDepth;
+
   // (4) dedupe, receive side: the same message id twice.
   if (live.seen[`in:${envelope.id}`]) {
     return { ok: false, code: 'DUPLICATE', reason: REFUSAL.DUPLICATE, ledger: live };
   }
 
-  const chainId = envelope.reply_to && envelope.reply_to !== '-' ? envelope.reply_to : envelope.id;
+  const chainId = collab.chainIdOf(envelope);
   const chain = live.chains[chainId] || { depth: 0, terminal: false };
 
   // Termination is checked before the parent-claim dedupe so the refusal names
@@ -298,8 +322,13 @@ export function checkReceiveBounds({ ledger = emptyLedger(), envelope, now = Dat
     return { ok: false, code: 'AFTER_TERMINAL', reason: REFUSAL.AFTER_TERMINAL, ledger: live };
   }
 
-  // Two different messages may not both claim the same parent.
-  if (envelope.reply_to && envelope.reply_to !== '-' && live.seen[`chain:${envelope.reply_to}`]) {
+  // Two different messages may not both claim the same parent. Exempt for the
+  // kinds that answer inside an open round: a collaboration is ONE chain, so
+  // every reply legitimately quotes the last message. The id dedupe above still
+  // refuses a byte-identical replay, which is what this rule was for.
+  if (!collab.REPLY_KINDS.includes(String(envelope.kind))
+    && envelope.reply_to && envelope.reply_to !== '-'
+    && live.seen[`chain:${envelope.reply_to}`]) {
     return { ok: false, code: 'DUPLICATE', reason: REFUSAL.DUPLICATE, ledger: live };
   }
 
@@ -308,8 +337,20 @@ export function checkReceiveBounds({ ledger = emptyLedger(), envelope, now = Dat
     return { ok: false, code: 'EXPIRED', reason: REFUSAL.EXPIRED, ledger: live };
   }
 
+  // THE TURN FLOOR, decided in the module that owns it — before anything here is
+  // recorded, so no caller in this file can widen it.
+  const budget = collab.checkTurnBudget({ chain, turns: live.turns, envelope, edge, globalTurns, now });
+  if (!budget.ok) return { ok: false, code: budget.code, reason: budget.reason, ledger: live };
+  const { spendsTurn, isAgree, round: roundsSoFar, maxTurns, maxRounds } = budget;
+
+  // CONVERGENCE: two local flags, true only once both exist for this round — so
+  // only the seat receiving the second `agree` can see it, and it is the closer.
+  const agreed = collab.agreementState({ chain, peerAgreedRound: isAgree ? roundsSoFar : 0, nowRound: roundsSoFar });
+  const converged = isAgree && agreed.converged;
+
   const next = {
     ...live,
+    turns: spendsTurn ? [...(live.turns || []), now] : (live.turns || []),
     seen: {
       ...live.seen,
       [`in:${envelope.id}`]: now,
@@ -317,14 +358,32 @@ export function checkReceiveBounds({ ledger = emptyLedger(), envelope, now = Dat
     },
     chains: {
       ...live.chains,
-      [chainId]: {
-        depth: Math.max(chain.depth, envelope.depth),
-        lastAt: now,
-        terminal: TERMINAL_KINDS.includes(envelope.kind),
-      },
+      [chainId]: collab.receivedChainRecord(chain, envelope, {
+        honestDepth,
+        claimedDepth,
+        turnsUsed: budget.turnsUsed,
+        round: roundsSoFar,
+        agreement: agreed,
+        converged,
+        now,
+      }),
     },
   };
-  return { ok: true, ledger: next, envelope };
+  return {
+    ok: true,
+    // A turn-costing kind, and whether this round has now been agreed by two
+    // distinct seats. The caller uses the first to decide whether to start an
+    // agent at all, and the second to decide when to stop.
+    spendsTurn,
+    converged,
+    round: roundsSoFar,
+    agreeingSeats: converged ? [envelope.from, self].filter(Boolean).sort() : [],
+    turnsUsed: budget.turnsUsed,
+    maxTurns,
+    maxRounds,
+    ledger: next,
+    envelope,
+  };
 }
 
 /**
