@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal, isWebStatic } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal, isWebStatic, verifyWithRefererFallback } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -742,6 +742,72 @@ console.log('assert-tui-gateway:');
   check('no cookie gets no socket token', (await serveToken('vm', '/tty/token', false)).code === 401);
 }
 
+// Cookieless browser TUI: a plain browser holds no gateway cookie, and the
+// ttyd client's ./token fetch carries no query token of its own — but every
+// request carries the landed page URL as same-host Referer, and a verified
+// ?token= on the TUI root deep-links to its own terminal path (live
+// 2026-10-05: headless cookieless page loaded, socket died on a 401 ./token).
+{
+  const CRED = Buffer.from('tui:x').toString('base64');
+  const env = {
+    TUI_GATEWAY_SECRET: SECRET,
+    TUI_BOT_ID: 'vm',
+    TUI_BOT_TOKEN_VM: TOKEN,
+    TUI_BOT_TOKEN_VM2: TOKEN,
+    TUI_TTYD_URL: 'http://127.0.0.1:1',
+    TUI_TTYD_CREDENTIAL: CRED,
+  };
+  const token = issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+  const refOf = `https://t.example/?token=${encodeURIComponent(token)}`;
+  const call = (url, headers) => new Promise((resolve, reject) => {
+    let code = 0; let hh = {};
+    const res = {
+      writeHead: (c, h) => { code = c; hh = h || {}; },
+      write: () => true,
+      end: () => resolve({ code, h: hh }),
+    };
+    createGateway({ env, log: () => {} })(
+      { method: 'GET', url, headers, [Symbol.asyncIterator]: async function* () {} }, res).catch(reject);
+    setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+  });
+  const noCookie = { host: 't.example', referer: refOf };
+  check('a cookieless socket token with a page referer is admitted',
+    (await call('/tty/token', noCookie)).code === 200);
+  check('a foreign referer gets no socket token',
+    (await call('/tty/token', { host: 't.example', referer: `https://evil.test/?token=${encodeURIComponent(token)}` })).code === 401);
+  check('authz stays strict by design (Caddy consumes the response, not the browser)',
+    (await call('/authz', noCookie)).code === 401);
+  check('authz still admits the socket query token Caddy forwards',
+    (await call(`/authz?token=${encodeURIComponent(token)}`, { host: 't.example' })).code === 204);
+  check('an expired page referer renews the socket token within grace',
+    await (async () => {
+      const old = issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900, now: Date.now() - 1020000 });
+      const r = await call('/tty/token', { host: 't.example', referer: `https://t.example/?token=${encodeURIComponent(old)}` });
+      return r.code === 200 && String(r.h['set-cookie'] || '').includes(COOKIE_NAME);
+    })());
+  check('a tokened TUI root deep-links to the terminal path, never the bootstrap',
+    await (async () => {
+      const r = await call(`/?token=${encodeURIComponent(token)}`, { host: 't.example' });
+      return r.code === 302 && String(r.h.location || '').startsWith('/tty/')
+        && String(r.h['set-cookie'] || '').includes(COOKIE_NAME);
+    })());
+  check('a bare TUI root still gets the cold bootstrap',
+    await (async () => {
+      const chunks = [];
+      const code = await new Promise((resolve, reject) => {
+        const res = { writeHead: (c) => resolve(c), write: (c) => { chunks.push(Buffer.from(c)); return true; }, end: () => {} };
+        createGateway({ env, log: () => {} })(
+          { method: 'GET', url: '/', headers: { host: 't.example' }, [Symbol.asyncIterator]: async function* () {} }, res).catch(reject);
+        setTimeout(() => resolve(-2), 5000).unref?.();
+      });
+      return code === 200;
+    })());
+  check('the fallback prefers direct tokens and otherwise needs the referer',
+    verifyWithRefererFallback({ headers: { host: 't.example', cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` } }, new URL('http://x/'), SECRET).ok === true
+    && verifyWithRefererFallback({ headers: { host: 't.example', referer: refOf } }, new URL('http://x/'), SECRET).ok === true
+    && verifyWithRefererFallback({ headers: { host: 't.example' } }, new URL('http://x/'), SECRET).ok === false);
+}
+
 // 12. The bot forge mounted under /forge: the gateway owns the hostname and the
 // door, and the creation is the injected handler — the gateway never learns how
 // to create a bot, so there is still one creation path.
@@ -883,8 +949,9 @@ console.log('assert-tui-gateway:');
     exch.code === 302 && String(exch.h.location || '').startsWith('/?token='));
 
   const tuiRoot = await call('/', { host: 'tui.health-tracking.duckdns.org', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` });
-  check('the same token on the tui host still gets the terminal bootstrap',
-    tuiRoot.code === 200 && !tuiRoot.body.includes('serve index'));
+  check('a tokened TUI root deep-links to its own terminal path (bot isolation kept)',
+    tuiRoot.code === 302 && String(tuiRoot.h.location || '').startsWith('/tty/')
+    && !tuiRoot.body.includes('serve index'));
 
   // Cookie planting: subresource requests carry no token of their own, so a
   // token-authed proxy plants the presented token as the cookie — otherwise
