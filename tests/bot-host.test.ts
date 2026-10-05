@@ -112,7 +112,7 @@ import {
   compactUnsupported,
   formatAgo,
 } from '../scripts/lib/bot-status.mjs';
-import { classifyInboundSender, sendPeerHandoff } from '../scripts/bot-host.mjs';
+import { classifyInboundSender, machineLocation, sendPeerHandoff } from '../scripts/bot-host.mjs';
 
 describe('telegram reply quote prompt', () => {
   it('prepends a direct text reply while preserving the new request', () => {
@@ -3234,5 +3234,34 @@ describe('B2B-1 /tell send path', () => {
     expect(second.ok).toBe(false);
     expect(second.code).toBe('COOLDOWN');
     expect(calls).toHaveLength(0);
+  });
+});
+
+/* ------------------------------------------------- B2B-1 inbox naming ---
+ * A proposal filed where nobody looks is the same as no proposal. The duty
+ * tells agents to read inbox-<location>.md and every sweep reads
+ * ~/.agents/location, so the writer must use the machine's own name — not
+ * workLocation(), which answers "which compute pool" and says `vps` here.
+ */
+describe('B2B-1 machine location naming', () => {
+  const OLD_MACHINE = process.env.BOT_MACHINE;
+  afterEach(() => {
+    if (OLD_MACHINE === undefined) delete process.env.BOT_MACHINE;
+    else process.env.BOT_MACHINE = OLD_MACHINE;
+  });
+
+  it('prefers ~/.agents/location over the compute pool', () => {
+    expect(machineLocation()).toBe('vps-france');
+  });
+
+  it('BOT_MACHINE overrides, for tests and for a box with no location file', () => {
+    process.env.BOT_MACHINE = 'somewhere-else';
+    expect(machineLocation()).toBe('somewhere-else');
+  });
+
+  it('the file really is the one the sweeps read', () => {
+    const declared = fs.readFileSync(path.join(os.homedir(), '.agents', 'location'), 'utf8').trim().split(/\s+/)[0];
+    expect(machineLocation()).toBe(declared);
+    expect(declared).not.toBe('vps'); // the pool name is the bug this test pins
   });
 });

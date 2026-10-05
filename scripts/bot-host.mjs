@@ -1889,6 +1889,33 @@ export function workLocation() {
 }
 
 /**
+ * The name of THIS machine, which is not the same question as workLocation().
+ *
+ * workLocation() answers "which compute pool should this turn run on" and
+ * answers `vps` on this box. The nudge inbox is keyed by the machine's own
+ * identity: every sweep (pending_sweep, session_link, watch_activity,
+ * proof_linker) reads `~/.agents/location`, and the duty tells agents to read
+ * `~/.agents/nudges/inbox-<location>.md`. Writing proposals to
+ * `inbox-vps.md` when the duty says `inbox-vps-france.md` files them where
+ * nobody looks — a proposal no agent will ever read is the same as no proposal.
+ *
+ * `BOT_MACHINE` overrides for tests and for a box with no location file.
+ */
+export function machineLocation() {
+  const override = String(process.env.BOT_MACHINE || '').trim();
+  if (override) return override;
+  try {
+    const declared = fs.readFileSync(path.join(os.homedir(), '.agents', 'location'), 'utf8')
+      .trim()
+      .split(/\s+/)[0];
+    if (declared) return declared;
+  } catch {
+    /* no location file: fall through to the pool name */
+  }
+  return workLocation();
+}
+
+/**
  * The location this chat asked for, surviving restarts. BOT_LOCATION is
  * process env: a poller restart wipes it, and the next turn silently runs on
  * the physical host again. Chat prefs live in stateDir and are reloaded on
@@ -4798,7 +4825,7 @@ function handlePeerHandoff({ config, message, verdict }) {
   }
 
   // A proposal, not a turn. The owning seat decides; this process does not act.
-  const inbox = path.join(os.homedir(), '.agents', 'nudges', `inbox-${workLocation()}.md`);
+  const inbox = path.join(os.homedir(), '.agents', 'nudges', `inbox-${machineLocation()}.md`);
   const line = proposalLine(verdict.envelope, { self: config.id });
   try {
     fs.mkdirSync(path.dirname(inbox), { recursive: true });
