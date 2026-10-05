@@ -815,9 +815,16 @@ describe("server_dish_finalize", () => {
     // Live repro: debug-job_1789920526160_7rwiexoqd turn 2 (3928 photo update).
     // Scout dish carries NO top-level nutrients (macros live in foods[]), so
     // step 5 derives unsat/salt from the estimated fallback while step 7 then
-    // sums the children into P=43.4/C=18.8/F=1.3/sat=1.3/Na=158. Without a
+    // sums the children into P=43.4/C=18.8/F=3.0/sat=1.3/Na=158. Without a
     // re-derive the stale unsat (>> totalFat) and salt survive onto the ledger,
     // the meal total, and the debug comprehensive table (the 29.2-style row).
+    //
+    // Each component states totalFat as well as saturatedFat. A component that
+    // gives saturatedFat but omits totalFat is malformed input: it forced the
+    // old `?? cNuts.saturatedFat` fallback to read "1.3 g saturated" as "1.3 g
+    // TOTAL", landing the ledger on totalFat === saturatedFat — a 100%-saturated
+    // item, which is the defect fixed in job_1791222829174_c2oveqa1n's sibling
+    // case. The child-sum re-derivation this test guards is unaffected.
     const item = {
       scoutIndex: 0,
       originalName: "Steamboat Ayam dan Sayur",
@@ -826,10 +833,10 @@ describe("server_dish_finalize", () => {
       cookingMethod: "steamed",
       diningEnvironment: "home_cooked",
       foods: [
-        { foodName: "Ayam", weightGrams: 180, nutrients: { protein: 38, saturatedFat: 1.1, addedSugar: 0, totalFibre: 0, sodium: 120, carbohydrates: 0 } },
-        { foodName: "Jamur Enoki", weightGrams: 80, nutrients: { protein: 2.2, saturatedFat: 0.1, addedSugar: 0, totalFibre: 2.2, sodium: 3, carbohydrates: 6.2 } },
-        { foodName: "Jagung", weightGrams: 100, nutrients: { protein: 2, saturatedFat: 0.1, addedSugar: 0, totalFibre: 2, sodium: 15, carbohydrates: 10 } },
-        { foodName: "Selada", weightGrams: 90, nutrients: { protein: 1.2, saturatedFat: 0, addedSugar: 0, totalFibre: 1.1, sodium: 20, carbohydrates: 2.6 } },
+        { foodName: "Ayam", weightGrams: 180, nutrients: { protein: 38, totalFat: 2.5, saturatedFat: 1.1, addedSugar: 0, totalFibre: 0, sodium: 120, carbohydrates: 0 } },
+        { foodName: "Jamur Enoki", weightGrams: 80, nutrients: { protein: 2.2, totalFat: 0.2, saturatedFat: 0.1, addedSugar: 0, totalFibre: 2.2, sodium: 3, carbohydrates: 6.2 } },
+        { foodName: "Jagung", weightGrams: 100, nutrients: { protein: 2, totalFat: 0.2, saturatedFat: 0.1, addedSugar: 0, totalFibre: 2, sodium: 15, carbohydrates: 10 } },
+        { foodName: "Selada", weightGrams: 90, nutrients: { protein: 1.2, totalFat: 0.1, saturatedFat: 0, addedSugar: 0, totalFibre: 1.1, sodium: 20, carbohydrates: 2.6 } },
       ],
       dishNutrients: { saturatedFat: 1.3, totalFat: 4.5, totalSugar: 2.5, potassium: 650, omega3: 0.1, calcium: 60, iron: 2.1, magnesium: 70, vitaminD: 0 },
     };
@@ -841,11 +848,11 @@ describe("server_dish_finalize", () => {
       diningEnvironment: "home_cooked",
     });
 
-    expect(ledger.nutrients.totalFat).toBe(1.3);
+    expect(ledger.nutrients.totalFat).toBe(3);
     expect(ledger.nutrients.saturatedFat).toBe(1.3);
     expect(ledger.nutrients.sodium).toBe(158);
     // Derived values must follow the FINAL (post-sum) macros, not the fallback.
-    expect(ledger.nutrients.unsaturatedFat).toBe(0); // max(0, 1.3 - 1.3 - 0)
+    expect(ledger.nutrients.unsaturatedFat).toBe(1.7); // 3 - 1.3 - 0
     expect(ledger.nutrients.salt).toBeCloseTo(0.4, 2); // 158 * 2.54 / 1000
     expect(Number(ledger.nutrients.unsaturatedFat)).toBeLessThanOrEqual(Number(ledger.nutrients.totalFat));
   });
@@ -1158,5 +1165,96 @@ describe("server_dish_finalize", () => {
       expect(ledger.nutrients.saturatedFat, `Failed for ${name}`).toBe(0);
       expect(ledger.nutrients.totalFat, `Failed for ${name}`).toBe(0.4);
     }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Live regression: job_1791222829174_c2oveqa1n (McDonald's McChicken, "I had 2 burger")
+  //
+  // Two production defects, both silent — the job reported `succeeded` with an
+  // empty degradedStages, so nothing surfaced them.
+  //
+  //  1. totalFat silently inherited saturatedFat. The scout dish carried
+  //     totalFat=32 at dish level, but its foods[] component shipped only
+  //     saturatedFat=7. The `?? cNuts.saturatedFat` tail of the cFatRaw chain
+  //     turned "7 g saturated fat" into "7 g TOTAL fat", leaving the ledger with
+  //     totalFat === saturatedFat === 7 — a physically impossible 100%-saturated
+  //     deep-fried item that also poisoned baseNutrients100g and the Atwater
+  //     back-computed calories.
+  //
+  //  2. A printed label was available and ignored. The second photo of that job
+  //     was a McDonald's menu board reading
+  //     "McChicken® Sandwich ... 1,558 kJ/371 kcal". A printed calorie IS label
+  //     truth wherever it appears (packaging, menu, menu board, counter display,
+  //     order screen). Once transcribed, dbSource must become 'label' and the
+  //     printed value must win over any vision estimate or canonical fallback.
+  // ───────────────────────────────────────────────────────────────────────────
+
+  it("never collapses totalFat onto saturatedFat when a component omits totalFat (McChicken live shape)", async () => {
+    const ledger = await finalizeDishLedger({
+      item: {
+        scoutIndex: 0,
+        name: "McChicken Sandwich",
+        originalName: "McChicken Sandwich",
+        keyword: "McChicken Sandwich",
+        estimatedWeightGrams: 700,
+        nutrientBasisWeight: 700,
+        dbSource: "estimated",
+        // The dish's own total fat, as server_vision_scout's dishNutrients
+        // reconciliation puts on the item before finalize runs ...
+        nutrients: { totalFat: 32, saturatedFat: 7, protein: 28, carbohydrates: 78, sodium: 1600 },
+        // ... while the sole component carries no totalFat at all.
+        componentsDetailList: [
+          {
+            name: "McChicken Sandwich",
+            foodName: "McChicken Sandwich",
+            weightGrams: 700,
+            estimatedWeightGrams: 700,
+            nutrientBasisWeight: 700,
+            nutrients: { protein: 28, saturatedFat: 7, carbohydrates: 78, sodium: 1600, addedSugar: 5, totalFibre: 3 },
+          },
+        ],
+      },
+      nutrientBasisWeight: 700,
+      consumedWeight: 700,
+    });
+
+    // The regression itself: 7 g of saturated fat must not become 7 g of total fat.
+    expect(Number(ledger.nutrients.totalFat)).toBeGreaterThan(Number(ledger.nutrients.saturatedFat));
+  });
+
+  it("treats a printed menu-board calorie as label truth (371 kcal per McChicken, not a vision estimate)", async () => {
+    // The printed 371 kcal is per sandwich. The label's own basis is therefore one
+    // sandwich (~107 g); the logged meal is two of them, so the ledger must scale
+    // by the 2x count and land on 742 kcal — not on a vision estimate.
+    const printed = { energy: 1558, energyKcal: 371, servingGrams: 107 };
+    const ledger = await finalizeDishLedger({
+      item: {
+        scoutIndex: 0,
+        name: "McChicken Sandwich",
+        originalName: "McChicken Sandwich",
+        keyword: "McChicken Sandwich",
+        estimatedWeightGrams: 214,
+        nutrientBasisWeight: 107,
+        // Transcribed verbatim from the second photo of the live job.
+        rawNutritionLabel: printed,
+        componentsDetailList: [
+          {
+            name: "McChicken Sandwich",
+            foodName: "McChicken Sandwich",
+            weightGrams: 214,
+            estimatedWeightGrams: 214,
+            nutrientBasisWeight: 107,
+            rawNutritionLabel: printed,
+          },
+        ],
+      },
+      nutrientBasisWeight: 107,
+      consumedWeight: 214,
+    });
+
+    expect(ledger.dbSource).toBe("label");
+    // 371 kcal printed per sandwich, two sandwiches logged. Reading the 1558 kJ
+    // as kcal instead would land near 6440 — the precedence bug this covers.
+    expect(Number(ledger.nutrients.calories)).toBe(742);
   });
 });
