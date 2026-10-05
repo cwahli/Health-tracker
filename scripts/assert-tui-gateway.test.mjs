@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -738,6 +738,103 @@ console.log('assert-tui-gateway:');
   check('the forge door refuses a forged hash', authorizeForgeAtGateway({ initData: forged, env, now }).ok === false);
   const otherKey = crypto.createHmac('sha256', 'WebAppData').update('987654:OTHER-BOT-TOKEN').digest();
   check('the forge door refuses a token this gateway does not hold', authorizeForgeAtGateway({ initData: makeInitData(fresh(), { secretKey: otherKey }), env, now }).ok === false);
+}
+
+// 14. The opencode web UI host (split solution): the whole host past the
+//     Telegram door proxies to serve with the serve credential substituted,
+//     so a browser never holds it. Live 2026-10-04: the first wiring proxied
+//     Caddy straight at serve, whose door answered {"ok":false,"error":"bad
+//     token"} with no way to ever log in — the gateway must own the exchange.
+{
+  const hostOf = (h) => ({ host: h });
+  check('the web host matches, case-insensitively, port stripped',
+    isWebUiHost({ headers: hostOf('Web.Test:443') }, { OPENCODE_WEB_HOST: 'web.test' }) === true);
+  check('the tui host is not the web host',
+    isWebUiHost({ headers: hostOf('tui.health-tracking.duckdns.org') }, { OPENCODE_WEB_HOST: 'web.test' }) === false);
+  check('no host header is not the web host',
+    isWebUiHost({ headers: {} }, {}) === false);
+  check('the default web host is the served one',
+    webUiHost({}) === 'web.health-tracking.duckdns.org');
+  check('the serve credential is composed as Basic, never bare',
+    webUiAuthHeader({ OPENCODE_WEB_PASSWORD: 'pw' }) === `Basic ${Buffer.from('opencode:pw').toString('base64')}`
+    && !webUiAuthHeader({ OPENCODE_WEB_PASSWORD: 'pw' }).includes('pw:'));
+  check('no serve password means no header (503 downstream, never anonymous)',
+    webUiAuthHeader({}) === '');
+
+  // Through the handler against a stub serve: the stub records what the
+  // gateway sent upstream, so the credential substitution is proven, not
+  // asserted from source.
+  const seen = [];
+  const serve = http.createServer((rq, rs) => {
+    let body = '';
+    rq.on('data', (c) => { body += c; });
+    rq.on('end', () => {
+      seen.push({ url: rq.url, auth: rq.headers.authorization || '' });
+      if (String(rq.url || '').startsWith('/api/session')) {
+        rs.writeHead(200, { 'content-type': 'application/json' });
+        return rs.end('[{"id":"ses_test"}]');
+      }
+      rs.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      rs.end('<html><body>serve index</body></html>');
+    });
+  });
+  await new Promise((r) => serve.listen(0, '127.0.0.1', r));
+  const sport = serve.address().port;
+  const wenv = {
+    TUI_GATEWAY_SECRET: SECRET,
+    TUI_BOT_TOKEN_VM: TOKEN,
+    OPENCODE_WEB_HOST: 'web.test',
+    OPENCODE_WEB_UPSTREAM: `http://127.0.0.1:${sport}`,
+    OPENCODE_WEB_PASSWORD: 'servepw',
+  };
+  const whandle = createGateway({ env: wenv, log: () => {} });
+  const call = (url, headers) => new Promise((resolve) => {
+    // proxyPass iterates the request body, so the stub must be async-iterable.
+    const req = {
+      method: 'GET', url, headers: headers || {},
+      [Symbol.asyncIterator]: async function* () {},
+    };
+    const res = {};
+    // capture writeHead+end together: stash code, resolve on end.
+    // proxyPass streams via res.write with byte chunks, so the stub decodes.
+    let code = 0; let hh = {}; const chunks = [];
+    res.writeHead = (c, h) => { code = c; hh = h || {}; };
+    res.write = (c) => { chunks.push(Buffer.from(c)); return true; };
+    res.end = (body) => { if (body) chunks.push(Buffer.from(body)); resolve({ code, h: hh, body: Buffer.concat(chunks).toString('utf8') }); };
+    whandle(req, res).catch(() => resolve({ code: -1 }));
+    setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+  });
+  const wtoken = issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+  const wcookie = { host: 'web.test', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` };
+
+  const refused = await call('/api/session', { host: 'web.test' });
+  check('the web host without a token is refused, not proxied',
+    refused.code === 401 && refused.body.includes('bad token') && seen.length === 0);
+
+  const page = await call('/', wcookie);
+  check('a cookied token on the web host reaches serve, not the bootstrap',
+    page.code === 200 && page.body.includes('serve index'));
+
+  const api = await call('/api/session?directory=/x', { host: 'web.test', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` });
+  check('the api path and query survive the proxy',
+    api.code === 200 && api.body.includes('ses_test') && seen.some((s) => s.url === '/api/session?directory=/x'));
+  check('serve sees Basic, never the gateway token or nothing',
+    seen.filter((s) => s.url.startsWith('/api')).every((s) => s.auth === `Basic ${Buffer.from('opencode:servepw').toString('base64')}`));
+
+  const exch = await new Promise((resolve) => {
+    const res = { writeHead: (c, h) => resolve({ code: c, h: h || {} }), end: () => {} };
+    const initData = makeInitData(fresh());
+    whandle({ method: 'GET', url: `/?bot=vm&initData=${encodeURIComponent(initData)}`, headers: { host: 'web.test' } }, res)
+      .catch(() => resolve({ code: -1 }));
+    setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+  });
+  check('the web exchange lands back on / with a token, never on a ttyd path',
+    exch.code === 302 && String(exch.h.location || '').startsWith('/?token='));
+
+  const tuiRoot = await call('/', { host: 'tui.health-tracking.duckdns.org', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` });
+  check('the same token on the tui host still gets the terminal bootstrap',
+    tuiRoot.code === 200 && !tuiRoot.body.includes('serve index'));
+  serve.close();
 }
 
 console.log(`\n${passed} pass, ${failed} fail`);

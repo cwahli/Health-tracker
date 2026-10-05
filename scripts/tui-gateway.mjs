@@ -313,6 +313,35 @@ export function boardUpstream(env = process.env) {
 }
 
 /**
+ * opencode web UI upstream (split solution, plan/WEBUI_MIGRATION.md). The web
+ * UI is a same-origin SPA — page, assets, API and SSE all live under one
+ * host — so the gateway fronts the whole host and proxies everything past the
+ * Telegram door, the ttyd shape with an HTTP Basic credential (serve's own
+ * auth) substituted per request so the browser never holds it.
+ */
+export function webUiUpstream(env = process.env) {
+  return String(env.OPENCODE_WEB_UPSTREAM || 'http://127.0.0.1:4096').replace(/\/+$/, '');
+}
+
+/** Host header the web UI is served on; requests there take the web branch. */
+export function webUiHost(env = process.env) {
+  return String(env.OPENCODE_WEB_HOST || 'web.health-tracking.duckdns.org').trim().toLowerCase();
+}
+
+export function isWebUiHost(req, env = process.env) {
+  const raw = req?.headers?.host || req?.headers?.[':authority'] || '';
+  const host = String(raw).split(':')[0].trim().toLowerCase();
+  return host !== '' && host === webUiHost(env);
+}
+
+/** Basic credential for serve, composed here so only the header crosses. */
+export function webUiAuthHeader(env = process.env) {
+  const pw = String(env.OPENCODE_WEB_PASSWORD || '').trim();
+  if (!pw) return '';
+  return `Basic ${Buffer.from(`opencode:${pw}`).toString('base64')}`;
+}
+
+/**
  * Cold-start page for the bug board mini app (packet bug-board-miniapp,
  * Node 5). Same shape as BOOTSTRAP: Telegram hands initData to the page, the
  * page puts it in the query, the server exchanges it — the HMAC never runs
@@ -373,12 +402,17 @@ const BOOTSTRAP_BUGS = [
  * target host is fixed (boardUpstream); only the path+query come from the
  * caller, so this cannot be aimed elsewhere.
  */
-async function proxyPass(req, res, target) {
+async function proxyPass(req, res, target, { headers: extraHeaders = null } = {}) {
   try {
     const headers = {};
     for (const [k, v] of Object.entries(req.headers || {})) {
       if (['host', 'connection', 'content-length'].includes(String(k).toLowerCase())) continue;
       headers[k] = v;
+    }
+    // Extra headers win (e.g. the web UI's upstream Basic credential replaces
+    // the caller's gateway Bearer token, which serve would refuse).
+    if (extraHeaders) {
+      for (const [k, v] of Object.entries(extraHeaders)) headers[k] = v;
     }
     const chunks = [];
     for await (const c of req) chunks.push(c);
@@ -408,6 +442,23 @@ async function proxyPass(req, res, target) {
 
 function logGatewayError(err) {
   console.error('[tui-gateway] board proxy error:', err && err.message ? err.message : err);
+}
+
+/**
+ * Proxy to the opencode web UI past the Telegram door. Stateless per request
+ * (Basic is injected every time), so no serve-side session is needed and
+ * nothing credential-shaped reaches the browser. SSE streams chunk by chunk
+ * through proxyPass rather than buffering.
+ */
+async function proxyWebUi(req, res, url, env) {
+  const auth = webUiAuthHeader(env);
+  if (!auth) {
+    res.writeHead(503, { 'content-type': 'application/json' });
+    return res.end(JSON.stringify({ ok: false, error: 'gateway has no OPENCODE_WEB_PASSWORD' }));
+  }
+  return proxyPass(req, res, `${webUiUpstream(env)}${url.pathname}${url.search}`, {
+    headers: { authorization: auth },
+  });
 }
 
 /**
@@ -769,8 +820,16 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // a session token that goes into an HttpOnly cookie — so the token never
     // appears in a URL, in browser history, or in a Referer.
     if (url.pathname === '/' || url.pathname === '/index.html') {
+      // The web UI host shares this landing: same initData exchange, but a
+      // successful exchange lands back on `/` with a token (which proxies
+      // serve's index below) instead of on a ttyd path.
+      const webMode = isWebUiHost(req, env);
       const initData = url.searchParams.get('initData') || '';
       if (!initData) {
+        if (webMode) {
+          const early = verifyAnyToken(req, url, secret);
+          if (early.ok) return proxyWebUi(req, res, url, env);
+        }
         // A cold WebView: Telegram gives initData to the page, not the URL.
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
         return res.end(BOOTSTRAP);
@@ -810,7 +869,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       // readout so a phone screenshot carries the numbers. Remove with the
       // readout once the layout is confirmed.
       res.writeHead(302, {
-        'location': landingLocationFor(botId, token, env),
+        'location': webMode ? `/?token=${encodeURIComponent(token)}` : landingLocationFor(botId, token, env),
         'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
         'cache-control': 'no-store',
       });
@@ -852,6 +911,22 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       log(`admitted bot=${botId} ${verdict.boundBy}=${verdict.chatId}`);
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       return res.end(JSON.stringify({ ok: true, token, bot: botId, chat: verdict.chatId, ttyd: ttydPathFor(botId, env) }));
+    }
+
+    // opencode web UI (split solution): the whole host past this point is
+    // serve's SPA, so paths stay absolute and nothing needs rewriting. Same
+    // Telegram door as the terminal (cookie/query/Bearer); any verified token
+    // admits, because sessions are per-user rather than per-bot, and the
+    // serve credential is substituted per request so the browser never holds
+    // it. Placed after `/` and `/auth` so the exchange itself stays shared.
+    if (isWebUiHost(req, env)) {
+      const webVerdict = verifyAnyToken(req, url, secret);
+      if (!webVerdict.ok) {
+        log(`web refused (${webVerdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: webVerdict.reason }));
+      }
+      return proxyWebUi(req, res, url, env);
     }
 
     // Caddy calls this before proxying the websocket. Answering 204 lets the
