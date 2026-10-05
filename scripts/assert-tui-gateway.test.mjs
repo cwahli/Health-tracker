@@ -524,6 +524,60 @@ console.log('assert-tui-gateway:');
       keys.slice(b).filter((k) => k.type === 'keydown').length <= 6);
   }
 
+  // 12a7. The bridge stands down on a DOM-rendered terminal. The bridge is a
+  //       workaround for a canvas having no native scroll; xterm.js can also
+  //       paint text as elements (rendererType=dom, set per ttyd unit), and
+  //       there the browser scrolls by itself. Calling preventDefault on that
+  //       gesture would BREAK the scroll it is supposed to enable — so the shim
+  //       must notice and unbind, not compete.
+  //
+  //       Renderer detection is measured, not guessed: a canvas/webgl renderer
+  //       puts a <canvas> inside .xterm-screen, the DOM renderer paints
+  //       .xterm-rows children and has none. Both cases are driven here.
+  {
+    // One harness, parameterised by which renderer is "mounted", so the two
+    // cases cannot pass for each other.
+    const runShim = (renderer) => {
+      const bound = {};
+      const removed = [];
+      const rows = { children: [1, 2, 3] };
+      const screenEl = {
+        clientWidth: 360,
+        clientHeight: 700,
+        // canvas|dom decides what querySelector('canvas') finds.
+        querySelector: (sel) => (sel === 'canvas'
+          ? (renderer === 'canvas' ? {} : null)
+          : (sel === '.xterm-rows' ? rows : null)),
+        addEventListener: (ev, fn) => { bound[ev] = fn; },
+        removeEventListener: (ev) => { removed.push(ev); delete bound[ev]; },
+      };
+      const doc = {
+        querySelector: (s) => (s === '.xterm-screen' ? screenEl : null),
+      };
+      const timers = [];
+      new Function('window', 'document', 'KeyboardEvent', 'performance', 'setInterval', 'clearInterval', 'requestAnimationFrame', TOUCH_SCROLL_JS)(
+        { addEventListener: () => {} },
+        doc,
+        function KeyboardEvent(type, init) { this.type = type; Object.assign(this, init); },
+        { now: () => 1000 },
+        (fn) => { timers.push(fn); return timers.length; },
+        () => {},
+        () => 1,
+      );
+      for (const t of timers) t();
+      return { bound, removed };
+    };
+
+    const onCanvas = runShim('canvas');
+    check('a canvas-rendered terminal still gets the drag bridge',
+      !!onCanvas.bound.touchmove && onCanvas.removed.length === 0);
+
+    const onDom = runShim('dom');
+    check('a DOM-rendered terminal is left to native scrolling',
+      !onDom.bound.touchmove && onDom.removed.length === 0,
+      );
+  }
+
   // 12a5. TEMP-DEBUG: the geometry readout rides on the landing redirect only
   //        when TUI_PAGE_DEBUG=1, and never otherwise.
   check('the landing redirect carries no readout flag by default',

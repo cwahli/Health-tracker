@@ -26,11 +26,33 @@ Environment=TUI_TMUX_NAME=VM-tui-vm3
 EnvironmentFile=-/home/ubuntu/.config/bot-host/tui-ttyd.env
 # Loopback only. Base-path /tty3 keeps this socket's page and websocket under
 # /tty3/, so Caddy routes vm3's socket to its own ttyd.
+# rendererType=dom: ttyd's page hardcodes rendererType:"webgl", which paints the
+# terminal to a canvas — a full-surface bitmap repaint per frame, no native
+# scroll, no selectable text. That is the "slow, screenshot-y TUI" on the phone,
+# and it is a DEFAULT, not a property of ttyd: ttyd 1.7.7's own page accepts
+# canvas | webgl | dom, and "dom" disposes both addons and paints text as real
+# elements, which is what gives native scroll and selection.
+#
+# Measured on this box with headless Chromium against real ttyd, not from the
+# bundle: live vm3 on webgl logs "[ttyd] WebGL renderer loaded" with a <canvas>
+# inside .xterm-screen; the same unit with this flag logs "[ttyd] dom renderer
+# loaded", 0 canvases, and 47 .xterm-rows elements. Do NOT "verify" this by
+# grepping the page bundle for rendererType — the bundle ALWAYS says "webgl",
+# because that is the compiled default; the real value arrives at runtime.
+#
+# TOUCH_SCROLL_JS in scripts/tui-gateway.mjs exists ONLY because the canvas has
+# no native scroll — it bridges a finger drag to PageUp/PageDown. Under the DOM
+# renderer that bridge would fight the browser's own scrolling, so this unit is
+# paired with the shim off (TUI_TOUCH_SCROLL=0).
+#
+# --max-clients 0 (no cap), matching vm/vm2: a cap of 1 is the "tap Enter,
+# never reconnects" loop when a second screen joins the session.
 ExecStart=/usr/bin/ttyd --port 8900 --interface 127.0.0.1 --base-path /tty3 \
-  --writable --max-clients 1 --once=false \
+  --writable --max-clients 0 --once=false \
   -c ${TUI_TTYD_USER}:${TUI_TTYD_PASSWORD} \
   --check-origin --terminal-type xterm-256color \
   --client-option fontSize=13 \
+  --client-option rendererType=dom \
   --ping-interval 20 \
   /home/ubuntu/bot-host/scripts/mobile/tui-attach.sh
 Restart=always

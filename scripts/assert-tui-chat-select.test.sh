@@ -156,17 +156,45 @@ grep -q 'list-clients -t "$TMUX_NAME"' "$ATTACH" \
 grep -q 'aggressive-resize on' "$ATTACH" \
   && { echo "  PASS  the pane keeps the largest client size"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  the pane shrinks to the smallest client"; FAIL=$((FAIL + 1)); }
-# 10d. Both shipped units must allow several browser clients on the one shell:
+# 10d. Every shipped unit must allow several browser clients on the one shell:
 #      --max-clients 1 is the "tap Enter, never reconnects" loop (the desktop
 #      holds the only slot, the phone gets no PTY, ttyd shows its overlay
 #      forever). 0 = no cap.
-for unit in tui-ttyd-vm tui-ttyd-vm2; do
+#
+#      vm3 is in this list because it was NOT, and that is how vm3 shipped with
+#      --max-clients 1 while its two siblings read 0 — the loop this check
+#      exists for was live on the newest unit and nothing looked at it. A gate
+#      that names two of three units is not a gate; it is a sample.
+for unit in tui-ttyd-vm tui-ttyd-vm2 tui-ttyd-vm3; do
   if grep -q -- '--max-clients 0' "$HERE/$unit.service" 2>/dev/null; then
     echo "  PASS  $unit allows several clients on one shell"; PASS=$((PASS + 1))
   else
     echo "  FAIL  $unit caps clients (second device gets the reconnect loop)"; FAIL=$((FAIL + 1))
   fi
 done
+# 10e. The renderer decides whether the TUI is usable on a phone at all.
+#      ttyd's page hardcodes rendererType:"webgl" — a canvas, repainted whole
+#      per frame, with no native scroll and no selectable text. That is the
+#      "slow screenshot terminal" complaint, and it is a DEFAULT, not a property
+#      of ttyd: 1.7.7's own page accepts canvas|webgl|dom.
+#
+#      vm3 carries the flag today; vm/vm2 still default to webgl. That is a
+#      deliberate, measured rollout (one unit, phone-tested before the rest), so
+#      this check asserts the units that claim dom DO claim it — it does not
+#      force every unit to switch at once, which would be the untested thing
+#      this gate exists to prevent.
+grep -q -- '--client-option rendererType=dom' "$HERE/tui-ttyd-vm3.service" 2>/dev/null \
+  && { echo "  PASS  vm3 paints text as elements (rendererType=dom), not a canvas"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  vm3 is back on the canvas renderer (no rendererType=dom)"; FAIL=$((FAIL + 1)); }
+# And the pairing that makes it work: TOUCH_SCROLL_JS bridges a finger drag to
+# PageUp/PageDown ONLY because a canvas cannot scroll natively. On a
+# DOM-rendered terminal the browser scrolls for real, and the bridge's
+# preventDefault would BREAK that scroll. scripts/assert-tui-gateway.test.mjs
+# drives that stand-down; here we only pin that the shim and the flag live in
+# the same change, so a later revert of one is visible in the diff.
+grep -q 'function isDomRenderer' "$HERE/tui-gateway.mjs" \
+  && { echo "  PASS  the drag bridge knows when to stand down"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the drag bridge still binds over native scrolling"; FAIL=$((FAIL + 1)); }
 grep -q 'set-option -t "$TMUX_NAME" status off' "$ATTACH" \
   && { echo "  PASS  the tmux frame stays off the phone screen"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  the tmux frame stays off the phone screen"; FAIL=$((FAIL + 1)); }
