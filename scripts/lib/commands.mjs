@@ -39,6 +39,7 @@ export const BOT_COMMANDS = [
   { command: 'tax', description: 'Chiwah LTD tax: /tax snapshot | sweep | status | deadlines | saving | doc' },
   { command: 'location', description: 'Show or switch active compute location / pool' },
   { command: 'tell', description: 'Send one bounded message to another seat (/tell <bot> <text> --ref <ticket>)' },
+  { command: 'notify', description: 'Finish alerts for runs started elsewhere on|off|status (web UI, TUI)' },
 ];
 
 /** Names handled by bot-host.mjs handleCommand (kept in sync). */
@@ -111,6 +112,7 @@ export const HELP_USAGE = {
   health: { args: '[sub]', text: 'health coach: verify · ingest · refresh · analyze · readiness · research · doctor · status · triage · dashboard' },
   tax: { args: '[sub]', text: 'Chiwah LTD tax: snapshot · sweep · status · deadlines · saving · doc' },
   location: { args: '[name]', text: 'show or switch compute location / quota pool' },
+  notify: { args: '[on|off|status]', text: 'finish alerts for runs started outside Telegram (web UI, TUI)' },
 };
 
 /** Payload for Telegram `setMyCommands` (strips nothing — already valid). */

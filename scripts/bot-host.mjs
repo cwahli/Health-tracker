@@ -3177,6 +3177,31 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'notify': {
+      // Finish alerts for runs started outside Telegram (finish-watch.mjs
+      // reads the same prefs file). Default on; `notify: false` silences.
+      const sub = String(cmd.args || '').trim().toLowerCase();
+      const kept = prefFor(prefs, chatId);
+      if (sub === 'off') {
+        setPref(prefs, chatId, { ...kept, notify: false });
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, '🔕 Finish alerts off for this chat — runs you start elsewhere stay there.');
+        return;
+      }
+      if (sub === 'on') {
+        const { notify: _dropped, ...rest } = kept;
+        setPref(prefs, chatId, rest);
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, '🔔 Finish alerts on for this chat — when a run you start in the web UI or TUI finishes, its answer lands here and the thread continues on either surface.');
+        return;
+      }
+      const on = kept?.notify !== false;
+      await api.sendMessage(chatId, on
+        ? '🔔 Finish alerts are on for this chat. `/notify off` silences them.'
+        : '🔕 Finish alerts are off for this chat. `/notify on` brings them back.');
+      return;
+    }
+
     case 'resume': {
       if (running.get(chatId)) {
         await api.sendMessage(chatId, 'A request is running. Wait for it to finish before resuming a ticket.');

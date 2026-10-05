@@ -122,3 +122,14 @@ way. No data migration at any step (sessions live in the opencode service).
   deploy (restart tui-gateway.service, flip the web. Caddy block to the
   gateway, restart bot-host@vm3 and drop the TEMP-TEST port in the r14
   tree), live phone test.
+
+## Finish forwarder 2026-10-05 (two-way follow-up)
+
+- `scripts/finish-watch.mjs` + `finish-watch.service`: polls serve for
+  completions in TG-bound sessions and forwards foreign answers once
+  (watermarked). Bot-busy sessions and a 60s settle window are consumed,
+  never echoed. Per-chat `/notify on|off`, default on.
+- Web UI works for every bot holding a gateway token (vm*–android,
+  collab, grok, hermes_*); serve rooted at $HOME covers all VPS
+  workspaces. Phone-hosted bots (mobile, /root paths) resolve nothing
+  here — stated, not fixed.
