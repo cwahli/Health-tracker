@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -961,6 +961,37 @@ console.log('assert-tui-gateway:');
     && webUpstreamQuery('?token=abc') === ''
     && webUpstreamQuery('') === ''
     && webUpstreamQuery('?directory=/x') === '?directory=/x');
+  // Referer fallback (live 2026-10-05: cookieless phone polls /api/event
+  // with no token anywhere the shim can attach — the parser-fired bundle
+  // and worker clients only carry the page URL as Referer).
+  const refOf = (token) => `https://web.test/?token=${encodeURIComponent(token)}`;
+  check('a cookieless asset with a same-host referer token is admitted',
+    await (async () => {
+      const r = await call('/_assets/index-x.js', { host: 'web.test', referer: refOf(wtoken) });
+      return r.code === 200;
+    })());
+  check('a cross-host referer token is refused, never proxied',
+    await (async () => {
+      const n = seen.length;
+      const r = await call(`/api/session?x=1`, { host: 'web.test', referer: `https://evil.test/?token=${encodeURIComponent(wtoken)}` });
+      return r.code === 401 && seen.length === n;
+    })());
+  check('a same-host referer without a token is refused',
+    await (async () => {
+      const r = await call('/api/session', { host: 'web.test', referer: 'https://web.test/?foo=1' });
+      return r.code === 401;
+    })());
+  check('refererToken takes the page token same-host only, never values',
+    refererToken({ headers: { host: 'web.test', referer: refOf(wtoken) } }) === wtoken
+    && refererToken({ headers: { host: 'web.test', referer: 'https://evil.test/?token=abc' } }) === ''
+    && refererToken({ headers: { host: 'web.test', referer: 'https://web.test/' } }) === ''
+    && refererToken({ headers: { host: 'web.test' } }) === ''
+    && refererToken({ headers: { host: 'web.test', referer: 'not a url' } }) === '');
+  check('refusal shapes name channels, never values',
+    describeWebRefusal({ headers: {} }, new URL('http://x/api/info')) === 'nocookie noreferer noquerytoken'
+    && describeWebRefusal({ headers: { host: 'web.test', referer: refOf(wtoken) } }, new URL('http://x/api/info')).includes('referertoken')
+    && describeWebRefusal({ headers: { host: 'web.test', referer: 'https://evil.test/?token=abc' } }, new URL('http://x/api/info')).includes('refererforeign')
+    && !describeWebRefusal({ headers: { host: 'web.test', referer: refOf(wtoken) } }, new URL('http://x/api/info')).includes(wtoken.slice(0, 8)));
   serve.close();
 }
 
