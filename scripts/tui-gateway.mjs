@@ -448,14 +448,50 @@ function logGatewayError(err) {
 }
 
 /**
+ * Cookieless auth shim for the opencode web UI. Telegram WebViews swallow
+ * Set-Cookie (redirect and proxied alike), so the planted cookie never sticks
+ * and every cookieless /api/* + /_assets/* 401s — the SPA shell renders
+ * ("home") but data never loads. The shim persists the landing ?token= in
+ * sessionStorage on first HTML load and appends it to every same-origin
+ * fetch/XHR/EventSource, which the gateway already accepts as a query token.
+ * Same-origin only, so the short-lived chat-bound token never leaks to a
+ * third party (the page's only third-party request is telegram-web-app.js,
+ * untouched). Exported for the sensor, not for browsers to import.
+ */
+export const WEB_AUTH_STORAGE_KEY = 'tui_token';
+export function webAuthShimJs(cookieName = COOKIE_NAME) {
+  return `<script>(function(){try{var k=${JSON.stringify(WEB_AUTH_STORAGE_KEY)};var cn=${JSON.stringify(cookieName)};var q;try{q=new URLSearchParams(location.search).get('token')||''}catch(e){q=''}if(q){try{sessionStorage.setItem(k,q)}catch(e){}try{document.cookie=cn+'='+encodeURIComponent(q)+'; Secure; Path=/; SameSite=Strict; Max-Age=900'}catch(e){}}var t=q;if(!t){try{t=sessionStorage.getItem(k)||''}catch(e){t=''}}if(!t)return;function add(u){try{var a=new URL(u,location.href);if(a.origin!==location.origin)return u;if(a.searchParams.get('token'))return u;a.searchParams.append('token',t);return a.pathname+a.search+a.hash}catch(e){return u}}if(window.fetch){var of=window.fetch;window.fetch=function(u,o){try{if(typeof u==='string'){u=add(u)}else if(u&&typeof u.url==='string'){var nu=add(u.url);if(nu!==u.url)u=new Request(nu,u)}}catch(e){}return of.call(this,u,o)}}if(window.XMLHttpRequest){var oo=window.XMLHttpRequest.prototype.open;window.XMLHttpRequest.prototype.open=function(m,u){try{arguments[1]=add(u)}catch(e){}return oo.apply(this,arguments)}}if(window.EventSource){var OE=window.EventSource;window.EventSource=function(u,c){try{u=add(u)}catch(e){}return new OE(u,c)};window.EventSource.prototype=OE.prototype}}catch(e){}})();</script>`;
+}
+
+/** Splice the auth shim into serve's HTML so it runs before the SPA bundle. */
+export function injectWebAuthShim(html, cookieName = COOKIE_NAME) {
+  const shim = webAuthShimJs(cookieName);
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => `${m}${shim}`);
+  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${shim}</head>`);
+  return `${shim}${html}`;
+}
+
+/** Upstream query without the gateway credential: serve never needs ?token=.
+ * Operates on the raw search string so surviving params keep their original
+ * encoding (a URLSearchParams round-trip would re-encode `/` as `%2F`). */
+export function webUpstreamQuery(search) {
+  const qs = String(search || '').replace(/^\?/, '');
+  if (!qs) return '';
+  const kept = qs.split('&').filter((p) => p && decodeURIComponent(p.split('=')[0] || '') !== 'token');
+  return kept.length ? `?${kept.join('&')}` : '';
+}
+
+/**
  * Proxy to the opencode web UI past the Telegram door. Stateless per request
  * (Basic is injected every time), so no serve-side session is needed and
- * nothing credential-shaped reaches the browser. SSE streams chunk by chunk
- * through proxyPass rather than buffering. When the caller authenticated with
- * a query/Bearer token (no cookie yet — some Telegram WebViews swallow
- * Set-Cookie on redirects), the token is planted as the cookie here so the
- * page's subresource requests (which carry no token of their own) pass the
- * same door instead of 401ing one by one.
+ * nothing credential-shaped reaches the browser. SSE and assets stream chunk
+ * by chunk; HTML is buffered once so the cookieless auth shim can be spliced
+ * in before the SPA bundle. When the caller authenticated with a query/Bearer
+ * token (no cookie yet — some Telegram WebViews swallow Set-Cookie on
+ * redirects and proxied responses alike), the token is planted as the cookie
+ * here AND the shim re-attaches it as a query token on every same-origin
+ * fetch/XHR/EventSource, so cookieless subresource and /api/* requests pass
+ * the same door instead of 401ing one by one.
  */
 async function proxyWebUi(req, res, url, env, { ttlSec = 900 } = {}) {
   const auth = webUiAuthHeader(env);
@@ -471,13 +507,49 @@ async function proxyWebUi(req, res, url, env, { ttlSec = 900 } = {}) {
   // Plant only when the browser holds no cookie yet: with a cookie present
   // there is nothing to fix, and a differing query token must not clobber it.
   const plant = !hasCookie ? (bearer || queryToken) : '';
-  const resHeaders = plant
-    ? { 'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(plant)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttlSec}` }
+  const setCookie = plant
+    ? `${COOKIE_NAME}=${encodeURIComponent(plant)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttlSec}`
     : null;
-  return proxyPass(req, res, `${webUiUpstream(env)}${url.pathname}${url.search}`, {
-    headers: { authorization: auth },
-    ...(resHeaders ? { resHeaders } : {}),
-  });
+  // The gateway token authenticates AT the gateway; serve gets Basic only.
+  const target = `${webUiUpstream(env)}${url.pathname}${webUpstreamQuery(url?.search)}`;
+  try {
+    const headers = {};
+    for (const [k, v] of Object.entries(req.headers || {})) {
+      if (['host', 'connection', 'content-length'].includes(String(k).toLowerCase())) continue;
+      headers[k] = v;
+    }
+    headers.authorization = auth;
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const body = Buffer.concat(chunks);
+    const up = await fetch(target, {
+      method: req.method,
+      headers,
+      body: ['GET', 'HEAD'].includes(String(req.method)) || body.length === 0 ? undefined : body,
+      duplex: 'half',
+    });
+    const ct = up.headers.get('content-type') || '';
+    const outHeaders = { 'cache-control': 'no-store' };
+    if (ct) outHeaders['content-type'] = ct;
+    if (setCookie) outHeaders['set-cookie'] = setCookie;
+    if (/text\/html/i.test(ct)) {
+      const raw = Buffer.from(await up.arrayBuffer()).toString('utf8');
+      const injected = injectWebAuthShim(raw);
+      res.writeHead(up.status, outHeaders);
+      return res.end(injected);
+    }
+    res.writeHead(up.status, outHeaders);
+    if (up.body) {
+      for await (const c of up.body) {
+        if (!res.write(c)) await new Promise((r) => res.once('drain', r));
+      }
+    }
+    res.end();
+  } catch (err) {
+    logGatewayError(err);
+    if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'board upstream unreachable' }));
+  }
 }
 
 /**

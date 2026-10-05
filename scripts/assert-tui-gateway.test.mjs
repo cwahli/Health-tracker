@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -927,6 +927,40 @@ console.log('assert-tui-gateway:');
       });
       return setCookie === null;
     })());
+  // Cookieless shim (live 2026-10-05: shell rendered "home" but stuck
+  // loading — WebViews swallow Set-Cookie entirely, so /api/* 401s forever).
+  // The gateway token authenticates AT the gateway; serve must never see it.
+  check('the gateway token is stripped before reaching serve',
+    seen.some((s) => s.url === '/') && !seen.some((s) => s.url.includes(encodeURIComponent(wtoken).slice(0, 12))));
+  check('a directory query survives while the token is stripped',
+    await (async () => {
+      seen.length = 0;
+      const r = await call(`/api/session?directory=/x&token=${encodeURIComponent(wtoken)}`, { host: 'web.test' });
+      return r.code === 200 && seen.some((s) => s.url === '/api/session?directory=/x');
+    })());
+  check('a query-tokened api call passes without any cookie (the shim path)',
+    await (async () => {
+      const r = await call(`/api/session?token=${encodeURIComponent(wtoken)}`, { host: 'web.test' });
+      return r.code === 200 && r.body.includes('ses_test');
+    })());
+  check('the shim persists the token and re-attaches it same-origin only',
+    webAuthShimJs().includes(WEB_AUTH_STORAGE_KEY)
+    && webAuthShimJs().includes('sessionStorage')
+    && webAuthShimJs().includes('EventSource')
+    && webAuthShimJs().includes('location.origin')
+    && !webAuthShimJs().includes('telegram.org'));
+  check('the served html carries the shim before the bundle',
+    planted.body.includes(WEB_AUTH_STORAGE_KEY)
+    && planted.body.indexOf(WEB_AUTH_STORAGE_KEY) < planted.body.indexOf('serve index'));
+  check('shim injection prefers head, falls back without one',
+    injectWebAuthShim('<html><head><title>t</title></head><body>x</body></html>').includes(`<head>${webAuthShimJs()}`)
+    && injectWebAuthShim('<html><body>x</body></html>').includes('<head>')
+    && injectWebAuthShim('plain').startsWith('<script>'));
+  check('upstream query keeps other params and drops only the token',
+    webUpstreamQuery('?directory=/x&token=abc') === '?directory=/x'
+    && webUpstreamQuery('?token=abc') === ''
+    && webUpstreamQuery('') === ''
+    && webUpstreamQuery('?directory=/x') === '?directory=/x');
   serve.close();
 }
 
