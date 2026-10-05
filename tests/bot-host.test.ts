@@ -3327,3 +3327,80 @@ describe('B2B-1 handoff notifications', () => {
     expect(calls[0].disable_notification).toBe('true');
   });
 });
+
+/* ------------------------------------------------------ B2B-1 group lane ---
+ * A private bot-to-bot chat has exactly two members: the two bots. The operator
+ * is not in it, so a handoff sent there is invisible to them — which is exactly
+ * what "I didn't see anything on tg" turned out to mean. With TG_B2B_GROUP_ID
+ * set, the human's group is the transport; the envelope still names the SEAT, so
+ * the receiving half does not change.
+ */
+describe('B2B-1 group lane', () => {
+  const OLD_GROUP = process.env.TG_B2B_GROUP_ID;
+  let stateRoot: string;
+  let calls: Array<Record<string, unknown>>;
+  const api = { call: async (_m: string, p: Record<string, unknown>) => { calls.push(p); return { message_id: 5 }; } };
+
+  beforeEach(() => {
+    stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'b2b-group-'));
+    fs.mkdirSync(path.join(stateRoot, 'pm'), { recursive: true });
+    fs.mkdirSync(path.join(stateRoot, 'vm3'), { recursive: true });
+    fs.writeFileSync(
+      path.join(stateRoot, 'pm', 'identity.json'),
+      JSON.stringify({ id: 'pm', username: 'ht_pm_bot', telegramId: 7 }),
+    );
+    process.env.TG_DEAD_LETTER_DIR = path.join(stateRoot, 'dl');
+    calls = [];
+  });
+
+  afterEach(() => {
+    if (OLD_GROUP === undefined) delete process.env.TG_B2B_GROUP_ID;
+    else process.env.TG_B2B_GROUP_ID = OLD_GROUP;
+    try { fs.rmSync(stateRoot, { recursive: true, force: true }); } catch {}
+  });
+
+  it('with no group configured it goes to the peer DM, as before', async () => {
+    delete process.env.TG_B2B_GROUP_ID;
+    const v = await sendPeerHandoff({
+      config: { id: 'vm3' } as never,
+      args: 'pm hello --ref Sheet-03',
+      api: api as never,
+      stateDirPath: stateRoot,
+      policy: 'humans-and-allowlisted-bots',
+      peers: { vm3: { pm: {} } },
+    });
+    expect(v.ok).toBe(true);
+    expect(calls[0].chat_id).toBe('@ht_pm_bot');
+  });
+
+  it('with TG_B2B_GROUP_ID set it goes to the group the operator is in', async () => {
+    process.env.TG_B2B_GROUP_ID = '-1001234567890';
+    const v = await sendPeerHandoff({
+      config: { id: 'vm3' } as never,
+      args: 'pm hello --ref Sheet-03',
+      api: api as never,
+      stateDirPath: stateRoot,
+      policy: 'humans-and-allowlisted-bots',
+      peers: { vm3: { pm: {} } },
+    });
+    expect(v.ok).toBe(true);
+    expect(calls[0].chat_id).toBe('-1001234567890');
+    // the envelope still names the SEAT, so the receiver classifies it unchanged
+    expect(String(calls[0].text)).toContain('from=vm3 to=pm');
+    expect(v.text).toContain('group -1001234567890');
+  });
+
+  it('an empty TG_B2B_GROUP_ID is not treated as a chat id', async () => {
+    process.env.TG_B2B_GROUP_ID = '   ';
+    const v = await sendPeerHandoff({
+      config: { id: 'vm3' } as never,
+      args: 'pm hello --ref Sheet-03',
+      api: api as never,
+      stateDirPath: stateRoot,
+      policy: 'humans-and-allowlisted-bots',
+      peers: { vm3: { pm: {} } },
+    });
+    expect(calls[0].chat_id).toBe('@ht_pm_bot');
+    expect(v.ok).toBe(true);
+  });
+});
