@@ -43,7 +43,7 @@ markers before treating a line as the current state.
 - `scripts/mobile/miniapp-shim.mjs` holds the gzip, `permessage-deflate`, `Origin`, and `Upgrade` fixes, and also the password form. Keep the four fixes. Remove the password.
 - `scripts/lib/work-session.mjs` names the stable view `work-view` and `workViewTarget(sessionId)`.
 - `stampDepleted` and `trackRunQuota` already record a quota error. ~~Bot-host does not yet walk to the next lane.~~ — the walk **is** wired now (R-14.1 card 6): sensor `scripts/assert-allowance-walk.test.mjs`, exit 0 on `main` at `ced03e4`. The 2026-09-25 12:29Z Muse `429` was pasted into the chat as raw JSON; that specimen is what card 6 fixed.
-- Caddy already serves `health-tracking.duckdns.org`. The TUI does not go on that hostname.
+- Caddy already serves `health-tracker.co.uk`. The TUI does not go on that hostname.
 
 ## Step 1 — this chat, and a button that still means something
 
@@ -54,7 +54,7 @@ markers before treating a line as the current state.
 
 ## Step 2 — stable URL and a one-time ticket
 
-**Change.** A new hostname on the existing Caddy, for example `tui.<the duckdns name>`. It proxies only to the gateway. The gateway runs beside the relay, not inside it. First request carries `initData`. The gateway checks HMAC with **that bot's** token, constant-time compare, `auth_date` within five minutes, skew of 60 seconds into the future allowed. It returns a session token bound to `(bot, chat)` with a short life. Later sockets send only that token. Wrong bot token, stale `auth_date`, and a replay after the window are rejected. The raw `initData` is not logged. The website origin does not serve this route.
+**Change.** A new hostname on the existing Caddy, for example `tui.health-tracker.co.uk` (live since the Domain-01 migration). It proxies only to the gateway. The gateway runs beside the relay, not inside it. First request carries `initData`. The gateway checks HMAC with **that bot's** token, constant-time compare, `auth_date` within five minutes, skew of 60 seconds into the future allowed. It returns a session token bound to `(bot, chat)` with a short life. Later sockets send only that token. Wrong bot token, stale `auth_date`, and a replay after the window are rejected. The raw `initData` is not logged. The website origin does not serve this route.
 
 **Row S3.** A button sent yesterday still opens today. Bytes read back from the public URL contain the event feed, not a password form and not a dead tunnel host.
 **Row S4.** A forged or two-hour-old `initData` gets a refusal. A second socket that resends the original `initData` after the window is refused. A session token from bot A does not open bot B's chat.

@@ -14,11 +14,13 @@ hosts, and the retirement sequence.
 |---|---|---|
 | 0 | Apex + www live on Caddy (`health-tracker.co.uk`, Let's Encrypt) | DONE (pre-existing) |
 | 1 | GitHub push webhook → `https://health-tracker.co.uk/webhook/deploy` | DONE (pre-existing, hook `682068098`) |
-| 2 | Repo defaults point at co.uk (QA, screenshots, skills, tunnels, gateway defaults) | DONE — branch `agent/domain-couk-full` |
-| 3 | DNS: `tui`/`web`/`omb`/`tgtg` A records → `51.254.217.163` (DNS-only) | HUMAN (Cloudflare dashboard) |
-| 4 | Caddy blocks for the four co.uk subdomains | STAGED (`~/caddy-couk-subdomains.snippet`), activates after step 3 |
-| 5 | Bot envs: `TUI_GATEWAY_URL` → `https://tui.health-tracker.co.uk` (vm, vm2, vm3) + `OPENCODE_WEB_HOST` → `web.health-tracker.co.uk` | after step 3, then restart bot/gateway services |
-| 6 | Live verification (site, TUI proof script, bot buttons, sub-services) | after step 5 |
+| 2 | Repo defaults point at co.uk (QA, screenshots, skills, tunnels, gateway defaults) | DONE — #579 merged; audit sweep `agent/domain-couk-audit` moved the last gateway default, test pins, memory seeds, scorecard live origin, and plan canonicals |
+| 3 | DNS: `tui`/`web`/`omb`/`tgtg` A records → `51.254.217.163` (DNS-only) | DONE by human 2026-10-06, verified resolving |
+| 4 | Caddy blocks for the four co.uk subdomains | DONE — active, `tui`/`web` 200 (`omb` 502 + `tgtg` 401 = parity with duckdns twins) |
+| 5 | Bot envs: `TUI_GATEWAY_URL` → `https://tui.health-tracker.co.uk` + `OPENCODE_WEB_URL` → `https://web.health-tracker.co.uk` + `OPENCODE_WEB_HOST` → `web.health-tracker.co.uk` | DONE — all bot envs incl. vm4/vm5/vm6/android/opencode/collab/mobile; units restarted, verified in PIDs |
+| 6 | Live verification (site, TUI proof script, bot buttons, sub-services) | DONE — site 200, full TUI proof green on the new host |
+| 9 | Audit sweep: every remaining old-domain reference (gateway default lost in #581 rebuild, scorecard live origin on dead onrender, r14-tree defaults, relay-staging, plan canonicals) | DONE — `agent/domain-couk-audit` |
+| 10 | Relay-staging on co.uk (`/relay-staging/*` → `:8891` in the co.uk block) | after this PR merges (additive Caddy handle + doc updates) |
 | 7 | Console checks: Supabase redirect allowlist, Google OAuth consent links, Health Connect callback | HUMAN (dashboards) |
 | 8 | Retirement: remove duckdns Caddy blocks after access logs go quiet | after step 6 + soak |
 
@@ -34,8 +36,7 @@ hosts, and the retirement sequence.
 
 ## 2. Why the code changes are safe before DNS exists
 
-- Bots read `TUI_GATEWAY_URL` from their env files, which still pin the duckdns
-  host until step 5 — the new code defaults are inert until then.
+- Bots read `TUI_GATEWAY_URL` / `OPENCODE_WEB_URL` / `OPENCODE_WEB_HOST` from their env files — all bot envs now pin the co.uk hosts (verified in the running processes), so the code defaults are the fallback, not the source.
 - `readWebUiUrl` returns `''` for anything that is not a bare `https://` origin,
   so callers hide the button instead of handing out a dead one.
 - The app runtime is host-agnostic (relative assets, no cookies, request-derived

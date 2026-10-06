@@ -190,11 +190,11 @@
     },
     {
       "id": "scorecard_live_structure",
-      "label": "Scorecard inventories (Top Targets, polarity, 32-key ledger, B0 converts) frozen; live Render must echo GET /api/scorecard/contract; skip is FAIL in every area",
+      "label": "Scorecard inventories (Top Targets, polarity, 32-key ledger, B0 converts) frozen; live VPS must echo GET /api/scorecard/contract; skip is FAIL in every area",
       "asked": "repeated",
       "files_must_contain": {
         "golden/scorecard/instruction/inventories/structure.json": [
-          "https://health-tracker-backend-64gt.onrender.com",
+          "https://health-tracker.co.uk",
           "getTopTargetNutrientKeys",
           "1.293"
         ],

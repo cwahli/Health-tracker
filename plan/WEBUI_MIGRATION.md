@@ -39,7 +39,7 @@ is DOM/native clients; opencode itself ships one (`opencode web` / `serve`).
 - `opencode serve --hostname 127.0.0.1 --port 4096` as a user systemd unit
   (same pattern as `tui-ttyd-<id>.service`); `OPENCODE_SERVER_PASSWORD` set,
   held in gateway env like today's ttyd credential — browser never sees it.
-- Gateway route + Caddy host (e.g. `web.health-tracking.duckdns.org` with
+- Gateway route + Caddy host (e.g. `web.health-tracker.co.uk` with
   `forward_auth` to the gateway, mirroring the `/tty/ws` block). Subdomain, not
   sub-path: the web UI is a SPA with absolute asset paths.
 - Mini App gains a second button (`🌐 Web` next to `⌨️ Terminal`). Both live,
@@ -114,7 +114,7 @@ way. No data migration at any step (sessions live in the opencode service).
 
 - Phase 0 PASS (session sharing proven at API level).
 - Phase 1 host wiring live: `opencode-web.service` on 127.0.0.1:4096,
-  `web.health-tracking.duckdns.org` issued and gated (401 without cookie).
+  `web.health-tracker.co.uk` issued and gated (401 without cookie).
 - Blocker cleared: #549 (b2b-peer) merged 2026-10-05; stranded
   `agent/fleet-proof-shot` branch deleted (all its commits were already on
   main) and the fixes-landed ratchet is 0 fail.
