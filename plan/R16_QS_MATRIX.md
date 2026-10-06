@@ -37,8 +37,11 @@ Secrets are never pasted here; the probe prints credential *presence* only.
 | QS-10 | Exhaustion walks tier-first, then the next location | 🟡 | Tier-internal order proved (high → unlisted → light, light reachable + announced). The "next location" half needs QS-9. |
 | QS-11 | Mid-turn exhaustion detected, stamped, next model resumes | 🟡 | Displacement/stamp/`/allowance` reflection proved live; a **mid-stream** death has not been produced on this host. |
 | QS-12 | No custom builds — shared components only | 🟢 | Propagation gate green, vendor mirrors byte-identical, no surface-local lane table. |
+| QS-13 | Project and role on a live chat | 🟢 | Live on @VM_19485_bot: /role ui, /role check ops, external isolation, legal policy text (R-14.1 cards 1, 2, 3, 7, 8). |
+| QS-14 | Mini App opens the right chat | 🟢 | Live on tui-gateway: per-chat tmux session attach, HMAC initData verification, token renewal grace (TUI S1–S5, S8). |
+| QS-15 | The tool's TUI stays on `work-view` | 🟢 | Live on VM: tmux `work-view` session survives across /project and /location without kill (R-14.1 card 6c). |
 
-**R-16 = RED.** 5 green, 3 partial, 4 red.
+**R-16 Status: 8 green, 3 partial, 4 red.** (Requires physical mobile/Grok/Colab workers online for full green).
 
 ---
 

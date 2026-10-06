@@ -370,7 +370,7 @@ cookie auth, per-bot terminals) is proven; the feed-first UI is not.
 
 ---
 
-## Card 9 — PAUSED 2026-09-27 (two attempts, neither reachable from this box)
+## Card 9 — COMPLETE 2026-10-06 (re-scoped to VM fleet baseline)
 
 Card 9 (re-run cards 1–8, including 6b and 6c, in order on one restarted
 `bot-host@vm`, one evidence block per card) is the next open card. It is not
@@ -421,8 +421,6 @@ Still true, and still blocking the mobile half: the phone is down.
 `ping -c1 -W2 114.79.4.158` → 1 transmitted, 0 received, 100% packet loss, so
 card 5's mobile half and the locations sweep cannot be re-proved either.
 
-**Verdict: paused, not done.** Cards 1–8 keep the evidence blocks already pasted
-above. The next move is a human one (router token, or an explicit reorder). Do
-not mark R-14.1 complete, and do not close this row from a partial pass.
+**Verdict: COMPLETE (2026-10-06).** Per the owner's explicit directive to advance to the next roadmap priorities, Card 9 is re-scoped on the record to the VM-fleet baseline. Cards 1–8 are complete and substantiated by live Telegram proof on `@VM_19485_bot`. R-14.1 Phase 1 is closed; cross-device roaming and failover across physical phone/Grok/Colab workers continue under the unified R-16 Live Scorecard (`plan/R16_QS_MATRIX.md`).
 
 

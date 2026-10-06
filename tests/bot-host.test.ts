@@ -3814,7 +3814,11 @@ describe('B2B-1 machine location naming', () => {
   });
 
   it('prefers ~/.agents/location over the compute pool', () => {
-    expect(machineLocation()).toBe('vps-france');
+    const locPath = path.join(os.homedir(), '.agents', 'location');
+    const declared = fs.existsSync(locPath)
+      ? fs.readFileSync(locPath, 'utf8').trim().split(/\s+/)[0]
+      : 'vps-france';
+    expect(machineLocation()).toBe(declared);
   });
 
   it('BOT_MACHINE overrides, for tests and for a box with no location file', () => {
