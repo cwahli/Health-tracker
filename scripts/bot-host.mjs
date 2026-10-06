@@ -4758,6 +4758,21 @@ export function stickyModelAfterTurn({ chatModel, answeredModel, answered }) {
 }
 
 /**
+ * Ping turns check exactly one lane. A bare greeting (`hi`) is rewritten into
+ * a connectivity ping that must exercise the real turn path (session, model,
+ * reply) — but walking the whole ledger on a ping turns one dead primary into
+ * N switch lines for a turn the user never cared about (live vm3 2026-10-06:
+ * `hi` walked longcat → gemini → qwen → glm → longcat, all hard-model-failure).
+ * Returns the single-model chain for pings, null otherwise (caller keeps the
+ * ledger walk for real prompts).
+ */
+export function pingOnlyModels({ isPingTurn, model, fallback } = {}) {
+  if (!isPingTurn) return null;
+  const single = [model || fallback].filter(Boolean);
+  return single.length ? single : null;
+}
+
+/**
  * The lanes this turn may use, in order, from this host's own ledger.
  *
  * The old chain was [chat model, bot default]: two fixed entries, so a lane the
@@ -6854,7 +6869,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // the window on the lane that is actually answering, not only on the few
     // lanes the static map happens to know. Best-effort, and it runs before the
     // walk: the cache it reads is the one the footer reads anyway.
-    const turnLaneModels = laneChoice.models.length ? laneChoice.models : failoverModels(eff.model, config.agent.model);
+    // Pings check the chat's own lane only; real prompts walk the ledger.
+    const pingModels = pingOnlyModels({ isPingTurn, model: eff.model, fallback: config.agent.model });
+    const turnLaneModels = pingModels || (laneChoice.models.length ? laneChoice.models : failoverModels(eff.model, config.agent.model));
     const laneLimits = await laneContextLimits(config, caches, turnLaneModels);
     const result = await runOpencodeWithFailover({
       api,
