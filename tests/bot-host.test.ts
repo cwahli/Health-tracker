@@ -73,6 +73,9 @@ import {
 import {
   parseCommand,
   resolveCommandName,
+  isKnownCommand,
+  greetingReply,
+  normalizeSkillCommand,
   BOT_COMMANDS,
   COMMAND_NAMES,
   toTelegramCommands,
@@ -97,6 +100,14 @@ import {
   ProgressRenderer,
   fanoutProgressEvent,
   buildQuotedPrompt,
+  listTypedSkills,
+  warmTurnCaches,
+  resolveFreemodelTap,
+  pickOfferedVariant,
+  readTuiPane,
+  hasTuiPane,
+  readTuiMark,
+  tuiStatusLine,
   loadLeases,
   saveLeases,
   recordRunStart,
@@ -1702,7 +1713,7 @@ describe('agent-cline', () => {
 // /tui terminal to resume. Before this, runCline resolved `sessionID: null` for
 // every run, so `sessions.json` kept a stale opencode id from before the chat
 // moved to Cline and the terminal opened that instead — a different agent on a
-// different thread. Cline cannot be TOLD which id to use (measured on 3.0.65:
+// different thread. Cline cannot be TOLD which id to use (measured on 3.0.65, re-verified on 3.0.68 2026-10-04:
 // `--id` with `--json` answers "interactive mode is unsupported", `--id` without
 // a TTY answers "interactive mode requires a TTY"), so the id can only be read
 // back out of the sessions directory.
@@ -2968,6 +2979,533 @@ describe('ledger depletion visibility (stamped routes)', () => {
   });
 });
 
+describe('TG tool surface M2 — progress ledger (plan/TG_TOOL_SURFACE.md)', () => {
+  const makeRenderer = (opts: Record<string, unknown> = {}) => {
+    const sent: string[] = [];
+    const edited: string[] = [];
+    const api = {
+      sendMessage: async (_c: unknown, text: string) => {
+        sent.push(text);
+        return { message_id: sent.length };
+      },
+      editMessageText: async (_c: unknown, _id: unknown, text: string) => {
+        edited.push(text);
+        return true;
+      },
+      sendChatAction: async () => ({}),
+    };
+    const throttle = { submit: (fn: () => unknown) => Promise.resolve().then(fn), pause: () => {} };
+    const renderer = new ProgressRenderer({ api: api as never, throttle: throttle as never, chatId: 1, ...opts });
+    const flush = async () => {
+      for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
+    };
+    return { renderer, sent, edited, flush };
+  };
+
+  it('lists every tool with target and duration under So far:', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'read', status: 'completed', input: { file_path: 'src/a.ts' } });
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm run build' } });
+    const body = renderer._render();
+    expect(body).toContain('So far:');
+    expect(body).toContain('read');
+    expect(body).toContain('src/a.ts');
+    expect(body).toContain('bash');
+    expect(body).toContain('npm run build');
+    expect(body).toMatch(/· \d+s/);
+  });
+
+  it('keeps six tools, dropping the oldest', () => {
+    const { renderer } = makeRenderer();
+    for (let i = 0; i < 8; i += 1) {
+      renderer.onEvent({ kind: 'tool', tool: `tool${i}`, status: 'completed', input: `target${i}` });
+    }
+    expect(renderer.steps).toHaveLength(6);
+    const body = renderer._render();
+    expect(body).not.toContain('tool0');
+    expect(body).not.toContain('tool1');
+    expect(body).toContain('tool7');
+  });
+
+  it('a repeated tool replaces its line without resetting its clock', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm test' } });
+    renderer.steps[0].startedAt -= 20_000;
+    const clock = renderer.steps[0].startedAt;
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'completed', input: { command: 'npm test' } });
+    expect(renderer.steps).toHaveLength(1);
+    expect(renderer.steps[0].startedAt).toBe(clock);
+    expect(renderer.steps[0].status).toBe('completed');
+  });
+
+  it('identical consecutive calls collapse to one line with a count', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'read', status: 'running', input: { file_path: 'x' } });
+    renderer.onEvent({ kind: 'tool', tool: 'read', status: 'running', input: { file_path: 'x' } });
+    expect(renderer.steps).toHaveLength(1);
+    expect(renderer._render()).toContain('×2');
+  });
+
+  it('Result is ~140 chars and clears when the next tool has no output', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'completed', input: 'build', output: 'y'.repeat(500) });
+    const resultLine = renderer._render().split('\n').find((l) => l.startsWith('Result:')) || '';
+    expect(resultLine.length).toBeLessThanOrEqual(160);
+    renderer.onEvent({ kind: 'tool', tool: 'read', status: 'running', input: { file_path: 'z' } });
+    expect(renderer._render()).not.toContain('Result:');
+  });
+
+  it('streaming answer text does not replace the tool story', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm test' } });
+    renderer.onEvent({ kind: 'text', text: 'a long streaming answer that must not wipe the bubble' });
+    const body = renderer._render();
+    expect(body).toContain('bash');
+    expect(body).not.toContain('a long streaming answer');
+  });
+
+  it('thinking is a single line capped at maxChars', () => {
+    const { renderer } = makeRenderer({ maxChars: 220 });
+    renderer.onEvent({ kind: 'reasoning', text: 'First I will explore the repository structure to understand the codebase layout and find the relevant modules.' });
+    renderer.onEvent({ kind: 'reasoning', text: 'Because the failure is in the freemodel ledger, I should check the stamping logic next before changing anything.' });
+    const line = renderer._render().split('\n').find((l) => l.startsWith('Thinking:')) || '';
+    expect(line).not.toContain('\n');
+    expect(line.length).toBeLessThanOrEqual('Thinking: '.length + 220);
+  });
+
+  it('a tool change still paints after maxEdits is spent', async () => {
+    const { renderer, edited, flush } = makeRenderer({ maxEdits: 2 });
+    renderer.onEvent({ kind: 'reasoning', text: 'first substantive exploration of the codebase structure here' });
+    await flush();
+    for (let i = 0; i < 6; i += 1) {
+      renderer.onEvent({ kind: 'reasoning', text: `follow-up investigation number ${i} into test files here` });
+    }
+    await flush();
+    const before = edited.length;
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm test' } });
+    await flush();
+    expect(edited.length).toBeGreaterThan(before);
+    expect(edited[edited.length - 1]).toContain('bash');
+  });
+
+  it('deliver is never gated by the edit budget', async () => {
+    const { renderer, sent, flush } = makeRenderer({ maxEdits: 0 });
+    renderer.onEvent({ kind: 'reasoning', text: 'first substantive exploration of the codebase structure here' });
+    await flush();
+    await renderer.deliver('the final answer');
+    expect(sent.join('\n')).toContain('the final answer');
+    renderer.stopTyping();
+  });
+
+  it('settle keeps the step list under Done / Stopped / Aborted', async () => {
+    for (const [label, needle] of [['✓ Done', '✓ Done'], ['Stopped', 'Stopped'], ['Aborted', 'Aborted']] as const) {
+      const { renderer, edited, flush } = makeRenderer();
+      renderer.messageId = 7;
+      renderer.startedAt = Date.now() - 47_000;
+      renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'completed', input: { command: 'npm test' } });
+      await flush();
+      renderer.settle(label);
+      await flush();
+      const bubble = edited[edited.length - 1];
+      expect(bubble).toContain(needle);
+      expect(bubble).toContain('bash');
+      expect(bubble).toMatch(/47s|46s|48s/);
+      renderer.stopTyping();
+    }
+  });
+});
+
+describe('TG tool surface M3 — slash forward + /skills (plan/TG_TOOL_SURFACE.md)', () => {
+  it('bot commands win, everything else is a tool prompt', () => {
+    for (const known of ['compact', 'thinking', 'model', 'new', 'skills', 'status_all', 'store', 'setup', 'freemodels', 'freemodel']) {
+      expect(isKnownCommand(resolveCommandName({ name: known, args: '', raw: `/${known}` }))).toBe(true);
+    }
+    for (const forwarded of ['do-verify', 'do-check-source', 'do-github-sync', 'do-plan-handoff', 'frob']) {
+      expect(isKnownCommand(resolveCommandName(parseCommand(`/${forwarded} with args`)!))).toBe(false);
+    }
+  });
+
+  it('/skills is published and lists the /do-* skills on disk', () => {
+    expect(BOT_COMMANDS.some((c) => c.command === 'skills')).toBe(true);
+    expect(() => assertValidCommands()).not.toThrow();
+    const typed = listTypedSkills({ agent: { sharedSkills: ['/home/ubuntu/.agents/skills'], workspace: '/tmp' } });
+    const names = typed.map(([cmd]) => cmd);
+    for (const skill of ['/do-verify', '/do-check-source', '/do-github-sync', '/do-plan-handoff']) {
+      expect(names).toContain(skill);
+    }
+  });
+
+  it('/compact no longer promises a fresh session', () => {
+    const compact = BOT_COMMANDS.find((c) => c.command === 'compact')!;
+    expect(compact.description).not.toMatch(/start fresh/i);
+  });
+
+  it('/status compact line no longer promises a fresh session', async () => {
+    const { buildStatusSnapshot } = await import('../scripts/lib/bot-status.mjs');
+    const snap = buildStatusSnapshot({
+      bot: { id: 'x' }, platform: 't', effective: {}, session: null,
+      capabilities: { compact: true },
+    });
+    expect(String(snap.compact)).not.toMatch(/start fresh/i);
+    expect(String(snap.compact)).toMatch(/in place|stays on it/i);
+  });
+});
+
+describe('TG tool surface M1 — one --session (plan/TG_TOOL_SURFACE.md)', () => {
+  it('buildOpencodeArgs carries --session exactly once via sessionId', () => {
+    for (const args of [
+      buildOpencodeArgs({ prompt: 'hi', sessionId: 'ses_1' }),
+      buildOpencodeArgs({ prompt: 'hi', sessionId: 'ses_1', extraArgs: [] }),
+      buildOpencodeArgs({ prompt: 'hi', sessionId: 'ses_1', extraArgs: ['--agent', 'build'] }),
+    ]) {
+      expect(args.filter((a) => a === '--session')).toHaveLength(1);
+      expect(args[args.indexOf('--session') + 1]).toBe('ses_1');
+    }
+  });
+});
+
+describe('TG tool surface M1 — boot warmup (plan/TG_TOOL_SURFACE.md)', () => {
+  it('warmTurnCaches populates the turn-path caches without throwing', async () => {
+    const caches = { models: null, verbose: null, agents: null, free: null, readiness: null };
+    await warmTurnCaches({ id: 'test-warm', agent: {} }, caches);
+    expect(Array.isArray(caches.free)).toBe(true);
+    expect(caches.free.length).toBeGreaterThan(0);
+    expect(caches.readiness).toBeTruthy();
+  }, 30000);
+
+  it('a warmed cache serves the free list from memory', async () => {
+    const caches = { models: null, verbose: null, agents: null, free: null, readiness: null };
+    await warmTurnCaches({ id: 'test-warm', agent: {} }, caches);
+    const t0 = Date.now();
+    await warmTurnCaches({ id: 'test-warm', agent: {} }, caches);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  }, 30000);
+});
+
+describe('TG tool surface M4 — freebuff tap resolves (plan/TG_TOOL_SURFACE.md)', () => {
+  // Live fixture 2026-10-04: the Freebuff keyboard button carries
+  // `fm:deepseek/deepseek-v4.1-flash` while the catalog row is keyed
+  // `freebuff/deepseek/deepseek-v4.1-flash` (surface prefix stripped).
+  // Before the suffix fallback the tap died with "Expired, run /freemodel
+  // again" and never reached the terminal-only refusal.
+  const annotated = [
+    { ref: 'opencode/deepseek-v4.1-flash', label: 'DeepSeek V4.1', selectable: true },
+    { ref: 'freebuff/deepseek/deepseek-v4.1-flash', label: '❌ DeepSeek V4.1 FB', selectable: false, terminalOnly: true },
+  ];
+
+  it('a vendorless freebuff tap resolves to the terminal-only row', () => {
+    const { hit } = resolveFreemodelTap({ annotated, value: 'deepseek/deepseek-v4.1-flash' });
+    expect(hit?.ref).toBe('freebuff/deepseek/deepseek-v4.1-flash');
+  });
+
+  it('an exact selectable match still wins over the suffix', () => {
+    const { hit } = resolveFreemodelTap({ annotated, value: 'opencode/deepseek-v4.1-flash' });
+    expect(hit?.ref).toBe('opencode/deepseek-v4.1-flash');
+  });
+
+  it('an unknown value resolves to nothing (expired path)', () => {
+    expect(resolveFreemodelTap({ annotated, value: 'nope/nothing' }).hit).toBeNull();
+    expect(resolveFreemodelTap({ annotated, value: '#3' }).hit).toBeNull();
+  });
+});
+
+describe('TG TUI — /tui status must not die in the temporal dead zone', () => {
+  it('tuiSessionId is declared before its first use in case tui', () => {
+    // Live 2026-10-04: /tui status and /tui off answered NOTHING. The const
+    // was declared on the open path below its uses in the status/off
+    // branches — a ReferenceError before any reply. This sensor pins the
+    // order: declaration first, uses after.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const caseStart = src.indexOf("case 'tui': {");
+    expect(caseStart).toBeGreaterThan(-1);
+    const caseBody = src.slice(caseStart);
+    const declAt = caseBody.indexOf('const tuiSessionId =');
+    expect(declAt).toBeGreaterThan(-1);
+    for (const use of ['tuiStatusLine(config.id, tuiSessionId)', 'readTuiLease(config.id, tuiSessionId)']) {
+      const useAt = caseBody.indexOf(use);
+      expect(useAt).toBeGreaterThan(-1);
+      expect(useAt).toBeGreaterThan(declAt);
+    }
+  });
+});
+
+describe('TG opencode lane — variant travels only when offered', () => {
+  it('pickOfferedVariant passes an offered level and drops anything else', async () => {
+    expect(pickOfferedVariant('high', ['low', 'high'])).toBe('high');
+    // Live 2026-10-04: ring-2.6-1t-free#xhigh died as Invalid model
+    // reference and burned three failover lanes before gemini answered.
+    expect(pickOfferedVariant('xhigh', [])).toBeUndefined();
+    expect(pickOfferedVariant('xhigh', ['low'])).toBeUndefined();
+    expect(pickOfferedVariant('xhigh', null)).toBeUndefined();
+    expect(pickOfferedVariant(undefined, ['high'])).toBeUndefined();
+    expect(pickOfferedVariant('', ['high'])).toBeUndefined();
+  });
+});
+
+describe('TG connectivity ping — greetings run a one-word turn', () => {
+  it('greetingReply detects bare greetings and nothing else', async () => {
+    // The detector returns the greeting (truthy); the turn path rewrites it
+    // to an exact-echo ping. No canned replies anywhere: a static reply
+    // would prove nothing about the chain.
+    for (const t of ['hi', '  Hi!  ', '/hi', 'hello', 'thanks', 'thank you!', 'ok', 'k', 'got it']) {
+      expect(greetingReply(t)).toBeTruthy();
+    }
+    // Anything with content falls through untouched.
+    for (const t of ['hi, can you check the build', 'hello there', '/do-verify', '/compact', '/model x', 'high', '']) {
+      expect(greetingReply(t)).toBeNull();
+    }
+  });
+
+  it('the turn path rewrites greetings to the PONG ping (source-pinned)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('reply with exactly PONG, no tools');
+  });
+});
+
+describe('TG streaming — the work record survives a lost bubble', () => {
+  const makeApi = () => {
+    const sent = [];
+    return {
+      sent,
+      api: {
+        sendMessage: async (_c, text) => {
+          sent.push(text);
+          return { message_id: sent.length };
+        },
+      },
+    };
+  };
+
+  it('finish sends the settled bubble first when none was ever created', async () => {
+    const { renderer, sent } = (() => {
+      const { sent, api } = makeApi();
+      return { renderer: new ProgressRenderer({ api: api, chatId: 1 }), sent };
+    })();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm test' } });
+    await renderer.finish({ code: 0, finalText: 'the answer', lastError: '', stderr: '' });
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toContain('bash');
+    expect(sent[1]).toContain('the answer');
+    renderer.stopTyping();
+  });
+
+  it('finish does not duplicate the bubble when it already exists', async () => {
+    const { sent, api } = makeApi();
+    const throttle = { submit: (fn) => Promise.resolve().then(fn), pause: () => {} };
+    const renderer = new ProgressRenderer({ api: api, throttle: throttle, chatId: 1 });
+    await renderer.announce();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'completed', input: 'x' });
+    await new Promise((r) => setImmediate(r));
+    const before = sent.length;
+    await renderer.finish({ code: 0, finalText: 'the answer', lastError: '', stderr: '' });
+    // One bubble (created at announce) + the answer; no extra bubble send.
+    expect(sent.filter((t) => t.includes('the answer'))).toHaveLength(1);
+    expect(sent.length).toBeLessThanOrEqual(before + 2);
+    renderer.stopTyping();
+  });
+});
+
+describe('TG review — no per-turn scaffolding in the shared transcript', () => {
+  it('the turn path appends no contract line (removed 2026-10-04: it rendered verbatim in the TUI)', () => {
+    // opencode run has no --system flag, so any per-turn suffix lands in the
+    // stored user row. The contract was that suffix; now nothing may be.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).not.toContain('withChatContract');
+    expect(src).not.toContain('[chat: answer only;');
+  });
+
+  it('commands.mjs exports no contract helper to reattach', () => {
+    const src = fs.readFileSync(new URL('../scripts/lib/commands.mjs', import.meta.url), 'utf8');
+    expect(src).not.toContain('CHAT_ANSWER_CONTRACT');
+    expect(src).not.toMatch(/export function withChatContract/);
+  });
+
+  it('every turn-path helper is actually imported (live 2026-10-04: withChatContract was called but never imported, killing the turn)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const m = src.match(/import\s*\{[\s\S]*?\}\s*from\s*'\.\/lib\/commands\.mjs'/);
+    expect(m).not.toBeNull();
+    for (const name of ['greetingReply', 'isKnownCommand']) {
+      expect(m[0]).toContain(name);
+    }
+  });
+});
+
+describe('TG ping turns leave no scaffolding in the chat transcript', () => {
+  it('isPingTurn is declared before the greeting assignment (never TDZ)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const declAt = src.indexOf('let isPingTurn = false;');
+    expect(declAt).toBeGreaterThan(-1);
+    expect(src.indexOf('isPingTurn = true;')).toBeGreaterThan(declAt);
+  });
+
+  it('ping turns force a fresh session and never bind back', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('if (isPingTurn) turnSessionId = null;');
+    expect(src).toContain('if (result.sessionID && !isPingTurn) {');
+  });
+});
+
+describe('TG TUI — a kept pane with no lease stays closeable', () => {
+  const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tui-pane-'));
+
+  it('readTuiPane returns the published name, null when absent', () => {
+    const dir = tmpRoot();
+    try {
+      expect(readTuiPane('vm2', dir)).toBeNull();
+      fs.writeFileSync(path.join(dir, 'tui-pane'), 'VM-tui-vm2\n');
+      expect(readTuiPane('vm2', dir)).toBe('VM-tui-vm2');
+      fs.writeFileSync(path.join(dir, 'tui-pane'), '  \n');
+      expect(readTuiPane('vm2', dir)).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('hasTuiPane asks tmux and survives a refusal', () => {
+    expect(hasTuiPane('VM-tui-vm2', () => true)).toBe(true);
+    expect(hasTuiPane('VM-tui-vm2', () => { throw new Error('no tmux'); })).toBe(false);
+    expect(hasTuiPane('', () => true)).toBe(false);
+    expect(hasTuiPane(null, () => true)).toBe(false);
+  });
+
+  it('tuiStatusLine reports a kept pane when the lease is gone', () => {
+    // Live 2026-10-04: VM-tui-vm2 alive with no lease after detach, and
+    // both /tui status (before the TDZ fix) and /tui off missed it.
+    const dir = tmpRoot();
+    try {
+      const none = tuiStatusLine('no-such-bot-xyz', 'ses_none', () => false, dir);
+      expect(none).toContain('none open');
+      fs.writeFileSync(path.join(dir, 'tui-pane'), 'VM-tui-vm2');
+      const kept = tuiStatusLine('no-such-bot-xyz', 'ses_none', () => true, dir);
+      expect(kept).toContain('VM-tui-vm2');
+      expect(kept).toContain('pane kept');
+      expect(kept).toContain('/tui off closes it');
+      const gone = tuiStatusLine('no-such-bot-xyz', 'ses_none', () => false, dir);
+      expect(gone).toContain('none open');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('TG TUI failproof sync — reset and resync paths', () => {
+  const botSrc = () => fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+
+  it('/new takes down the stale pane with a verified kill', () => {
+    // Live failure: after /new the open terminal kept showing the old
+    // session. /new must kill the published pane and say to reopen.
+    const src = botSrc();
+    expect(src).toContain('const stalePane = readTuiPane(config.id);');
+    expect(src).toContain('Closed the old terminal pane');
+  });
+
+  it('/tui refresh kills verified-dead and points at reopen', () => {
+    // Manual resync for stuck boots and post-failover staleness: kill, then
+    // a fresh tap rebuilds via attach-time resolution (ttyd only attaches on
+    // a new client, so no auto-reopen is possible here).
+    const src = botSrc();
+    expect(src).toContain("tuiSub === 'refresh'");
+    expect(src).toContain('the new pane attaches to this chat');
+  });
+});
+
+describe('TG TUI failproof sync — no split sessions, no false same-session claim', () => {
+  it('attach refuses a sessionless opencode open before any tmux runs', () => {
+    // Live 2026-10-04: a pre-message tap launched bare opencode on "" while
+    // the turn bound ses_ef7b… — blank terminal beside a live conversation.
+    const sh = fs.readFileSync(new URL('../scripts/mobile/tui-attach.sh', import.meta.url), 'utf8');
+    const refuseAt = sh.indexOf('nothing shared to attach to.');
+    const tmuxAt = sh.indexOf('tmux new-session -d -A');
+    expect(refuseAt).toBeGreaterThan(-1);
+    expect(tmuxAt).toBeGreaterThan(refuseAt);
+    const exitAt = sh.indexOf('exit 0', refuseAt);
+    expect(exitAt).toBeGreaterThan(refuseAt);
+    expect(exitAt).toBeLessThan(tmuxAt);
+  });
+
+  it('/tui offers no button when the chat has no session to attach to', () => {
+    // Live 2026-10-05: /new deleted the chat's session row, /tui ran 20s later,
+    // wrote tui-open.json with sessionId: null and sent the button anyway, and
+    // the tap printed the attach script's refusal on a phone. The gate has to sit
+    // BEFORE the snapshot write (a null session recorded looks like a fact about
+    // the chat) and before the button.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const gateAt = src.indexOf('if (!tuiCanOpen)');
+    const snapshotAt = src.indexOf("'tui-open.json'");
+    const buttonAt = src.indexOf("text: '⌨️ Open the TUI'");
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(snapshotAt).toBeGreaterThan(gateAt);
+    expect(buttonAt).toBeGreaterThan(gateAt);
+    // It answers in the chat and stops there — a `return` before the write.
+    expect(src.slice(gateAt, snapshotAt)).toContain('return;');
+    expect(src.slice(gateAt, snapshotAt)).toContain('tuiNoSessionAdvice');
+    // The advice names the action that fixes it, once, for all three answers
+    // that used to promise a terminal.
+    expect(src).toContain('const tuiNoSessionAdvice =');
+    expect(src).toMatch(/tuiNoSessionAdvice = 'Send me any message first/);
+    // The predicate is the shared decision, not a private re-implementation, and
+    // the Cline exemption stays in the module where the surface table lives.
+    expect(src).toContain("canOpenSharedTui } from './lib/tui-surface.mjs'");
+    expect(src).toContain('const tuiCanOpen = canOpenSharedTui(tuiSurface.surface, tuiSessionId);');
+  });
+
+  it('the refresh answers promise a terminal only when there is a session', () => {
+    // Sibling path, same lie: right after /new there is no pane to refresh, and
+    // both refresh answers used to tell the user to tap /tui for a terminal on
+    // "this chat's current session" — a session that does not exist yet. Two
+    // conditionals on the one predicate: nothing to refresh, and pane closed.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src.match(/tuiCanOpen\s*\?/g)?.length).toBe(2);
+    // Both conditionals fall back to the same honest advice, and so does the
+    // /tui gate: the const plus its three call sites, and no fourth promise.
+    expect(src.match(/tuiNoSessionAdvice/g)?.length).toBe(4);
+  });
+
+  it('/new stops promising a terminal it cannot open yet', () => {
+    // The sentence that caused it: "/tui opens a fresh one on the new session",
+    // said at the exact moment /new had deleted the row that /tui resolves from.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).not.toContain('`/tui` opens a fresh one on the new session');
+    expect(src).toContain('This chat has no session of its own yet');
+  });
+
+  it('a lease naming no session never backs the same-session claim', () => {
+    // readTuiLease must return null when the turn has a session and the
+    // lease names none — otherwise the chat promises "same session" while
+    // the terminal sits on a blank one.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('if (wanted && held !== wanted) return null;');
+    expect(src).not.toContain('if (held && wanted && held !== wanted) return null;');
+  });
+});
+
+describe('TG skills match — menu autocompletes, agent keeps the skill', () => {
+  it('normalizeSkillCommand restores hyphens on the command word only', () => {
+    expect(normalizeSkillCommand('/do_github_sync')).toBe('/do-github-sync');
+    expect(normalizeSkillCommand('/do_github_sync please sync now')).toBe('/do-github-sync please sync now');
+    expect(normalizeSkillCommand('/do-github-sync')).toBe('/do-github-sync');
+    expect(normalizeSkillCommand('/status')).toBe('/status');
+    expect(normalizeSkillCommand('hello there')).toBe('hello there');
+    expect(normalizeSkillCommand('/do_a_b x_y')).toBe('/do-a-b x_y');
+  });
+
+  it('menu entries exist but are not bot commands, so taps still forward', () => {
+    // Telegram forbids hyphens in commands, hence underscore form in the
+    // menu. COMMAND_NAMES must NOT contain them or a tap would hit
+    // handleCommand instead of falling through to the turn path (M3).
+    const menu = toTelegramCommands().map((c) => c.command);
+    for (const name of ['do_check_source', 'do_github_sync', 'do_plan_handoff', 'do_verify']) {
+      expect(menu).toContain(name);
+      expect(isKnownCommand(name)).toBe(false);
+    }
+  });
+
+  it('the turn path imports the normalizer (source-pinned)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('text = normalizeSkillCommand(text);');
+    const m = src.match(/import\s*\{[\s\S]*?\}\s*from\s*'\.\/lib\/commands\.mjs'/);
+    expect(m).not.toBeNull();
+    expect(m[0]).toContain('normalizeSkillCommand');
 
 /* ---------------------------------------------------------------- B2B-1 ---
  * Bot-to-bot ingress. The contract under test is the classification, because

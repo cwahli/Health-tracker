@@ -107,7 +107,7 @@ export function buildStatusSnapshot({
     handoff: Boolean(handoff),
     lastRun,
     totals: runs > 0 || totalTokens > 0 || totalCost > 0 ? { runs, tokens: totalTokens, cost: totalCost } : null,
-    compact: capabilities.compact ? 'session compaction ready — /compact to summarize + start fresh' : null,
+    compact: capabilities.compact ? 'session compaction ready — /compact compacts in place (stays on it)' : null,
     uptime: runtime.bootedAt ? formatUptime(runtime.bootedAt) : '',
     taskState: runtime.taskState || 'idle',
     lock: runtime.lock || null,

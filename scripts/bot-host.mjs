@@ -84,7 +84,7 @@ import { routeState, routeFor, armRoute, confirmRoute, rollbackRoute, validateCa
 import { acquirePollerLease, releasePollerLease, renewPollerLease } from './lib/poller-lease.mjs';
 import { buildPack, packWithContents } from './lib/swap-pack.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
-import { tuiSurfaceFor as tuiSurface, latestClineSessionId } from './lib/tui-surface.mjs';
+import { tuiSurfaceFor as tuiSurface, latestClineSessionId, canOpenSharedTui } from './lib/tui-surface.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
 import { parsePermissionCallback, startPermissionWatch, stopPermissionWatch } from './lib/permission-bridge.mjs';
@@ -152,6 +152,9 @@ import {
 import {
   parseCommand,
   resolveCommandName,
+  isKnownCommand,
+  greetingReply,
+  normalizeSkillCommand,
   isAddressedToUs,
   resolveGroupAddressing,
   recordActiveThread,
@@ -708,6 +711,20 @@ async function getVariants(config, caches, modelId) {
   return entry?.variants || [];
 }
 
+/**
+ * The variant the next `-m` argument may carry (plan/TG_TOOL_SURFACE.md M3).
+ *
+ * A stored level the model does not offer must never reach the child argv:
+ * `ring-2.6-1t-free#xhigh` dies as "Invalid model reference" and burns the
+ * whole failover walk (live 2026-10-04: three lanes down before gemini
+ * answered). Models with no variants run bare — same shape as the Cline
+ * branch, which only forwards levels in CLINE_THINKING_LEVELS.
+ */
+export function pickOfferedVariant(variant, offered) {
+  if (!variant) return undefined;
+  return Array.isArray(offered) && offered.includes(variant) ? variant : undefined;
+}
+
 async function getContextLimit(config, caches, modelId) {
   if (!caches.verbose) {
     caches.verbose = parseModelsVerbose(
@@ -739,6 +756,43 @@ async function getFreeModels(caches, config) {
     caches.freeLocation = location;
   }
   return caches.free;
+}
+
+/**
+ * Boot warmup for the turn path (plan/TG_TOOL_SURFACE.md M1).
+ *
+ * The first turn after a restart paid ~3s building the free-model list
+ * inside the send→session-row budget (M1 proof runs measured 6.8s/7.4s
+ * against a 5s budget; buildFreeModelList alone is ~2.6s cold on this host).
+ * These are the same zero-burn local reads the turn would do anyway
+ * (catalog/auth files, `--version` probes) — warming them once at boot
+ * moves the cost out of the message path. Best-effort: the turn rebuilds
+ * whatever is still missing.
+ */
+export async function warmTurnCaches(config, caches) {
+  try {
+    hostReadiness(caches, config?.id);
+  } catch {
+    /* the turn path recomputes this */
+  }
+  try {
+    await getFreeModels(caches, config);
+  } catch {
+    /* the turn path rebuilds this */
+  }
+  // The variant gate on the turn path (pickOfferedVariant) reads the verbose
+  // catalog: warm it here so the first turn after boot does not pay a
+  // `models --verbose` spawn inside the send→session-row budget.
+  try {
+    if (!caches.verbose) {
+      caches.verbose = parseModelsVerbose(
+        await listModelsVerbose({ opencodeBin: config?.agent?.opencodeBin, env: opencodeEnv(config) }),
+      );
+    }
+  } catch {
+    /* getVariants rebuilds this */
+  }
+  return caches;
 }
 
 /**
@@ -1491,6 +1545,17 @@ export class ProgressRenderer {
     this.tool = '';
     this.toolDetail = '';
     this.toolStartedAt = null;
+    // M2 ledger (plan/TG_TOOL_SURFACE.md): the last six tools, each with
+    // name, status, target, and a duration that starts when that tool starts.
+    // A repeated call of the same tool replaces that tool's line without
+    // resetting its clock; identical consecutive calls collapse with a count.
+    this.steps = [];
+    // Set when the tool list changes since the last paint: tool changes (and
+    // heartbeats) still paint after the reasoning edit budget is spent, so
+    // the bubble coalesces to the latest body instead of freezing.
+    this.toolChangedSincePaint = false;
+    // Settle label for the final bubble: '✓ Done', 'Stopped', or 'Aborted'.
+    this.settledLabel = '';
     this.lastOutput = '';
     this.lastEventAt = null;
     this.lastRendered = '';
@@ -1536,17 +1601,22 @@ export class ProgressRenderer {
     const lines = [];
     const now = Date.now();
     const elapsedSec = this.startedAt ? (now - this.startedAt) / 1000 : 0;
-    lines.push(
-      formatWorkingHeadline({
-        providerLabel: this.providerLabel || 'Agent',
-        modelLabel: this.modelLabel,
-        thinking: this.thinkingLevel,
-        elapsedSec,
-        used: this.usedTokens,
-        ctxLimit: ctxLimitFor(this.modelLabel),
-        detail: this.status,
-      }),
-    );
+    if (this.settledLabel) {
+      const modelBit = [this.providerLabel, this.modelLabel].filter(Boolean).join(' ');
+      lines.push(`${this.settledLabel}${modelBit ? ` · ${modelBit}` : ''} · ${Math.max(0, Math.round(elapsedSec))}s`);
+    } else {
+      lines.push(
+        formatWorkingHeadline({
+          providerLabel: this.providerLabel || 'Agent',
+          modelLabel: this.modelLabel,
+          thinking: this.thinkingLevel,
+          elapsedSec,
+          used: this.usedTokens,
+          ctxLimit: ctxLimitFor(this.modelLabel),
+          detail: this.status,
+        }),
+      );
+    }
     // Node 3 (PROGRESS-SURFACES-1) ships as a CAPABILITY, off by default.
     //
     // The evidence says the user surface should carry a truthful phase label
@@ -1559,17 +1629,22 @@ export class ProgressRenderer {
     // today's behaviour byte-for-byte; flipping it to `phase` is a one-word
     // config change and needs no code edit.
     if (this.progressMode === 'phase') {
-      const phase = phaseLabelFor(this.tool, this.status);
+      const phase = phaseLabelFor(this.tool, this.settledLabel ? 'done' : this.status);
       if (phase) lines.push(`Phase: ${phase}`);
     } else if (this.thinkingText) {
-      lines.push(`Thinking: ${this.thinkingText}`);
+      lines.push(`Thinking: ${String(this.thinkingText).replace(/\s+/g, ' ').trim()}`);
     }
-    if (this.tool) {
+    if (this.steps.length > 1) {
+      lines.push('So far:');
+      for (const step of this.steps) lines.push(`· ${this._stepLine(step, now)}`);
+    } else if (this.steps.length === 1) {
+      lines.push(`Tool: ${this._stepLine(this.steps[0], now)}`);
+    } else if (this.tool) {
       const running = this.toolStartedAt ? ` · ${Math.max(0, Math.round((now - this.toolStartedAt) / 1000))}s` : '';
       const detail = this.toolDetail ? ` ${this._tail(this.toolDetail, 90)}` : '';
       lines.push(`Tool: ${this.tool}${running}${detail}`);
     }
-    if (this.lastOutput) lines.push(`Out: ${this._tail(this.lastOutput, 180)}`);
+    if (this.lastOutput) lines.push(`Result: ${this._tail(this.lastOutput, 140)}`);
     if (this.startedAt) {
       const idleSec = Math.max(0, Math.round((now - (this.lastEventAt || this.startedAt)) / 1000));
       if (idleSec >= 45) lines.push(`⚠️ no update ${idleSec}s — still running (long tool or stuck?)`);
@@ -1651,6 +1726,46 @@ export class ProgressRenderer {
     this._stopHeartbeat();
   }
 
+  /** One ledger line per tool step (plan/TG_TOOL_SURFACE.md M2). */
+  _stepLine(step, now) {
+    const secs = Math.max(0, Math.round(((now || Date.now()) - step.startedAt) / 1000));
+    const count = step.count > 1 ? ` ×${step.count}` : '';
+    const target = step.target ? ` ${this._tail(step.target, 60)}` : '';
+    return `${step.label}${count} (${step.status})${target} · ${secs}s`;
+  }
+
+  _recordTool(name, status, target, output) {
+    const now = Date.now();
+    const label = String(name || 'tool');
+    const key = label;
+    const cleanTarget = String(target || '').replace(/\s+/g, ' ').trim();
+    const out = output != null ? String(output) : '';
+    const last = this.steps.length ? this.steps[this.steps.length - 1] : null;
+    const existing = this.steps.find((s) => s.key === key);
+    if (last && last.key === key && last.status === status && last.target === cleanTarget && !out.trim()) {
+      // Identical consecutive call: one line with a count, clock untouched.
+      last.count = (last.count || 1) + 1;
+      last.updatedAt = now;
+    } else if (existing) {
+      // Repeated call of the same tool: replace that tool's line, keep its clock.
+      existing.status = status;
+      if (cleanTarget) existing.target = cleanTarget;
+      existing.count = 1;
+      existing.updatedAt = now;
+    } else {
+      this.steps.push({ key, label, status, target: cleanTarget, startedAt: now, updatedAt: now, count: 1 });
+      if (this.steps.length > 6) this.steps.shift();
+    }
+    // Legacy single-tool fields stay for lastActivityLine() compat.
+    this.tool = `${label} (${status})`;
+    const clock = existing || this.steps[this.steps.length - 1];
+    this.toolStartedAt = clock ? clock.startedAt : now;
+    this.toolDetail = cleanTarget || (out ? out : '');
+    // One Result: line from tool output; cleared when the next tool has none.
+    this.lastOutput = out.trim() ? out : '';
+    this.toolChangedSincePaint = true;
+  }
+
   onEvent(event) {
     if (!event || typeof event !== 'object') return;
     if (event.kind === 'reasoning' && event.text) {
@@ -1672,23 +1787,21 @@ export class ProgressRenderer {
       this._schedule();
     } else if (event.kind === 'tool') {
       this.lastEventAt = Date.now();
-      this.tool = `${event.tool} (${event.status})`;
-      this.toolStartedAt = Date.now();
       const inp = event.input;
-      let detail = '';
-      if (typeof inp === 'string') detail = inp;
+      let target = '';
+      if (typeof inp === 'string') target = inp;
       else if (inp && typeof inp === 'object') {
-        detail = String(inp.command || inp.file_path || inp.path || inp.filePath || inp.pattern || inp.glob || '');
+        target = String(inp.command || inp.file_path || inp.path || inp.filePath || inp.pattern || inp.glob || '');
       }
       const out = event.output != null ? String(event.output) : '';
-      if (!detail && out) detail = out;
-      this.toolDetail = detail;
-      if (out.trim()) this.lastOutput = out;
+      if (!target && out) target = out;
+      this._recordTool(event.tool, event.status, target, out);
       this.status = 'working';
       this._schedule();
     } else if (event.kind === 'text' && event.text) {
+      // Answer streaming is proof of life only: it must not replace the tool
+      // story in the bubble (the final answer is its own message on settle).
       this.lastEventAt = Date.now();
-      this.lastOutput = String(event.text);
       if (this.status === 'starting') this.status = 'working';
       this._schedule();
     } else if (event.kind === 'step_finish') {
@@ -1742,14 +1855,18 @@ export class ProgressRenderer {
     }
     // Content edits keep the maxEdits budget (spam guard). Heartbeats bypass
     // it so the clock + freshness line keep moving on long runs — they are
-    // still throttled to one edit per throttle window.
+    // still throttled to one edit per throttle window. Tool changes also
+    // still paint after the reasoning budget is spent: skipping the
+    // intermediate reasoning edits is how flood control is handled, and the
+    // next tool change or heartbeat paints the coalesced latest body.
     if (!isHeartbeat) {
-      if (this.edits >= this.maxEdits) return;
+      if (this.edits >= this.maxEdits && !this.toolChangedSincePaint) return;
       this.edits += 1;
     }
     const body = this._render();
     if (body === this.lastRendered) return;
     this.lastRendered = body;
+    this.toolChangedSincePaint = false;
     this.throttle
       .submit(() => this._guarded(() => this.api.editMessageText(this.chatId, this.messageId, this._render())))
       .catch(() => {});
@@ -1800,8 +1917,33 @@ export class ProgressRenderer {
     }
   }
 
+  /** Final bubble: label + elapsed + the same step list (M2). Bypasses the
+   * reasoning edit budget like a heartbeat; the final answer stays a
+   * separate send and is never gated. */
+  settle(label) {
+    this.settledLabel = label;
+    if (label === '✓ Done') this.status = 'done';
+    else if (label === 'Aborted') this.status = 'aborted';
+    else this.status = 'stopped';
+    if (this.messageId != null) this._schedule(true);
+  }
+
   async finish(result, { footer = '' } = {}) {
     this.stopTyping();
+    // The bubble may never have been created (every create/edit failed or
+    // was throttled away): without this, a turn whose progress never
+    // painted delivers only the answer and the whole work record — tools,
+    // durations, thinking — is silently lost ("everything at once at the
+    // end", live 2026-10-04). So when no bubble exists, send the settled
+    // body as its own message first; the answer below stays separate.
+    // Never throws: the answer must still go out.
+    if (this.messageId == null && !this.dryRun) {
+      try {
+        await this.deliver(this._render());
+      } catch {
+        /* the answer below matters more */
+      }
+    }
     const withFooter = (body) => (footer ? `${body}\n\n${footer}` : body);
     const partial = String(result.finalText || '').trim();
     const errText = String(result.lastError || '').trim();
@@ -1812,7 +1954,7 @@ export class ProgressRenderer {
     const killedNoOutput = result.code == null && !errText && stderrBlank && !partial;
     if (killedNoOutput) {
       this.status = 'failed';
-      if (this.messageId != null) this._schedule(true);
+      this.settle('Stopped');
       await this.deliver(
         withFooter(
           'Interrupted before the model produced output (the bot process restarted mid-run). Nothing was computed — just send your request again.',
@@ -1822,7 +1964,7 @@ export class ProgressRenderer {
     }
     if (errText && !partial) {
       this.status = 'failed';
-      if (this.messageId != null) this._schedule(true);      const friendly = humanizeRunError(errText);
+      this.settle('Stopped');      const friendly = humanizeRunError(errText);
       let hint = '';
       let lead = `Error: ${friendly}`;
       if (isTimeoutError(errText)) {
@@ -1835,7 +1977,7 @@ export class ProgressRenderer {
       return;
     }
     this.status = 'done';
-    if (this.messageId != null) this._schedule(true);
+    this.settle('✓ Done');
     if (!partial) {
       const code = result.code === 0 ? '' : ` (exit ${result.code})`;
       await this.deliver(withFooter(`Done${code}, but the model returned no text output.`));
@@ -2433,6 +2575,65 @@ async function bugsListText() {
   return formatBugsListText(parsed);
 }
 
+/**
+ * `/do-*` skills the operator can type (plan/TG_TOOL_SURFACE.md M3).
+ * Telegram menus cannot register a hyphen, so these are typed, not buttons —
+ * and the slash-forward in handleMessage delivers them to the tool as the
+ * prompt. Sources: the canonical `~/.agents/skills` plus this bot's
+ * `agent.sharedSkills` (workspace-relative entries resolve against the
+ * workspace, `~` against home). A skill counts when its directory holds a
+ * SKILL.md.
+ */
+export function listTypedSkills(config) {
+  const found = new Map();
+  const roots = [];
+  try {
+    roots.push(path.join(os.homedir(), '.agents', 'skills'));
+  } catch {}
+  const shared = config?.agent?.sharedSkills;
+  const list = Array.isArray(shared) ? shared : [];
+  for (const raw of list) {
+    const value = String(raw ?? '').trim();
+    if (!value) continue;
+    if (value === '~') roots.push(os.homedir());
+    else if (value.startsWith('~/')) roots.push(path.join(os.homedir(), value.slice(2)));
+    else if (path.isAbsolute(value)) roots.push(value);
+    else roots.push(path.resolve(config?.agent?.workspace || '.', value));
+  }
+  for (const root of roots) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry || typeof entry.isDirectory !== 'function' || !entry.isDirectory()) continue;
+      const dirName = String(entry.name || '');
+      if (!dirName.startsWith('do-')) continue;
+      const skillFile = path.join(root, dirName, 'SKILL.md');
+      let readable = false;
+      try {
+        readable = fs.statSync(skillFile).isFile();
+      } catch {
+        readable = false;
+      }
+      if (!readable) continue;
+      const cmd = `/${dirName}`;
+      if (!found.has(cmd)) {
+        let blurb = '';
+        try {
+          const head = String(fs.readFileSync(skillFile, 'utf8')).slice(0, 1200);
+          const m = head.match(/^\s*description\s*:\s*>?-?\s*(.+)$/m);
+          if (m) blurb = m[1].trim().slice(0, 120);
+        } catch {}
+        found.set(cmd, blurb);
+      }
+    }
+  }
+  return [...found.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+}
+
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId = 0, kind = 'direct' }) {
   const eff = effective(config, prefs, chatId);
 
@@ -2576,7 +2777,37 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       saveSessions(config.id, sessions);
       clearFollowups(chatId);
       clearActiveThread(chatId);
-      await api.sendMessage(chatId, 'Started a fresh session.');
+      // Failproof-sync: an open terminal belongs to the OLD session. Leaving
+      // it up guarantees the "TUI shows another conversation" desync, so /new
+      // takes it down (verified kill, same path as /tui off) and the next /tui
+      // tap rebuilds on the fresh session. The old session itself is untouched.
+      let paneNote = '';
+      const stalePane = readTuiPane(config.id);
+      if (stalePane && hasTuiPane(stalePane)) {
+        killTuiPane(stalePane);
+        if (!hasTuiPane(stalePane)) {
+          try {
+            fs.rmSync(tuiLeasePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          try {
+            fs.rmSync(tuiPanePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          // The honest half: /new deleted the session row above, so there is
+          // no session for /tui to attach to until the next message binds one.
+          // This used to promise /tui a fresh terminal on the new session, which
+          // cannot be true at this moment, and it is exactly what a user acted on
+          // 20s later to reach a terminal that refused to open
+          // (live 2026-10-05).
+          paneNote = `\nClosed the old terminal pane (\`${stalePane}\`) — it showed the previous session. This chat has no session of its own yet: the next message you send starts one, and \`/tui\` after that lands on it.`;
+        } else {
+          paneNote = `\n⚠️ Could not close the old terminal pane (\`${stalePane}\`) — it still shows the previous session. \`/tui off\` retries the kill.`;
+        }
+      }
+      await api.sendMessage(chatId, `Started a fresh session.${paneNote}`);
       return;
 
     case 'compact': {
@@ -2876,8 +3107,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     case 'thinking': {
       const ref = parseModelRef(eff.model);
       // Gemini is single-shot: no variants, no opencode verbose lookup.
+      // One refusal, no turn, no stored level (plan/TG_TOOL_SURFACE.md M4).
+      if (ref.surface === 'gemini') {
+        await api.sendMessage(chatId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.');
+        return;
+      }
       const variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : ref.surface === 'gemini' ? [] : await getVariants(config, caches, eff.model);
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
       if (!cmd.args) {
         if (!variants.length) {
           await api.sendMessage(chatId, `No thinking levels exposed for ${eff.model}.`);
@@ -2899,6 +3135,17 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'skills': {
+      const typed = listTypedSkills(config);
+      if (!typed.length) {
+        await api.sendMessage(chatId, 'No /do-* skills found on this host. The canonical copy is ~/.agents/skills.');
+        return;
+      }
+      const lines = typed.map(([cmd, blurb]) => (blurb ? `${cmd} — ${blurb}` : cmd));
+      await api.sendMessage(chatId, `Skills you can type here (typed, not buttons — just send the line):\n${lines.join('\n')}`);
+      return;
+    }
+
     case 'tui': {
       // /tui off closes this bot's pane; /tui status reports it. Both live here
       // rather than in the shell because the pane's name belongs to a service
@@ -2908,15 +3155,54 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // drift the first time either side changed, and a wrong name means killing
       // nothing while reporting success.
       const tuiSub = String(cmd.args || '').trim().toLowerCase();
+      // The workspace this chat is actually in right now — the same expression
+      // the turn uses. Resolved up here (not only on the open path) because
+      // /tui status and /tui off below already need the session id: declaring
+      // it after them is a temporal-dead-zone ReferenceError that answers
+      // neither (every /tui status went silently missing).
+      const tuiProject = getChatProject(chatId);
+      const tuiWorkspace = tuiProject.type === 'external' ? tuiProject.workspace : config.agent.workspace;
+      // Scoped, so /tui hands tui-attach.sh the session for the workspace the
+      // chat is in — the identical id the next turn passes.
+      const tuiSessionId = sessionForWorkspace(sessions, chatId, tuiWorkspace);
+      // The lane, and whether a terminal could be opened on THIS chat's session
+      // right now. Resolved here, above status/off/refresh, because all three
+      // name the session in their answers and two of them used to promise a
+      // terminal that could not be opened (see tuiCanOpen below).
+      const tuiSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
+      const tuiCanOpen = canOpenSharedTui(tuiSurface.surface, tuiSessionId);
+      // What to say instead of "tap /tui for a terminal" when there is no
+      // session behind the promise. Named once because three answers need it and
+      // a fresh chat has no session at all until its next message binds one
+      // (live 2026-10-05: /new then /tui twenty seconds later).
+      const tuiNoSessionAdvice = 'Send me any message first: that starts the conversation this chat shares with the terminal, and `/tui` after it lands on that conversation.';
       if (tuiSub === 'status') {
         await api.sendMessage(chatId, `⌨️ ${tuiStatusLine(config.id, tuiSessionId)}`);
         return;
       }
       if (tuiSub === 'off' || tuiSub === 'kill' || tuiSub === 'stop') {
         const lease = readTuiLease(config.id, tuiSessionId);
-        if (!lease || !lease.pane) {
-          await api.sendMessage(chatId, '⌨️ No TUI pane is open for this chat — nothing to close. `/tui` opens one.');
-          return;
+        // The lease only exists while a client is attached; a kept pane
+        // outlives it (live 2026-10-04: VM-tui-vm2 alive, no lease, and /tui
+        // off answered "nothing to close"). Fall back to the last published
+        // pane name — a name whose session is gone reads as already closed.
+        let pane = lease?.pane || null;
+        let sessionLabel = lease?.session ? ` (session ${lease.session.slice(0, 12)}…)` : '';
+        if (!pane) {
+          pane = readTuiPane(config.id);
+          if (!pane) {
+            await api.sendMessage(chatId, '⌨️ No TUI pane is open for this chat — nothing to close. `/tui` opens one.');
+            return;
+          }
+          if (!hasTuiPane(pane)) {
+            try {
+              fs.rmSync(tuiPanePath(config.id), { force: true });
+            } catch {
+              /* the pane is gone either way */
+            }
+            await api.sendMessage(chatId, `⌨️ No TUI pane is running — \`${pane}\` is already gone. \`/tui\` opens a fresh one.`);
+            return;
+          }
         }
         // Refuse while this bot is mid-turn, unless forced. Killing the pane
         // takes the terminal's opencode process with it, and if a turn is
@@ -2925,26 +3211,70 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         if (running.has(chatId) && !/\b(force|yes)\b/.test(tuiSub)) {
           await api.sendMessage(chatId, [
             '⏸ A turn is running right now, so I will not close the terminal out from under it.',
-            `Say \`/tui off force\` to close \`${lease.pane}\` anyway, or wait for the turn to finish first.`,
+            `Say \`/tui off force\` to close \`${pane}\` anyway, or wait for the turn to finish first.`,
           ].join('\n'));
           return;
         }
-        const killed = killTuiPane(lease.pane);
-        // The lease goes with the pane. tui-attach.sh clears it on exit, but a
-        // killed pane never runs its trap, so the bot clears it here or /status
-        // keeps reporting a terminal that no longer exists. It would expire on
-        // its heartbeat anyway; this just makes the answer immediate.
-        try {
-          fs.rmSync(tuiLeasePath(config.id), { force: true });
-        } catch {
-          /* the pane is gone either way */
+        killTuiPane(pane);
+        // Verify the kill landed: only then do the lease and the published
+        // pane name go with it. A surviving session keeps its records, so a
+        // failed kill still reports a pane /status can see.
+        const gone = !hasTuiPane(pane);
+        if (gone) {
+          try {
+            fs.rmSync(tuiLeasePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          try {
+            fs.rmSync(tuiPanePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
         }
-        await api.sendMessage(chatId, killed
+        await api.sendMessage(chatId, gone
           ? [
-            `💤 Closed \`${lease.pane}\`${lease.session ? ` (session ${lease.session.slice(0, 12)}…)` : ''}.`,
+            `💤 Closed \`${pane}\`${sessionLabel}.`,
             'Your scrollback went with it, and it costs nothing while closed. `/tui` opens a fresh one on this same conversation whenever you want it back.',
           ].join('\n')
-          : `⚠️ Could not close \`${lease.pane}\` — tmux refused. It may already be gone; \`/tui status\` will say.`);
+          : `⚠️ Could not close \`${pane}\` — tmux refused. It may already be gone; \`/tui status\` will say.`);
+        return;
+      }
+      // The universal resync: whatever the pane shows (stale session after a
+      // lane failover, a stuck boot like VM-tui-vm3 on the 742-row session, a
+      // half-dead attach), killing it verified-dead and reopening rebuilds on
+      // THIS chat's current session via the attach-time resolution. /new does
+      // this kill automatically; refresh is the manual version. Reopening
+      // always needs a fresh tap — ttyd only runs the attach on a new client.
+      if (tuiSub === 'refresh' || tuiSub === 'reopen' || tuiSub === 'reload' || tuiSub === 'resync') {
+        const refreshPane = readTuiLease(config.id, tuiSessionId)?.pane || readTuiPane(config.id);
+        if (!refreshPane || !hasTuiPane(refreshPane)) {
+          try {
+            fs.rmSync(tuiPanePath(config.id), { force: true });
+          } catch {
+            /* nothing published either way */
+          }
+          await api.sendMessage(chatId, `⌨️ No terminal pane is running — nothing to refresh. ${tuiCanOpen ? '`/tui` opens one on this chat\'s current session.' : tuiNoSessionAdvice}`);
+          return;
+        }
+        killTuiPane(refreshPane);
+        if (!hasTuiPane(refreshPane)) {
+          try {
+            fs.rmSync(tuiLeasePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          try {
+            fs.rmSync(tuiPanePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          await api.sendMessage(chatId, tuiCanOpen
+            ? `🔄 Closed \`${refreshPane}\`. Tap \`/tui\` again — the new pane attaches to this chat's current session.`
+            : `🔄 Closed \`${refreshPane}\`. ${tuiNoSessionAdvice}`);
+        } else {
+          await api.sendMessage(chatId, `⚠️ Could not close \`${refreshPane}\` — tmux refused. \`/tui status\` will say what survived.`);
+        }
         return;
       }
       // The actual TUI: ttyd serves a real PTY and mounts it under the same
@@ -2992,22 +3322,35 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // broken.
       const moved = lastMiniappUrl && lastMiniappUrl !== tuiUrl;
       lastMiniappUrl = tuiUrl;
-      const tuiSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
-      // The workspace this chat is actually in right now — the same expression
-      // the turn uses. Advertising config.agent.workspace unconditionally is what
-      // let a /tui in an external chat promise the website repo while the chat
-      // was pointed somewhere else entirely.
-      const tuiProject = getChatProject(chatId);
-      const tuiWorkspace = tuiProject.type === 'external' ? tuiProject.workspace : config.agent.workspace;
-      // Scoped, so /tui hands tui-attach.sh the session for the workspace the
-      // chat is in — the identical id the next turn passes.
-      const tuiSessionId = sessionForWorkspace(sessions, chatId, tuiWorkspace);
+      // tuiSurface / tuiCanOpen are resolved at the top of this case, with the
+      // session they depend on (status, off and refresh all need it).
       if (!tuiSurface.terminal) {
         // An API-only lane has no screen to attach to. Handing it a PTY anyway
         // would be a scraped badge, not a terminal.
         await api.sendMessage(chatId, [
           `⌨️ No terminal for this chat — it is on \`${tuiSurface.tool}\`, which answers in one shot and has no session to attach to.`,
           '`/tx on` still gives you the live tool feed here, and `/freemodel` moves the chat to a lane with a real terminal if you want one.',
+        ].join('\n'));
+        return;
+      }
+      // No session to share means no terminal worth opening: tui-attach.sh
+      // refuses a sessionless opencode open (live 2026-10-04), so the button
+      // below would promise a conversation and deliver that refusal on the
+      // user's screen. Say it here, where the answer belongs. Asked BEFORE the
+      // tui-open.json write so a null session is never recorded as a fact about
+      // the chat — that snapshot with `sessionId: null` is what an auditor reads
+      // afterwards and cannot tell from a broken record.
+      //
+      // Live 2026-10-05: `/new` cleared the chat's session row at 10:54:23,
+      // `/tui` ran at 10:54:43, wrote the null snapshot and sent the button,
+      // and the tap 20s later printed "No chat session recorded yet — nothing
+      // shared to attach to" on a phone. tuiSessionId was already resolved at the
+      // top of this case; nothing read it on the open path.
+      if (!tuiCanOpen) {
+        await api.sendMessage(chatId, [
+          '⌨️ There is nothing for the terminal to attach to yet — this chat has no session.',
+          tuiNoSessionAdvice,
+          '(`/new` puts you here on purpose: a fresh chat has no session until your next message.)',
         ].join('\n'));
         return;
       }
@@ -3983,6 +4326,32 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
   }
 }
 
+/**
+ * Resolve a /freemodel keyboard tap to its annotated row (plan/TG_TOOL_SURFACE.md M4).
+ *
+ * A tap carries the button's route identity (`fm:<route>`), but terminal-only
+ * rows are keyed with their vendor (`freebuff/deepseek/deepseek-v4.1-flash`)
+ * while the button carries the vendorless route
+ * (`deepseek/deepseek-v4.1-flash` — surface prefix stripped). Without the
+ * suffix fallback the tap resolves to nothing and the chat gets "Expired, run
+ * /freemodel again" instead of the terminal-only refusal. The fallback only
+ * matches terminal-only rows, so a selectable row is never reached through
+ * an ambiguous tap; exact matches always win.
+ */
+export function resolveFreemodelTap({ annotated = [], value } = {}) {
+  const wanted = String(value || '').replace(/^❌\s*/, '').trim();
+  const direct = (annotated || []).find(
+    (a) => a.ref === value || a.laneLabel === wanted || a.label === wanted || a.ref === wanted,
+  );
+  if (direct) return { hit: direct };
+  if (!wanted || wanted.startsWith('#')) return { hit: null };
+  const terminal = (annotated || []).find(
+    (a) => (a.terminalOnly || /^freebuff\//i.test(String(a.ref || '')))
+      && (String(a.ref || '') === wanted || String(a.ref || '').endsWith(`/${wanted}`)),
+  );
+  return { hit: terminal || null };
+}
+
 async function handleCallback({ api, config, prefs, caches, running = null, query }) {
   // String once, at the boundary: Map keys written with the raw Telegram id
   // never match the same keys after a disk round-trip stringifies them, so
@@ -4093,9 +4462,7 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
             return (available.length ? available : selectable)[Number(wanted.slice(1))] || null;
           })()
         : null;
-      const hit = byPosition || (bundle.annotated || []).find(
-        (a) => a.ref === value || a.laneLabel === wanted || a.label === wanted || a.ref === wanted,
-      );
+      const hit = byPosition || resolveFreemodelTap({ annotated: bundle.annotated || [], value }).hit;
       const entries = bundle.entries?.length ? bundle.entries : await getFreeModels(caches, config);
       const entry = hit
         ? entries.find((e) => e.ref === hit.ref) || hit
@@ -4113,6 +4480,17 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
         const route = freemodelRefToRoute(entry.ref);
         await sendHtml(api, chatId, `That lane is depleted (reset in ${hit?.resetIn || 'unknown'}).\nNext up: ${next ? `${next.label} (${next.ref})` : 'none — wait for reset'}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location: workLocation(), readiness: hostReadiness(caches) })}`);
         return;
+      }
+      // Terminal-only rows (Freebuff) are shown for visibility but must not
+      // become the chat's model: the keyboard never starts a headless turn
+      // (plan/TG_TOOL_SURFACE.md M4). One reply, pref untouched.
+      {
+        const annHit = (bundle.annotated || []).find((a) => a.ref === entry.ref);
+        if (annHit?.terminalOnly || /^freebuff\//i.test(String(entry.ref || ''))) {
+          await api.answerCallbackQuery(query.id, { text: 'Terminal-only lane' });
+          await api.sendMessage(chatId, 'Freebuff runs in the terminal — it cannot take a headless turn from chat. Your model is unchanged and nothing was spent.');
+          return;
+        }
       }
       setPref(prefs, chatId, { model: entry.ref });
       savePrefs(config.id, prefs);
@@ -4158,9 +4536,14 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
       const eff = effective(config, prefs, chatId);
       const ref = parseModelRef(eff.model);
       // Cline models expose fixed thinking levels, not opencode model variants.
-      // Gemini exposes none (single-shot lane).
+      // Gemini exposes none (single-shot lane): one refusal, nothing stored.
+      if (ref.surface === 'gemini') {
+        await api.answerCallbackQuery(query.id, { text: 'No levels on this model' });
+        await api.editMessageText(chatId, messageId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.').catch(() => {});
+        return;
+      }
       let variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : ref.surface === 'gemini' ? [] : await getVariants(config, caches, eff.model);
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
       // New buttons carry the name (`v:high`); old keyboards carry an index
       // (`v:0`). Support both so already-shown keyboards keep working.
       let variant = variants.includes(value) ? value : variants[Number(value)];
@@ -4581,6 +4964,46 @@ function tuiLeasePath(botId) {
   return path.join(stateDir(botId), 'tui-lease.json');
 }
 
+function tuiPanePath(botId) {
+  return path.join(stateDir(botId), 'tui-pane');
+}
+
+/**
+ * The tmux session name the attach script last published for this bot.
+ * Unlike the lease it survives detach, so a pane outliving its last client
+ * stays closeable and reportable (live 2026-10-04: VM-tui-vm2 alive with no
+ * lease after the Mini App detached, and /tui off answered "nothing to
+ * close"). A name whose session is gone reads as already-closed, never live.
+ */
+export function readTuiPane(botId, stateRoot = null) {
+  try {
+    const file = stateRoot ? path.join(stateRoot, 'tui-pane') : tuiPanePath(botId);
+    const name = String(fs.readFileSync(file, 'utf8') || '').trim();
+    return name || null;
+  } catch {
+    return null;
+  }
+}
+
+export function hasTuiPane(pane, tmux = defaultTmuxRunner) {
+  if (!pane) return false;
+  try {
+    return Boolean(tmux(['has-session', '-t', pane]));
+  } catch {
+    return false;
+  }
+}
+
+/** The `<surface>:<session>` mark tui-attach.sh wrote on its last run, or null. */
+export function readTuiMark(botId) {
+  try {
+    const name = String(fs.readFileSync(path.join(os.tmpdir(), `tui-session-id-${botId}`), 'utf8') || '').trim();
+    return name || null;
+  } catch {
+    return null;
+  }
+}
+
 export function tuiIsAttached(botId, sessionId) {
   return Boolean(readTuiLease(botId, sessionId));
 }
@@ -4606,9 +5029,14 @@ function readTuiLease(botId, sessionId) {
   if (!heartbeat || Date.now() - heartbeat > TUI_LEASE_MAX_AGE_MS) return null;
   const held = String(lease?.session || '');
   const wanted = String(sessionId || '');
-  // A lease with no session id predates the id, so treat it as "a TUI is open"
-  // rather than guessing. A lease for a *different* session is not ours.
-  if (held && wanted && held !== wanted) return null;
+  // The lease names its session and the caller names the turn's: attach only
+  // when they are the same conversation. A lease with no session id is a
+  // terminal on nothing shared (a pre-message tap that launched bare) — with
+  // a turn session in hand that is NOT our terminal, so it must not trigger
+  // the "same session" claim (live 2026-10-04: VM-tui-vm3 opened blank on ""
+  // while the turn ran on ses_ef7b…, and the chat still promised both match).
+  // With no turn session yet (status right after /new) any live lease counts.
+  if (wanted && held !== wanted) return null;
   const since = Number(lease?.since || 0);
   return {
     session: held || null,
@@ -4644,16 +5072,24 @@ function killTuiPane(pane, tmux = defaultTmuxRunner) {
 }
 
 /** One line for /status: is a terminal open, which one, and is anyone in it. */
-export function tuiStatusLine(botId, sessionId) {
+export function tuiStatusLine(botId, sessionId, tmux = defaultTmuxRunner, stateRoot = null) {
   const lease = readTuiLease(botId, sessionId);
-  if (!lease) return 'tui: none open (open one with /tui)';
-  const who = lease.pane || 'unknown pane';
-  const use = lease.clients > 0
-    ? `${lease.clients} client${lease.clients === 1 ? '' : 's'} attached`
-    : 'no client attached (pane kept for your place)';
-  const age = lease.since ? ` · up ${humanAge(Date.now() - lease.since)}` : '';
-  const sess = lease.session ? ` · ${lease.session.slice(0, 12)}…` : '';
-  return `tui: ${who} · ${use}${age}${sess}`;
+  if (lease) {
+    const who = lease.pane || 'unknown pane';
+    const use = lease.clients > 0
+      ? `${lease.clients} client${lease.clients === 1 ? '' : 's'} attached`
+      : 'no client attached (pane kept for your place)';
+    const age = lease.since ? ` · up ${humanAge(Date.now() - lease.since)}` : '';
+    const sess = lease.session ? ` · ${lease.session.slice(0, 12)}…` : '';
+    return `tui: ${who} · ${use}${age}${sess}`;
+  }
+  // No live lease: the pane may still be there, kept after detach. Report
+  // that instead of "none open" so /tui off has something to close.
+  const pane = readTuiPane(botId, stateRoot);
+  if (pane && hasTuiPane(pane, tmux)) {
+    return `tui: ${pane} · pane kept, nobody attached — /tui reopens it, /tui off closes it`;
+  }
+  return 'tui: none open (open one with /tui)';
 }
 
 /**
@@ -5370,14 +5806,37 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   if (addr.delayMs && addr.delayMs > 0) {
     await new Promise((r) => setTimeout(r, addr.delayMs));
   }
-  const text = (addr.cleanText || message.text || message.caption || '').trim();
+  let text = (addr.cleanText || message.text || message.caption || '').trim();
+  // Menu-tapped skills arrive underscored (/do_github_sync — Telegram forbids
+  // hyphens in commands). Restore the hyphen form before anything parses, so
+  // a tap behaves exactly like the typed line.
+  text = normalizeSkillCommand(text);
   const hasMedia = selectInboundMedia(message).length > 0;
   if (!text && !hasMedia) return;
 
   const cmd = text ? parseCommand(text) : null;
-  if (cmd) {
-    await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId, kind: chatKind(message) });
+  // A leading `/` that is not a bot command is NOT a command: it falls
+  // through to the turn path as the user prompt (plan/TG_TOOL_SURFACE.md M3).
+  // That is how typed `/do-*` skills reach the tool. Bot commands win.
+  const route = cmd ? resolveCommandName(cmd) : null;
+  if (cmd && isKnownCommand(route)) {
+    await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd: { ...cmd, name: route }, userId, kind: chatKind(message) });
     return;
+  }
+
+  // Bare greetings become a one-word connectivity ping, not smalltalk and
+  // not a canned reply: the operator uses "hi" to check the whole chain is
+  // alive, so it must exercise the real turn path (session, model, reply) —
+  // cheaply, with no tools and an exact echo to check against. A static
+  // auto-reply would prove nothing; the raw greeting invites a rambling
+  // turn. Group rooms keep existing behavior; media takes the normal path.
+  // Connectivity pings run on a throwaway session: their scaffolding must
+  // never land in the chat's transcript or the TUI (declared here, ahead of
+  // use — a later `let` would be a temporal-dead-zone throw on every ping).
+  let isPingTurn = false;
+  if (chatKind(message) !== 'group' && !hasMedia && greetingReply(text)) {
+    text = `[connectivity ping for ${JSON.stringify(text.trim())}: reply with exactly PONG, no tools]`;
+    isPingTurn = true;
   }
 
   // A named health seat, or a bare question to the room, is answered here.
@@ -5643,6 +6102,27 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     worktree: config.agent.workspace,
   }).claimed;
 
+  // Lane preflight, before the turn starts (plan/TG_TOOL_SURFACE.md M4).
+  // Freebuff is terminal-only (laneSupports('freebuff','headless') === false):
+  // the model keyboard must not start a headless turn. Cline cannot load the
+  // opencode `/do-*` skill library. Each is one recorded refusal: no session
+  // is burned and no turn runs. Gemini `/do-*` is run as a normal prompt.
+  {
+    const laneEff = effective(config, prefs, chatId);
+    const laneRef = parseModelRef(laneEff.model);
+    const lane = laneRef.surface === 'cline' ? 'cline' : laneRef.surface === 'gemini' ? 'gemini' : 'opencode';
+    if (/^freebuff\//i.test(String(laneEff.model || ''))) {
+      try { releaseFiles(claimed, claimId); } catch {}
+      await api.sendMessage(chatId, 'Freebuff runs in the terminal — it cannot take a headless turn from chat. No session was started and nothing was spent. Pick another lane with /freemodel.');
+      return;
+    }
+    if (lane === 'cline' && /^\/do[-_][a-z]/i.test(String(text || '').trim())) {
+      try { releaseFiles(claimed, claimId); } catch {}
+      await api.sendMessage(chatId, 'Cline cannot load that skill — it runs without the opencode skill library, so this text was not run and nothing was spent. Switch lane with /model, or run it in the terminal. (Cline’s screen is its own thread, not this chat.)');
+      return;
+    }
+  }
+
   // A TUI attached to this same conversation does NOT stop a turn.
   //
   // This used to defer every message while the terminal was open, queue it as a
@@ -5802,8 +6282,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
     // A `/freemodel` switch after `/tx on` must move the live view with the
     // lane: stale OpenCode TUI panes are dropped for Cline/Gemini and the TUI
-    // is re-ensured when the lane comes back to OpenCode.
-    if (workSession.tx) {
+    // is re-ensured when the lane comes back to OpenCode. Only for an
+    // already-live TUI view (plan/TG_TOOL_SURFACE.md M1): a stale `tx: true`
+    // row must not boot a private `opencode serve` on an ordinary message.
+    if (workSession.tx && workSession.viewMode === 'tui' && workSession.serverUrl && workSession.opencodeSessionId) {
       try {
         workSession = await reconcileWorkViewForLane({
           session: workSession,
@@ -5827,6 +6309,31 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
         ? workSession.opencodeSessionId
         : undefined);
+    // Connectivity pings run throwaway: force a fresh session so their
+    // scaffolding never lands in the chat's transcript or the TUI.
+    if (isPingTurn) turnSessionId = null;
+
+
+    // A TUI is open on this same conversation, so the user can watch this turn
+    // happen in the terminal as well. It shares the session, so what runs here
+    // shows up there — one turn at a time, never two at once.
+    //
+    // Only true on a lane with a shared session. Cline's terminal resumes the
+    // LAST Cline thread and each new message starts a fresh one, so claiming
+    // "same session" there would be a lie the user discovers by watching a turn
+    // that never appears. Say the true thing instead.
+    //
+    // This runs AFTER the resolve above on purpose: it used to run before the
+    // headline announce with turnSessionId still null, and a null wanted
+    // matches any lease — so the chat was told "same session" for a TUI on a
+    // different conversation. No session yet (first turn) means no claim.
+    if (turnSessionId && tuiIsAttached(config.id, turnSessionId)) {
+      const openSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
+      await api.sendMessage(chatId, openSurface.sharedSession
+        ? '⌨️ A TUI is open on this conversation — you can watch this turn in the terminal. Same session, so it shows up in both; one turn at a time.'
+        : `⌨️ A ${openSurface.tool} terminal is open, but ${openSurface.tool} cannot resume a thread headlessly — this turn will not appear there. The terminal stays on the last ${openSurface.tool} thread.`
+      ).catch(() => {});
+    }
 
     // A TUI is open on this same conversation, so the user can watch this turn
     // happen in the terminal as well. It shares the session, so what runs here
@@ -5862,7 +6369,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       fanoutProgressEvent({ renderer, observer, event, context: observerContext });
     };
     let lastAttemptModel = eff.model;
-    const runSurfaceModel = (model) => {
+    const runSurfaceModel = async (model) => {
       const candidate = parseModelRef(model);
       if (candidate.surface === 'cline') {
         return runCline({
@@ -5887,10 +6394,22 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
         });
       }
+      // Only a level this model offers travels as `#variant`. Anything else
+      // runs bare: an unoffered suffix is a hard "Invalid model reference"
+      // on strict models (see pickOfferedVariant). The verbose catalog is
+      // warmed at boot, so this is a cache read on a warm poller.
+      let opencodeVariant;
+      if (eff.variant) {
+        try {
+          opencodeVariant = pickOfferedVariant(eff.variant, await getVariants(config, caches, model));
+        } catch {
+          opencodeVariant = undefined;
+        }
+      }
       return runOpencode({
         prompt: finalPrompt,
         model,
-        variant: eff.variant,
+        variant: opencodeVariant,
         workspace: effectiveWorkspace,
         thinking: config.agent.thinking,
         timeoutMs: config.agent.timeoutMs,
@@ -6027,7 +6546,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         // thread that just ran — otherwise /tx keeps showing the conversation
         // from the previous host until something else rewrites it.
         workSession = setWorkView(workSession.id, { opencodeSessionId: handed.sessionID }) || workSession;
-        if (workSession.tx) {
+        if (workSession.tx && workSession.viewMode === 'tui' && workSession.serverUrl && workSession.opencodeSessionId) {
           try {
             workSession = await reconcileWorkViewForLane({
               session: workSession,
@@ -6076,6 +6595,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       // arrived 26s after the abort ack because this call had no aborted check.
       if (running.get(chatId)?.aborted) {
         renderer.status = 'aborted';
+        renderer.settle('Aborted');
         await renderer.deliver('Aborted.').catch(() => {});
       } else {
         await renderer.finish(
@@ -6274,7 +6794,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // turn stored nothing at all (runCline always resolved null), so the TUI
     // kept attaching to whatever stale opencode id was left in the map.
     const resultSurface = parseModelRef(lastAttemptModel).surface;
-    if (result.sessionID) {
+    // Ping turns never bind back: the throwaway session belongs to the
+    // check, not the chat. Everything else (usage, ledger, sticky lane)
+    // behaves exactly like a normal turn.
+    if (result.sessionID && !isPingTurn) {
       if (resultSurface === 'cline') {
         const clineSessions = loadClineSessions(config.id);
         clineSessions.set(chatId, result.sessionID);
@@ -6336,6 +6859,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
     if (running.get(chatId)?.aborted) {
       renderer.status = 'aborted';
+      renderer.settle('Aborted');
       await renderer.deliver('Aborted.');
     } else {
       // Sticky failover: the chat asked for eff.model but the answer came from
@@ -6390,6 +6914,42 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         delegation.text = String(displayResult?.finalText || '').trim();
         delegation.usage = displayResult?.usage || null;
         delegation.finishedAt = Date.now();
+      }
+
+      // Failproof-sync (turn-end hook): the pane shows whatever the last
+      // attach resolved; the chat follows whatever just bound. On a
+      // shared-session lane a mismatch means the open terminal is showing
+      // another conversation — take it down verified-dead so the next tap
+      // rebuilds on this one (live 2026-10-04: VM-tui-vm3 sat blank on ""
+      // while the turn bound ses_ef7b…). Cline excluded: a fresh thread per
+      // message makes mismatch normal there. Ping turns excluded: a
+      // connectivity check must not move anything. Best-effort, never
+      // breaking delivery; fires only on genuine mismatch, so matching
+      // turns cost two file reads.
+      if (!isPingTurn && resultSurface === 'opencode' && result?.sessionID) {
+        try {
+          const turnMark = `opencode:${result.sessionID}`;
+          const paneMark = readTuiMark(config.id);
+          const paneName = readTuiPane(config.id);
+          if (paneMark && paneMark !== turnMark && paneName && hasTuiPane(paneName)) {
+            killTuiPane(paneName);
+            if (!hasTuiPane(paneName)) {
+              try {
+                fs.rmSync(tuiLeasePath(config.id), { force: true });
+              } catch {
+                /* the pane is gone either way */
+              }
+              try {
+                fs.rmSync(tuiPanePath(config.id), { force: true });
+              } catch {
+                /* the pane is gone either way */
+              }
+              await api.sendMessage(chatId, `🔄 The open terminal was on another session, so I closed \`${paneName}\`. Tap \`/tui\` again — the new pane follows this conversation.`).catch(() => {});
+            }
+          }
+        } catch {
+          /* sync must never break delivery */
+        }
       }
     }
   } catch (err) {
@@ -6469,6 +7029,9 @@ async function runLoop({ api, config }) {
   const health = { okAt: 0, errAt: 0, err: '' };
   let offset = loadOffset(config.id);
   let running_ = true;
+  // M1 boot warmup (see warmTurnCaches): the first turn after a restart must
+  // not pay the ~3s cold catalog build inside the send→session-row budget.
+  await warmTurnCaches(config, caches);
   // In-flight update handlers. On SIGTERM (service restart/redeploy) we stop
   // polling for NEW updates but let running requests finish (bounded) so a
   // restart no longer kills runs into "exit null, no text output".
@@ -6728,7 +7291,7 @@ config.me = { id: Number(me.id) || 0, username: String(me.username || '') };
   try {
     assertValidCommands(BOT_COMMANDS);
     await api.call('setMyCommands', { commands: toTelegramCommands() });
-    console.log(`[${config.id}] published ${BOT_COMMANDS.length} bot commands`);
+    console.log(`[${config.id}] published ${toTelegramCommands().length} bot commands`);
   } catch (err) {
     console.error(`[${config.id}] setMyCommands failed (non-fatal): ${err.message}`);
   }

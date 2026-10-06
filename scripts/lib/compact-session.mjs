@@ -23,6 +23,10 @@ const POLL_INTERVAL_MS = 2_000;
 const DEFAULT_TIMEOUT_MS = 180_000;
 /** Telegram's own limit is 4096; leave room for the receipt and the footer. */
 const SUMMARY_MAX_CHARS = 2_600;
+/** The handoff in the receipt is clipped to about 800 characters (plan/TG_TOOL_SURFACE.md
+ * M3): goal, decisions, files, next step travel in the tool's own summary text.
+ * No second model call rewrites it — the full summary stays available. */
+const HANDOFF_MAX_CHARS = 800;
 
 /** `idle` entries are turn markers, not conversation. They are not messages. */
 export function countContextEntries(entries) {
@@ -132,8 +136,10 @@ export function truncateSummary(summary, maxChars = SUMMARY_MAX_CHARS) {
 }
 
 /**
- * The receipt. One message that says what happened, what it cost, and what the
- * chat is still attached to — the three things the old two-line reply left out.
+ * The receipt. A short handoff: message counts, tokens, session id, goal,
+ * decisions, files, next step — clipped to about 800 characters — and one
+ * sentence that the summary can omit decisions and tool output. The full
+ * summary stays available with /export in the TUI. No second model call.
  */
 export function formatCompactReceipt({
   sessionId,
@@ -142,7 +148,7 @@ export function formatCompactReceipt({
   read = 0,
   spent = 0,
   summary = '',
-  maxSummaryChars = SUMMARY_MAX_CHARS,
+  maxSummaryChars = HANDOFF_MAX_CHARS,
 } = {}) {
   const facts = [`${messagesBefore} message${messagesBefore === 1 ? '' : 's'} → ${messagesAfter}`];
   if (read > 0) facts.push(`read ${formatTokens(read)} tokens`);
@@ -154,7 +160,12 @@ export function formatCompactReceipt({
   const { text, truncated } = truncateSummary(summary, maxSummaryChars);
   if (text) lines.push('', text);
   else lines.push('', 'The tool compacted the session but wrote no summary.');
-  if (truncated) lines.push('', 'Full summary: /export in the TUI, or read the session on the host.');
+  if (text) {
+    lines.push('', 'The summary can omit decisions and tool output — it is a handoff, not the transcript.');
+    lines.push(truncated
+      ? 'Full summary: /export in the TUI, or read the session on the host.'
+      : 'Full summary: /export in the TUI.');
+  }
   return lines.join('\n');
 }
 

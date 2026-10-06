@@ -209,6 +209,7 @@
         "forge": false,
         "fleet": false,
         "review": false,
+        "skills": false,
         "routerOnly": ["switch", "unlock"],
         "aliases": ["think"]
       }

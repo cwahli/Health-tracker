@@ -292,6 +292,24 @@ if [ "${TUI_DRY_RUN:-0}" = "1" ]; then
   exit 0
 fi
 
+# --- refuse a shared-session attach with no session to share. An opencode
+# terminal with no SID launches a bare opencode whose session the bot never
+# joins: the next turn binds a different session and the terminal sits blank
+# beside it, exactly as reported (live 2026-10-04: VM-tui-vm3 tapped
+# pre-message opened empty on "" while the "hi" turn ran on ses_ef7b…).
+# Refusing with guidance beats a blank terminal that looks broken. No mark,
+# no pane name, no tmux below this point runs — so the next attach after the
+# first message resolves fresh and reaps correctly. Cline keeps its
+# fresh-thread path: its terminal never shares the turn thread by design.
+if [ -z "$SID" ] && [ "$SURFACE" = "opencode" ]; then
+  echo "No chat session recorded yet — nothing shared to attach to."
+  echo "Send the bot a message first, then reopen this: the next attach"
+  echo "lands on that conversation instead of a blank terminal the bot"
+  echo "never joins."
+  sleep 20
+  exit 0
+fi
+
 # --- wait out a turn that is already running rather than refusing to attach.
 # lease_held exits 1 while held, so the loop needs the negation: without it
 # the script waited on an idle chat and barged into a live turn (2026-09-27).
@@ -396,6 +414,14 @@ case "$DECISION" in
     ;;
 esac
 echo "$MARK" > "$SID_MARK"
+# Publish the pane name for the bot. /tui off and /tui status cannot read
+# TUI_TMUX_NAME out of the service file, and the lease only exists while a
+# client is attached — so without this, a kept pane with no lease is
+# uncloseable and unreportable (live 2026-10-04: /tui off answered
+# "nothing to close" with VM-tui-vm2 alive). Written on every attach, never
+# deleted here: only a verified kill clears it, and a missing session reads
+# as already gone. The bot clears it; this script never has to.
+printf '%s' "$TMUX_NAME" > "$STATE/tui-pane" 2>/dev/null || true
 
 case "$SURFACE" in
   cline)
