@@ -636,7 +636,8 @@ Canonical plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Live host: `https://
 | **V-14** | Staging meal + Google login on exact host | One real meal on staging | **COMPLETE** (Full D1/Supabase/R2 sync) |
 | **V-15** | Public hostname, Firebase + R2 CORS, deploy loop | `/api/status` 200 off Tailscale | **COMPLETE** (`https://health-tracking.duckdns.org` + Webhook) |
 | **V-16** | DNS cutover; Render still up | Cellular load, no Render splash, meal works | **COMPLETE & LIVE** |
-| **V-17** | Delete Render; scrub `onrender.com` | Old origin dead | **IN PROGRESS** (24-48h soak before deletion) |
+| **V-17** | Delete Render; scrub `onrender.com` | Old origin dead | **SUPERSEDED by the co.uk migration** — Render deletion folded into full-domain move; last live-code `onrender.com` default retired on `agent/domain-couk-full`. Plan: [COUK_MIGRATION.md](../docs/infra/COUK_MIGRATION.md) |
+| **V-17b** | Full migration to `health-tracker.co.uk` (web app + TUI + TG bot buttons + `web`/`omb`/`tgtg` hosts); retire duckdns | co.uk serves everything; duckdns blocks removed | **IN PROGRESS** (Domain-01; code defaults done, DNS+Caddy+env then verify) |
 | **V-18** | Confirm Containers/Cloud Run stay off | Runbook matches prod | **PENDING** |
 
 ### Track V Phase 6 — Autonomous Journey QA Fleet & Orchestrator Self-Healing Loop

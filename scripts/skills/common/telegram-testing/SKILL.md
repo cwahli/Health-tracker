@@ -73,12 +73,12 @@ test -s /absolute/path/to/report.html && file /absolute/path/to/report.html
 
 ```bash
 # 1) Body must be YOUR content, not the SPA shell
-curl -sS https://health-tracking.duckdns.org/nutrient-table | head -c 200
+curl -sS https://health-tracker.co.uk/nutrient-table | head -c 200
 # PASS if unique marker e.g. "Baked Salmon" or <title> you set
 # FAIL if <title>Biomarker and Nutrient Tracker</title> (SPA catch-all won)
 
 # 2) Distinguish SPA vs asset
-curl -sS -o /dev/null -w "%{http_code}\n" https://health-tracking.duckdns.org/nutrient-table
+curl -sS -o /dev/null -w "%{http_code}\n" https://health-tracker.co.uk/nutrient-table
 # 200 alone is NOT a pass — always grep a unique string from your page
 
 # 3) Instant View only if:
@@ -97,7 +97,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" https://health-tracking.duckdns.org/nu
 
 ```bash
 # after fix: must NOT return SPA title
-curl -sS https://health-tracking.duckdns.org/<route> | grep -F '<unique-marker>'
+curl -sS https://health-tracker.co.uk/<route> | grep -F '<unique-marker>'
 ```
 
 ## 5. Chat action / typing
@@ -117,7 +117,7 @@ Pulse every ~4s during long work (see `docs/agents/telegram_work.md`).
 | Markdown works | same + no plain-fallback warning |
 | Photo/file delivered | `Photo delivered` / document message id / `MEDIA:` accepted |
 | Route serves page | curl body contains **unique** page marker, not SPA title |
-| Prod live | curl **https://health-tracking.duckdns.org/...** after deploy |
+| Prod live | curl **https://health-tracker.co.uk/...** after deploy |
 | Instant View | public HTTPS + template/rhash — else say “link only” |
 
 Never: “should work”, “I restarted but didn’t re-curl”, HTTP 200 without body check.

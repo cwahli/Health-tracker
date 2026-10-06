@@ -360,7 +360,7 @@ export function isWebStatic(pathname) {
 
 /** Host header the web UI is served on; requests there take the web branch. */
 export function webUiHost(env = process.env) {
-  return String(env.OPENCODE_WEB_HOST || 'web.health-tracking.duckdns.org').trim().toLowerCase();
+  return String(env.OPENCODE_WEB_HOST || 'web.health-tracker.co.uk').trim().toLowerCase();
 }
 
 export function isWebUiHost(req, env = process.env) {

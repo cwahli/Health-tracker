@@ -20,7 +20,7 @@ flock -n 200 || { echo "another tunnel holds the lock, exiting"; exit 0; }
 
 KEY="${SHOT_SSH_KEY:-$HOME/.ssh/moshi_vps}"
 SSH_USER="${SHOT_SSH_USER:-ubuntu}"
-SSH_HOST="${SHOT_SSH_HOST:-health-tracking.duckdns.org}"
+SSH_HOST="${SHOT_SSH_HOST:-health-tracker.co.uk}"
 SSH_PORT="${SHOT_SSH_PORT:-22}"
 REMOTE_PORT="${SHOT_TUNNEL_PORT:-7777}"   # the port pull_shot.sh dials on the VPS
 LOCAL_PORT="${SHOT_SERVER_PORT:-7788}"    # shot-server.mjs on this phone

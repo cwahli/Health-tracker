@@ -1421,7 +1421,7 @@ export function readTuiUrl(env = process.env, file = miniappUrlFile()) {
  * would apply, so callers can hide the button instead of handing out a dead one.
  */
 export function readWebUiUrl(env = process.env) {
-  const raw = String(env.OPENCODE_WEB_URL ?? 'https://web.health-tracking.duckdns.org').trim().replace(/\/+$/, '');
+  const raw = String(env.OPENCODE_WEB_URL ?? 'https://web.health-tracker.co.uk').trim().replace(/\/+$/, '');
   if (/^https:\/\/[A-Za-z0-9.-]+$/.test(raw)) return raw;
   return '';
 }

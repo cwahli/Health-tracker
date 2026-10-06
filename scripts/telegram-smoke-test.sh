@@ -6,7 +6,7 @@
 #
 # Usage:
 #   bash scripts/telegram-smoke-test.sh [--profile=orchestrator] [--photo=/abs/x.png] [--doc=/abs/x.html]
-#   bash scripts/telegram-smoke-test.sh --profile=qa_meal --url=https://health-tracking.duckdns.org/nutrient-table --marker=Baked
+#   bash scripts/telegram-smoke-test.sh --profile=qa_meal --url=https://health-tracker.co.uk/nutrient-table --marker=Baked
 
 set -uo pipefail
 
