@@ -3259,11 +3259,22 @@ describe('TG tool surface M3 — slash forward + /skills (plan/TG_TOOL_SURFACE.m
   it('/skills is published and lists the /do-* skills on disk', () => {
     expect(BOT_COMMANDS.some((c) => c.command === 'skills')).toBe(true);
     expect(() => assertValidCommands()).not.toThrow();
-    const typed = listTypedSkills({ agent: { sharedSkills: ['/home/ubuntu/.agents/skills'], workspace: '/tmp' } });
+    // A fixture root, not the box's own skills directory: this case pins the
+    // resolver — a readable do-*/SKILL.md becomes a /do-* command — and never the
+    // machine's inventory. The absolute /home/ubuntu/.agents/skills it used to
+    // name exists on the VPS and nowhere else, so a CI runner looked at an empty
+    // list and the case could only ever be green on a developer box.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'do-skills-'));
+    for (const dir of ['do-verify', 'do-check-source', 'do-github-sync', 'do-plan-handoff']) {
+      fs.mkdirSync(path.join(root, dir), { recursive: true });
+      fs.writeFileSync(path.join(root, dir, 'SKILL.md'), `---\nname: ${dir}\ndescription: ${dir} fixture\n---\n`);
+    }
+    const typed = listTypedSkills({ agent: { sharedSkills: [root], workspace: '/tmp' } });
     const names = typed.map(([cmd]) => cmd);
     for (const skill of ['/do-verify', '/do-check-source', '/do-github-sync', '/do-plan-handoff']) {
       expect(names).toContain(skill);
     }
+    fs.rmSync(root, { recursive: true, force: true });
   });
 
   it('/compact no longer promises a fresh session', () => {
@@ -3945,11 +3956,22 @@ describe('B2B-1 machine location naming', () => {
   });
 
   it('prefers ~/.agents/location over the compute pool', () => {
-    const locPath = path.join(os.homedir(), '.agents', 'location');
-    const declared = fs.existsSync(locPath)
-      ? fs.readFileSync(locPath, 'utf8').trim().split(/\s+/)[0]
-      : 'vps-france';
-    expect(machineLocation()).toBe(declared);
+    // A HOME of its own. The case is about the file winning over the pool name,
+    // and the old version read this box's file when it existed and otherwise
+    // asserted 'vps-france' — which machineLocation() never answers on a box
+    // whose compute pool is 'vps' and which has no location file: every runner.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-home-'));
+    fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.agents', 'location'), 'mac\n');
+    const OLD_HOME = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      expect(machineLocation()).toBe('mac');
+    } finally {
+      if (OLD_HOME === undefined) delete process.env.HOME;
+      else process.env.HOME = OLD_HOME;
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('BOT_MACHINE overrides, for tests and for a box with no location file', () => {
@@ -3957,11 +3979,20 @@ describe('B2B-1 machine location naming', () => {
     expect(machineLocation()).toBe('somewhere-else');
   });
 
-  it('the file really is the one the sweeps read', () => {
-    const declared = fs.readFileSync(path.join(os.homedir(), '.agents', 'location'), 'utf8').trim().split(/\s+/)[0];
-    expect(machineLocation()).toBe(declared);
-    expect(declared).not.toBe('vps'); // the pool name is the bug this test pins
-  });
+  const LOCATION_FILE = path.join(os.homedir(), '.agents', 'location');
+  if (!fs.existsSync(LOCATION_FILE)) {
+    // Host-only: a runner has no ~/.agents/location, so there is nothing to
+    // cross-check. Guarded the way tests/golden_biomarker.test.ts guards a
+    // missing golden directory, rather than failing on the absence of a
+    // developer box's state.
+    it.skip('the file really is the one the sweeps read (host-only)', () => {});
+  } else {
+    it('the file really is the one the sweeps read', () => {
+      const declared = fs.readFileSync(LOCATION_FILE, 'utf8').trim().split(/\s+/)[0];
+      expect(machineLocation()).toBe(declared);
+      expect(declared).not.toBe('vps'); // the pool name is the bug this test pins
+    });
+  }
 });
 
 /* --------------------------------------------------- B2B-1 notify default ---
