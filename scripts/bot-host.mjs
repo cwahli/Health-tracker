@@ -3671,10 +3671,24 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
       if (table && isFreemodelEntryDepleted(entry, table, session)) {
         const { annotated } = getAnnotatedFreeModels(caches, config.id);
         const hit = annotated.find((a) => a.ref === entry.ref);
-        const next = annotated.find((a) => a.selectable !== false && !a.depleted);
-        await api.answerCallbackQuery(query.id, { text: `Depleted (reset in ${hit?.resetIn || 'unknown'}) — pick ${next?.label || 'another lane'}` });
+        // `-` used to be the annotation's "not depleted" sentinel and it printed
+        // verbatim inside a sentence asserting the lane IS depleted. Anything but
+        // a real countdown reads as unknown here.
+        const resetIn = hit?.resetIn && hit.resetIn !== '-' ? hit.resetIn : 'unknown';
         const route = freemodelRefToRoute(entry.ref);
-        await sendHtml(api, chatId, `That lane is depleted (reset in ${hit?.resetIn || 'unknown'}).\nNext up: ${next ? `${next.label} (${next.ref})` : 'none — wait for reset'}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location: workLocation(), readiness: hostReadiness(caches) })}`);
+        // Same argument /allowance passes (catalogEntries), so the table under this
+        // line is the same lane set the annotation was computed against.
+        const meta = {};
+        const allowance = buildAllowanceTextForBots({
+          stateDir: dir, provider: route.provider, model: route.model, location: workLocation(),
+          readiness: hostReadiness(caches), catalogEntries: await getFreeModels(caches, config), meta,
+        });
+        // ONE "Next up" in the reply: the table's own, whose choice comes back on
+        // `meta`. A second line picked from `annotated` disagreed with the table
+        // printed beneath it and named a model that was not a row in it.
+        const nextName = meta.nextUp?.name || 'another lane';
+        await api.answerCallbackQuery(query.id, { text: `Depleted (reset in ${resetIn}) — pick ${nextName}` });
+        await sendHtml(api, chatId, `That lane is depleted (reset in ${resetIn}).\n\n${allowance}`);
         return;
       }
       setPref(prefs, chatId, { model: entry.ref });

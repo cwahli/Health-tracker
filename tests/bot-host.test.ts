@@ -2538,4 +2538,64 @@ describe('ledger depletion visibility (stamped routes)', () => {
       try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
     }
   });
+
+  // 2026-10-06, live: the tap replied "That lane is depleted (reset in -)". `-`
+  // is the annotation's NOT-depleted sentinel, printed inside a sentence
+  // asserting the opposite. The projection only reads the lane row's own key
+  // (liveRecForLane); the tap's gate also reads the route-key fallback, so a
+  // stamp written under another spelling of the same route split the two in two
+  // and the button offered a lane the reply then called depleted.
+  it('gives the row and the tap ONE depletion verdict', async () => {
+    const { isFreemodelEntryDepleted, annotateFreemodelEntries } = await import('../scripts/lib/free-lanes.mjs');
+    const now = Date.now();
+    const table = { version: 3, buckets: {}, lanes: [
+      { pref: 1, provider: 'opencode', model: 'tokenharbor/deepseek-v4.1-flash:free', status: 'available', tg: true, label: 'TH DeepSeek' },
+      { pref: 2, provider: 'opencode', model: 'opencode/zen', status: 'available', tg: true, label: 'Zen' },
+    ] };
+    const stamped = {
+      quota: {
+        // The stamp's own route key, not the lane row's `opencode/...` key.
+        'tokenharbor/tokenharbor/deepseek-v4.1-flash:free': {
+          depletedUntil: now + 5 * 3600 * 1000,
+          lastError: 'Error 429: rate limited',
+          scope: 'per-model',
+          depletedObservedAt: new Date(now).toISOString(),
+        },
+      },
+    };
+    const entries = [
+      { ref: 'tokenharbor/deepseek-v4.1-flash:free', label: 'th deepseek', selectable: true },
+      { ref: 'opencode/zen', label: 'zen', selectable: true },
+    ];
+    for (const e of entries) {
+      const gate = isFreemodelEntryDepleted(e, table, stamped, { now });
+      const [ann] = annotateFreemodelEntries([e], table, stamped, { now });
+      expect({ ref: e.ref, depleted: ann.depleted }).toEqual({ ref: e.ref, depleted: gate });
+    }
+    const [depletedRow] = annotateFreemodelEntries([entries[0]], table, stamped, { now });
+    expect(depletedRow.depleted).toBe(true);
+    // a real countdown, never the `-` sentinel that means "not depleted"
+    expect(depletedRow.resetIn).not.toBe('-');
+    expect(depletedRow.resetIn).toMatch(/^\d/);
+    const [clearRow] = annotateFreemodelEntries([entries[1]], table, stamped, { now });
+    expect(clearRow.depleted).toBe(false);
+    expect(clearRow.resetIn).toBeNull();
+  });
+
+  it('sends ONE "Next up" in the depleted-tap reply, and it is the table\'s', async () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const anchor = 'if (table && isFreemodelEntryDepleted(entry, table, session))';
+    const at = src.indexOf(anchor);
+    expect(at).toBeGreaterThan(0);
+    const branch = src.slice(at, src.indexOf('return;', at) + 'return;'.length);
+    // no second line picked from a different list — that is how the reply named a
+    // model that was not a row in the table printed underneath it
+    expect(branch).not.toMatch(/\\nNext up:/);
+    // the embedded table is the lane set /allowance renders (it passes catalogEntries)
+    expect(branch).toMatch(/catalogEntries: await getFreeModels\(caches, config\), meta/);
+    // the toast names the table's own choice, carried back on meta.nextUp
+    expect(branch).toMatch(/meta\.nextUp\?\.name/);
+    // and the sentinel can never be printed under "depleted"
+    expect(branch).toMatch(/resetIn !== '-'/);
+  });
 });

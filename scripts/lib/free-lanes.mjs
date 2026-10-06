@@ -1357,7 +1357,7 @@ export function allowanceTableLines(table, session, { now = Date.now(), labelFn 
   return formatCompactAllowanceChat(table, session, { now, labelFn, rows, currentModel: "", location, readiness, tableOnly: true });
 }
 
-export function formatCompactAllowanceChat(table, session, { now = Date.now(), labelFn = defaultResetLabel, rows = null, currentModel = "", tableOnly = false } = {}) {
+export function formatCompactAllowanceChat(table, session, { now = Date.now(), labelFn = defaultResetLabel, rows = null, currentModel = "", tableOnly = false, meta = null } = {}) {
   const t = overlayLiveQuota(table, session, { now, labelFn });
   // TH + OC-TH are one row (display-only); failover still uses both lanes.
   const lanes = dedupeTokenHarborLanes([...(t.lanes || [])].filter(laneInAllowanceTable));
@@ -1463,11 +1463,16 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   if (firstUsable) {
     const u = firstUsable;
     const term = u.tg === false ? " (terminal)" : "";
+    // Hand the choice back to the caller so a message that wraps this table can
+    // name the same lane instead of picking one from a different list — the reply
+    // that says "Next up" twice, disagreeing, is what that prevents.
+    if (meta) meta.nextUp = { name: shortModelName(u), plan: planCodeForLane(u), model: u.model, terminal: u.tg === false };
     lines.push(
       "Next up: " + escHtml(shortModelName(u)) + " · " + planCodeForLane(u) + term +
       " · <code>" + escHtml(u.model) + "</code>"
     );
   } else {
+    if (meta) meta.nextUp = null;
     lines.push("Next up: (no free lane available — use paid / wait for reset)");
   }
   if (advice.depleted && advice.active) {
@@ -1475,7 +1480,7 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   }
   const fb = usable.find((l) => String(l.provider || "").toLowerCase() === "freebuff" || String(l.bucket || "").toLowerCase().includes("freebuff"));
   if (fb) {
-    lines.push("Freebuff: " + escHtml(shortModelName(fb)) + " ready (~1h Freebucks) — terminal only; use it promptly.");
+    lines.push("Freebuff: " + escHtml(shortModelName(fb)) + " has ~1h Freebucks — terminal only, not selectable in chat; use it promptly.");
   }
   // Token Harbor's free models share ONE rolling ~7-day value bar, which is what
   // the table's own resetRule says on every TH row and what the shared
@@ -2049,12 +2054,21 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
       || byModelIdentity.get(modelKey(refRoute?.model || ""))
       || projection.find((r) => r.provider === refRoute?.provider
         && String(r.model).replace(/^[^/]+\//, '') === String(refRoute?.model || '').replace(/^[^/]+\//, ''));
-    const depleted = verdict ? verdict.depleted : isFreemodelEntryDepleted(e, table, session, { now });
-    let resetIn = "-";
+    // ONE depletion verdict for the row, the button and the tap's reply. The
+    // projection only reads the lane row's own key (`liveRecForLane`);
+    // isFreemodelEntryDepleted also counts a stamp written under another spelling
+    // of the same route (its route-key fallback). Taking the projection alone let
+    // a stamped lane render as available, accept the tap, and then answer
+    // "depleted (reset in -)" — `-` being the sentinel that means NOT depleted.
+    // Union of the two, so they can only disagree in the safe direction.
+    const depleted = Boolean(verdict?.depleted) || isFreemodelEntryDepleted(e, table, session, { now });
+    // `null` when not depleted: an empty value is the one sentinel no render site
+    // can print by accident. `depleted` entries always get a real countdown string.
+    let resetIn = null;
     try {
       const routeHit = liveRecForRoutes(routeCandidates(ref), session, now);
-      const at = lane?.nextResetAt || lane?.cooldownUntil || routeHit?.rec?.depletedUntil || null;
-      resetIn = depleted ? formatResetIn(at, now) : "-";
+      const at = lane?.nextResetAt || lane?.cooldownUntil || routeHit?.rec?.depletedUntil || verdict?.resetAt || null;
+      if (depleted) resetIn = formatResetIn(at, now);
     } catch {}
     return {
       ...e,
@@ -2078,7 +2092,7 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
  * Pass the chat's effective provider/model so the `Active route` + `Next up`
  * lines are chat-aware (bot-host has no sticky session like the router).
  */
-export function buildAllowanceTextForBots({ stateDir = null, provider = "", model = "", location = "", now = Date.now(), labelFn = defaultResetLabel, readiness = null, catalogEntries = null } = {}) {
+export function buildAllowanceTextForBots({ stateDir = null, provider = "", model = "", location = "", now = Date.now(), labelFn = defaultResetLabel, readiness = null, catalogEntries = null, meta = null } = {}) {
   const { table, session, source } = loadFreeLaneLedger({ stateDir, catalogEntries });
   if (!table) {
     return "Allowance: no shared free-lane ledger found (router state + pref doc missing). Use /freemodel to list free models.";
@@ -2099,6 +2113,7 @@ export function buildAllowanceTextForBots({ stateDir = null, provider = "", mode
       labelFn,
       rows: projection.length ? projection : null,
       currentModel: provider && model ? `${provider}/${model}` : "",
+      meta,
     });
     // The Host line duplicated the location the caller already prints ("Free models
     // at vps"), and it sat in the proportional font directly above a monospace
