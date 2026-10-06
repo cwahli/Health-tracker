@@ -6796,7 +6796,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       ).catch(() => {});
       return;
     }
-    if (laneChoice.displaced) {
+    // Pings answer on their own single lane (see pingOnlyModels): the
+    // pre-computed stays-on-X claim below would be false — sticky follows
+    // the answer, and the ping reply itself already names where it ran
+    // (live vm3 2026-10-06: notice said "stays on qwen" while the ping
+    // answered live on direct gemini and sticky followed it there).
+    if (laneChoice.displaced && !isPingTurn) {
       // Chat copy carries the compact countdown, never the ledger's absolute
       // stamp: "depleted until 2026-10-03T04:30:29Z (default TTL, no countdown
       // in vendor text) / Sat 11:30 WIB" is a log line, not a chat line (live
