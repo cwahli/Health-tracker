@@ -257,3 +257,42 @@ describe('cleanApiError', () => {
     expect(cleanApiError('timestamp=1 level=INFO message="x"')).toBe('');
   });
 });
+describe('formatCompactReceipt handoff (plan/TG_TOOL_SURFACE.md M3)', () => {
+  it('clips the handoff to about 800 characters by default', () => {
+    const text = formatCompactReceipt({
+      sessionId: SID,
+      messagesBefore: 40,
+      messagesAfter: 1,
+      read: 100_000,
+      spent: 2_000,
+      summary: 'x'.repeat(5_000),
+    });
+    const handoff = text.split('\n\n')[1] || '';
+    expect(handoff.length).toBeLessThanOrEqual(900);
+    expect(text).toContain('summary cut');
+  });
+
+  it('ends with the omission sentence and /export, with no second model call', () => {
+    const text = formatCompactReceipt({
+      sessionId: SID,
+      messagesBefore: 5,
+      messagesAfter: 1,
+      summary: '## Goal\n- ship it',
+    });
+    expect(text).toContain('The summary can omit decisions and tool output');
+    expect(text).toContain('/export');
+  });
+
+  it('still leads with counts, tokens, and the short session id', () => {
+    const text = formatCompactReceipt({
+      sessionId: SID,
+      messagesBefore: 9,
+      messagesAfter: 2,
+      read: 1_500,
+      spent: 300,
+      summary: 'goal line',
+    });
+    expect(text.split('\n')[0]).toMatch(/^Compacted · 9 messages → 2/);
+    expect(text).toContain(`Session ${SID.slice(0, 12)}… unchanged`);
+  });
+});
