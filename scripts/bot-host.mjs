@@ -4758,6 +4758,24 @@ export function stickyModelAfterTurn({ chatModel, answeredModel, answered }) {
 }
 
 /**
+ * Execution ref for a configured model. The OpenCode `google/` provider is
+ * unavailable on hosts without a wired OpenCode google credential (live VPS:
+ * every `google/gemini-*` attempt ends `Model unavailable`), while
+ * GEMINI_API_KEY answers directly through the `gemini:` runner (pinged PONG
+ * on vm3 2026-10-06). A raw `google/<id>` ref therefore never reaches the
+ * CLI — it is rewritten to the direct runner. Every other surface passes
+ * through untouched (unknown refs stay first-choice per the 2026-09-25 rule).
+ * Idempotent: an already-direct `gemini:` ref has no `/`-prefix match.
+ */
+export function execModelRef(ref) {
+  const raw = String(ref || '');
+  const m = raw.match(/^(google|gemini)\/(.+)$/i);
+  if (!m) return raw;
+  const id = m[2].startsWith('gemini/') ? m[2] : `gemini/${m[2]}`;
+  return `gemini:${id}`;
+}
+
+/**
  * Ping turns check exactly one lane. A bare greeting (`hi`) is rewritten into
  * a connectivity ping that must exercise the real turn path (session, model,
  * reply) — but walking the whole ledger on a ping turns one dead primary into
@@ -4870,7 +4888,10 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   }
 
   const models = [];
-  if (model && !currentSkipped) models.push(model);
+  // The first entry executes, so it takes the execution ref: a raw `google/`
+  // id would burn the turn on an unwired provider. Ledger identity above
+  // (currentSkipped, groups) stays on the configured ref.
+  if (model && !currentSkipped) models.push(execModelRef(model));
   for (const lane of orderedLanes) models.push(toModelRef(lane.provider, lane.model));
   if (!models.length) models.push(fallback);
   const unique = [...new Set(models.filter(Boolean))];
@@ -6870,7 +6891,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // lanes the static map happens to know. Best-effort, and it runs before the
     // walk: the cache it reads is the one the footer reads anyway.
     // Pings check the chat's own lane only; real prompts walk the ledger.
-    const pingModels = pingOnlyModels({ isPingTurn, model: eff.model, fallback: config.agent.model });
+    const pingModels = pingOnlyModels({ isPingTurn, model: execModelRef(eff.model), fallback: execModelRef(config.agent.model) });
     const turnLaneModels = pingModels || (laneChoice.models.length ? laneChoice.models : failoverModels(eff.model, config.agent.model));
     const laneLimits = await laneContextLimits(config, caches, turnLaneModels);
     const result = await runOpencodeWithFailover({
