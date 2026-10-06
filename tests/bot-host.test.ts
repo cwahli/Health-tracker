@@ -117,8 +117,10 @@ import {
   formatFreemodelWithDepletion,
   getContextLimit,
   laneContextLimits,
-} from '../scripts/bot-host.mjs';
+  resetInBit,
+  depletedLaneProse,
 import { isHardModelFailure, ensureBotLedger, withCatalogLanes, stampCooldown, CONNECTION_FAILED_COOLDOWN_MS, HARD_MODEL_FAILURE_COOLDOWN_MS, canonicalAllowanceLanes, planCodeForLane } from '../scripts/lib/free-lanes.mjs';
+import { projectLanes, nextUsableLane, formatCompactAllowanceChat, annotateFreemodelEntries } from '../scripts/lib/free-lanes.mjs';
 import {
   buildStatusSnapshot,
   formatStatusPlain,
@@ -3196,6 +3198,50 @@ describe('context limit resolution (answer footer usage)', () => {
       ['gemini:gemini/gemini-3.8-flash', 1000000],
       ['opencode/mimo-v2.6-flash-free', 200000],
     ]);
+  });
+});
+
+describe('depleted-lane notice (one verdict, one next lane)', () => {
+  // A fixed clock: the countdown has to be the same number the table row prints.
+  const NOW = Date.UTC(2026, 9, 6, 12, 0, 0);
+  const in5h15 = new Date(NOW + 5 * 3600_000 + 15 * 60_000).toISOString();
+  // The live shape: every coding lane spent, one terminal-only row, one light row
+  // that is the only thing the walk can take next.
+  const laneTable = () => ({ version: 3, lanes: [
+    { pref: 1, provider: 'opencode', model: 'opencode/space-bunny-free', status: 'depleted', nextResetAt: in5h15, tg: true, label: 'Space Bunny' },
+    { pref: 2, provider: 'tokenharbor', model: 'tokenharbor/mimo-v2.6-flash:free', status: 'depleted', nextResetAt: in5h15, tg: true, label: 'MiMo V2.6' },
+    { pref: 3, provider: 'freebuff', model: 'freebuff/deepseek/deepseek-v4.1-flash', status: 'available', tg: false, label: 'DeepSeek V4.1' },
+    { pref: 4, provider: 'cloudflare', model: 'cloudflare/@cf/qwen/qwen3.8-27b', status: 'available', tg: true, label: 'Qwen 3.8 27B' },
+  ] }) as never;
+
+  it('names the lane the appended table names — not a catalog-only or terminal row', () => {
+    const table = laneTable();
+    const rows = projectLanes(table, {}, { now: NOW });
+    const body = formatCompactAllowanceChat(table, {}, { now: NOW, rows });
+    const next = nextUsableLane({ table, rows, provider: 'opencode', model: 'opencode/space-bunny-free', now: NOW });
+    // The only usable chat lane is the light one (the FB row is terminal-only), and
+    // the notice's line is worded exactly like the table's own.
+    expect(next?.model).toBe('cloudflare/@cf/qwen/qwen3.8-27b');
+    const noticeLine = depletedLaneProse({ resetIn: '5h 15', next }).split('\n')[1];
+    expect(noticeLine).toBe('Next up: Qwen 3.8 27B · CF · cloudflare/@cf/qwen/qwen3.8-27b');
+    expect(body).toContain('Next up: Qwen 3.8 27B · CF · <code>cloudflare/@cf/qwen/qwen3.8-27b</code>');
+  });
+
+  it('never prints the table placeholder as a duration', () => {
+    expect(resetInBit('-')).toBe('reset time unknown');
+    expect(resetInBit('—')).toBe('reset time unknown');
+    expect(resetInBit('')).toBe('reset time unknown');
+    const prose = depletedLaneProse({ resetIn: '-' });
+    expect(prose).toContain('That lane is depleted (reset time unknown).');
+    expect(prose).not.toContain('reset in -');
+    expect(prose).toContain('Next up: (no free lane available');
+  });
+
+  it('reads the countdown the table row shows for the tapped lane', () => {
+    const table = laneTable();
+    const ann = annotateFreemodelEntries([{ ref: 'opencode/space-bunny-free', label: 'Space Bunny' }], table, {}, { now: NOW });
+    expect(ann[0].depleted).toBe(true);
+    expect(ann[0].resetIn).toBe('5h 15');
   });
 });
 

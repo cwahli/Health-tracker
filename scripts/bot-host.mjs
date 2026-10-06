@@ -113,6 +113,7 @@ import {
   headingWidth,
   shortModelName,
   buildAllowanceTextForBots,
+  nextUsableLane,
   formatResetIn,
   renderFreeLaneTableHtml,
   ensureBotLedger,
@@ -1237,6 +1238,39 @@ async function sendHtml(api, chatId, html) {
  * so the next person does not go re-derive this from guesswork.
  */
 export const FREEMODEL_EMPTY_BODY = '\u2060';
+
+/**
+ * A depleted lane's reset as prose.
+ *
+ * `-` and `—` are the table's placeholders for "no timestamp known", and both
+ * formats printed them as if they were a duration: the tap notice read `That
+ * lane is depleted (reset in -)` while the table row right below it carried a
+ * real countdown (live 2026-10-06). Unknown says so instead of inventing a
+ * number, and the value itself now comes from the projection's own reset, so the
+ * notice and the row read the same number.
+ */
+export function resetInBit(resetIn) {
+  const value = String(resetIn ?? '').trim();
+  if (!value || /^[-—–]+$/.test(value)) return 'reset time unknown';
+  return `reset in ${value}`;
+}
+
+/**
+ * The two prose lines of a depleted-tap answer; the refreshed allowance table
+ * is appended by the caller.
+ *
+ * The "Next up" lane is the table's OWN picker (`nextUsableLane`), and the line
+ * is worded exactly like the table's own "Next up" line — so one reply cannot
+ * name two different lanes, and it never names a lane the table does not show
+ * (live 2026-10-06: the notice offered a catalog-only lane while the table below
+ * it offered a Cloudflare one).
+ */
+export function depletedLaneProse({ resetIn = '', next = null } = {}) {
+  const nextBit = next
+    ? `Next up: ${shortModelName(next)} · ${planCodeForLane(next)} · ${next.model}`
+    : 'Next up: (no free lane available — use paid / wait for reset)';
+  return `That lane is depleted (${resetInBit(resetIn)}).\n${nextBit}`;
+}
 
 export function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [] } = {}) {
   const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
@@ -4535,13 +4569,30 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
         return;
       }
       const { table, session, dir } = getLedger(config.id);
-      if (table && isFreemodelEntryDepleted(entry, table, session)) {
-        const { annotated } = getAnnotatedFreeModels(caches, config.id);
-        const hit = annotated.find((a) => a.ref === entry.ref);
-        const next = annotated.find((a) => a.selectable !== false && !a.depleted);
-        await api.answerCallbackQuery(query.id, { text: `Depleted (reset in ${hit?.resetIn || 'unknown'}) — pick ${next?.label || 'another lane'}` });
+      // The verdict, the reset and the next lane all come from the SAME
+      // projection the keyboard and the table below are rendered from (the
+      // annotation carries it); `isFreemodelEntryDepleted` is the
+      // pre-projection check kept only as the fallback for a row the annotation
+      // cannot resolve. Two verdicts for one lane is how a tap answered
+      // "depleted" beside a row the table showed as usable, and how the notice's
+      // reset printed its `-` placeholder beside a real countdown.
+      const { annotated: annRows } = getAnnotatedFreeModels(caches, config.id);
+      const annHit = annRows.find((a) => a.ref === entry.ref);
+      const blocked = annHit
+        ? Boolean(annHit.depleted)
+        : Boolean(table && isFreemodelEntryDepleted(entry, table, session));
+      if (blocked) {
         const route = freemodelRefToRoute(entry.ref);
-        await sendHtml(api, chatId, `That lane is depleted (reset in ${hit?.resetIn || 'unknown'}).\nNext up: ${next ? `${next.label} (${next.ref})` : 'none — wait for reset'}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location: workLocation(), readiness: hostReadiness(caches) })}`);
+        const readiness = hostReadiness(caches);
+        const location = workLocation();
+        // `projectLanes` with the host's readiness is what
+        // buildAllowanceTextForBots renders its rows from, and `nextUsableLane`
+        // is the picker behind that table's own Next up line — one answer, named
+        // the same way, in both places.
+        const projection = projectLanes(table, session, { now: Date.now(), location, readiness });
+        const next = nextUsableLane({ table, session, rows: projection, provider: route.provider, model: route.model });
+        await api.answerCallbackQuery(query.id, { text: `Depleted (${resetInBit(annHit?.resetIn)}) — pick ${next ? shortModelName(next) : 'another lane'}` });
+        await sendHtml(api, chatId, `${depletedLaneProse({ resetIn: annHit?.resetIn, next })}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location, readiness })}`);
         return;
       }
       // Terminal-only rows (Freebuff) are shown for visibility but must not
