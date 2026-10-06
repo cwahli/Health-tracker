@@ -1265,11 +1265,14 @@ export function resetInBit(resetIn) {
  * (live 2026-10-06: the notice offered a catalog-only lane while the table below
  * it offered a Cloudflare one).
  */
-export function depletedLaneProse({ resetIn = '', next = null } = {}) {
+export function depletedLaneProse({ label = '', resetIn = '', next = null } = {}) {
   const nextBit = next
     ? `Next up: ${shortModelName(next)} · ${planCodeForLane(next)} · ${next.model}`
     : 'Next up: (no free lane available — use paid / wait for reset)';
-  return `That lane is depleted (${resetInBit(resetIn)}).\n${nextBit}`;
+  // The lane the user tapped is named. "That lane is depleted" left the reader to
+  // scroll the table it appends to find which row they had pressed.
+  const name = String(label || '').trim();
+  return `${name ? `${name} is` : 'That lane is'} depleted (${resetInBit(resetIn)}).\n${nextBit}`;
 }
 
 export function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [] } = {}) {
@@ -4592,7 +4595,7 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
         const projection = projectLanes(table, session, { now: Date.now(), location, readiness });
         const next = nextUsableLane({ table, session, rows: projection, provider: route.provider, model: route.model });
         await api.answerCallbackQuery(query.id, { text: `Depleted (${resetInBit(annHit?.resetIn)}) — pick ${next ? shortModelName(next) : 'another lane'}` });
-        await sendHtml(api, chatId, `${depletedLaneProse({ resetIn: annHit?.resetIn, next })}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location, readiness })}`);
+        await sendHtml(api, chatId, `${depletedLaneProse({ label: annHit?.label || entry.label, resetIn: annHit?.resetIn, next })}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location, readiness })}`);
         return;
       }
       // Terminal-only rows (Freebuff) are shown for visibility but must not
