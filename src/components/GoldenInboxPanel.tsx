@@ -983,8 +983,7 @@ function findMealObs(board: any, exp: any, idx: number) {
   const list = board?.observedMeal || [];
   const presenceOnly = exp.calories == null;
   return (
-    list.find((o: any) => mealLineNamesMatch(exp.name, o.name, presenceOnly)) ||
-    (presenceOnly ? undefined : list[idx])
+    list.find((o: any) => mealLineNamesMatch(exp.name, o.name, presenceOnly)) || undefined
   );
 }
 
