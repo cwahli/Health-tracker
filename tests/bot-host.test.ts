@@ -3228,6 +3228,32 @@ describe('depleted-lane notice (one verdict, one next lane)', () => {
     expect(body).toContain('Next up: Qwen 3.8 27B · CF · <code>cloudflare/@cf/qwen/qwen3.8-27b</code>');
   });
 
+  it('names the lane that was tapped instead of saying "that lane"', () => {
+    const table = laneTable();
+    const rows = projectLanes(table, {}, { now: NOW });
+    const next = nextUsableLane({ table, rows, provider: 'opencode', model: 'opencode/space-bunny-free', now: NOW });
+    const prose = depletedLaneProse({ label: 'Space Bunny', resetIn: '5h 15', next });
+    expect(prose.split('\n')[0]).toBe('Space Bunny is depleted (reset in 5h 15).');
+    // and the name is the row the table itself marks, so the notice and the table agree
+    expect(formatCompactAllowanceChat(table, {}, { now: NOW, rows })).toContain('❌ Space Bunny');
+  });
+
+  it('the Freebuff line follows its own row — never "ready" beside a spent lane', () => {
+    const table = laneTable();
+    const healthy = projectLanes(table, {}, { now: NOW });
+    // A terminal-only lane is ❌ because it is not selectable from chat, and the
+    // line says where it IS usable — the two statements do not contradict.
+    const okOut = formatCompactAllowanceChat(table, {}, { now: NOW, rows: healthy });
+    expect(okOut).toContain('❌ DeepSeek V4.1');
+    expect(okOut).toContain('Freebuff: DeepSeek V4.1 ready');
+    // The ledger has spent it: the line follows the verdict, not the table.
+    const spent = healthy.map((r) => (r.provider === 'freebuff' ? { ...r, depleted: true, selectable: false, resetAt: NOW + 3600_000 } : r));
+    const out = formatCompactAllowanceChat(table, {}, { now: NOW, rows: spent });
+    expect(out).toContain('❌ DeepSeek V4.1');
+    expect(out).not.toContain('ready (~1h Freebucks)');
+    expect(out).toContain('Freebuff: DeepSeek V4.1 is depleted');
+  });
+
   it('never prints the table placeholder as a duration', () => {
     expect(resetInBit('-')).toBe('reset time unknown');
     expect(resetInBit('—')).toBe('reset time unknown');

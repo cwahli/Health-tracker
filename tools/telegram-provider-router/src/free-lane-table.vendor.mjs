@@ -1544,9 +1544,21 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   if (advice.depleted && advice.active) {
     lines.push("Active sticky is empty — fail over to Next up (do not hang).");
   }
-  const fb = usable.find((l) => String(l.provider || "").toLowerCase() === "freebuff" || String(l.bucket || "").toLowerCase().includes("freebuff"));
+  // The Freebuff line reads the SAME verdict as the ❌/✅ row above it, or the two
+  // contradict: the mark comes from the projection (a terminal-only lane is ❌ —
+  // "terminal only, not selectable from chat") while this line took `usable`, the
+  // table's own verdict, so a lane the ledger had already spent was announced as
+  // "ready" directly under a ❌ row. Live 2026-10-06, on the vm3 bot's own reply.
+  const fb = (rows || []).find((r) => String(r.provider || "").toLowerCase().includes("freebuff") || String(r.bucket || "").toLowerCase().includes("freebuff"))
+    || usable.find((l) => String(l.provider || "").toLowerCase() === "freebuff" || String(l.bucket || "").toLowerCase().includes("freebuff"));
   if (fb) {
-    lines.push("Freebuff: " + escHtml(shortModelName(fb)) + " ready (~1h Freebucks) — terminal only; use it promptly.");
+    const spent = rows ? Boolean(fb.depleted || fb.ended) : !laneIsUsable(fb);
+    if (!spent) {
+      lines.push("Freebuff: " + escHtml(shortModelName(fb)) + " ready (~1h Freebucks) — terminal only; use it promptly.");
+    } else if (rows) {
+      const until = fb.resetAt ? ` (${escHtml(String(labelFn(fb.resetAt)))})` : "";
+      lines.push("Freebuff: " + escHtml(shortModelName(fb)) + (fb.ended ? " is over" : " is depleted") + until + " — terminal only; not usable right now.");
+    }
   }
   // Token Harbor's free models share ONE rolling ~7-day value bar, which is what
   // the table's own resetRule says on every TH row and what the shared
@@ -1748,7 +1760,7 @@ export function laneScoreFromCatalog(lane) {
 export const TIER_GROUPS = [
   { tier: 'high', label: 'Coding-agent capable' },
   { tier: 'unlisted', label: 'Not in the catalog' },
-  { tier: 'light', label: 'Light · docs/inventory' },
+  { tier: 'light', label: 'No published figure · docs/inventory' },
 ];
 
 /**
