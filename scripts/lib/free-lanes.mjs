@@ -1546,15 +1546,30 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   // "terminal only, not selectable from chat") while this line took `usable`, the
   // table's own verdict, so a lane the ledger had already spent was announced as
   // "ready" directly under a ❌ row. Live 2026-10-06, on the vm3 bot's own reply.
+  //
+  // The other half of that contradiction is the terminal-only row itself, which the
+  // first fix missed. Its ❌ means "no chat tap", its Reset column is `—` because
+  // the ledger carries no Freebucks stamp (`nextResetAt: null`, resetRule "shared
+  // daily Freebucks (Freebuff UI)"), and this line still said "ready (~1h
+  // Freebucks)" — an availability claim plus a time figure, under the ❌, on no
+  // evidence: `~1h` was the string literal below, not a measurement. So the
+  // not-spent case now states what the ledger actually knows — terminal-only, no
+  // chat tap, bar untracked — and nothing is announced ready beside a ❌ row.
+  // Live 2026-10-06, second paste of the same reply.
   const fb = (rows || []).find((r) => String(r.provider || "").toLowerCase().includes("freebuff") || String(r.bucket || "").toLowerCase().includes("freebuff"))
     || usable.find((l) => String(l.provider || "").toLowerCase() === "freebuff" || String(l.bucket || "").toLowerCase().includes("freebuff"));
   if (fb) {
     const spent = rows ? Boolean(fb.depleted || fb.ended) : !laneIsUsable(fb);
-    if (!spent) {
-      lines.push("Freebuff: " + escHtml(shortModelName(fb)) + " ready (~1h Freebucks) — terminal only; use it promptly.");
-    } else if (rows) {
+    const fbName = escHtml(shortModelName(fb));
+    if (spent) {
       const until = fb.resetAt ? ` (${escHtml(String(labelFn(fb.resetAt)))})` : "";
-      lines.push("Freebuff: " + escHtml(shortModelName(fb)) + (fb.ended ? " is over" : " is depleted") + until + " — terminal only; not usable right now.");
+      lines.push("Freebuff: " + fbName + (fb.ended ? " is over" : " is depleted") + until + " — terminal only; not usable right now.");
+    } else if (fb.tg === true) {
+      // A chat-selectable Freebuff lane (the experimental FREEBUFF_TG_LANE) is the
+      // one case that may call itself ready — still without an invented figure.
+      lines.push("Freebuff: " + fbName + " — ready; shared daily Freebucks.");
+    } else {
+      lines.push("Freebuff: " + fbName + " — terminal only; not selectable from chat. Shared daily Freebucks, reset not tracked here.");
     }
   }
   // Token Harbor's free models share ONE rolling ~7-day value bar, which is what

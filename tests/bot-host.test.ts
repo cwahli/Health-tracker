@@ -3238,20 +3238,30 @@ describe('depleted-lane notice (one verdict, one next lane)', () => {
     expect(formatCompactAllowanceChat(table, {}, { now: NOW, rows })).toContain('❌ Space Bunny');
   });
 
-  it('the Freebuff line follows its own row — never "ready" beside a spent lane', () => {
+  it('the Freebuff line follows its own row — never "ready" beside a ❌ it cannot use', () => {
     const table = laneTable();
     const healthy = projectLanes(table, {}, { now: NOW });
-    // A terminal-only lane is ❌ because it is not selectable from chat, and the
-    // line says where it IS usable — the two statements do not contradict.
+    const fbLine = (out: string) => out.split('\n').filter((l) => l.startsWith('Freebuff:')).join(' | ');
+    // A terminal-only lane IS ❌ (chat cannot select it) and the ledger has no
+    // Freebucks stamp for it, so the line may not announce it ready and may not
+    // print a figure this host cannot know: "~1h" was a string literal under a ❌
+    // row (live 2026-10-06, the vm3 reply the operator pasted twice).
     const okOut = formatCompactAllowanceChat(table, {}, { now: NOW, rows: healthy });
     expect(okOut).toContain('❌ DeepSeek V4.1');
-    expect(okOut).toContain('Freebuff: DeepSeek V4.1 ready');
+    expect(fbLine(okOut)).toContain('Freebuff: DeepSeek V4.1 — terminal only; not selectable from chat');
+    expect(fbLine(okOut)).not.toContain('ready');
+    expect(fbLine(okOut)).not.toMatch(/~1h|reset in -\b/);
+    // The reset the row cannot show is admitted, not invented — the row's own `—`.
+    expect(okOut).toContain('Freebuff: DeepSeek V4.1 — terminal only; not selectable from chat. Shared daily Freebucks, reset not tracked here.');
     // The ledger has spent it: the line follows the verdict, not the table.
     const spent = healthy.map((r) => (r.provider === 'freebuff' ? { ...r, depleted: true, selectable: false, resetAt: NOW + 3600_000 } : r));
     const out = formatCompactAllowanceChat(table, {}, { now: NOW, rows: spent });
     expect(out).toContain('❌ DeepSeek V4.1');
-    expect(out).not.toContain('ready (~1h Freebucks)');
+    expect(fbLine(out)).not.toContain('ready');
     expect(out).toContain('Freebuff: DeepSeek V4.1 is depleted');
+    // ... and one that chat CAN take is the only one that may say so.
+    const chatLane = healthy.map((r) => (r.provider === 'freebuff' ? { ...r, selectable: true, terminalOnly: false, tg: true } : r));
+    expect(fbLine(formatCompactAllowanceChat(table, {}, { now: NOW, rows: chatLane }))).toBe('Freebuff: DeepSeek V4.1 — ready; shared daily Freebucks.');
   });
 
   it('never prints the table placeholder as a duration', () => {
