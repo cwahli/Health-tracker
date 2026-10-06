@@ -871,7 +871,7 @@ console.log('assert-tui-gateway:');
   check('no host header is not the web host',
     isWebUiHost({ headers: {} }, {}) === false);
   check('the default web host is the served one',
-    webUiHost({}) === 'web.health-tracking.duckdns.org');
+    webUiHost({}) === 'web.health-tracker.co.uk');
   check('the serve credential is composed as Basic, never bare',
     webUiAuthHeader({ OPENCODE_WEB_PASSWORD: 'pw' }) === `Basic ${Buffer.from('opencode:pw').toString('base64')}`
     && !webUiAuthHeader({ OPENCODE_WEB_PASSWORD: 'pw' }).includes('pw:'));
