@@ -549,7 +549,7 @@ describe('runWithModelFailover', () => {
     expect(result._model).toBe('a/one');
   });
 
-  it('never auto-retries a timeout — re-running would just wait again', async () => {
+  it('a timeout advances to the next candidate (failover, #577)', async () => {
     const prompts = [];
     const { attempts } = await runWithModelFailover({
       models: ['a/one', 'b/two'],
@@ -558,8 +558,8 @@ describe('runWithModelFailover', () => {
         return Promise.resolve({ finalText: '', lastError: 'timed out after 900000ms' });
       },
     });
-    expect(prompts).toEqual(['a/one']);
-    expect(attempts).toHaveLength(1);
+    expect(prompts).toEqual(['a/one', 'b/two']);
+    expect(attempts).toHaveLength(2);
   });
 
   it('reports the switch so the chat can show what happened', async () => {
@@ -2780,7 +2780,7 @@ describe('provider switching (opencode <-> cline)', () => {
     expect(sent[0]).not.toMatch(/[{}]/);
   });
 
-  it('never auto-retries a cline timeout onto the next lane', async () => {
+  it('a cline timeout advances onto the next lane (#577)', async () => {
     const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
     const seen = [];
     const result = await runOpencodeWithFailover({
@@ -2795,7 +2795,7 @@ describe('provider switching (opencode <-> cline)', () => {
         });
       },
     });
-    expect(seen).toEqual(['cline:cline-free/muse-spark-1.3-contributor']);
+    expect(seen).toEqual(['cline:cline-free/muse-spark-1.3-contributor', 'opencode/space-bunny-free']);
     expect(result.finalText).toBe('');
   });
 
