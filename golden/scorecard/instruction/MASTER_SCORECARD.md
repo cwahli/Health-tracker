@@ -8,7 +8,7 @@
 **Process:** [`README.md`](./README.md) · [`WORKFLOW.md`](./WORKFLOW.md) · [`gates.json`](./gates.json)  
 **Sister files:** [`../../past/SCOREBOARD_LIVE_RESULTS.md`](../../past/SCOREBOARD_LIVE_RESULTS.md) · [`i18n/GATE_I18N_A11Y_TREE.md`](./i18n/GATE_I18N_A11Y_TREE.md) · [`../../../plan/ROADMAP.md`](../../../plan/ROADMAP.md) · [`../../../docs/agent/DOMAIN_REGRESSION_MAP.md`](../../../docs/agent/DOMAIN_REGRESSION_MAP.md) · [`../../../docs/agent/standing.json`](../../../docs/agent/standing.json)
 
-**Live origin:** `https://health-tracker-backend-64gt.onrender.com` — `GET /api/scorecard/contract` must echo frozen inventories. Local green is not live green.
+**Live origin:** `https://health-tracker.co.uk` — `GET /api/scorecard/contract` must echo frozen inventories. Local green is not live green.
 
 **This moment:** [`../../current/MASTER_SCORECARD_DEBUG.md`](../../current/MASTER_SCORECARD_DEBUG.md) · [`../../current/MASTER_SCORECARD_DEBUG.json`](../../current/MASTER_SCORECARD_DEBUG.json). Contract table first. Skip is not PASS. Cite **all green** only from [`../../result_summary/LATEST.md`](../../result_summary/LATEST.md) after exit 0.
 

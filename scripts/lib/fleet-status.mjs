@@ -17,6 +17,8 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 import { workerStatus } from './worker-presence.mjs';
+import { applyMasterDefaults } from './registry.mjs';
+import { formatTokens } from './commands.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -32,6 +34,23 @@ export const VM_OPENCODE_WINDOW_MS = 15 * 60 * 1000;
 
 let fleetTicketsCache = { cachedAt: 0, rows: [] };
 const fleetNodeHeartbeats = new Map();
+
+/**
+ * The Drive FILE id inside a proof cell, or '' when there is none.
+ *
+ * A `drive.google.com/file/d/<id>/…` link is a screenshot, and the mini app
+ * renders it as the picture. A `/folders/` link, a bare key, or prose is not
+ * an image and stays text — the cell never guesses which one it is.
+ */
+export function driveFileIdFrom(value) {
+  const s = String(value || '');
+  if (!/drive\.google\.com/i.test(s)) return '';
+  const m = s.match(/\/file\/d\/([A-Za-z0-9_-]{10,})/);
+  if (m) return m[1];
+  // thumbnail links carry the id in a query param
+  const q = s.match(/[?&]id=([A-Za-z0-9_-]{10,})/);
+  return q ? q[1] : '';
+}
 
 /** Directory where local beats are persisted. */
 export function fleetBeatsDir() {
@@ -444,6 +463,35 @@ export function getFleetNodes(opts = {}) {
  * Read tickets from PM spreadsheet tab 'current' projecting the 8 human fields strictly by name.
  * Caches for 15s in memory. On failure, returns previous snapshot and age. Never writes to Google.
  */
+/**
+ * One sheet row → the ticket the mini app renders.
+ *
+ * Pure on purpose: `getByName` is injected, so both layouts the `current` tab
+ * has used (curated `Owner/Status/Completion proof`, and projected
+ * `owner/author/state/agent_note/stall_reason`) are testable without touching
+ * Google. Each field lists every header that has ever carried it.
+ */
+export function ticketFromRow(getByName, idx = 0) {
+  const idVal = getByName('key') || getByName('id') || getByName('#') || String(idx + 1);
+  const proof = getByName('Completion proof') || getByName('proof') || '—';
+  const proofShot = driveFileIdFrom(proof);
+  return {
+    id: idVal,
+    originalRequest: getByName('Original request') || getByName('goal') || getByName('title') || '—',
+    workDoneSoFar: getByName('Work done so far') || getByName('Work done') || getByName('note') || getByName('agent_note') || '—',
+    whatsLeftToDo: getByName("What's left to do") || getByName('What is left to do') || getByName('todo') || '—',
+    owner: getByName('Owner') || getByName('author') || '—',
+    status: getByName('Status') || getByName('state') || 'Pending',
+    // A Drive FILE link is a screenshot: the cell shows the picture, not the
+    // URL. Anything else (a folder, a key, prose) stays text.
+    completionProof: proofShot ? '' : proof,
+    proofFileId: proofShot,
+    completionProofText: proofShot ? proof : '',
+    completionGate: getByName('Completion gate') || getByName('gate') || getByName('stall_reason') || '—',
+    lastActivity: getByName('last_activity') || getByName('last activity') || getByName('Last activity') || getByName('built_at') || '—',
+  };
+}
+
 export async function getFleetTickets({ env = process.env, root = REPO_ROOT, refresh = false } = {}) {
   const now = Date.now();
   if (!refresh && fleetTicketsCache.cachedAt && now - fleetTicketsCache.cachedAt < FLEET_CACHE_TTL_MS && fleetTicketsCache.rows.length) {
@@ -477,18 +525,14 @@ export async function getFleetTickets({ env = process.env, root = REPO_ROOT, ref
                 return c >= 0 && vals[c] !== undefined ? String(vals[c]).trim() : '';
               };
 
-              const idVal = getByName('key') || getByName('id') || getByName('#') || String(idx + 1);
-              return {
-                id: idVal,
-                originalRequest: getByName('Original request') || getByName('goal') || getByName('title') || '—',
-                workDoneSoFar: getByName('Work done so far') || getByName('note') || '—',
-                whatsLeftToDo: getByName("What's left to do") || getByName('todo') || '—',
-                owner: getByName('Owner') || '—',
-                status: getByName('Status') || 'Pending',
-                completionProof: getByName('Completion proof') || getByName('proof') || '—',
-                completionGate: getByName('Completion gate') || getByName('gate') || '—',
-                lastActivity: getByName('last_activity') || getByName('last activity') || getByName('built_at') || '—',
-              };
+              // The `current` tab has been laid out two ways (a curated one with
+              // Owner/Status/Completion proof, a projected one with
+              // owner/author/state/agent_note). Reading only the curated names
+              // blanked five columns the instant the layout flipped, even when
+              // the projected row carried the value. `ticketFromRow` names all
+              // the headers that have ever held each field, so a layout change
+              // costs one field instead of five.
+              return ticketFromRow(getByName, idx);
             });
 
             fleetTicketsCache = { cachedAt: now, rows: mapped };
@@ -577,6 +621,198 @@ export async function getFleetBots({ root = REPO_ROOT, home = os.homedir() } = {
   } catch {
     return [];
   }
+}
+
+/**
+ * Runtimes that share the bot-host on-disk per-chat state layout
+ * (`~/.local/state/bot-host/<id>/{prefs,sessions,totals,leases}.json`).
+ * hermes/collab/provider-router keep their own state and are excluded.
+ */
+export const FLEET_CHAT_RUNTIMES = new Set(['bot-host', 'device']);
+
+function readJsonObject(file) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function lookupByChat(obj, chatId) {
+  const key = String(chatId ?? '');
+  if (!key || !obj || typeof obj !== 'object') return undefined;
+  if (Object.hasOwn(obj, key)) return obj[key];
+  return undefined;
+}
+
+function splitScopedSession(raw) {
+  const s = String(raw ?? '');
+  if (!s) return { workspace: '', sessionId: null };
+  const cut = s.indexOf('\u0000');
+  if (cut === -1) return { workspace: '', sessionId: null };
+  return { workspace: s.slice(0, cut), sessionId: s.slice(cut + 1) || null };
+}
+
+/**
+ * One row per council agent for this chat, read from on-disk state.
+ *
+ * `seats` + `roleOf` select the agents in the room: the registry master
+ * (coordinator) plus the bots holding a seat on this chat's council
+ * (health seats for a health chat, tax seats for a tax chat). Without them
+ * every chat-capable runtime is listed. Each bot is its own OS process, so
+ * live memory (last-run usage, uptime, poll health) of *other* bots is not
+ * visible here. Task state falls back to what the fleet dashboard uses: a
+ * leases.json entry for this chat means working, otherwise idle. Only the
+ * answering bot's own /status has the live-memory fields — this table says
+ * which bot to ask for those.
+ *
+ * `workspace` scopes the session row the same way /status does (an exact
+ * workspace match, or the row belongs to another project).
+ */
+export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home = os.homedir(), seats = null, roleOf = null, masterId = null } = {}) {
+  const key = String(chatId ?? '');
+  if (!key) return [];
+  let bots = [];
+  let master = null;
+  try {
+    const reg = readJsonObject(path.join(root, 'bots', 'registry.json'));
+    if (!Array.isArray(reg.bots) || reg.bots.length === 0) return [];
+    master = masterId || reg.master || null;
+    bots = applyMasterDefaults({ master: reg.master, bots: reg.bots }).bots;
+  } catch {
+    return [];
+  }
+  const ws = String(workspace || '');
+  const inCouncil = (b) => {
+    if (!Array.isArray(seats) || typeof roleOf !== 'function') return true;
+    if (master && b.id === master) return true;
+    return seats.includes(roleOf(b));
+  };
+  return bots
+    .filter((b) => FLEET_CHAT_RUNTIMES.has(b.runtime || 'bot-host') && inCouncil(b))
+    .map((b) => {
+      const dir = path.join(home, '.local', 'state', 'bot-host', b.id);
+      const pref = lookupByChat(readJsonObject(path.join(dir, 'prefs.json')), key) || {};
+      const sessionRow = lookupByChat(readJsonObject(path.join(dir, 'sessions.json')), key);
+      const totalsRow = lookupByChat(readJsonObject(path.join(dir, 'totals.json')), key) || {};
+      const leases = readJsonObject(path.join(dir, 'leases.json'));
+      const leaseHit = Array.isArray(leases)
+        ? leases.some((l) => String(l?.chatId ?? '') === key)
+        : lookupByChat(leases, key) !== undefined;
+      const scoped = splitScopedSession(sessionRow);
+      const sessionId = scoped.sessionId && (!ws || scoped.workspace === ws) ? scoped.sessionId : null;
+      const foreignSession = Boolean(scoped.sessionId && ws && scoped.workspace !== ws);
+      const runs = Number(totalsRow.runs) || 0;
+      const tokens = Number(totalsRow.tokens) || 0;
+      const cost = Number(totalsRow.cost) || 0;
+      const last = totalsRow.last && typeof totalsRow.last === 'object' ? totalsRow.last : null;
+      const lastTokens = Number(last?.tokens?.total ?? last?.tokens) || 0;
+      const lastLimit = Number(last?.contextLimit) || 0;
+      const enabled = b.enabled !== false;
+      const seat = typeof roleOf === 'function' ? String(roleOf(b) || '') : '';
+      return {
+        id: b.id,
+        name: b.name || b.id,
+        enabled,
+        role: master && b.id === master ? 'coordinator' : seat || null,
+        model: pref.model || b.agent?.model || null,
+        agent: pref.agent || b.agent?.defaultAgent || null,
+        sessionId,
+        foreignSession,
+        totals: runs > 0 || tokens > 0 || cost > 0 ? { runs, tokens, cost } : null,
+        lastUsage: lastTokens > 0 ? { tokens: lastTokens, contextLimit: lastLimit } : null,
+        task: !enabled ? 'off' : leaseHit ? 'working' : 'idle',
+      };
+    });
+}
+
+function padEnd(s, w) {
+  const t = String(s ?? '');
+  return t.length >= w ? t : t + ' '.repeat(w - t.length);
+}
+
+function trunc(s, w) {
+  const t = String(s ?? '');
+  return t.length > w ? `${t.slice(0, w - 1)}…` : t;
+}
+
+function sessionCell(r) {
+  if (r.sessionId) return trunc(r.sessionId, 9);
+  if (r.foreignSession) return 'other-proj';
+  return '—';
+}
+
+/**
+ * Session usage for the compaction question: last-run tokens against the
+ * context window, e.g. `310k (30%)`. Falls back to cumulative chat totals
+ * when no last-run snapshot was persisted yet.
+ */
+export function usageCell(r) {
+  const t = Number(r.lastUsage?.tokens) || 0;
+  const limit = Number(r.lastUsage?.contextLimit) || 0;
+  if (t > 0 && limit > 0) {
+    const pct = Math.round((t / limit) * 100);
+    return `${formatTokens(t)} (${pct}%)`;
+  }
+  if (t > 0) return formatTokens(t);
+  if (!r.totals) return '—';
+  // Cumulative chat totals. A council answer is a stateless one-shot — the
+  // lane reports no token events for it (verified against the live CLI: no
+  // step_finish on a text turn) — so a seat that only ever answers here has
+  // runs but zero measured tokens. Show the honest parts only, never `·0`.
+  const parts = [`${r.totals.runs} run${r.totals.runs === 1 ? '' : 's'}`];
+  if ((Number(r.totals.tokens) || 0) > 0) parts.push(formatTokens(r.totals.tokens));
+  const spend = Number(r.totals.cost) || 0;
+  if (spend > 0) parts.push(`$${spend.toFixed(spend < 0.01 ? 5 : 4)}`);
+  return parts.join('·');
+}
+
+/**
+ * Monospace fleet-wide table for /status_all. Telegram has no table
+ * rendering, so the table ships in a code fence with padded columns.
+ * When every live bot shares model+agent those move to one `all:` line and
+ * the table stays narrow enough for a phone; otherwise each row carries its
+ * own Model/Agent columns. Disabled bots are not table rows — they get one
+ * `off:` line. The answering bot is named so a group chat knows who
+ * rendered it. Full per-bot detail stays behind each bot's own /status.
+ */
+export function formatFleetStatusTable(rows, { chatId, via } = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  const live = list.filter((r) => r.enabled !== false);
+  const off = list.filter((r) => r.enabled === false);
+  const uniform =
+    live.length > 0 && live.every((r) => r.model === live[0].model && r.agent === live[0].agent);
+  const head = `Fleet status · chat ${String(chatId ?? '')} · ${list.length} agent${list.length === 1 ? '' : 's'}${via ? ` (via ${via})` : ''}`;
+  const out = [head];
+  const roleCell = (r) => trunc(r.role || '—', 14);
+  if (uniform) {
+    const free = live[0].model && /free/i.test(live[0].model) ? ' (free)' : '';
+    out.push(`all: ${live[0].model || '—'}${free} · ${live[0].agent || '—'}`);
+    const W = { bot: 8, role: 14, sess: 9, task: 7, runs: 14 };
+    out.push('```');
+    out.push(`${padEnd('Bot', W.bot)} ${padEnd('Role', W.role)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Usage', W.runs)}`.trimEnd());
+    for (const r of live) {
+      out.push(
+        `${padEnd(trunc(r.id, W.bot), W.bot)} ${padEnd(roleCell(r), W.role)} ${padEnd(sessionCell(r), W.sess)} ${padEnd(r.task, W.task)} ${padEnd(trunc(usageCell(r), W.runs), W.runs)}`.trimEnd(),
+      );
+    }
+    out.push('```');
+  } else {
+    const W = { bot: 8, role: 14, model: 18, agent: 5, sess: 9, task: 7, runs: 14 };
+    out.push('```');
+    out.push(
+      `${padEnd('Bot', W.bot)} ${padEnd('Role', W.role)} ${padEnd('Model', W.model)} ${padEnd('Ag', W.agent)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Usage', W.runs)}`.trimEnd(),
+    );
+    for (const r of live) {
+      out.push(
+        `${padEnd(trunc(r.id, W.bot), W.bot)} ${padEnd(roleCell(r), W.role)} ${padEnd(trunc(r.model || '—', W.model), W.model)} ${padEnd(trunc(r.agent || '—', W.agent), W.agent)} ${padEnd(sessionCell(r), W.sess)} ${padEnd(r.task, W.task)} ${padEnd(trunc(usageCell(r), W.runs), W.runs)}`.trimEnd(),
+      );
+    }
+    out.push('```');
+  }
+  if (off.length) out.push(`off: ${off.map((r) => r.id).join(', ')}`);
+  return out.join('\n');
 }
 
 /** Clear in-memory caches (for sensor testing). */

@@ -36,7 +36,7 @@ echo "  ✓ ~/.hermes/SOUL.md + profile souls written (composed, budgets enforce
 # 2. USER & MEMORY FILES (BOT_ROLES.md §3b)
 # ---------------------------------------------------------------
 USER_CONTENT="Cwah Li. Short replies. Screenshots belong in the chat, not as a file path."
-MEMORY_CONTENT="Live site is https://health-tracking.duckdns.org. Dev checkout is /home/ubuntu/src/Health-tracker.
+MEMORY_CONTENT="Live site is https://health-tracker.co.uk. Dev checkout is /home/ubuntu/src/Health-tracker.
 OpenCode model opencode/muse-spark-1.3 returned insufficient funds on 2026-09-22. Antigravity is blocked in this region.
 A QA bug is fixed only by scripts/run-coding-dispatch.sh. The OpenCode Telegram bot is a separate interactive door."
 
@@ -56,7 +56,7 @@ for prof in qa_meal orchestrator qa_biomarker qa_onboarding meal_audit bug_ticke
 done
 
 cat > "${PROFILES_DIR}/bug_ticket/memories/MEMORY.md" << 'BUG_TICKET_MEM_EOF'
-Live site is https://health-tracking.duckdns.org. Dev checkout is /home/ubuntu/src/Health-tracker.
+Live site is https://health-tracker.co.uk. Dev checkout is /home/ubuntu/src/Health-tracker.
 The only binary: run from the repo root — cd /home/ubuntu/src/Health-tracker && node scripts/bugctl.mjs (gateway cwd is ~/.hermes, a relative path fails there). Read the canonical list with `bugctl list --json`; use `queue` only for the open queue. pack --check before pack POST; repro --check before repro POST. State is derived from artifacts — never set it.
 Multi-item reports (e.g. BUG-8449's 7 Home discrepancies): ONE card + a split list, never a bundled ticket.
 Vague report → card + repro status=needed (needs_repro). Fingerprint = class|canonical_key|iso-week.
@@ -66,7 +66,7 @@ BUG_TICKET_MEM_EOF
 echo "  ✓ USER.md synced across profiles; bug_ticket MEMORY.md written"
 
 cat > "${PROFILES_DIR}/qa_meal/memories/MEMORY.md" << 'QA_MEM_EOF'
-Live site is https://health-tracking.duckdns.org. Dev checkout is /home/ubuntu/src/Health-tracker.
+Live site is https://health-tracker.co.uk. Dev checkout is /home/ubuntu/src/Health-tracker.
 Tickets: cd /home/ubuntu/src/Health-tracker && node scripts/bugctl.mjs list --assignee=qa_meal (canonical list, never MEMORY.md).
 Reproduce-only lane: qa-reproduce skill + scripts/qa-runner.mjs --ticket=<n>; never fix, dispatch, or verify.
 A QA bug is fixed only by run-coding-dispatch.sh. The OpenCode Telegram bot is a separate interactive door.
@@ -74,7 +74,7 @@ OpenCode model opencode/muse-spark-1.3 returned insufficient funds on 2026-09-22
 QA_MEM_EOF
 
 cat > "${PROFILES_DIR}/orchestrator/memories/MEMORY.md" << 'ORCH_MEM_EOF'
-Live site is https://health-tracking.duckdns.org. Dev checkout is /home/ubuntu/src/Health-tracker.
+Live site is https://health-tracker.co.uk. Dev checkout is /home/ubuntu/src/Health-tracker.
 The dispatch harness is installed in PATH at run-coding-dispatch.sh and tool-allowance.mjs.
 Available commands:
 - run-coding-dispatch.sh status — shows active agent PID, elapsed time, current agent activity.
@@ -190,8 +190,8 @@ set_or_replace_env() {
 
 set_or_replace_env "${HERMES_DIR}/.env" "HERMES_INFERENCE_MODEL" "${DEFAULT_FREE_MODEL}"
 set_or_replace_env "${HERMES_DIR}/.env" "HERMES_PROVIDER" "${DEFAULT_PROVIDER}"
-set_or_replace_env "${HERMES_DIR}/.env" "PLAYWRIGHT_TEST_BASE_URL" "https://health-tracking.duckdns.org"
-echo "  ✓ Global ~/.hermes/.env configured with model=${DEFAULT_FREE_MODEL} and duckdns origin"
+set_or_replace_env "${HERMES_DIR}/.env" "PLAYWRIGHT_TEST_BASE_URL" "https://health-tracker.co.uk"
+echo "  ✓ Global ~/.hermes/.env configured with model=${DEFAULT_FREE_MODEL} and co.uk origin"
 
 # Propagate credentials and user ID to all profile .envs
 GLOBAL_ALLOWED=$(grep -E '^(TELEGRAM_ALLOWED_USERS|TELEGRAM_USER_ID)=' "${HERMES_DIR}/.env" 2>/dev/null | head -n1 | cut -d '=' -f2- || true)

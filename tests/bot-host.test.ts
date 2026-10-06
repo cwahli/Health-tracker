@@ -73,6 +73,9 @@ import {
 import {
   parseCommand,
   resolveCommandName,
+  isKnownCommand,
+  greetingReply,
+  normalizeSkillCommand,
   BOT_COMMANDS,
   COMMAND_NAMES,
   toTelegramCommands,
@@ -97,19 +100,32 @@ import {
   ProgressRenderer,
   fanoutProgressEvent,
   buildQuotedPrompt,
+  listTypedSkills,
+  warmTurnCaches,
+  resolveFreemodelTap,
+  pickOfferedVariant,
+  readTuiPane,
+  hasTuiPane,
+  readTuiMark,
+  tuiStatusLine,
   loadLeases,
   saveLeases,
   recordRunStart,
   recordRunFinish,
   sweepOrphanedLeases,
+  selectTurnLanes,
+  formatFreemodelWithDepletion,
+  getContextLimit,
+  laneContextLimits,
 } from '../scripts/bot-host.mjs';
+import { isHardModelFailure, ensureBotLedger, withCatalogLanes, stampCooldown, CONNECTION_FAILED_COOLDOWN_MS, HARD_MODEL_FAILURE_COOLDOWN_MS, canonicalAllowanceLanes, planCodeForLane } from '../scripts/lib/free-lanes.mjs';
 import {
   buildStatusSnapshot,
   formatStatusPlain,
   compactUnsupported,
   formatAgo,
-  COMPACT_SUMMARY_PROMPT,
 } from '../scripts/lib/bot-status.mjs';
+import { classifyInboundSender, delegationConfig, delegationSourcePath, machineLocation, sendPeerEnvelope, sendPeerHandoff } from '../scripts/bot-host.mjs';
 
 describe('telegram reply quote prompt', () => {
   it('prepends a direct text reply while preserving the new request', () => {
@@ -546,7 +562,7 @@ describe('runWithModelFailover', () => {
     expect(result._model).toBe('a/one');
   });
 
-  it('never auto-retries a timeout — re-running would just wait again', async () => {
+  it('a timeout advances to the next candidate (failover, #577)', async () => {
     const prompts = [];
     const { attempts } = await runWithModelFailover({
       models: ['a/one', 'b/two'],
@@ -555,8 +571,8 @@ describe('runWithModelFailover', () => {
         return Promise.resolve({ finalText: '', lastError: 'timed out after 900000ms' });
       },
     });
-    expect(prompts).toEqual(['a/one']);
-    expect(attempts).toHaveLength(1);
+    expect(prompts).toEqual(['a/one', 'b/two']);
+    expect(attempts).toHaveLength(2);
   });
 
   it('reports the switch so the chat can show what happened', async () => {
@@ -734,6 +750,29 @@ describe('commands', () => {
     expect(src).toMatch(/runBugctl\(\['queue', '--json'\]\)/);
     expect(src).toMatch(/runBugctl\(\['packet', `--id=#\$\{id\}`, '--format=text'\]\)/);
     expect(parseCommand('/resume 5')).toEqual({ name: 'resume', args: '5', raw: '/resume 5' });
+  });
+
+  it('hands /tui a fresh personal web link (never a fixed Mini App URL) plus a live minter', async () => {
+    const src = (await import('node:fs')).readFileSync(
+      new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8',
+    );
+    expect(src).toContain('personalWebUiLink');
+    expect(src).toContain('freshWebLink');
+    expect(src).not.toContain("case 'web'");
+    expect(COMMAND_NAMES).not.toContain('web');
+    const { personalWebUiLink, gatewaySecretFromHostEnv, WEB_LINK_TTL_SEC } =
+      await import('../scripts/bot-host.mjs');
+    expect(WEB_LINK_TTL_SEC).toBe(900);
+    const link = personalWebUiLink({ webUrl: 'https://web.test', botId: 'vm', chatId: '42', secret: 's3cret', now: 1000 });
+    expect(link.startsWith('https://web.test/?token=')).toBe(true);
+    const { verifyToken } = await import('../scripts/tui-gateway.mjs');
+    expect(verifyToken(decodeURIComponent(link.split('token=')[1]), 's3cret', { now: 1000 }).ok).toBe(true);
+    expect(verifyToken(decodeURIComponent(link.split('token=')[1]), 's3cret', { now: 1000 + 901000 }).ok).toBe(false);
+    expect(personalWebUiLink({ webUrl: '', botId: 'vm', chatId: '42', secret: 's3cret' })).toBe('');
+    expect(personalWebUiLink({ webUrl: 'https://web.test', botId: 'vm', chatId: '', secret: 's3cret' })).toBe('');
+    expect(personalWebUiLink({ webUrl: 'https://web.test', botId: 'vm', chatId: '42', secret: '' })).toBe('');
+    expect(gatewaySecretFromHostEnv({ readFile: () => { throw new Error('no file'); } })).toBe('');
+    expect(gatewaySecretFromHostEnv({ readFile: () => 'A=1\nTUI_GATEWAY_SECRET=abc\n' })).toBe('abc');
   });
 
   it('/bugs reads the live store in the handler and formats count + cards deterministically', async () => {
@@ -932,8 +971,27 @@ describe('pickers', () => {
     );
     expect(failing).toContain('poll: FAILING since 1m ago (fetch failed)');
     expect(formatAgo(0)).toBe('never');
-    expect(COMPACT_SUMMARY_PROMPT.length).toBeGreaterThan(20);
     expect(compactUnsupported('collab', 'gpu tunnels')).toContain('/compact');
+  });
+
+  it('declares the turn seat outside the try so the finally can read it', async () => {
+    // The finished-turn record in `finally` reads `activeRole`. Declared inside
+    // the try block it is out of scope there, so every recorded turn threw
+    // "activeRole is not defined" and the thread was never recorded.
+    const src = (await import('node:fs')).readFileSync(
+      new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8',
+    );
+    const decl = src.indexOf('let activeRole = null;');
+    expect(decl).toBeGreaterThan(-1);
+    const storeFacts = src.indexOf('const storeFacts =');
+    expect(decl).toBeGreaterThan(storeFacts);
+    // Same statement list as storeFacts, i.e. BEFORE the turn's `try {`.
+    expect(decl).toBeLessThan(src.indexOf('try {', storeFacts));
+    // Assigned, not redeclared, inside the try.
+    expect(src).toContain('activeRole = getChatRole(chatId);');
+    expect(src).not.toContain('let activeRole = getChatRole(chatId);');
+    // And the consumer the crash came from is still there.
+    expect(src).toContain('roleId: activeRole || addr?.roleId || null,');
   });
 
   it('keeps one command source of truth including /compact', async () => {
@@ -1134,6 +1192,343 @@ describe('freemodels', () => {
   });
 });
 
+describe('vm5 failover refs (live 2026-10-03)', () => {
+  it('keeps the vendor on bare chat-only lane ids', () => {
+    // Live: the ledger's `tokenharbor` lane with model `mimo-v2.6-flash:free`
+    // was emitted bare, and every turn burned on `Invalid model reference`.
+    expect(toModelRef('tokenharbor', 'mimo-v2.6-flash:free')).toBe('tokenharbor/mimo-v2.6-flash:free');
+    expect(toModelRef('cloudflare', 'qwen3.8-flash:free')).toBe('cloudflare/qwen3.8-flash:free');
+    expect(toModelRef('opencode', 'opencode/big-pickle')).toBe('opencode/big-pickle');
+    expect(toModelRef('opencode', 'tokenharbor/deepseek-v4.1-flash:free')).toBe(
+      'tokenharbor/deepseek-v4.1-flash:free',
+    );
+    expect(toModelRef('cline', 'cline-free/kat-coder-pro')).toBe('cline:cline-free/kat-coder-pro');
+    // `google/` catalog rows execute through the direct Gemini runner: the
+    // OpenCode `google/` provider is unwired on this host (live 2026-10-03).
+    expect(toModelRef('google', 'gemini-3.8-flash')).toBe('gemini:gemini/gemini-3.8-flash');
+    expect(toModelRef('gemini', 'gemini-3.8-flash')).toBe('gemini:gemini/gemini-3.8-flash');
+    expect(toModelRef('gemini', 'gemini/gemini-3.1-pro')).toBe('gemini:gemini/gemini-3.1-pro');
+    // The go-plan pool is its own quota: a bare id keeps the vendor.
+    expect(toModelRef('opencode-go', 'space-bunny-free')).toBe('opencode-go/space-bunny-free');
+  });
+
+  it('treats an invalid model reference as a hard model failure', () => {
+    expect(isHardModelFailure('Invalid model reference: mimo-v2.6-flash:free')).toBe(true);
+    expect(isHardModelFailure('Model unavailable: tokenharbor/deepseek-v4.1-flash:free')).toBe(true);
+    expect(isHardModelFailure('429 Too Many Requests')).toBe(false);
+    expect(isHardModelFailure('')).toBe(false);
+  });
+
+  it('walks a qualified tokenharbor ref and hides vendors with no credential', () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5-home-'));
+    const lanesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5-lanes-'));
+    const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5-shared-'));
+    const oldHome = process.env.HOME;
+    const oldLanes = process.env.FREE_LANES_DIR;
+    const oldShared = process.env.FREE_LANES_SHARED_DIR;
+    process.env.HOME = homeDir;
+    process.env.FREE_LANES_DIR = lanesDir;
+    process.env.FREE_LANES_SHARED_DIR = sharedDir;
+    try {
+      const { dir } = ensureBotLedger('vm5test');
+      const lane = (pref: number, provider: string, model: string) => ({
+        pref,
+        family: `f${pref}`,
+        provider,
+        model,
+        label: model,
+        bucket: `${provider}-test`,
+        tg: true,
+        resetRule: 'test',
+        status: 'available',
+        nextReset: '-',
+        nextResetAt: null,
+        cooldownLeft: '-',
+      });
+      const table = {
+        version: 3,
+        failover: 'test',
+        updatedAt: null,
+        buckets: {},
+        lanes: [
+          lane(1, 'opencode', 'opencode/space-bunny-free'),
+          lane(2, 'tokenharbor', 'mimo-v2.6-flash:free'),
+          lane(3, 'opencode', 'cloudflare/@cf/qwen/qwen3.8-27b'),
+        ],
+      };
+      fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(table));
+      fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ quota: {} }));
+      const ready = (overrides = {}) => ({
+        opencode: { ready: true },
+        cline: { ready: true },
+        tokenharbor: { ready: true },
+        cloudflare: { ready: true },
+        gemini: { ready: true },
+        freebuff: { ready: true },
+        ...overrides,
+      });
+      const open = selectTurnLanes({
+        botId: 'vm5test',
+        model: 'opencode/space-bunny-free',
+        fallback: 'cline:cline-free/deepseek-v4.1-flash',
+        readiness: ready(),
+      });
+      expect(open.models).toContain('tokenharbor/mimo-v2.6-flash:free');
+      expect(open.models).not.toContain('mimo-v2.6-flash:free');
+      const closed = selectTurnLanes({
+        botId: 'vm5test',
+        model: 'opencode/space-bunny-free',
+        fallback: 'cline:cline-free/deepseek-v4.1-flash',
+        readiness: ready({
+          tokenharbor: { ready: false, needs: 'a Token Harbor key', fix: 'set it', command: null },
+          cloudflare: { ready: false, needs: 'a Cloudflare token', fix: 'set it', command: null },
+        }),
+      });
+      expect(closed.models).toEqual(['opencode/space-bunny-free']);
+      expect(closed.skipped.some((s) => /needs a Token Harbor key/.test(s.why || ''))).toBe(true);
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = oldHome;
+      if (oldLanes === undefined) delete process.env.FREE_LANES_DIR;
+      else process.env.FREE_LANES_DIR = oldLanes;
+      if (oldShared === undefined) delete process.env.FREE_LANES_SHARED_DIR;
+      else process.env.FREE_LANES_SHARED_DIR = oldShared;
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(lanesDir, { recursive: true, force: true });
+      fs.rmSync(sharedDir, { recursive: true, force: true });
+    }
+  });
+
+  it('folds provider-distinct catalog rows but keeps shared-bar twins single', () => {
+    const table = {
+      version: 3,
+      failover: 'test',
+      buckets: {},
+      lanes: [
+        { pref: 1, family: 'f1', provider: 'opencode', model: 'opencode/space-bunny-free', label: 'Space Bunny', bucket: 'opencode-zen-free', tg: true },
+        { pref: 2, family: 'f2', provider: 'opencode', model: 'tokenharbor/mimo-v2.6-flash:free', label: 'MiMo', bucket: 'tokenharbor-free', tg: true },
+      ],
+    };
+    const { table: folded, added } = withCatalogLanes(table, [
+      'opencode-go/space-bunny-free',
+      'google/gemini-3.8-flash',
+      'tokenharbor/mimo-v2.6-flash:free',
+    ]);
+    const refs = added.map((l) => `${l.provider}/${l.model}`);
+    // The go-plan pool is separate quota: its own row. The tokenharbor twin
+    // shares one bar: still a single row.
+    expect(refs).toContain('opencode-go/space-bunny-free');
+    expect(refs).toContain('google/gemini-3.8-flash');
+    expect(refs.filter((r) => /mimo-v2\.6-flash/.test(r))).toHaveLength(0);
+    expect(folded.lanes).toHaveLength(4);
+    const go = folded.lanes.find((l) => l.provider === 'opencode-go');
+    expect(go.model).toBe('space-bunny-free');
+  });
+
+  it('walks folded go-plan and gemini lanes in executable form', () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5b-home-'));
+    const lanesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5b-lanes-'));
+    const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5b-shared-'));
+    const oldHome = process.env.HOME;
+    const oldLanes = process.env.FREE_LANES_DIR;
+    const oldShared = process.env.FREE_LANES_SHARED_DIR;
+    process.env.HOME = homeDir;
+    process.env.FREE_LANES_DIR = lanesDir;
+    process.env.FREE_LANES_SHARED_DIR = sharedDir;
+    try {
+      const { dir } = ensureBotLedger('vm5fold');
+      const table = {
+        version: 3,
+        failover: 'test',
+        updatedAt: null,
+        buckets: {},
+        lanes: [
+          { pref: 1, family: 'f1', provider: 'opencode', model: 'opencode/space-bunny-free', label: 'Space Bunny', bucket: 'opencode-zen-free', tg: true, resetRule: 't', status: 'available', nextReset: '-', nextResetAt: null, cooldownLeft: '-' },
+        ],
+      };
+      fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(table));
+      fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ quota: {} }));
+      const readiness = {
+        opencode: { ready: true },
+        cline: { ready: true },
+        tokenharbor: { ready: true },
+        cloudflare: { ready: true },
+        gemini: { ready: true },
+        freebuff: { ready: true },
+      };
+      const choice = selectTurnLanes({
+        botId: 'vm5fold',
+        model: 'opencode/space-bunny-free',
+        fallback: 'cline:cline-free/deepseek-v4.1-flash',
+        readiness,
+        catalogEntries: ['opencode-go/space-bunny-free', 'google/gemini-3.8-flash'],
+      });
+      expect(choice.models).toContain('opencode-go/space-bunny-free');
+      expect(choice.models).toContain('gemini:gemini/gemini-3.8-flash');
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = oldHome;
+      if (oldLanes === undefined) delete process.env.FREE_LANES_DIR;
+      else process.env.FREE_LANES_DIR = oldLanes;
+      if (oldShared === undefined) delete process.env.FREE_LANES_SHARED_DIR;
+      else process.env.FREE_LANES_SHARED_DIR = oldShared;
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(lanesDir, { recursive: true, force: true });
+      fs.rmSync(sharedDir, { recursive: true, force: true });
+    }
+  });
+
+  it('stamps a keyed gemini quota error instead of re-burning it', async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5c-home-'));
+    const lanesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5c-lanes-'));
+    const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5c-shared-'));
+    const oldHome = process.env.HOME;
+    const oldLanes = process.env.FREE_LANES_DIR;
+    const oldShared = process.env.FREE_LANES_SHARED_DIR;
+    process.env.HOME = homeDir;
+    process.env.FREE_LANES_DIR = lanesDir;
+    process.env.FREE_LANES_SHARED_DIR = sharedDir;
+    try {
+      const { dir } = ensureBotLedger('vm5quota');
+      const table = {
+        version: 3,
+        failover: 'test',
+        updatedAt: null,
+        buckets: {},
+        lanes: [
+          { pref: 1, family: 'f1', provider: 'opencode', model: 'opencode/space-bunny-free', label: 'Space Bunny', bucket: 'opencode-zen-free', tg: true, resetRule: 't', status: 'available', nextReset: '-', nextResetAt: null, cooldownLeft: '-' },
+        ],
+      };
+      fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(table));
+      fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ quota: {} }));
+      const { trackRunQuota } = await import('../scripts/bot-host.mjs');
+      const stamped = trackRunQuota({
+        botId: 'vm5quota',
+        modelRef: 'gemini:gemini-3.8-flash',
+        result: { finalText: '', stderr: '', lastError: '429 Resource exhausted, retry in 20s' },
+      });
+      expect(stamped?.stamped).toBe(true);
+      const session = JSON.parse(fs.readFileSync(path.join(dir, 'session.json'), 'utf8'));
+      expect(session.quota['gemini/gemini-3.8-flash']?.depletedUntil).toBeGreaterThan(Date.now());
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = oldHome;
+      if (oldLanes === undefined) delete process.env.FREE_LANES_DIR;
+      else process.env.FREE_LANES_DIR = oldLanes;
+      if (oldShared === undefined) delete process.env.FREE_LANES_SHARED_DIR;
+      else process.env.FREE_LANES_SHARED_DIR = oldShared;
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(lanesDir, { recursive: true, force: true });
+      fs.rmSync(sharedDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rests dead lanes for hours, transport blips for minutes', () => {    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5d-home-'));
+    const lanesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5d-lanes-'));
+    const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5d-shared-'));
+    const oldHome = process.env.HOME;
+    const oldLanes = process.env.FREE_LANES_DIR;
+    const oldShared = process.env.FREE_LANES_SHARED_DIR;
+    process.env.HOME = homeDir;
+    process.env.FREE_LANES_DIR = lanesDir;
+    process.env.FREE_LANES_SHARED_DIR = sharedDir;
+    try {
+      const { dir } = ensureBotLedger('vm5ttl');
+      const table = {
+        version: 3, failover: 'test', updatedAt: null, buckets: {},
+        lanes: [
+          { pref: 1, family: 'f1', provider: 'opencode', model: 'x', label: 'X', bucket: 'b', tg: true, resetRule: 't', status: 'available', nextReset: '-', nextResetAt: null, cooldownLeft: '-' },
+          { pref: 2, family: 'f2', provider: 'opencode', model: 'y', label: 'Y', bucket: 'b', tg: true, resetRule: 't', status: 'available', nextReset: '-', nextResetAt: null, cooldownLeft: '-' },
+        ],
+      };
+      fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(table));
+      fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ quota: {} }));
+      // Live VM5 2026-10-03: user retries ~35min apart re-burned every dead
+      // lane whose 10min stamp had just expired. Dead lanes must outlast that.
+      const t0 = Date.now();
+      expect(stampCooldown({ stateDir: dir, provider: 'opencode', model: 'x', errText: 'connect ECONNREFUSED 1.2.3.4', now: t0 }).stamped).toBe(true);
+      expect(stampCooldown({ stateDir: dir, provider: 'opencode', model: 'y', errText: 'Model unavailable: y', kind: 'model-unavailable', now: t0 }).stamped).toBe(true);
+      const session = JSON.parse(fs.readFileSync(path.join(dir, 'session.json'), 'utf8'));
+      expect(session.quota['opencode/x'].kind).toBe('connection-failed');
+      expect(session.quota['opencode/x'].depletedUntil).toBeLessThanOrEqual(t0 + CONNECTION_FAILED_COOLDOWN_MS + 5000);
+      expect(session.quota['opencode/y'].kind).toBe('model-unavailable');
+      expect(session.quota['opencode/y'].depletedUntil).toBeGreaterThan(t0 + CONNECTION_FAILED_COOLDOWN_MS);
+      expect(session.quota['opencode/y'].depletedUntil).toBeLessThanOrEqual(t0 + HARD_MODEL_FAILURE_COOLDOWN_MS + 5000);
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = oldHome;
+      if (oldLanes === undefined) delete process.env.FREE_LANES_DIR;
+      else process.env.FREE_LANES_DIR = oldLanes;
+      if (oldShared === undefined) delete process.env.FREE_LANES_SHARED_DIR;
+      else process.env.FREE_LANES_SHARED_DIR = oldShared;
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(lanesDir, { recursive: true, force: true });
+      fs.rmSync(sharedDir, { recursive: true, force: true });
+    }
+  });
+
+  it('codes the go-plan pool OG so its row survives beside the zen row', () => {
+    expect(planCodeForLane({ provider: 'opencode-go', model: 'space-bunny-free' })).toBe('OG');
+    expect(planCodeForLane({ provider: 'opencode', model: 'opencode/space-bunny-free' })).toBe('OC');
+    expect(planCodeForLane({ provider: 'opencode', model: 'tokenharbor/x:free' })).toBe('TH');
+  });
+
+  it('lists go-plan in /freemodel and parks keyed gemini last', () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5e-home-'));
+    const lanesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5e-lanes-'));
+    const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm5e-shared-'));
+    const oldHome = process.env.HOME;
+    const oldLanes = process.env.FREE_LANES_DIR;
+    const oldShared = process.env.FREE_LANES_SHARED_DIR;
+    process.env.HOME = homeDir;
+    process.env.FREE_LANES_DIR = lanesDir;
+    process.env.FREE_LANES_SHARED_DIR = sharedDir;
+    try {
+      const { dir } = ensureBotLedger('vm5keys');
+      const table = {
+        version: 3, failover: 'test', updatedAt: null, buckets: {},
+        lanes: [
+          { pref: 1, family: 'f1', provider: 'opencode', model: 'opencode/space-bunny-free', label: 'Space Bunny', bucket: 'opencode-zen-free', tg: true, resetRule: 't', status: 'available', nextReset: '-', nextResetAt: null, cooldownLeft: '-' },
+        ],
+      };
+      const folded = withCatalogLanes(table, ['opencode-go/space-bunny-free', 'google/gemini-3.8-flash']).table;
+      fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(folded));
+      fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ quota: {} }));
+      const readiness = {
+        opencode: { ready: true }, cline: { ready: true }, tokenharbor: { ready: true },
+        cloudflare: { ready: true }, gemini: { ready: true }, freebuff: { ready: true },
+      };
+      // The walk spends free lanes before the keyed one.
+      const choice = selectTurnLanes({
+        botId: 'vm5keys', model: 'opencode/space-bunny-free', fallback: 'x',
+        readiness, catalogEntries: [],
+      });
+      const refs = choice.models;
+      expect(refs).toContain('opencode-go/space-bunny-free');
+      expect(refs).toContain('gemini:gemini/gemini-3.8-flash');
+      expect(refs.indexOf('opencode-go/space-bunny-free')).toBeLessThan(refs.indexOf('gemini:gemini/gemini-3.8-flash'));
+      // The keyboard shows both, keyed last.
+      const canonical = canonicalAllowanceLanes({ table: folded, session: { quota: {} }, readiness, location: 'test' });
+      const body = formatFreemodelWithDepletion([], [], { current: '', location: 'test', canonical, tableLanes: folded.lanes });
+      const rowButtons = (body.buttons || []).filter((b) => !b.header);
+      const texts = rowButtons.map((b) => String(b.text || ''));
+      expect(texts.some((t) => /\bOG\b/.test(t))).toBe(true);
+      expect(texts.some((t) => /\bGM\b/.test(t))).toBe(true);
+      expect(/\bGM\b/.test(texts[texts.length - 1])).toBe(true);
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = oldHome;
+      if (oldLanes === undefined) delete process.env.FREE_LANES_DIR;
+      else process.env.FREE_LANES_DIR = oldLanes;
+      if (oldShared === undefined) delete process.env.FREE_LANES_SHARED_DIR;
+      else process.env.FREE_LANES_SHARED_DIR = oldShared;
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(lanesDir, { recursive: true, force: true });
+      fs.rmSync(sharedDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('agent-gemini', () => {
   it('resolves the key from opts env or process env', () => {
     expect(resolveGeminiKey({ GEMINI_API_KEY: ' k ' })).toBe('k');
@@ -1320,7 +1715,7 @@ describe('agent-cline', () => {
 // /tui terminal to resume. Before this, runCline resolved `sessionID: null` for
 // every run, so `sessions.json` kept a stale opencode id from before the chat
 // moved to Cline and the terminal opened that instead — a different agent on a
-// different thread. Cline cannot be TOLD which id to use (measured on 3.0.65:
+// different thread. Cline cannot be TOLD which id to use (measured on 3.0.65, re-verified on 3.0.68 2026-10-04:
 // `--id` with `--json` answers "interactive mode is unsupported", `--id` without
 // a TTY answers "interactive mode requires a TTY"), so the id can only be read
 // back out of the sessions directory.
@@ -1600,6 +1995,52 @@ describe('ProgressRenderer finish (bot restart/timeout truthfulness)', () => {
     expect(all).toContain('Finished with an error after partial output');
     expect(all).toContain('90s');
     expect(all).not.toContain('90000ms');
+  });
+
+  it('timeout with partial output says where it got to and how to continue', async () => {
+    const sent: string[] = [];
+    const api = {
+      sendMessage: async (_chatId: unknown, text: string, _extra?: unknown) => {
+        sent.push(text);
+        return { message_id: sent.length };
+      },
+      editMessageText: async () => ({}),
+      sendChatAction: async () => ({}),
+    };
+    const throttle = { submit: (fn: () => unknown) => Promise.resolve().then(fn), pause: () => {} };
+    const renderer = new ProgressRenderer({ api: api as never, throttle: throttle as never, chatId: 1 });
+    renderer.onEvent({ kind: 'tool', tool: 'shell', status: 'running', input: { command: 'npm run build' } });
+    renderer.onEvent({ kind: 'text', text: 'first output chunk' });
+    await renderer.finish({ code: null, finalText: 'partial answer', lastError: 'timed out after 900000ms', stderr: '' });
+    const all = sent.join('\n');
+    expect(all).toContain('partial answer');
+    expect(all).toContain('Finished with an error after partial output');
+    expect(all).toContain('15m');
+    expect(all).toContain('Last:');
+    expect(all).toContain('shell');
+    expect(all).toContain('continue the same session');
+    renderer.stopTyping();
+  });
+
+  it('timeout with no output still reports last activity', async () => {
+    const sent: string[] = [];
+    const api = {
+      sendMessage: async (_chatId: unknown, text: string, _extra?: unknown) => {
+        sent.push(text);
+        return { message_id: sent.length };
+      },
+      editMessageText: async () => ({}),
+      sendChatAction: async () => ({}),
+    };
+    const throttle = { submit: (fn: () => unknown) => Promise.resolve().then(fn), pause: () => {} };
+    const renderer = new ProgressRenderer({ api: api as never, throttle: throttle as never, chatId: 1 });
+    renderer.onEvent({ kind: 'tool', tool: 'shell', status: 'running', input: { command: 'npm run build' } });
+    await renderer.finish({ code: null, finalText: '', lastError: 'timed out after 900000ms', stderr: '' });
+    const all = sent.join('\n');
+    expect(all).toContain('Timed out after 15m');
+    expect(all).toContain('shell');
+    expect(all).toContain('continue the same session');
+    renderer.stopTyping();
   });
 
   it('clean empty run keeps the legacy Done message', async () => {
@@ -2352,7 +2793,7 @@ describe('provider switching (opencode <-> cline)', () => {
     expect(sent[0]).not.toMatch(/[{}]/);
   });
 
-  it('never auto-retries a cline timeout onto the next lane', async () => {
+  it('a cline timeout advances onto the next lane (#577)', async () => {
     const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
     const seen = [];
     const result = await runOpencodeWithFailover({
@@ -2367,7 +2808,7 @@ describe('provider switching (opencode <-> cline)', () => {
         });
       },
     });
-    expect(seen).toEqual(['cline:cline-free/muse-spark-1.3-contributor']);
+    expect(seen).toEqual(['cline:cline-free/muse-spark-1.3-contributor', 'opencode/space-bunny-free']);
     expect(result.finalText).toBe('');
   });
 
@@ -2597,5 +3038,1211 @@ describe('ledger depletion visibility (stamped routes)', () => {
     expect(branch).toMatch(/meta\.nextUp\?\.name/);
     // and the sentinel can never be printed under "depleted"
     expect(branch).toMatch(/resetIn !== '-'/);
+  });
+});
+
+describe('TG tool surface M2 — progress ledger (plan/TG_TOOL_SURFACE.md)', () => {
+  const makeRenderer = (opts: Record<string, unknown> = {}) => {
+    const sent: string[] = [];
+    const edited: string[] = [];
+    const api = {
+      sendMessage: async (_c: unknown, text: string) => {
+        sent.push(text);
+        return { message_id: sent.length };
+      },
+      editMessageText: async (_c: unknown, _id: unknown, text: string) => {
+        edited.push(text);
+        return true;
+      },
+      sendChatAction: async () => ({}),
+    };
+    const throttle = { submit: (fn: () => unknown) => Promise.resolve().then(fn), pause: () => {} };
+    const renderer = new ProgressRenderer({ api: api as never, throttle: throttle as never, chatId: 1, ...opts });
+    const flush = async () => {
+      for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
+    };
+    return { renderer, sent, edited, flush };
+  };
+
+  it('lists every tool with target and duration under So far:', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'read', status: 'completed', input: { file_path: 'src/a.ts' } });
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm run build' } });
+    const body = renderer._render();
+    expect(body).toContain('So far:');
+    expect(body).toContain('read');
+    expect(body).toContain('src/a.ts');
+    expect(body).toContain('bash');
+    expect(body).toContain('npm run build');
+    expect(body).toMatch(/· \d+s/);
+  });
+
+  it('keeps six tools, dropping the oldest', () => {
+    const { renderer } = makeRenderer();
+    for (let i = 0; i < 8; i += 1) {
+      renderer.onEvent({ kind: 'tool', tool: `tool${i}`, status: 'completed', input: `target${i}` });
+    }
+    expect(renderer.steps).toHaveLength(6);
+    const body = renderer._render();
+    expect(body).not.toContain('tool0');
+    expect(body).not.toContain('tool1');
+    expect(body).toContain('tool7');
+  });
+
+  it('a repeated tool replaces its line without resetting its clock', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm test' } });
+    renderer.steps[0].startedAt -= 20_000;
+    const clock = renderer.steps[0].startedAt;
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'completed', input: { command: 'npm test' } });
+    expect(renderer.steps).toHaveLength(1);
+    expect(renderer.steps[0].startedAt).toBe(clock);
+    expect(renderer.steps[0].status).toBe('completed');
+  });
+
+  it('identical consecutive calls collapse to one line with a count', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'read', status: 'running', input: { file_path: 'x' } });
+    renderer.onEvent({ kind: 'tool', tool: 'read', status: 'running', input: { file_path: 'x' } });
+    expect(renderer.steps).toHaveLength(1);
+    expect(renderer._render()).toContain('×2');
+  });
+
+  it('Result is ~140 chars and clears when the next tool has no output', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'completed', input: 'build', output: 'y'.repeat(500) });
+    const resultLine = renderer._render().split('\n').find((l) => l.startsWith('Result:')) || '';
+    expect(resultLine.length).toBeLessThanOrEqual(160);
+    renderer.onEvent({ kind: 'tool', tool: 'read', status: 'running', input: { file_path: 'z' } });
+    expect(renderer._render()).not.toContain('Result:');
+  });
+
+  it('streaming answer text does not replace the tool story', () => {
+    const { renderer } = makeRenderer();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm test' } });
+    renderer.onEvent({ kind: 'text', text: 'a long streaming answer that must not wipe the bubble' });
+    const body = renderer._render();
+    expect(body).toContain('bash');
+    expect(body).not.toContain('a long streaming answer');
+  });
+
+  it('thinking is a single line capped at maxChars', () => {
+    const { renderer } = makeRenderer({ maxChars: 220 });
+    renderer.onEvent({ kind: 'reasoning', text: 'First I will explore the repository structure to understand the codebase layout and find the relevant modules.' });
+    renderer.onEvent({ kind: 'reasoning', text: 'Because the failure is in the freemodel ledger, I should check the stamping logic next before changing anything.' });
+    const line = renderer._render().split('\n').find((l) => l.startsWith('Thinking:')) || '';
+    expect(line).not.toContain('\n');
+    expect(line.length).toBeLessThanOrEqual('Thinking: '.length + 220);
+  });
+
+  it('a tool change still paints after maxEdits is spent', async () => {
+    const { renderer, edited, flush } = makeRenderer({ maxEdits: 2 });
+    renderer.onEvent({ kind: 'reasoning', text: 'first substantive exploration of the codebase structure here' });
+    await flush();
+    for (let i = 0; i < 6; i += 1) {
+      renderer.onEvent({ kind: 'reasoning', text: `follow-up investigation number ${i} into test files here` });
+    }
+    await flush();
+    const before = edited.length;
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm test' } });
+    await flush();
+    expect(edited.length).toBeGreaterThan(before);
+    expect(edited[edited.length - 1]).toContain('bash');
+  });
+
+  it('deliver is never gated by the edit budget', async () => {
+    const { renderer, sent, flush } = makeRenderer({ maxEdits: 0 });
+    renderer.onEvent({ kind: 'reasoning', text: 'first substantive exploration of the codebase structure here' });
+    await flush();
+    await renderer.deliver('the final answer');
+    expect(sent.join('\n')).toContain('the final answer');
+    renderer.stopTyping();
+  });
+
+  it('settle keeps the step list under Done / Stopped / Aborted', async () => {
+    for (const [label, needle] of [['✓ Done', '✓ Done'], ['Stopped', 'Stopped'], ['Aborted', 'Aborted']] as const) {
+      const { renderer, edited, flush } = makeRenderer();
+      renderer.messageId = 7;
+      renderer.startedAt = Date.now() - 47_000;
+      renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'completed', input: { command: 'npm test' } });
+      await flush();
+      renderer.settle(label);
+      await flush();
+      const bubble = edited[edited.length - 1];
+      expect(bubble).toContain(needle);
+      expect(bubble).toContain('bash');
+      expect(bubble).toMatch(/47s|46s|48s/);
+      renderer.stopTyping();
+    }
+  });
+
+  it('settled bubble keeps the usage — tokens and share — it showed while working', async () => {
+    // #581 built the settled line by hand and dropped the usage block, so the
+    // bubble the turn ENDS on showed no tokens and no context percent while
+    // the working line above it had both (live 2026-10-06).
+    const { renderer, edited, flush } = makeRenderer({ modelLabel: 'glm-4.7-free' });
+    renderer.messageId = 7;
+    renderer.startedAt = Date.now() - 50_000;
+    renderer.onEvent({ kind: 'step_finish', tokens: 39321 });
+    await flush();
+    expect(renderer._render()).toContain('- 39.3K/131.1K (30%)');
+    renderer.settle('✓ Done');
+    await flush();
+    const bubble = edited[edited.length - 1];
+    expect(bubble).toContain('✓ Done');
+    expect(bubble).toContain('- 39.3K/131.1K (30%)');
+    renderer.stopTyping();
+  });
+
+  it('settled bubble shows the bare count, never a fake percent, when the window is unknown', async () => {
+    const { renderer, edited, flush } = makeRenderer({ modelLabel: 'mimo-v2.6-flash-free' });
+    renderer.messageId = 7;
+    renderer.startedAt = Date.now() - 12_000;
+    renderer.onEvent({ kind: 'step_finish', tokens: 539 });
+    await flush();
+    renderer.settle('✓ Done');
+    await flush();
+    const bubble = edited[edited.length - 1];
+    expect(bubble).toContain('- 539');
+    expect(bubble).not.toContain('%');
+    renderer.stopTyping();
+  });
+
+  it('a lane the catalog knows gets its real window, set beside the headline', async () => {
+    // The static free-lane map has no row for a gemini lane, so without the
+    // turn handing the renderer the catalog's window the finished bubble showed
+    // a bare count on a model whose window is catalog truth.
+    const { renderer, edited, flush } = makeRenderer({ modelLabel: 'gemini/gemini-3.8-flash' });
+    renderer.messageId = 7;
+    renderer.startedAt = Date.now() - 110_000;
+    renderer.onEvent({ kind: 'step_finish', tokens: 31900 });
+    renderer.setCtxLimit(200000);
+    await flush();
+    expect(renderer._render()).toContain('- 31.9K/200.0K (16%)');
+    renderer.settle('✓ Done');
+    await flush();
+    expect(edited[edited.length - 1]).toContain('- 31.9K/200.0K (16%)');
+    renderer.stopTyping();
+  });
+});
+
+describe('context limit resolution (answer footer usage)', () => {
+  const caches = (rows: Array<{ id: string; context?: number }>) => ({ verbose: rows }) as never;
+
+  it('resolves a legacy gemini: lane through the catalog sibling the mapping names', async () => {
+    const catalog = caches([{ id: 'google/gemini-3.8-flash', context: 1000000 }]);
+    expect(await getContextLimit({} as never, catalog, 'gemini:gemini/gemini-3.8-flash')).toBe(1000000);
+    expect(await getContextLimit({} as never, catalog, 'google/gemini-3.8-flash')).toBe(1000000);
+  });
+
+  it('answers 0 — the honest no-limit fallback — for a lane the catalog cannot resolve', async () => {
+    const catalog = caches([{ id: 'opencode/mimo-v2.6-flash-free', context: 200000 }]);
+    expect(await getContextLimit({} as never, catalog, 'tokenharbor/mimo-v2.6-flash:free')).toBe(0);
+    expect(await getContextLimit({} as never, catalog, 'gemini:gemini/unknown-flash')).toBe(0);
+  });
+
+  it('maps the turn\'s lanes to their windows, and omits the ones it cannot resolve', async () => {
+    const catalog = caches([
+      { id: 'google/gemini-3.8-flash', context: 1000000 },
+      { id: 'opencode/mimo-v2.6-flash-free', context: 200000 },
+    ]);
+    const limits = await laneContextLimits({} as never, catalog, [
+      'gemini:gemini/gemini-3.8-flash',
+      'opencode/mimo-v2.6-flash-free',
+      'tokenharbor/mimo-v2.6-flash:free',
+      'opencode/mimo-v2.6-flash-free',
+    ]);
+    expect([...limits.entries()]).toEqual([
+      ['gemini:gemini/gemini-3.8-flash', 1000000],
+      ['opencode/mimo-v2.6-flash-free', 200000],
+    ]);
+  });
+});
+
+describe('TG tool surface M3 — slash forward + /skills (plan/TG_TOOL_SURFACE.md)', () => {
+  it('bot commands win, everything else is a tool prompt', () => {
+    for (const known of ['compact', 'thinking', 'model', 'new', 'skills', 'status_all', 'store', 'setup', 'freemodels', 'freemodel']) {
+      expect(isKnownCommand(resolveCommandName({ name: known, args: '', raw: `/${known}` }))).toBe(true);
+    }
+    for (const forwarded of ['do-verify', 'do-check-source', 'do-github-sync', 'do-plan-handoff', 'frob']) {
+      expect(isKnownCommand(resolveCommandName(parseCommand(`/${forwarded} with args`)!))).toBe(false);
+    }
+  });
+
+  it('/skills is published and lists the /do-* skills on disk', () => {
+    expect(BOT_COMMANDS.some((c) => c.command === 'skills')).toBe(true);
+    expect(() => assertValidCommands()).not.toThrow();
+    const typed = listTypedSkills({ agent: { sharedSkills: ['/home/ubuntu/.agents/skills'], workspace: '/tmp' } });
+    const names = typed.map(([cmd]) => cmd);
+    for (const skill of ['/do-verify', '/do-check-source', '/do-github-sync', '/do-plan-handoff']) {
+      expect(names).toContain(skill);
+    }
+  });
+
+  it('/compact no longer promises a fresh session', () => {
+    const compact = BOT_COMMANDS.find((c) => c.command === 'compact')!;
+    expect(compact.description).not.toMatch(/start fresh/i);
+  });
+
+  it('/status compact line no longer promises a fresh session', async () => {
+    const { buildStatusSnapshot } = await import('../scripts/lib/bot-status.mjs');
+    const snap = buildStatusSnapshot({
+      bot: { id: 'x' }, platform: 't', effective: {}, session: null,
+      capabilities: { compact: true },
+    });
+    expect(String(snap.compact)).not.toMatch(/start fresh/i);
+    expect(String(snap.compact)).toMatch(/in place|stays on it/i);
+  });
+});
+
+describe('TG tool surface M1 — one --session (plan/TG_TOOL_SURFACE.md)', () => {
+  it('buildOpencodeArgs carries --session exactly once via sessionId', () => {
+    for (const args of [
+      buildOpencodeArgs({ prompt: 'hi', sessionId: 'ses_1' }),
+      buildOpencodeArgs({ prompt: 'hi', sessionId: 'ses_1', extraArgs: [] }),
+      buildOpencodeArgs({ prompt: 'hi', sessionId: 'ses_1', extraArgs: ['--agent', 'build'] }),
+    ]) {
+      expect(args.filter((a) => a === '--session')).toHaveLength(1);
+      expect(args[args.indexOf('--session') + 1]).toBe('ses_1');
+    }
+  });
+});
+
+describe('TG tool surface M1 — boot warmup (plan/TG_TOOL_SURFACE.md)', () => {
+  it('warmTurnCaches populates the turn-path caches without throwing', async () => {
+    const caches = { models: null, verbose: null, agents: null, free: null, readiness: null };
+    await warmTurnCaches({ id: 'test-warm', agent: {} }, caches);
+    expect(Array.isArray(caches.free)).toBe(true);
+    expect(caches.free.length).toBeGreaterThan(0);
+    expect(caches.readiness).toBeTruthy();
+  }, 30000);
+
+  it('a warmed cache serves the free list from memory', async () => {
+    const caches = { models: null, verbose: null, agents: null, free: null, readiness: null };
+    await warmTurnCaches({ id: 'test-warm', agent: {} }, caches);
+    const t0 = Date.now();
+    await warmTurnCaches({ id: 'test-warm', agent: {} }, caches);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  }, 30000);
+});
+
+describe('TG tool surface M4 — freebuff tap resolves (plan/TG_TOOL_SURFACE.md)', () => {
+  // Live fixture 2026-10-04: the Freebuff keyboard button carries
+  // `fm:deepseek/deepseek-v4.1-flash` while the catalog row is keyed
+  // `freebuff/deepseek/deepseek-v4.1-flash` (surface prefix stripped).
+  // Before the suffix fallback the tap died with "Expired, run /freemodel
+  // again" and never reached the terminal-only refusal.
+  const annotated = [
+    { ref: 'opencode/deepseek-v4.1-flash', label: 'DeepSeek V4.1', selectable: true },
+    { ref: 'freebuff/deepseek/deepseek-v4.1-flash', label: '❌ DeepSeek V4.1 FB', selectable: false, terminalOnly: true },
+  ];
+
+  it('a vendorless freebuff tap resolves to the terminal-only row', () => {
+    const { hit } = resolveFreemodelTap({ annotated, value: 'deepseek/deepseek-v4.1-flash' });
+    expect(hit?.ref).toBe('freebuff/deepseek/deepseek-v4.1-flash');
+  });
+
+  it('an exact selectable match still wins over the suffix', () => {
+    const { hit } = resolveFreemodelTap({ annotated, value: 'opencode/deepseek-v4.1-flash' });
+    expect(hit?.ref).toBe('opencode/deepseek-v4.1-flash');
+  });
+
+  it('an unknown value resolves to nothing (expired path)', () => {
+    expect(resolveFreemodelTap({ annotated, value: 'nope/nothing' }).hit).toBeNull();
+    expect(resolveFreemodelTap({ annotated, value: '#3' }).hit).toBeNull();
+  });
+});
+
+describe('TG TUI — /tui status must not die in the temporal dead zone', () => {
+  it('tuiSessionId is declared before its first use in case tui', () => {
+    // Live 2026-10-04: /tui status and /tui off answered NOTHING. The const
+    // was declared on the open path below its uses in the status/off
+    // branches — a ReferenceError before any reply. This sensor pins the
+    // order: declaration first, uses after.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const caseStart = src.indexOf("case 'tui': {");
+    expect(caseStart).toBeGreaterThan(-1);
+    const caseBody = src.slice(caseStart);
+    const declAt = caseBody.indexOf('const tuiSessionId =');
+    expect(declAt).toBeGreaterThan(-1);
+    for (const use of ['tuiStatusLine(config.id, tuiSessionId)', 'readTuiLease(config.id, tuiSessionId)']) {
+      const useAt = caseBody.indexOf(use);
+      expect(useAt).toBeGreaterThan(-1);
+      expect(useAt).toBeGreaterThan(declAt);
+    }
+  });
+});
+
+describe('TG opencode lane — variant travels only when offered', () => {
+  it('pickOfferedVariant passes an offered level and drops anything else', async () => {
+    expect(pickOfferedVariant('high', ['low', 'high'])).toBe('high');
+    // Live 2026-10-04: ring-2.6-1t-free#xhigh died as Invalid model
+    // reference and burned three failover lanes before gemini answered.
+    expect(pickOfferedVariant('xhigh', [])).toBeUndefined();
+    expect(pickOfferedVariant('xhigh', ['low'])).toBeUndefined();
+    expect(pickOfferedVariant('xhigh', null)).toBeUndefined();
+    expect(pickOfferedVariant(undefined, ['high'])).toBeUndefined();
+    expect(pickOfferedVariant('', ['high'])).toBeUndefined();
+  });
+});
+
+describe('TG connectivity ping — greetings run a one-word turn', () => {
+  it('greetingReply detects bare greetings and nothing else', async () => {
+    // The detector returns the greeting (truthy); the turn path rewrites it
+    // to an exact-echo ping. No canned replies anywhere: a static reply
+    // would prove nothing about the chain.
+    for (const t of ['hi', '  Hi!  ', '/hi', 'hello', 'thanks', 'thank you!', 'ok', 'k', 'got it']) {
+      expect(greetingReply(t)).toBeTruthy();
+    }
+    // Anything with content falls through untouched.
+    for (const t of ['hi, can you check the build', 'hello there', '/do-verify', '/compact', '/model x', 'high', '']) {
+      expect(greetingReply(t)).toBeNull();
+    }
+  });
+
+  it('the turn path rewrites greetings to the PONG ping (source-pinned)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('reply with exactly PONG, no tools');
+  });
+});
+
+describe('TG streaming — the work record survives a lost bubble', () => {
+  const makeApi = () => {
+    const sent = [];
+    return {
+      sent,
+      api: {
+        sendMessage: async (_c, text) => {
+          sent.push(text);
+          return { message_id: sent.length };
+        },
+      },
+    };
+  };
+
+  it('finish sends the settled bubble first when none was ever created', async () => {
+    const { renderer, sent } = (() => {
+      const { sent, api } = makeApi();
+      return { renderer: new ProgressRenderer({ api: api, chatId: 1 }), sent };
+    })();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'running', input: { command: 'npm test' } });
+    await renderer.finish({ code: 0, finalText: 'the answer', lastError: '', stderr: '' });
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toContain('bash');
+    expect(sent[1]).toContain('the answer');
+    renderer.stopTyping();
+  });
+
+  it('finish does not duplicate the bubble when it already exists', async () => {
+    const { sent, api } = makeApi();
+    const throttle = { submit: (fn) => Promise.resolve().then(fn), pause: () => {} };
+    const renderer = new ProgressRenderer({ api: api, throttle: throttle, chatId: 1 });
+    await renderer.announce();
+    renderer.onEvent({ kind: 'tool', tool: 'bash', status: 'completed', input: 'x' });
+    await new Promise((r) => setImmediate(r));
+    const before = sent.length;
+    await renderer.finish({ code: 0, finalText: 'the answer', lastError: '', stderr: '' });
+    // One bubble (created at announce) + the answer; no extra bubble send.
+    expect(sent.filter((t) => t.includes('the answer'))).toHaveLength(1);
+    expect(sent.length).toBeLessThanOrEqual(before + 2);
+    renderer.stopTyping();
+  });
+});
+
+describe('TG review — no per-turn scaffolding in the shared transcript', () => {
+  it('the turn path appends no contract line (removed 2026-10-04: it rendered verbatim in the TUI)', () => {
+    // opencode run has no --system flag, so any per-turn suffix lands in the
+    // stored user row. The contract was that suffix; now nothing may be.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).not.toContain('withChatContract');
+    expect(src).not.toContain('[chat: answer only;');
+  });
+
+  it('commands.mjs exports no contract helper to reattach', () => {
+    const src = fs.readFileSync(new URL('../scripts/lib/commands.mjs', import.meta.url), 'utf8');
+    expect(src).not.toContain('CHAT_ANSWER_CONTRACT');
+    expect(src).not.toMatch(/export function withChatContract/);
+  });
+
+  it('every turn-path helper is actually imported (live 2026-10-04: withChatContract was called but never imported, killing the turn)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const m = src.match(/import\s*\{[\s\S]*?\}\s*from\s*'\.\/lib\/commands\.mjs'/);
+    expect(m).not.toBeNull();
+    for (const name of ['greetingReply', 'isKnownCommand']) {
+      expect(m[0]).toContain(name);
+    }
+  });
+});
+
+describe('TG ping turns leave no scaffolding in the chat transcript', () => {
+  it('isPingTurn is declared before the greeting assignment (never TDZ)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const declAt = src.indexOf('let isPingTurn = false;');
+    expect(declAt).toBeGreaterThan(-1);
+    expect(src.indexOf('isPingTurn = true;')).toBeGreaterThan(declAt);
+  });
+
+  it('ping turns force a fresh session and never bind back', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('if (isPingTurn) turnSessionId = null;');
+    expect(src).toContain('if (result.sessionID && !isPingTurn) {');
+  });
+});
+
+describe('TG TUI — a kept pane with no lease stays closeable', () => {
+  const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tui-pane-'));
+
+  it('readTuiPane returns the published name, null when absent', () => {
+    const dir = tmpRoot();
+    try {
+      expect(readTuiPane('vm2', dir)).toBeNull();
+      fs.writeFileSync(path.join(dir, 'tui-pane'), 'VM-tui-vm2\n');
+      expect(readTuiPane('vm2', dir)).toBe('VM-tui-vm2');
+      fs.writeFileSync(path.join(dir, 'tui-pane'), '  \n');
+      expect(readTuiPane('vm2', dir)).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('hasTuiPane asks tmux and survives a refusal', () => {
+    expect(hasTuiPane('VM-tui-vm2', () => true)).toBe(true);
+    expect(hasTuiPane('VM-tui-vm2', () => { throw new Error('no tmux'); })).toBe(false);
+    expect(hasTuiPane('', () => true)).toBe(false);
+    expect(hasTuiPane(null, () => true)).toBe(false);
+  });
+
+  it('tuiStatusLine reports a kept pane when the lease is gone', () => {
+    // Live 2026-10-04: VM-tui-vm2 alive with no lease after detach, and
+    // both /tui status (before the TDZ fix) and /tui off missed it.
+    const dir = tmpRoot();
+    try {
+      const none = tuiStatusLine('no-such-bot-xyz', 'ses_none', () => false, dir);
+      expect(none).toContain('none open');
+      fs.writeFileSync(path.join(dir, 'tui-pane'), 'VM-tui-vm2');
+      const kept = tuiStatusLine('no-such-bot-xyz', 'ses_none', () => true, dir);
+      expect(kept).toContain('VM-tui-vm2');
+      expect(kept).toContain('pane kept');
+      expect(kept).toContain('/tui off closes it');
+      const gone = tuiStatusLine('no-such-bot-xyz', 'ses_none', () => false, dir);
+      expect(gone).toContain('none open');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('TG TUI failproof sync — reset and resync paths', () => {
+  const botSrc = () => fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+
+  it('/new takes down the stale pane with a verified kill', () => {
+    // Live failure: after /new the open terminal kept showing the old
+    // session. /new must kill the published pane and say to reopen.
+    const src = botSrc();
+    expect(src).toContain('const stalePane = readTuiPane(config.id);');
+    expect(src).toContain('Closed the old terminal pane');
+  });
+
+  it('/tui refresh kills verified-dead and points at reopen', () => {
+    // Manual resync for stuck boots and post-failover staleness: kill, then
+    // a fresh tap rebuilds via attach-time resolution (ttyd only attaches on
+    // a new client, so no auto-reopen is possible here).
+    const src = botSrc();
+    expect(src).toContain("tuiSub === 'refresh'");
+    expect(src).toContain('the new pane attaches to this chat');
+  });
+});
+
+describe('TG TUI failproof sync — no split sessions, no false same-session claim', () => {
+  it('attach refuses a sessionless opencode open before any tmux runs', () => {
+    // Live 2026-10-04: a pre-message tap launched bare opencode on "" while
+    // the turn bound ses_ef7b… — blank terminal beside a live conversation.
+    const sh = fs.readFileSync(new URL('../scripts/mobile/tui-attach.sh', import.meta.url), 'utf8');
+    const refuseAt = sh.indexOf('nothing shared to attach to.');
+    const tmuxAt = sh.indexOf('tmux new-session -d -A');
+    expect(refuseAt).toBeGreaterThan(-1);
+    expect(tmuxAt).toBeGreaterThan(refuseAt);
+    const exitAt = sh.indexOf('exit 0', refuseAt);
+    expect(exitAt).toBeGreaterThan(refuseAt);
+    expect(exitAt).toBeLessThan(tmuxAt);
+  });
+
+  it('/tui offers no button when the chat has no session to attach to', () => {
+    // Live 2026-10-05: /new deleted the chat's session row, /tui ran 20s later,
+    // wrote tui-open.json with sessionId: null and sent the button anyway, and
+    // the tap printed the attach script's refusal on a phone. The gate has to sit
+    // BEFORE the snapshot write (a null session recorded looks like a fact about
+    // the chat) and before the button.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const gateAt = src.indexOf('if (!tuiCanOpen)');
+    const snapshotAt = src.indexOf("'tui-open.json'");
+    const buttonAt = src.indexOf("text: '⌨️ Open the TUI'");
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(snapshotAt).toBeGreaterThan(gateAt);
+    expect(buttonAt).toBeGreaterThan(gateAt);
+    // It answers in the chat and stops there — a `return` before the write.
+    expect(src.slice(gateAt, snapshotAt)).toContain('return;');
+    expect(src.slice(gateAt, snapshotAt)).toContain('tuiNoSessionAdvice');
+    // The advice names the action that fixes it, once, for all three answers
+    // that used to promise a terminal.
+    expect(src).toContain('const tuiNoSessionAdvice =');
+    expect(src).toMatch(/tuiNoSessionAdvice = 'Send me any message first/);
+    // The predicate is the shared decision, not a private re-implementation, and
+    // the Cline exemption stays in the module where the surface table lives.
+    expect(src).toContain("canOpenSharedTui } from './lib/tui-surface.mjs'");
+    expect(src).toContain('const tuiCanOpen = canOpenSharedTui(tuiSurface.surface, tuiSessionId);');
+  });
+
+  it('the refresh answers promise a terminal only when there is a session', () => {
+    // Sibling path, same lie: right after /new there is no pane to refresh, and
+    // both refresh answers used to tell the user to tap /tui for a terminal on
+    // "this chat's current session" — a session that does not exist yet. Two
+    // conditionals on the one predicate: nothing to refresh, and pane closed.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src.match(/tuiCanOpen\s*\?/g)?.length).toBe(2);
+    // Both conditionals fall back to the same honest advice, and so does the
+    // /tui gate: the const plus its three call sites, and no fourth promise.
+    expect(src.match(/tuiNoSessionAdvice/g)?.length).toBe(4);
+  });
+
+  it('/new stops promising a terminal it cannot open yet', () => {
+    // The sentence that caused it: "/tui opens a fresh one on the new session",
+    // said at the exact moment /new had deleted the row that /tui resolves from.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).not.toContain('`/tui` opens a fresh one on the new session');
+    expect(src).toContain('This chat has no session of its own yet');
+  });
+
+  it('a lease naming no session never backs the same-session claim', () => {
+    // readTuiLease must return null when the turn has a session and the
+    // lease names none — otherwise the chat promises "same session" while
+    // the terminal sits on a blank one.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('if (wanted && held !== wanted) return null;');
+    expect(src).not.toContain('if (held && wanted && held !== wanted) return null;');
+  });
+});
+
+describe('TG skills match — menu autocompletes, agent keeps the skill', () => {
+  it('normalizeSkillCommand restores hyphens on the command word only', () => {
+    expect(normalizeSkillCommand('/do_github_sync')).toBe('/do-github-sync');
+    expect(normalizeSkillCommand('/do_github_sync please sync now')).toBe('/do-github-sync please sync now');
+    expect(normalizeSkillCommand('/do-github-sync')).toBe('/do-github-sync');
+    expect(normalizeSkillCommand('/status')).toBe('/status');
+    expect(normalizeSkillCommand('hello there')).toBe('hello there');
+    expect(normalizeSkillCommand('/do_a_b x_y')).toBe('/do-a-b x_y');
+  });
+
+  it('menu entries exist but are not bot commands, so taps still forward', () => {
+    // Telegram forbids hyphens in commands, hence underscore form in the
+    // menu. COMMAND_NAMES must NOT contain them or a tap would hit
+    // handleCommand instead of falling through to the turn path (M3).
+    const menu = toTelegramCommands().map((c) => c.command);
+    for (const name of ['do_check_source', 'do_github_sync', 'do_plan_handoff', 'do_verify']) {
+      expect(menu).toContain(name);
+      expect(isKnownCommand(name)).toBe(false);
+    }
+  });
+
+  it('the turn path imports the normalizer (source-pinned)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('text = normalizeSkillCommand(text);');
+    const m = src.match(/import\s*\{[\s\S]*?\}\s*from\s*'\.\/lib\/commands\.mjs'/);
+    expect(m).not.toBeNull();
+    expect(m[0]).toContain('normalizeSkillCommand');
+  });
+});
+
+/* ---------------------------------------------------------------- B2B-1 ---
+ * Bot-to-bot ingress. The contract under test is the classification, because
+ * the whole loop defence on the receive side is "a bot-sourced update files a
+ * proposal and never becomes a turn". Anything less than three outcomes here is
+ * a fleet-wide loop waiting for a misread message.
+ */
+describe('B2B-1 bot-to-bot ingress classification', () => {
+  const PEERS = { vm3: { pm: { maxDepth: 2, cooldownMs: 60_000, ttlMs: 1_800_000 } } };
+  let stateRoot: string;
+  const OLD_HOME = process.env.HOME;
+
+  const envelopeText = (over: Record<string, string> = {}) => {
+    const head = [
+      '[b2b v1]',
+      `kind=${over.kind === undefined ? 'ask' : over.kind}`,
+      `ref=${over.ref === undefined ? 'spec:fleet-current-tab' : over.ref}`,
+      `depth=${over.depth || '1'}`,
+      `from=${over.from || 'vm3'}`,
+      `to=${over.to || 'pm'}`,
+      `expires=${new Date(Date.now() + 1_800_000).toISOString()}`,
+      `id=${over.id === undefined ? 'msg00001' : over.id}`,
+      `reply_to=${over.reply_to || '-'}`,
+    ].join(' ');
+    return `${head}\n${over.body || 'the current tab has no card rows — is D1 the source or the sheet?'}`;
+  };
+
+  const message = (over: Record<string, unknown> = {}) => ({
+    from: { id: 777000, is_bot: true, username: 'ht_vm3_bot', ...(over.from || {}) },
+    chat: { id: 6218257274 },
+    text: envelopeText(over.envelope || {}),
+  });
+
+  beforeEach(() => {
+    stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'b2b-ingress-'));
+    fs.mkdirSync(path.join(stateRoot, 'vm3'), { recursive: true });
+    fs.writeFileSync(
+      path.join(stateRoot, 'vm3', 'identity.json'),
+      JSON.stringify({ id: 'vm3', username: 'ht_vm3_bot', telegramId: 777000 }),
+    );
+  });
+
+  afterEach(() => {
+    try { fs.rmSync(stateRoot, { recursive: true, force: true }); } catch {}
+  });
+
+  it('passes a human update straight through, untouched by the policy', () => {
+    const v = classifyInboundSender({
+      message: { from: { id: 6218257274, is_bot: false }, chat: { id: 1 }, text: 'hi' },
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('human');
+  });
+
+  it('never treats an update with no sender id as anything but unknown', () => {
+    const v = classifyInboundSender({ message: { chat: { id: 1 }, text: 'x' }, stateDirPath: stateRoot, self: 'pm' });
+    expect(v.kind).toBe('unknown');
+  });
+
+  it('refuses a bot sender by default, before any peers lookup', () => {
+    const v = classifyInboundSender({ message: message(), stateDirPath: stateRoot, self: 'pm' });
+    expect(v.kind).toBe('bot-refused');
+    expect(v.code).toBe('POLICY_HUMANS_ONLY');
+  });
+
+  it('refuses a bot that no seat has claimed, even with the policy on', () => {
+    const v = classifyInboundSender({
+      message: message({ from: { username: 'stranger_bot' } }),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('bot-refused');
+    expect(v.code).toBe('SENDER_UNKNOWN_SEAT');
+  });
+
+  it('refuses a claimed bot that has no peers edge to this seat', () => {
+    const v = classifyInboundSender({
+      message: message(),
+      stateDirPath: stateRoot,
+      self: 'vm4',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('bot-refused');
+    expect(v.code).toBe('PEER_NOT_ALLOWED');
+  });
+
+  it('accepts an allowlisted, in-bounds envelope as a handoff — not a turn', () => {
+    const v = classifyInboundSender({
+      message: message(),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('bot-handoff');
+    expect(v.seat).toBe('vm3');
+    expect(v.envelope.kind).toBe('ask');
+    expect(v.envelope.ref).toBe('spec:fleet-current-tab');
+    // The classification carries no turn handle at all: there is nothing for a
+    // caller to dispatch, which is the point.
+    expect(Object.keys(v)).not.toContain('run');
+    expect(v.ledger.seen['in:msg00001']).toBeGreaterThan(0);
+  });
+
+  it('refuses an envelope addressed to another seat', () => {
+    const v = classifyInboundSender({
+      message: message({ envelope: { to: 'vm4' } }),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('bot-refused');
+    expect(v.code).toBe('TARGET_UNKNOWN');
+  });
+
+  it('refuses an envelope whose from= lies about the sender', () => {
+    const v = classifyInboundSender({
+      message: message({ envelope: { from: 'vm4' } }),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('bot-refused');
+    expect(v.code).toBe('FROM_MISMATCH');
+  });
+
+  it('refuses plain text from a bot, and a bot handoff with no ref', () => {
+    const plain = classifyInboundSender({
+      message: { from: { id: 777000, is_bot: true, username: 'ht_vm3_bot' }, chat: { id: 1 }, text: 'hello there' },
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(plain.code).toBe('BAD_HEADER');
+    const noRef = classifyInboundSender({
+      message: message({ envelope: { ref: '' } }),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(noRef.code).toBe('NO_REF'); // a well-formed header with no tracked work behind it
+  });
+
+  it('receives the same message id once: the second is a duplicate', () => {
+    const first = classifyInboundSender({
+      message: message(),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(first.kind).toBe('bot-handoff');
+    const replay = classifyInboundSender({
+      message: message(),
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+      ledger: first.ledger,
+    });
+    expect(replay.kind).toBe('bot-refused');
+    expect(replay.code).toBe('DUPLICATE');
+  });
+
+  it('refuses an expired question rather than acting on stale intent', () => {
+    const stale = {
+      from: { id: 777000, is_bot: true, username: 'ht_vm3_bot' },
+      chat: { id: 1 },
+      text: `[b2b v1] kind=ask ref=spec:x depth=1 from=vm3 to=pm expires=${new Date(Date.now() - 1000).toISOString()} id=old00001 reply_to=-\ntoo late`,
+    };
+    const v = classifyInboundSender({
+      message: stale,
+      stateDirPath: stateRoot,
+      self: 'pm',
+      policy: 'humans-and-allowlisted-bots',
+      peers: PEERS,
+    });
+    expect(v.kind).toBe('bot-refused');
+    expect(v.code).toBe('EXPIRED');
+  });
+});
+
+/* --------------------------------------------------------------- B2B-1 /tell ---
+ * The send side is refusal-first. These cases never touch the network: each one
+ * asserts that a refusal returned text and sent nothing, because a bound that
+ * fires *after* the send is not a bound.
+ */
+describe('B2B-1 /tell send path', () => {
+  const PEERS = { vm3: { pm: { maxDepth: 2, cooldownMs: 60_000, ttlMs: 1_800_000 } } };
+  let stateRoot: string;
+
+  const OLD_DL = process.env.TG_DEAD_LETTER_DIR;
+
+  beforeEach(() => {
+    stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'b2b-tell-'));
+    // Dead letters go to the throwaway dir: a sensor must never write into the
+    // repo, and the production path keeps its documented location.
+    process.env.TG_DEAD_LETTER_DIR = path.join(stateRoot, 'dead-letter');
+    fs.mkdirSync(path.join(stateRoot, 'pm'), { recursive: true });
+    fs.writeFileSync(
+      path.join(stateRoot, 'pm', 'identity.json'),
+      JSON.stringify({ id: 'pm', username: 'ht_pm_bot', telegramId: 555 }),
+    );
+    fs.mkdirSync(path.join(stateRoot, 'vm3'), { recursive: true });
+  });
+
+  afterEach(() => {
+    if (OLD_DL === undefined) delete process.env.TG_DEAD_LETTER_DIR;
+    else process.env.TG_DEAD_LETTER_DIR = OLD_DL;
+    try { fs.rmSync(stateRoot, { recursive: true, force: true }); } catch {}
+  });
+
+  const config = { id: 'vm3' } as never;
+  const ON = 'humans-and-allowlisted-bots';
+  let calls: Array<Record<string, unknown>> = [];
+  const fakeApi = { call: async (_m: string, payload: Record<string, unknown>) => { calls.push(payload); return { message_id: 4242 }; } };
+
+  beforeEach(() => { calls = []; });
+
+  it('refuses without a --ref and sends nothing', async () => {
+    const v = await sendPeerHandoff({ config, args: 'pm hello there', api: fakeApi, stateDirPath: stateRoot, policy: ON, peers: PEERS });
+    expect(v.ok).toBe(false);
+    expect(v.code).toBe('NO_REF');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses malformed usage and sends nothing', async () => {
+    const v = await sendPeerHandoff({ config, args: 'pm', api: fakeApi, stateDirPath: stateRoot, policy: ON, peers: PEERS });
+    expect(v.code).toBe('BAD_ARGS');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses an unlisted target and names the addressable peers', async () => {
+    const v = await sendPeerHandoff({ config, args: 'vm4 take this --ref Sheet-03', api: fakeApi, stateDirPath: stateRoot, policy: ON, peers: PEERS });
+    expect(v.ok).toBe(false);
+    expect(v.code).toBe('PEER_NOT_ALLOWED');
+    expect(v.text).toContain('pm');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses when the policy is humans-only, even for a listed peer', async () => {
+    const v = await sendPeerHandoff({ config, args: 'pm hello --ref Sheet-03', api: fakeApi, stateDirPath: stateRoot, policy: 'humans-only', peers: PEERS });
+    expect(v.code).toBe('POLICY_HUMANS_ONLY');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses a target with no identity file rather than guessing a username', async () => {
+    const v = await sendPeerHandoff({ config, args: 'ghost hello --ref Sheet-03', api: fakeApi, stateDirPath: stateRoot, policy: ON, peers: { vm3: { ghost: {} } } });
+    expect(v.ok).toBe(false);
+    expect(v.code).toBe('PEER_NO_IDENTITY_CACHE');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('sends one addressed envelope to the resolved @username and reports the depth', async () => {
+    const v = await sendPeerHandoff({
+      config,
+      args: 'pm "the current tab has no card rows" --ref spec:fleet-current-tab',
+      api: fakeApi,
+      stateDirPath: stateRoot,
+      policy: ON,
+      peers: PEERS,
+    });
+    expect(v.ok).toBe(true);
+    expect(v.messageId).toBe(4242);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].chat_id).toBe('@ht_pm_bot');
+    expect(String(calls[0].text)).toContain('[b2b v1] kind=ask ref=spec:fleet-current-tab depth=1 from=vm3 to=pm');
+    expect(String(calls[0].text)).not.toContain('--ref');
+  });
+
+  it('a second send inside the cooldown is refused before the network', async () => {
+    const args = 'pm hello --ref Sheet-03';
+    const first = await sendPeerHandoff({ config, args, api: fakeApi, stateDirPath: stateRoot, policy: ON, peers: PEERS });
+    expect(first.ok).toBe(true);
+    calls = [];
+    const second = await sendPeerHandoff({ config, args: 'pm again --ref Sheet-03', api: fakeApi, stateDirPath: stateRoot, policy: ON, peers: PEERS });
+    expect(second.ok).toBe(false);
+    expect(second.code).toBe('COOLDOWN');
+    expect(calls).toHaveLength(0);
+  });
+});
+
+/* ------------------------------------------------- B2B-1 inbox naming ---
+ * A proposal filed where nobody looks is the same as no proposal. The duty
+ * tells agents to read inbox-<location>.md and every sweep reads
+ * ~/.agents/location, so the writer must use the machine's own name — not
+ * workLocation(), which answers "which compute pool" and says `vps` here.
+ */
+describe('B2B-1 machine location naming', () => {
+  const OLD_MACHINE = process.env.BOT_MACHINE;
+  afterEach(() => {
+    if (OLD_MACHINE === undefined) delete process.env.BOT_MACHINE;
+    else process.env.BOT_MACHINE = OLD_MACHINE;
+  });
+
+  it('prefers ~/.agents/location over the compute pool', () => {
+    const locPath = path.join(os.homedir(), '.agents', 'location');
+    const declared = fs.existsSync(locPath)
+      ? fs.readFileSync(locPath, 'utf8').trim().split(/\s+/)[0]
+      : 'vps-france';
+    expect(machineLocation()).toBe(declared);
+  });
+
+  it('BOT_MACHINE overrides, for tests and for a box with no location file', () => {
+    process.env.BOT_MACHINE = 'somewhere-else';
+    expect(machineLocation()).toBe('somewhere-else');
+  });
+
+  it('the file really is the one the sweeps read', () => {
+    const declared = fs.readFileSync(path.join(os.homedir(), '.agents', 'location'), 'utf8').trim().split(/\s+/)[0];
+    expect(machineLocation()).toBe(declared);
+    expect(declared).not.toBe('vps'); // the pool name is the bug this test pins
+  });
+});
+
+/* --------------------------------------------------- B2B-1 notify default ---
+ * The send is LOUD unless TG_B2B_NOTIFY=0. It shipped silent, which made a
+ * working channel indistinguishable from a broken one — three hops went past
+ * unseen. The cooldown and the global budget are what stop this being spam,
+ * not the mute.
+ */
+describe('B2B-1 handoff notifications', () => {
+  const OLD = process.env.TG_B2B_NOTIFY;
+  let stateRoot: string;
+  let calls: Array<Record<string, unknown>>;
+  const api = { call: async (_m: string, p: Record<string, unknown>) => { calls.push(p); return { message_id: 99 }; } };
+
+  beforeEach(() => {
+    stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'b2b-notify-'));
+    fs.mkdirSync(path.join(stateRoot, 'pm'), { recursive: true });
+    // the sender's own ledger directory, or the send refuses with LEDGER_WRITE
+    // — it will not put a message on the wire it cannot record
+    fs.mkdirSync(path.join(stateRoot, 'vm3'), { recursive: true });
+    fs.writeFileSync(
+      path.join(stateRoot, 'pm', 'identity.json'),
+      JSON.stringify({ id: 'pm', username: 'ht_pm_bot', telegramId: 7 }),
+    );
+    process.env.TG_DEAD_LETTER_DIR = path.join(stateRoot, 'dl');
+    calls = [];
+  });
+
+  afterEach(() => {
+    if (OLD === undefined) delete process.env.TG_B2B_NOTIFY;
+    else process.env.TG_B2B_NOTIFY = OLD;
+    try { fs.rmSync(stateRoot, { recursive: true, force: true }); } catch {}
+  });
+
+  it('notifies by default — silence made a working channel look broken', async () => {
+    delete process.env.TG_B2B_NOTIFY;
+    const v = await sendPeerHandoff({
+      config: { id: 'vm3' } as never,
+      args: 'pm hello --ref Sheet-03',
+      api: api as never,
+      stateDirPath: stateRoot,
+      policy: 'humans-and-allowlisted-bots',
+      peers: { vm3: { pm: {} } },
+    });
+    expect(v.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].disable_notification).toBe('false');
+  });
+
+  it('TG_B2B_NOTIFY=0 goes back to silent without a deploy', async () => {
+    process.env.TG_B2B_NOTIFY = '0';
+    const v = await sendPeerHandoff({
+      config: { id: 'vm3' } as never,
+      args: 'pm hello again --ref Sheet-04',
+      api: api as never,
+      stateDirPath: stateRoot,
+      policy: 'humans-and-allowlisted-bots',
+      peers: { vm3: { pm: {} } },
+    });
+    expect(v.ok).toBe(true);
+    expect(calls[0].disable_notification).toBe('true');
+  });
+});
+
+/* ------------------------------------------------------ B2B-1 group lane ---
+ * A private bot-to-bot chat has exactly two members: the two bots. The operator
+ * is not in it, so a handoff sent there is invisible to them — which is exactly
+ * what "I didn't see anything on tg" turned out to mean. With TG_B2B_GROUP_ID
+ * set, the human's group is the transport; the envelope still names the SEAT, so
+ * the receiving half does not change.
+ */
+describe('B2B-1 group lane', () => {
+  const OLD_GROUP = process.env.TG_B2B_GROUP_ID;
+  let stateRoot: string;
+  let calls: Array<Record<string, unknown>>;
+  const api = { call: async (_m: string, p: Record<string, unknown>) => { calls.push(p); return { message_id: 5 }; } };
+
+  beforeEach(() => {
+    stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'b2b-group-'));
+    fs.mkdirSync(path.join(stateRoot, 'pm'), { recursive: true });
+    fs.mkdirSync(path.join(stateRoot, 'vm3'), { recursive: true });
+    fs.writeFileSync(
+      path.join(stateRoot, 'pm', 'identity.json'),
+      JSON.stringify({ id: 'pm', username: 'ht_pm_bot', telegramId: 7 }),
+    );
+    process.env.TG_DEAD_LETTER_DIR = path.join(stateRoot, 'dl');
+    calls = [];
+  });
+
+  afterEach(() => {
+    if (OLD_GROUP === undefined) delete process.env.TG_B2B_GROUP_ID;
+    else process.env.TG_B2B_GROUP_ID = OLD_GROUP;
+    try { fs.rmSync(stateRoot, { recursive: true, force: true }); } catch {}
+  });
+
+  it('with no group configured it goes to the peer DM, as before', async () => {
+    delete process.env.TG_B2B_GROUP_ID;
+    const v = await sendPeerHandoff({
+      config: { id: 'vm3' } as never,
+      args: 'pm hello --ref Sheet-03',
+      api: api as never,
+      stateDirPath: stateRoot,
+      policy: 'humans-and-allowlisted-bots',
+      peers: { vm3: { pm: {} } },
+    });
+    expect(v.ok).toBe(true);
+    expect(calls[0].chat_id).toBe('@ht_pm_bot');
+  });
+
+  it('with TG_B2B_GROUP_ID set it goes to the group the operator is in', async () => {
+    process.env.TG_B2B_GROUP_ID = '-1001234567890';
+    const v = await sendPeerHandoff({
+      config: { id: 'vm3' } as never,
+      args: 'pm hello --ref Sheet-03',
+      api: api as never,
+      stateDirPath: stateRoot,
+      policy: 'humans-and-allowlisted-bots',
+      peers: { vm3: { pm: {} } },
+    });
+    expect(v.ok).toBe(true);
+    expect(calls[0].chat_id).toBe('-1001234567890');
+    // the envelope still names the SEAT, so the receiver classifies it unchanged
+    expect(String(calls[0].text)).toContain('from=vm3 to=pm');
+    expect(v.text).toContain('group -1001234567890');
+  });
+
+  it('an empty TG_B2B_GROUP_ID is not treated as a chat id', async () => {
+    process.env.TG_B2B_GROUP_ID = '   ';
+    const v = await sendPeerHandoff({
+      config: { id: 'vm3' } as never,
+      args: 'pm hello --ref Sheet-03',
+      api: api as never,
+      stateDirPath: stateRoot,
+      policy: 'humans-and-allowlisted-bots',
+      peers: { vm3: { pm: {} } },
+    });
+    expect(calls[0].chat_id).toBe('@ht_pm_bot');
+    expect(v.ok).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------- B2B-2 delegation ---
+ * B2B-1 made peer traffic free: a bot message filed an inbox line and spent no
+ * tokens. That is also why two seats could never actually collaborate. These
+ * cases cover the deliberate exception — a peer message that may start a turn —
+ * and, more importantly, the switches that keep the exception from being a hole.
+ */
+describe('B2B-2 delegation configuration', () => {
+  const PEERS = { vm4: { vm5: { maxDepth: 3 } }, vm5: { vm4: { maxDepth: 3 } } };
+
+  it('is off unless BOTH switches are set — the default spends nothing', () => {
+    // The load-bearing default. Every existing deployment has TG_SENDER_POLICY
+    // set and no TG_B2B_DELEGATE, so nothing changes for them.
+    expect(delegationConfig({} as never, { self: 'vm4', peers: PEERS }).ok).toBe(false);
+    expect(delegationConfig({ TG_B2B_DELEGATE: '1' } as never, { self: 'vm4', peers: PEERS }).ok).toBe(false);
+    expect(delegationConfig({ TG_B2B_AUTO_PEER: 'vm5' } as never, { self: 'vm4', peers: PEERS }).ok).toBe(false);
+    // A value that is merely truthy is not consent.
+    expect(delegationConfig({ TG_B2B_DELEGATE: 'true', TG_B2B_AUTO_PEER: 'vm5' } as never, { self: 'vm4', peers: PEERS }).ok).toBe(false);
+  });
+
+  it('names the peer, the ref and the sheet when both switches are set', () => {
+    const c = delegationConfig(
+      { TG_B2B_DELEGATE: '1', TG_B2B_AUTO_PEER: 'vm5', TG_B2B_REF: 'gp-letter', TG_B2B_SHEET: 'abc123' } as never,
+      { self: 'vm4', peers: PEERS },
+    );
+    expect(c.ok).toBe(true);
+    expect(c.peer).toBe('vm5');
+    expect(c.ref).toBe('gp-letter');
+    expect(c.sheetId).toBe('abc123');
+  });
+
+  it('refuses a peer with no declared edge, so a typo cannot open a lane', () => {
+    const c = delegationConfig({ TG_B2B_DELEGATE: '1', TG_B2B_AUTO_PEER: 'ghost' } as never, { self: 'vm4', peers: PEERS });
+    expect(c.ok).toBe(false);
+    expect(c.code).toBe('TARGET_UNKNOWN');
+    // Directed: vm5 may reach vm4, but not the other way round.
+    const back = delegationConfig({ TG_B2B_DELEGATE: '1', TG_B2B_AUTO_PEER: 'vm4' } as never, { self: 'pm', peers: PEERS });
+    expect(back.ok).toBe(false);
+  });
+
+  it('caches source material under a filename that cannot escape its dir', () => {
+    const p = delegationSourcePath('/tmp/state', '../../etc/passwd');
+    expect(p.startsWith('/tmp/state/b2b-source/')).toBe(true);
+    expect(p).not.toContain('..');
+  });
+});
+
+describe('B2B-2 peer envelope send', () => {
+  const PEERS = { vm4: { vm5: { maxDepth: 3, maxTurns: 4, maxRounds: 2, cooldownMs: 0, ttlMs: 1_800_000 } } };
+  let stateRoot: string;
+  let calls: Array<Record<string, unknown>>;
+  const OLD_DL = process.env.TG_DEAD_LETTER_DIR;
+
+  beforeEach(() => {
+    stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'b2b-delegate-'));
+    process.env.TG_DEAD_LETTER_DIR = path.join(stateRoot, 'dl');
+    fs.mkdirSync(path.join(stateRoot, 'vm5'), { recursive: true });
+    fs.writeFileSync(path.join(stateRoot, 'vm5', 'identity.json'), JSON.stringify({ id: 'vm5', username: 'ht_vm5_bot', telegramId: 9 }));
+    fs.mkdirSync(path.join(stateRoot, 'vm4'), { recursive: true });
+    calls = [];
+  });
+
+  afterEach(() => {
+    if (OLD_DL === undefined) delete process.env.TG_DEAD_LETTER_DIR;
+    else process.env.TG_DEAD_LETTER_DIR = OLD_DL;
+    try { fs.rmSync(stateRoot, { recursive: true, force: true }); } catch {}
+  });
+
+  const config = { id: 'vm4' } as never;
+  const api = { call: async (_m: string, p: Record<string, unknown>) => { calls.push(p); return { message_id: 7 }; } };
+
+  it('puts a delegate on the wire with the chain id the whole round will share', async () => {
+    const v = await sendPeerEnvelope({
+      config, to: 'vm5', kind: 'delegate', ref: 'gp-letter', body: 'my draft',
+      chainId: 'gp-letter-r1', api, root: stateRoot, policy: 'humans-and-allowlisted-bots', peers: PEERS,
+    });
+    expect(v.ok).toBe(true);
+    const text = String(calls[0].text);
+    expect(text).toContain('kind=delegate');
+    expect(text).toContain('from=vm4 to=vm5');
+    expect(text).toContain('chain=gp-letter-r1');
+    expect(text).toContain('my draft');
+  });
+
+  it('refuses a delegate with no ref, and sends nothing', async () => {
+    const v = await sendPeerEnvelope({
+      config, to: 'vm5', kind: 'delegate', body: 'my draft', chainId: 'c', api, root: stateRoot,
+      policy: 'humans-and-allowlisted-bots', peers: PEERS,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.code).toBe('NO_REF');
+    expect(calls.length).toBe(0);
+  });
+
+  it('refuses to delegate to a seat with no edge, and sends nothing', async () => {
+    const v = await sendPeerEnvelope({
+      config, to: 'pm', kind: 'delegate', ref: 'gp-letter', body: 'x', chainId: 'c', api, root: stateRoot,
+      policy: 'humans-and-allowlisted-bots', peers: PEERS,
+    });
+    expect(v.ok).toBe(false);
+    expect(calls.length).toBe(0);
+  });
+
+  it('honours the group lane, so the operator watches the collaboration', async () => {
+    const OLD = process.env.TG_B2B_GROUP_ID;
+    process.env.TG_B2B_GROUP_ID = '-5461458468';
+    try {
+      const v = await sendPeerEnvelope({
+        config, to: 'vm5', kind: 'feedback', ref: 'gp-letter', body: 'my revision',
+        chainId: 'gp-letter-r1', api, root: stateRoot, policy: 'humans-and-allowlisted-bots', peers: PEERS,
+      });
+      expect(v.ok).toBe(true);
+      expect(calls[0].chat_id).toBe('-5461458468');
+      expect(String(calls[0].text)).toContain('kind=feedback');
+    } finally {
+      if (OLD === undefined) delete process.env.TG_B2B_GROUP_ID;
+      else process.env.TG_B2B_GROUP_ID = OLD;
+    }
+  });
+
+  it('records our own agreement on the send side, which is half of convergence', async () => {
+    const v = await sendPeerEnvelope({
+      config, to: 'vm5', kind: 'agree', ref: 'gp-letter', body: 'the letter as it stands',
+      chainId: 'gp-letter-r1', api, root: stateRoot, policy: 'humans-and-allowlisted-bots', peers: PEERS,
+    });
+    expect(v.ok).toBe(true);
+    const led = JSON.parse(fs.readFileSync(path.join(stateRoot, 'vm4', 'handoff.json'), 'utf8'));
+    expect(led.chains['gp-letter-r1'].ourAgree).toBe(1);
+    expect(led.chains['gp-letter-r1'].terminal).toBe(true);
   });
 });

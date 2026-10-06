@@ -93,8 +93,26 @@ export function parseModelRef(raw) {
 
 export function toModelRef(surface, id) {
   if (surface === 'cline') return `cline:${id}`;
-  if (surface === 'gemini') return `gemini:${id}`;
-  return id;
+  // `google/` catalog rows execute through the direct Gemini runner: the
+  // OpenCode `google/` provider is unavailable on hosts without a wired
+  // OpenCode google credential (live VPS 2026-10-03), while GEMINI_API_KEY
+  // answers directly. Mirrored in free-lanes.laneWalkRef — keep both in sync.
+  if (surface === 'google' || surface === 'gemini') {
+    const full = String(id || '').startsWith('gemini/') ? id : `gemini/${id}`;
+    return `gemini:${full}`;
+  }
+  if (surface === 'freebuff') {
+    return String(id || '').startsWith('freebuff/') ? id : `freebuff/${id}`;
+  }
+  // A chat-only lane id without a vendor path (e.g. provider `tokenharbor`,
+  // model `mimo-v2.6-flash:free`) is not runnable as-is: the OpenCode CLI
+  // answers `Invalid model reference` and the walk burns a turn on it every
+  // time (live VM5 2026-10-03). Keep the vendor so the attempt is routed and
+  // stamped against the right lane and bucket. `opencode` surface behavior is
+  // unchanged (legacy bare ids still pass through).
+  if (!surface || surface === 'opencode') return id;
+  if (String(id || '').includes('/')) return id;
+  return `${surface}/${id}`;
 }
 
 export function formatFreeLabel(ref) {

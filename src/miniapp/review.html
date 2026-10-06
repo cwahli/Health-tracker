@@ -1,0 +1,866 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Review Queue</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { --gutter: clamp(10px, 3vw, 22px); }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; padding: 0;
+    background: #0b1220; color: #e2e8f0;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%; line-height: 1.5;
+    display: flex; flex-direction: column; height: 100dvh; overflow: hidden;
+  }
+
+  /* --- masthead ------------------------------------------------------- */
+  .masthead {
+    flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: #0b1220; padding: 6px var(--gutter); border-bottom: 1px solid #1e293b;
+  }
+  .title-group { display: flex; align-items: center; gap: 8px; }
+  h1 { color: #f8fafc; font-size: clamp(15px, 3.5vw, 19px); margin: 0; }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981; }
+  .btn-refresh {
+    background: #1e293b; border: 1px solid #334155; color: #93c5fd;
+    border-radius: 6px; padding: 2px 7px; font-size: 13px; cursor: pointer;
+    line-height: 1.2; display: inline-flex; align-items: center; justify-content: center;
+    transition: background 0.15s, transform 0.15s; user-select: none;
+  }
+  .btn-refresh:hover { background: #334155; }
+  .btn-refresh.spinning { animation: spin 0.8s linear infinite; pointer-events: none; opacity: 0.7; }
+  @keyframes spin { 100% { transform: rotate(360deg); } }
+  .pager { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #93c5fd; }
+  .pager button {
+    background: #1e293b; border: 1px solid #334155; color: #93c5fd;
+    border-radius: 6px; padding: 3px 9px; font-size: 14px; cursor: pointer;
+  }
+  .pager button:disabled { opacity: 0.3; }
+
+  /* --- one-word tabs: Info doubles as the card's collapse switch ------ */
+  .tabs { flex: 0 0 auto; display: flex; background: #0b1220; border-bottom: 1px solid #1e293b; }
+  .tabs button {
+    flex: 1; cursor: pointer; padding: 8px 4px; font-size: 12.5px; font-weight: 600;
+    color: #7f93b0; background: transparent; border: none; border-bottom: 2px solid transparent;
+    transition: color 0.12s, border-color 0.12s;
+  }
+  .tabs button.on { color: #fff; border-bottom-color: #3b82f6; }
+
+  /* --- panel ----------------------------------------------------------- */
+  .panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; }
+  .view { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+  .view.on { display: flex; }
+  .view.scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+
+  .info { padding: 8px var(--gutter); flex: 0 0 auto; max-height: 30vh; overflow-y: auto;
+          background: #0f172a; border-bottom: 1px solid #1e293b; }
+  .kv { margin-bottom: 10px; }
+  .kv:last-child { margin-bottom: 0; }
+  .kv h3 { margin: 0 0 3px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: #64748b; }
+  .kv p { margin: 0; font-size: 13.5px; color: #e2e8f0; white-space: pre-wrap; overflow-wrap: break-word; }
+  .kv .key { color: #7dd3fc; font-family: "SF Mono", Consolas, monospace; font-size: 12.5px; }
+  .kv .gate { color: #fbbf24; }
+  .text { padding: 14px var(--gutter); font-size: 15px; color: #e2e8f0;
+          white-space: pre-wrap; overflow-wrap: break-word; }
+  .colname { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+             color: #64748b; margin-bottom: 6px; }
+  .answers { padding: 12px var(--gutter); }
+  .answers .none { color: #64748b; font-size: 13px; }
+  .answer { margin: 0 0 14px; }
+  .answer img { width: 100%; max-height: 40vh; object-fit: contain; display: block;
+                background: #000; border-radius: 8px; border: 1px solid #1e293b; }
+  .answer figcaption { font-size: 13px; color: #e2e8f0; margin-top: 5px; white-space: pre-wrap; }
+  .answer figcaption.where { font-size: 10.5px; color: #64748b; }
+
+  /* --- image stage: pinch, pan, swipe, all gestures are ours --------- */
+  .stage { position: relative; flex: 1 1 auto; min-height: 0; background: #000; overflow: hidden; }
+  .track {
+    display: flex; height: 100%; width: 100%;
+    touch-action: none; /* every gesture below is handled here, not by the UA */
+    will-change: transform;
+  }
+  .track.animating { transition: transform 0.24s ease-out; }
+  .slide { flex: 0 0 100%; height: 100%; position: relative; overflow: hidden; }
+  .zoom { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .slide img { max-width: 100%; max-height: 100%; object-fit: contain; display: block;
+               transform-origin: center center; will-change: transform; }
+
+  .noproof { flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
+             text-align: center; color: #64748b; font-size: 13px; padding: 24px; }
+
+  /* Overlays never share a corner: counter + hint on the left, heart on the
+     right. The hint has done its job once the reader has pinched, so it goes. */
+  .count {
+    position: absolute; left: 10px; bottom: 10px; z-index: 5;
+    background: rgba(0,0,0,.6); border: 1px solid #334155; color: #e2e8f0;
+    border-radius: 9999px; padding: 2px 9px; font-size: 11px;
+  }
+  .zoomhint {
+    position: absolute; left: 58px; bottom: 10px; z-index: 5;
+    background: rgba(0,0,0,.6); border: 1px solid #334155; color: #93c5fd;
+    border-radius: 9999px; padding: 2px 9px; font-size: 10.5px; pointer-events: none;
+    transition: opacity 0.18s;
+  }
+  #track[data-zoomed="1"] ~ .zoomhint { opacity: 0; }
+  .heart {
+    position: absolute; right: 10px; bottom: 10px; z-index: 6;
+    width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
+    background: rgba(15,23,42,.72); color: #fca5a5; font-size: 25px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,.5); transition: transform 0.12s;
+  }
+  .heart:active { transform: scale(0.9); }
+
+  /* --- composer: no send button, keyboard sends ----------------------- */
+  .composer { flex: 0 0 auto; background: #0b1220; border-top: 1px solid #1e293b;
+              padding: 6px var(--gutter) calc(6px + env(safe-area-inset-bottom)); }
+  .attach {
+    width: 34px; height: 34px; flex: 0 0 34px; border-radius: 8px; cursor: pointer;
+    background: #111c33; border: 1px solid #1e293b; color: #93c5fd; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .attach[disabled] { opacity: 0.45; }
+  .attachrow { display: flex; gap: 8px; align-items: flex-end; }
+  .attachrow textarea { flex: 1 1 auto; }
+  .attachment[hidden] { display: none; }
+  .attachment {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+    background: #111c33; border: 1px solid #1e293b; border-radius: 8px; padding: 6px 8px;
+  }
+  .attachment img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; background: #000; }
+  .attachment .name { flex: 1 1 auto; font-size: 11.5px; color: #93c5fd; overflow-wrap: anywhere; }
+  .attachment .drop { background: none; border: none; color: #f87171; font-size: 15px; cursor: pointer; padding: 2px 4px; }
+  .target { display: flex; gap: 6px; margin-bottom: 6px; }
+  .target button {
+    cursor: pointer; padding: 4px 12px; font-size: 11.5px; font-weight: 600;
+    color: #7f93b0; background: #111c33; border: 1px solid #1e293b; border-radius: 9999px;
+    transition: color 0.12s, background 0.12s, border-color 0.12s;
+  }
+  .target button.on { color: #fff; background: #1d4ed8; border-color: #3b82f6; }
+  textarea {
+    width: 100%; min-height: 40px; max-height: 22vh; resize: none;
+    background: #111c33; border: 1px solid #1e293b; border-radius: 10px;
+    color: #e2e8f0; font-size: 14px; padding: 9px 11px; font-family: inherit; line-height: 1.35;
+  }
+  .hint { font-size: 10.5px; color: #475569; margin-top: 4px; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+    background: #111c33; border: 1px solid #334155; color: #f8fafc;
+    border-radius: 8px; padding: 8px 14px; font-size: 13px; z-index: 50;
+    max-width: 88vw; text-align: center;
+  }
+  .empty { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
+           justify-content: center; text-align: center; color: #64748b; padding: 24px; }
+  .empty .big { font-size: 38px; }
+</style>
+</head>
+<body>
+<div class="masthead">
+  <div class="title-group">
+    <span class="live-dot" id="live-indicator" title="Connected"></span>
+    <h1>Review</h1>
+    <button id="btn-refresh" class="btn-refresh" title="Refresh queue" aria-label="Refresh queue">🔄</button>
+  </div>
+  <div class="pager">
+    <button id="btn-prev" aria-label="Previous item">‹</button>
+    <span id="pos">0/0</span>
+    <button id="btn-next" aria-label="Next item">›</button>
+  </div>
+</div>
+
+<div class="tabs" id="tabs">
+  <button data-tab="info">Info</button>
+  <button data-tab="request">Request</button>
+  <button data-tab="todo">To&nbsp;do</button>
+  <button data-tab="answer">Answer</button>
+</div>
+
+<div class="panel" id="panel"></div>
+
+<div class="composer" id="composer" hidden>
+  <div class="target" id="target">
+    <button data-target="left">To&nbsp;do</button>
+    <button data-target="original">Request</button>
+  </div>
+  <div class="attachment" id="attachment" hidden>
+    <img id="attach-preview" alt="attached">
+    <span class="name" id="attach-name"></span>
+    <button class="drop" id="attach-drop" title="Remove" aria-label="Remove attached picture">✕</button>
+  </div>
+  <div class="attachrow">
+    <button class="attach" id="attach" title="Attach a picture" aria-label="Attach a picture">📎</button>
+    <textarea id="comment" rows="1" placeholder="Comment for the agent…"></textarea>
+  </div>
+  <input type="file" id="file" accept="image/*" hidden>
+  <div class="hint">Enter sends · Shift+Enter new line · 📎 attaches a picture</div>
+</div>
+
+<script>
+(function () {
+  try {
+    var tg = window.Telegram && window.Telegram.WebApp;
+    if (tg) {
+      if (tg.ready) tg.ready();
+      if (tg.expand) tg.expand();
+      if (tg.disableVerticalSwipes) { try { tg.disableVerticalSwipes(); } catch (e) {} }
+    }
+  } catch (e) {}
+
+  var state = { items: [], idx: 0, tab: 'proof', infoOpen: false, target: 'left', busy: false, pending: null };
+  var query = location.search || '';
+  var builtKey = null;      // item key currently in the DOM — the blink guard
+  var view = null;          // per-item picture view: slides, zoom, gestures
+
+  var MAX_ZOOM = 6;
+  var DOUBLE_TAP_MS = 300;
+  var SWIPE_RATIO = 0.18;
+
+  function esc(s) {
+    if (s === null || s === undefined || s === '') return '<span style="color:#475569">—</span>';
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function toast(msg) {
+    var old = document.querySelector('.toast');
+    if (old) old.remove();
+    var t = document.createElement('div');
+    t.className = 'toast';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(function () { t.remove(); }, 3000);
+  }
+
+  function proofUrl(key, fileId) {
+    var q = query ? query + '&' : '?';
+    return '/review/api/proof' + q + 'key=' + encodeURIComponent(key) + '&file=' + encodeURIComponent(fileId);
+  }
+
+  function api(path, opts) {
+    return fetch(path + query, opts).then(function (res) {
+      return res.json().then(function (j) { return { status: res.status, body: j }; });
+    });
+  }
+
+  /* ===================== picture view =================================
+     Every touch gesture is ours (the UA is told `touch-action: none`), so a
+     proof screenshot is browsed the way a photo is:
+       · one finger, not zoomed  → swipe to the next/previous shot
+       · one finger, zoomed      → pan
+       · two fingers             → pinch to zoom, drag to pan
+       · double tap              → zoom in on that point / back out
+     Zoom and offset live per slide and are clamped, so a picture can never
+     be dragged off its own bounds. ==================================== */
+  function PictureView(track, countEl) {
+    this.track = track;
+    this.countEl = countEl;
+    this.i = 0;
+    this.n = track.querySelectorAll('.slide').length;
+    this.zooms = [];
+    for (var k = 0; k < this.n; k++) this.zooms.push({ s: 1, x: 0, y: 0 });
+    this.pointers = new Map();
+    this.dragPx = 0;
+    this.mode = null;          // 'swipe' | 'pan' | 'pinch'
+    this.lastTap = 0;
+    this.lastTapPt = null;
+    this.bind();
+    this.apply();
+  }
+
+  PictureView.prototype.img = function (i) {
+    var f = this.track.querySelectorAll('.slide')[i || 0];
+    return f ? f.querySelector('img') : null;
+  };
+
+  PictureView.prototype.slideBox = function (i) {
+    return this.track.querySelectorAll('.slide')[i || 0];
+  };
+
+  PictureView.prototype.zoomOf = function (i) { return this.zooms[i || 0] || { s: 1, x: 0, y: 0 }; };
+
+  /** Clamp the offset so the scaled picture stays inside its own frame. */
+  PictureView.prototype.clamp = function (i) {
+    var img = this.img(i);
+    var z = this.zooms[i];
+    if (!img) return;
+    var box = this.slideBox(i);
+    var bw = img.offsetWidth || 1;
+    var bh = img.offsetHeight || 1;
+    var vw = box.clientWidth || 1;
+    var vh = box.clientHeight || 1;
+    var maxX = Math.max(0, (bw * z.s - vw) / 2);
+    var maxY = Math.max(0, (bh * z.s - vh) / 2);
+    z.x = Math.min(maxX, Math.max(-maxX, z.x));
+    z.y = Math.min(maxY, Math.max(-maxY, z.y));
+  };
+
+  PictureView.prototype.paint = function (i) {
+    var img = this.img(i);
+    if (!img) return;
+    var z = this.zooms[i];
+    img.style.transform = 'translate(' + z.x + 'px,' + z.y + 'px) scale(' + z.s + ')';
+  };
+
+  /** Apply zoom/offset to the slide on screen (and clamp it). */
+  PictureView.prototype.apply = function () {
+    for (var i = 0; i < this.n; i++) {
+      this.clamp(i);
+      if (i === this.i || this.dragPx) this.paint(i);
+    }
+    if (this.countEl) {
+      this.countEl.textContent = this.n > 1 ? (this.i + 1) + '/' + this.n : '1 shot';
+    }
+    this.track.dataset.slide = String(this.i);
+    this.track.dataset.zoomed = this.zoomOf(this.i).s > 1.02 ? '1' : '0';
+    this.track.style.transform = 'translate3d(' + (-this.i * 100 + (this.dragPx / this.track.clientWidth) * 100) + '%,0,0)';
+  };
+
+  PictureView.prototype.animateTo = function (i) {
+    if (i < 0 || i >= this.n) return;
+    this.i = i;
+    this.dragPx = 0;
+    this.track.classList.add('animating');
+    var self = this;
+    this.apply();
+    setTimeout(function () { self.track.classList.remove('animating'); self.apply(); }, 260);
+  };
+
+  PictureView.prototype.zoomTo = function (i, scale, cx, cy) {
+    var z = this.zooms[i];
+    var from = z.s;
+    var next = Math.min(MAX_ZOOM, Math.max(1, scale));
+    if (Math.abs(next - from) < 0.001) return;
+    // Keep the point under the fingers (or the double tap) where it is.
+    var box = this.slideBox(i);
+    var r = box.getBoundingClientRect();
+    var px = cx === undefined ? r.left + r.width / 2 : cx - r.left;
+    var py = cy === undefined ? r.top + r.height / 2 : cy - r.top;
+    var img = this.img(i);
+    var bw = img ? img.offsetWidth : 0;
+    var bh = img ? img.offsetHeight : 0;
+    // Where the anchored point sits inside the picture, relative to its centre.
+    var ox = (px - r.width / 2) - z.x;
+    var oy = (py - r.height / 2) - z.y;
+    var k = next / from;
+    z.s = next;
+    z.x -= ox * (k - 1);
+    z.y -= oy * (k - 1);
+    if (bw && bh) {
+      // the anchor uses the picture's own scale, not the box's
+      var imgK = (bw * next) / Math.max(1, box.clientWidth);
+      void imgK;
+    }
+    this.clamp(i);
+    this.paint(i);
+  };
+
+  PictureView.prototype.bind = function () {
+    var self = this;
+    var track = this.track;
+
+    track.addEventListener('pointerdown', function (e) {
+      track.setPointerCapture(e.pointerId);
+      self.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (self.pointers.size === 1) {
+        self.startX = e.clientX;
+        self.startY = e.clientY;
+        self.startZ = self.zoomOf(self.i);
+        self.dragPx = 0;
+        self.mode = self.startZ.s > 1.02 ? 'pan' : 'swipe';
+        self.pinch = null;
+        // A double tap toggles zoom, and it must be recognised in BOTH states:
+        // the second tap lands while the picture is already zoomed, and a check
+        // that only looked at the not-zoomed path made "tap again to fit" a
+        // silent no-op — the reader zoomed in and could not get back out.
+        var now = Date.now();
+        var isDouble = now - self.lastTap < DOUBLE_TAP_MS
+          && self.lastTapPt
+          && Math.abs(self.lastTapPt.x - e.clientX) < 40
+          && Math.abs(self.lastTapPt.y - e.clientY) < 40;
+        if (isDouble) {
+          self.mode = 'tap';
+          self.lastTap = 0;
+        } else {
+          self.lastTap = now;
+          self.lastTapPt = { x: e.clientX, y: e.clientY };
+        }
+      } else if (self.pointers.size === 2) {
+        self.mode = 'pinch';
+        var pts = [...self.pointers.values()];
+        self.pinch = {
+          dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
+          mid: { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 },
+          scale: self.zoomOf(self.i).s,
+          x: self.zoomOf(self.i).x,
+          y: self.zoomOf(self.i).y,
+        };
+        self.dragPx = 0;
+      }
+      track.classList.remove('animating');
+      e.preventDefault();
+    });
+
+    track.addEventListener('pointermove', function (e) {
+      if (!self.pointers.has(e.pointerId)) return;
+      self.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (self.mode === 'pinch' && self.pointers.size >= 2) {
+        var pts = [...self.pointers.values()];
+        var dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+        var mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+        self.zoomTo(self.i, self.pinch.scale * (dist / self.pinch.dist), mid.x, mid.y);
+        var z = self.zoomOf(self.i);
+        z.x += mid.x - self.pinch.mid.x;
+        z.y += mid.y - self.pinch.mid.y;
+        self.pinch.mid = mid;
+        self.clamp(self.i);
+        self.paint(self.i);
+        e.preventDefault();
+        return;
+      }
+
+      var dx = e.clientX - self.startX;
+      var dy = e.clientY - self.startY;
+      if (self.mode === 'pan') {
+        var z2 = self.zoomOf(self.i);
+        z2.x = self.startZ.x + dx;
+        z2.y = self.startZ.y + dy;
+        self.clamp(self.i);
+        self.paint(self.i);
+        e.preventDefault();
+        return;
+      }
+      if (self.mode === 'swipe') {
+        self.dragPx = dx;
+        self.apply();
+        e.preventDefault();
+      }
+    });
+
+    function endPointer(e) {
+      if (!self.pointers.has(e.pointerId)) return;
+      self.pointers.delete(e.pointerId);
+      if (self.pointers.size === 1) {
+        // A finger lifted mid-pinch: restart as a pan from the surviving finger.
+        var rest = [...self.pointers.values()][0];
+        self.mode = self.zoomOf(self.i).s > 1.02 ? 'pan' : 'swipe';
+        self.startX = rest.x;
+        self.startY = rest.y;
+        self.startZ = { s: self.zoomOf(self.i).s, x: self.zoomOf(self.i).x, y: self.zoomOf(self.i).y };
+        self.dragPx = 0;
+        return;
+      }
+      if (self.pointers.size) return;
+      if (self.mode === 'tap') {
+        var z3 = self.zoomOf(self.i);
+        // A double tap toggles: back to fit, or 2.5x centred on the tap.
+        self.zoomTo(self.i, z3.s > 1.02 ? 1 : 2.5, e.clientX, e.clientY);
+        if (z3.s <= 1.02) self.paint(self.i);
+        self.mode = null;
+        return;
+      }
+      if (self.mode === 'swipe') {
+        var w = track.clientWidth || 1;
+        if (Math.abs(self.dragPx) > Math.max(40, w * SWIPE_RATIO)) {
+          self.animateTo(self.dragPx < 0 ? self.i + 1 : self.i - 1);
+          self.mode = null;
+          return;
+        }
+      }
+      self.dragPx = 0;
+      self.mode = null;
+      self.apply();
+    }
+    track.addEventListener('pointerup', endPointer);
+    track.addEventListener('pointercancel', endPointer);
+    track.addEventListener('wheel', function (e) {
+      // Desktop/trackpad: ctrl+wheel zooms, plain wheel scrolls sideways.
+      if (!e.ctrlKey && !e.metaKey) {
+        var d = e.deltaY + e.deltaX;
+        if (Math.abs(d) < 2) return;
+        var target = self.i + (d > 0 ? 1 : -1);
+        if (target >= 0 && target < self.n) { e.preventDefault(); self.animateTo(target); }
+        return;
+      }
+      e.preventDefault();
+      self.zoomTo(self.i, self.zoomOf(self.i).s * (e.deltaY < 0 ? 1.12 : 1 / 1.12), e.clientX, e.clientY);
+    }, { passive: false });
+
+    window.addEventListener('resize', function () { self.apply(); });
+  };
+
+  /* ===================== item DOM ==================================== */
+  function build(it) {
+    builtKey = it.key;
+    var panel = document.getElementById('panel');
+    var proofs = it.proofs || [];
+
+    var views = '';
+    views += '<div class="view scroll info" data-view="info">'
+      + '<div class="kv"><h3>Ticket</h3><p class="key">' + esc(it.key) + (it.ref ? ' · ' + esc(it.ref) : '') + '</p></div>'
+      + '<div class="kv"><h3>Owner</h3><p>' + esc(it.owner) + '</p></div>'
+      + '<div class="kv"><h3>Last activity</h3><p>' + esc(it.lastActivity) + '</p></div>'
+      + (it.gate ? '<div class="kv"><h3>Gate</h3><p class="gate">' + esc(it.gate) + '</p></div>' : '')
+      + '<div class="kv"><h3>Work done</h3><p>' + esc(it.workDone) + '</p></div>'
+      + '<div class="kv"><h3>Proof</h3><p>' + (proofs.length ? proofs.map(function (p) { return esc(p.name); }).join('\n') : 'none filed') + '</p></div>'
+      + '</div>';
+    // The two column tabs name the sheet column they show, so a reader can
+    // never be guessing which cell is on screen.
+    views += '<div class="view scroll text" data-view="request">'
+      + '<div class="colname">Original request</div><div id="pane-request">' + esc(it.originalRequest) + '</div></div>';
+    views += '<div class="view scroll text" data-view="todo">'
+      + '<div class="colname">What\u2019s left to do</div><div id="pane-todo">'
+      + (it.whatsLeft ? esc(it.whatsLeft) : '<span style="color:#475569">the What\u2019s left to do column is empty</span>')
+      + '</div></div>';
+
+    var answers = it.answers || [];
+    views += '<div class="view scroll answers" data-view="answer">'
+      + '<div class="colname">Your answers</div>'
+      + (answers.length
+        ? answers.map(function (a, i) {
+            return '<figure class="answer">'
+              + '<img src="' + proofUrl(it.key, a.id) + '" alt="your answer ' + (i + 1) + '" loading="lazy">'
+              + (a.text ? '<figcaption>' + esc(a.text) + '</figcaption>' : '')
+              + '<figcaption class="where">' + esc(a.target === 'original' ? 'added to Original request' : 'added to What\u2019s left to do')
+              + (a.at ? ' \u00b7 ' + esc(String(a.at).slice(0, 16).replace('T', ' ')) : '') + '</figcaption>'
+              + '</figure>';
+          }).join('')
+        : '<p class="none">Nothing sent back yet. Tap 📎, pick a picture of what is wrong, and press Enter \u2014 it lands in this item\u2019s Drive folder for the agent to open.</p>')
+      + '</div>';
+
+    var stage = '';
+    if (proofs.length) {
+      stage = '<div class="stage full"><div class="track" id="track">'
+        + proofs.map(function (p, i) {
+            var src = proofUrl(it.key, p.id);
+            return '<div class="slide"><div class="zoom"><img src="' + src + '" alt="proof shot ' + (i + 1) + ' of ' + proofs.length + '"></div></div>';
+          }).join('')
+        + '</div>'
+        + '<div class="count" id="imgcount">' + (proofs.length > 1 ? '1/' + proofs.length : '1 shot') + '</div>'
+        + (proofs.length > 1 ? '<div class="zoomhint">pinch · drag</div>' : '<div class="zoomhint">pinch to zoom</div>')
+        + '<button class="heart" id="heart" title="Done — archive" aria-label="Mark done and archive">🤍</button>'
+        + '</div>';
+    } else {
+      stage = '<div class="noproof">No proof screenshots filed.</div>'
+        + '<button class="heart" id="heart" style="position:absolute;right:10px;bottom:10px" title="Done — archive" aria-label="Mark done and archive">🤍</button>';
+    }
+
+    // Info first: the card stacks ABOVE the picture, and tapping Info folds it
+    // away so the picture takes the whole area.
+    panel.innerHTML = views + '<div class="view on" data-view="proof">' + stage + '</div>';
+
+    view = proofs.length ? new PictureView(document.getElementById('track'), document.getElementById('imgcount')) : null;
+    document.getElementById('heart').addEventListener('click', onHeart);
+    document.getElementById('composer').hidden = false;
+    setInfo(false);
+  }
+
+  /* --- Info is a toggle, not a destination: tap it again to fold the
+     card away and hand the whole area to the picture. ------------------ */
+  function setInfo(open) {
+    state.infoOpen = !!open;
+    var infoView = document.querySelector('#panel .view[data-view="info"]');
+    if (infoView) {
+      infoView.classList.toggle('on', state.infoOpen);
+      infoView.hidden = !state.infoOpen;
+    }
+    var stage = document.querySelector('.stage');
+    if (stage) stage.classList.toggle('full', !state.infoOpen);
+    document.querySelectorAll('#tabs button').forEach(function (b) {
+      b.classList.toggle('on', state.infoOpen && b.getAttribute('data-tab') === 'info');
+    });
+  }
+
+  function showProof() {
+    var proof = document.querySelector('[data-view="proof"]');
+    var stage = document.querySelector('.stage');
+    if (stage) stage.hidden = false;
+    document.querySelectorAll('#panel .view').forEach(function (v) {
+      if (v !== proof) v.classList.remove('on');
+    });
+    if (proof) proof.classList.add('on');
+    document.querySelectorAll('#tabs button').forEach(function (b) {
+      b.classList.toggle('on', state.infoOpen && b.getAttribute('data-tab') === 'info');
+    });
+    state.tab = 'proof';
+  }
+
+  function showText(name) {
+    state.tab = name;
+    state.infoOpen = false;
+    var proof = document.querySelector('[data-view="proof"]');
+    var stage = document.querySelector('.stage');
+    var infoView = document.querySelector('#panel .view[data-view="info"]');
+    if (infoView) { infoView.classList.remove('on'); infoView.hidden = true; }
+    if (stage) { stage.hidden = true; stage.classList.add('full'); }
+    document.querySelectorAll('#panel .view').forEach(function (v) {
+      v.classList.toggle('on', v.getAttribute('data-view') === name);
+    });
+    if (proof) proof.classList.remove('on');
+    document.querySelectorAll('#tabs button').forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-tab') === name);
+    });
+  }
+
+  /* --- composer ------------------------------------------------------- */
+  function setTarget(which) {
+    state.target = which;
+    document.querySelectorAll('#target button').forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-target') === which);
+    });
+  }
+
+  document.getElementById('tabs').addEventListener('click', function (e) {
+    var tab = e.target.getAttribute('data-tab');
+    if (!tab) return;
+    if (tab === 'info') {
+      // Toggle: the second tap folds the card and gives the picture the area.
+      if (state.tab !== 'proof') { state.tab = 'proof'; showProof(); setInfo(true); return; }
+      setInfo(!state.infoOpen);
+      return;
+    }
+    showText(tab);
+  });
+
+  document.getElementById('target').addEventListener('click', function (e) {
+    var t = e.target.getAttribute('data-target');
+    if (!t) return;
+    setTarget(t);
+    var box = document.getElementById('comment');
+    if (box && !state.busy) box.focus();
+  });
+
+  document.getElementById('comment').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendComment(); }
+  });
+
+  /* --- 📎 a picture of what is wrong -----------------------------------
+     The picture is not decoration: it goes into the item's own Drive folder
+     (where the agent's proof already is), carrying the note in the file's
+     properties, and the sheet cell gets the stamped line. That is the whole
+     point — the agent opens the same folder it already knows. */
+  var MAX_UPLOAD = 4 * 1024 * 1024;
+  var fileInput = document.getElementById('file');
+
+  function clearAttachment() {
+    state.pending = null;
+    var box = document.getElementById('attachment');
+    if (box) box.hidden = true;
+    var pv = document.getElementById('attach-preview');
+    if (pv) pv.removeAttribute('src');
+    var nm = document.getElementById('attach-name');
+    if (nm) nm.textContent = '';
+    if (fileInput) fileInput.value = '';
+  }
+
+  document.getElementById('attach').addEventListener('click', function () { fileInput.click(); });
+  document.getElementById('attach-drop').addEventListener('click', clearAttachment);
+
+  fileInput.addEventListener('change', function () {
+    var f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    var okType = /^image\/(png|jpeg|webp|gif)$/i.test(f.type || '');
+    if (!okType) { toast('Only a picture (png, jpeg, webp, gif)'); clearAttachment(); return; }
+    if (f.size > MAX_UPLOAD) { toast('Picture is too big (max 4MB)'); clearAttachment(); return; }
+    var fr = new FileReader();
+    fr.onerror = function () { toast('Could not read that picture'); clearAttachment(); };
+    fr.onload = function () {
+      state.pending = { file: f, dataUrl: String(fr.result || '') };
+      document.getElementById('attach-preview').src = state.pending.dataUrl;
+      document.getElementById('attach-name').textContent = f.name + ' \u00b7 ' + Math.round(f.size / 1024) + 'KB';
+      document.getElementById('attachment').hidden = false;
+    };
+    fr.readAsDataURL(f);
+  });
+
+  // Paste a picture straight into the box, the way a reader would.
+  document.getElementById('comment').addEventListener('paste', function (e) {
+    var items = (e.clipboardData && e.clipboardData.items) || [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type && items[i].type.indexOf('image/') === 0) {
+        var f = items[i].getAsFile();
+        if (f) { e.preventDefault(); setPasted(f); }
+        return;
+      }
+    }
+  });
+
+  function setPasted(f) {
+    if (f.size > MAX_UPLOAD) { toast('Picture is too big (max 4MB)'); return; }
+    var fr = new FileReader();
+    fr.onload = function () {
+      state.pending = { file: f, dataUrl: String(fr.result || '') };
+      document.getElementById('attach-preview').src = state.pending.dataUrl;
+      document.getElementById('attach-name').textContent = 'pasted picture \u00b7 ' + Math.round(f.size / 1024) + 'KB';
+      document.getElementById('attachment').hidden = false;
+    };
+    fr.readAsDataURL(f);
+  }
+
+  function onHeart() {
+    var btn = document.getElementById('heart');
+    var it = state.items[state.idx];
+    if (!it || !btn || state.busy) return;
+    state.busy = true;
+    btn.textContent = '…';
+    api('/review/api/approve', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: it.key }),
+    }).then(function (r) {
+      state.busy = false;
+      if (r.body && r.body.ok) {
+        toast('Archived ✅ ' + it.key);
+        state.items.splice(state.idx, 1);
+        if (state.idx >= state.items.length) state.idx = Math.max(0, state.items.length - 1);
+        render();
+      } else {
+        btn.textContent = '🤍';
+        toast('Approve failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
+      }
+    }).catch(function () { state.busy = false; btn.textContent = '🤍'; toast('Approve failed: network'); });
+  }
+
+  /** Read the picked file as base64 (no data: prefix) for the answer endpoint. */
+  function readAsBase64(file) {
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onerror = function () { reject(new Error('could not read the file')); };
+      fr.onload = function () {
+        var out = String(fr.result || '');
+        var i = out.indexOf(',');
+        resolve(i >= 0 ? out.slice(i + 1) : out);
+      };
+      fr.readAsDataURL(file);
+    });
+  }
+
+  function sendComment() {
+    var ta = document.getElementById('comment');
+    var it = state.items[state.idx];
+    if (!it || state.busy) return;
+    var text = ta.value.trim();
+    var pending = state.pending;
+    if (!text && !pending) return;
+    state.busy = true;
+
+    var ready = pending
+      ? readAsBase64(pending.file).then(function (b64) {
+          return {
+            key: it.key,
+            target: state.target,
+            text: text,
+            image: { name: pending.file.name || 'picture', mimeType: pending.file.type || 'image/png', data: b64 },
+          };
+        })
+      : Promise.resolve({ key: it.key, target: state.target, text: text });
+
+    ready.then(function (payload) {
+      var path = payload.image ? '/review/api/answer' : '/review/api/comment';
+      return api(path, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    }).then(function (r) {
+      state.busy = false;
+      if (r.body && r.body.ok) {
+        var pane = document.getElementById(state.target === 'left' ? 'pane-todo' : 'pane-request');
+        if (pane) pane.innerHTML = (pane.innerHTML || '') + '\n' + esc(r.body.stamped);
+        ta.value = '';
+        clearAttachment();
+        if (r.body.uploaded) {
+          // Show it straight away: the Answer tab is where the reader looks next.
+          var card = document.createElement('figure');
+          card.className = 'answer';
+          var img = document.createElement('img');
+          img.src = pending.dataUrl;
+          img.alt = 'your answer';
+          var cap = document.createElement('figcaption');
+          cap.textContent = text || '';
+          var where = document.createElement('figcaption');
+          where.className = 'where';
+          where.textContent = 'added to ' + (state.target === 'left' ? 'What\u2019s left to do' : 'Original request');
+          card.appendChild(img);
+          if (text) card.appendChild(cap);
+          card.appendChild(where);
+          var holder = document.querySelector('.answers');
+          var none = holder && holder.querySelector('.none');
+          if (none) none.remove();
+          if (holder) holder.insertBefore(card, holder.children[1] || null);
+        }
+        toast(r.body.uploaded ? 'Answer sent \u2192 the agent\u2019s folder' : 'Sent \u2192 ' + (state.target === 'left' ? 'To do' : 'Request'));
+      } else {
+        toast('Send failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
+      }
+    }).catch(function (e) {
+      state.busy = false;
+      toast('Send failed: ' + (e && e.message ? e.message : 'network'));
+    });
+  }
+
+  /* --- render: only rebuilds when the item actually changes ----------- */
+  function render() {
+    var panel = document.getElementById('panel');
+    var prev = document.getElementById('btn-prev');
+    var next = document.getElementById('btn-next');
+    document.getElementById('pos').textContent = state.items.length ? ((state.idx + 1) + '/' + state.items.length) : '0/0';
+    prev.disabled = state.idx <= 0;
+    next.disabled = state.idx >= state.items.length - 1;
+    if (!state.items.length) {
+      builtKey = null;
+      view = null;
+      panel.innerHTML = '<div class="empty"><div class="big">🎉</div><p>No items awaiting review.<br>Agents set Status to <b>review</b> when work is ready for human eyes.</p></div>';
+      document.getElementById('composer').hidden = true;
+      return;
+    }
+    var it = state.items[state.idx];
+    if (builtKey !== it.key) { clearAttachment(); build(it); }
+    showProof();
+  }
+
+  document.getElementById('btn-prev').addEventListener('click', function () {
+    if (state.idx > 0) { state.idx -= 1; render(); }
+  });
+  document.getElementById('btn-next').addEventListener('click', function () {
+    if (state.idx < state.items.length - 1) { state.idx += 1; render(); }
+  });
+  document.getElementById('btn-refresh').addEventListener('click', function () {
+    this.classList.add('spinning');
+    fetchState(true);
+    setTimeout(function () { document.getElementById('btn-refresh').classList.remove('spinning'); }, 600);
+  });
+
+  function fetchState(isRefresh) {
+    var q = isRefresh ? (query ? query + '&refresh=1' : '?refresh=1') : query;
+    fetch('/review/api/state' + q, { headers: { Accept: 'application/json' } })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (data && data.ok) {
+          var cur = state.items[state.idx] && state.items[state.idx].key;
+          state.items = data.items || [];
+          var at = -1;
+          for (var i = 0; i < state.items.length; i++) { if (state.items[i].key === cur) { at = i; break; } }
+          state.idx = at >= 0 ? at : Math.min(state.idx, Math.max(0, state.items.length - 1));
+          document.getElementById('live-indicator').style.background = '#10b981';
+          render();
+        }
+      })
+      .catch(function () {
+        document.getElementById('live-indicator').style.background = '#ef4444';
+      });
+  }
+
+  setTarget('left');
+  fetchState(false);
+  setInterval(function () {
+    if (document.visibilityState === 'visible') fetchState(false);
+  }, 30000);
+})();
+</script>
+</body>
+</html>

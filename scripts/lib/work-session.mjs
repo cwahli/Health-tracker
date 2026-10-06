@@ -81,11 +81,28 @@ function observerContext(context = {}) {
   return record;
 }
 
+/**
+ * `at` is the PRODUCER's timestamp when the payload carries one, because the
+ * observer log is the pane a human reads while the turn runs and it has to
+ * agree with what the model actually did, in the order it did it. `receivedAt`
+ * is when this process saw it. The two used to be one field, filled from the
+ * local clock, so a relayed event carried the receiver's time and the log's
+ * ordering silently disagreed with the run's real ordering.
+ */
+function producerAt(payload, fallback) {
+  const raw = typeof payload?.at === 'string' ? payload.at : '';
+  return raw && !Number.isNaN(Date.parse(raw)) ? raw : String(fallback);
+}
+
 export function formatObserverRecord(type, payload = {}, context = {}, at = new Date().toISOString()) {
-  const record = { at: String(at), type: String(type) };
+  const record = { at: producerAt(payload, at), receivedAt: String(at), type: String(type) };
   Object.assign(record, observerContext(context));
   if (type === 'event') {
     const kind = String(payload?.kind || '');
+    // Carry the sequence through when the producer assigned one, so an event
+    // that crossed the relay can be matched to the same event in the job
+    // store instead of being lined up by timestamp alone.
+    if (Number.isFinite(Number(payload?.seq))) record.seq = Number(payload.seq);
     if (kind === 'reasoning') return { ...record, kind: 'thinking', content: safeObserverContent(payload.text) };
     if (kind === 'text') return { ...record, kind: 'text', content: safeObserverContent(payload.text) };
     if (kind === 'tool') {

@@ -33,6 +33,8 @@ import {
   getFleetNodes as getStatusNodes,
   getFleetTickets as getStatusTickets,
   getFleetBots as getStatusBots,
+  driveFileIdFrom,
+  ticketFromRow,
 } from './lib/fleet-status.mjs';
 
 function makeInitData(botToken, { user = { id: 123456, first_name: 'Test' }, authDate = Math.floor(Date.now() / 1000) } = {}) {
@@ -554,8 +556,80 @@ test('ticket projection follows the live sheet headers (key, LAST ACTIVITY)', as
   assert.ok(tickets.length > 0, 'live sheet must project rows');
   for (const t of tickets) {
     // 'key' holds the ticket identity (spec:/req:/card:/sync:…); a bare row index means the id lookup missed.
-    assert.match(t.id, /^(spec:|req:|card:|task:|proj:|sync:|bug-|fleet-|meal-|sheet-)/i, `ticket id keeps sheet key, got ${t.id}`);
+    // `lane:` joined the prefixes on 2026-10-04: the current tab carries the
+    // orchestrator lane row, and it is a keyed item like any other. `auto:`
+    // joined it the same day for the same reason — the activity watcher files
+    // machine rows as `auto:<box>:<cluster>` and the board carries them until
+    // they are claimed or triaged. The intent is unchanged — a bare row index
+    // means the id lookup missed.
+    assert.match(t.id, /^(spec:|req:|card:|task:|proj:|sync:|lane:|auto:|bug-|fleet-|meal-|sheet-)/i, `ticket id keeps sheet key, got ${t.id}`);
     // 'LAST ACTIVITY' header carries the timestamp; a dash means the lookup missed.
     assert.notEqual(t.lastActivity, '—', `lastActivity projected for ${t.id}`);
   }
+});
+
+test('only a Drive FILE link becomes a screenshot; a folder, key, or prose stays text', () => {
+  // A file link is a screenshot: the cell renders the picture, not the URL.
+  assert.equal(
+    driveFileIdFrom('https://drive.google.com/file/d/162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM/view'),
+    '162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM',
+  );
+  assert.equal(
+    driveFileIdFrom('https://drive.google.com/file/d/1yEcrqTRVFf358Bty6F0xnl29frgcbgDt/view?usp=sharing'),
+    '1yEcrqTRVFf358Bty6F0xnl29frgcbgDt',
+  );
+  assert.equal(
+    driveFileIdFrom('https://drive.google.com/thumbnail?id=162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM&sz=w400'),
+    '162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM',
+  );
+  // A FOLDER is not one image — it must never be guessed into a screenshot.
+  assert.equal(driveFileIdFrom('https://drive.google.com/drive/folders/1kY6Z2TDoNM5s0vuRiv_rXE_k145cDMnj'), '');
+  // Prose and bare keys are not links at all.
+  assert.equal(driveFileIdFrom('TRANSCRIPT+payload-render, real-surface render still owed'), '');
+  assert.equal(driveFileIdFrom('spec:fleet-beat-fixes'), '');
+  assert.equal(driveFileIdFrom('sync-2026-10-02b-checkouts'), '');
+  assert.equal(driveFileIdFrom(''), '');
+  assert.equal(driveFileIdFrom('—'), '');
+  assert.equal(driveFileIdFrom('see https://example.com/a/b/c for detail'), '');
+});
+
+test('a row projects from either current-tab layout, not just the curated one', () => {
+  // The curated layout: what the operator hand-writes.
+  const curated = {
+    'Original request': 'Do the thing',
+    'Work done so far': 'Half of it',
+    "What's left to do": 'The other half',
+    'Owner': 'Space Bunny Free (high) VM',
+    'Status': 'In progress',
+    'Completion proof': 'https://drive.google.com/file/d/162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM/view',
+    'Completion gate': 'tsc 0',
+    'last_activity': '2026-10-04T01:00:00Z',
+  };
+  // The projected layout: what pm-current used to write into `current` before
+  // the 2026-10-04 split (it now owns its own `fleet` tab). The fallback stays
+  // — a stale `current` once reverted to these headers and blanked five columns.
+  const projected = {
+    key: 'spec:x', goal: 'Do the thing', agent_note: 'Half of it',
+    todo: 'The other half', owner: '', author: 'Space Bunny Free (high) VM',
+    state: 'locked', stall_reason: '', last_activity: '2026-10-04T01:00:00Z',
+  };
+  const reader = (row) => (n) => String(row[n] ?? '').trim();
+
+  const a = ticketFromRow(reader(curated), 0);
+  assert.equal(a.originalRequest, 'Do the thing');
+  assert.equal(a.owner, 'Space Bunny Free (high) VM');
+  assert.equal(a.status, 'In progress');
+  assert.equal(a.proofFileId, '162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM');
+
+  const b = ticketFromRow(reader(projected), 0);
+  assert.equal(b.id, 'spec:x');
+  assert.equal(b.originalRequest, 'Do the thing', 'goal stands in for the request');
+  assert.equal(b.workDoneSoFar, 'Half of it', 'agent_note stands in for work done');
+  assert.equal(b.whatsLeftToDo, 'The other half', 'todo stands in for what is left');
+  assert.equal(b.owner, 'Space Bunny Free (high) VM', 'author stands in for owner');
+  assert.equal(b.status, 'locked', 'state stands in for status — never the Pending placeholder');
+  assert.equal(b.lastActivity, '2026-10-04T01:00:00Z');
+  // No proof column in the projected layout, so the cell stays text, not a guess.
+  assert.equal(b.proofFileId, '');
+  assert.equal(b.completionProof, '—');
 });

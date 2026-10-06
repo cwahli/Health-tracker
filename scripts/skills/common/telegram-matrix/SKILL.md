@@ -30,7 +30,7 @@ the **`telegram-photo`** skill; verification rules in **`telegram-testing`**.
 - **Hermes / VPS / Mobile:** PNG via `MEDIA:` as above.
 - **Grok TG:** same PNG if the host can upload; otherwise link the live page.
 - **Collab:** link-only reply is enough —
-  `https://health-tracking.duckdns.org/capability-matrix` — do not burn GPU
+  `https://health-tracker.co.uk/capability-matrix` — do not burn GPU
   units screenshotting a static page.
 
 ## Updating the matrix

@@ -47,9 +47,9 @@ export function listClineSessionIds(dir = clineSessionsDir(), readdirImpl = fs.r
 /**
  * The id of the session one run just created.
  *
- * Cline 3.0.65 has no headless resume — `cline --id <id> --json` answers
+ * Cline 3.0.65-3.0.68 has no headless resume — `cline --id <id> --json` answers
  * "interactive mode is unsupported" and `cline --id <id>` without a TTY
- * answers "interactive mode requires a TTY" (both measured on 3.0.65, see
+ * answers "interactive mode requires a TTY" (measured on 3.0.65, re-verified on 3.0.68 2026-10-04, see
  * TUI_TG_AUTH_TRAIL.md). So the id cannot be passed IN; it can only be read back
  * OUT. Every run writes `<sessions>/<epoch>_<rand>/<epoch>_<rand>.json`, and the
  * before/after diff of that directory is the run's own footprint.

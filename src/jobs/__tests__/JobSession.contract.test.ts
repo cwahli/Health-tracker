@@ -219,6 +219,43 @@ describe('JobSession contract (STALE_TURN)', () => {
     expect(previewStatusLabel(job)).toMatch(/Uploading|Updating|queued|Queued/i);
   });
 
+  it('PROGRESS-SURFACES-1: the job-session progress path is last-write-wins, and that is now pinned', () => {
+    // scripts/bot-host.mjs is a hub file, so per AGENTS.md L1 this contract
+    // travels with the change. Two things are pinned here deliberately:
+    //
+    // 1. JobStore.apply takes the LAST write unconditionally. It does NOT guard
+    //    against a late frame moving progress backwards. That is pre-existing
+    //    behaviour and out of this PR's blast radius to change — but it is now
+    //    pinned so a future guard is a deliberate, visible edit rather than an
+    //    accident. Anyone adding a monotonic guard should update THIS test.
+    // 2. The bot-host renderer change is confined to the Telegram headline; it
+    //    does not touch the job store, so a turn's progress frame still lands
+    //    here untouched. If that ever stops being true, this test fails.
+    JobStore.createJob({ id: 'prog1', status: 'running', currentTurn: 1 });
+    JobStore.apply({
+      type: 'PollerPayload',
+      id: 'prog1',
+      status: 'running',
+      statusMessage: 'Reading sources',
+      progressPercent: 60,
+    });
+    const fresh = JobStore.getJob('prog1')!;
+    expect(fresh.progressPercent).toBe(60);
+    expect(fresh.statusMessage).toBe('Reading sources');
+
+    // Documented last-write-wins: a later frame overwrites, even backwards.
+    JobStore.apply({
+      type: 'PollerPayload',
+      id: 'prog1',
+      status: 'running',
+      statusMessage: 'Running gates',
+      progressPercent: 5,
+    });
+    const after = JobStore.getJob('prog1')!;
+    expect(after.progressPercent).toBe(5);
+    expect(after.statusMessage).toBe('Running gates');
+  });
+
   it('F-9.5 PollerPayload progress does not require currentTurn and does not clobber turn', () => {
     JobStore.createJob({
       id: 'poll1',

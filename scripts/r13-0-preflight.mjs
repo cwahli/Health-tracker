@@ -13,7 +13,7 @@ const account = process.env.CLOUDFLARE_ACCOUNT_ID;
 const token = process.env.CLOUDFLARE_API_TOKEN;
 const d1Id = process.env.CLOUDFLARE_D1_DATABASE_ID;
 const bucket = process.env.CLOUDFLARE_R2_BUCKET_NAME;
-const liveOrigin = process.env.R13_LIVE_ORIGIN || 'https://health-tracker-backend-64gt.onrender.com';
+const liveOrigin = process.env.R13_LIVE_ORIGIN || 'https://health-tracker.co.uk';
 const extraOrigin = process.env.R13_PROD_ORIGIN || '';
 
 const CORS_ORIGINS = [

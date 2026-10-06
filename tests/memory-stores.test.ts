@@ -21,7 +21,7 @@ function seedUserMemory() {
   const memDir = path.join(home, '.hermes', 'memories');
   fs.mkdirSync(memDir, { recursive: true });
   fs.writeFileSync(path.join(memDir, 'USER.md'), 'Cwah Li. Short replies.');
-  fs.writeFileSync(path.join(memDir, 'MEMORY.md'), 'Live site is https://health-tracking.duckdns.org.');
+  fs.writeFileSync(path.join(memDir, 'MEMORY.md'), 'Live site is https://health-tracker.co.uk.');
 }
 
 describe('appendRow', () => {

@@ -9,6 +9,7 @@
 import { finalizeDishLedger, parseOcrLabel } from './server_dish_finalize.js';
 import { applyNutrientModifiers, computeCaloriesFromMacros, computeSolubleFibre, reapplyDerivedNutrients, isFruitJuiceItem } from './server_derivation.js';
 import { findItemIndexInList, formatMealReceiptTable, synthesizeEditCommandsFromBreakdown, itemsMatchByName } from './server_pure_helpers.js';
+import { partitionDestructiveCommands, describeDroppedCommand } from './src/server/food/server_food_edit_intent.js';
 import { NUTRIENT_KEYS } from './src/utils/nutrients.js';
 import { sumItemNutrients } from './server_meal_from_finalize.js';
 import {
@@ -89,6 +90,8 @@ export type MealEditCommand = {
   replacementItemName?: string;
   targetItemName?: string;
   sourceItemName?: string;
+  /** Scout dish dialect: the dish a delete/replace refers to. */
+  replacesDish?: string | null;
   newWeightGrams?: number | null;
   targetDbId?: string | null;
   componentName?: string | null;
@@ -109,6 +112,8 @@ export type MealEditResult = {
   receiptTable: string;
   notes: string[];
   beforeItems?: any[];
+  /** True when an edit tried to delete every item and was refused. */
+  refusedEmptyMeal?: boolean;
 };
 
 function itemNames(it: any): string {
@@ -544,6 +549,7 @@ export async function applyMealEdits(opts: {
   priorLocks?: UserLockedSlot[] | null;
   turn?: number;
   portionChoices?: any;
+  isRecheckRequest?: boolean;
 }): Promise<MealEditResult & { userLockedSlots?: UserLockedSlot[]; appliedCommands?: MealEditCommand[] }> {
   const notes: string[] = [];
   const snapshotOf = (rows: any[]) =>
@@ -594,6 +600,34 @@ export async function applyMealEdits(opts: {
       commandsIn = synthesized;
       notes.push(`Synthesized ${synthesized.length} edit command(s) from user message`);
     }
+  }
+
+  // A re-analysis request ("this is incorrect, check again") carries no intent to
+  // mutate. The edit instruction only offers replace|add|delete, so a model that
+  // finds nothing else to do deletes the dish the user just complained about —
+  // job_1791044439374_4x4srekyi wiped a meal that way. Drop the removals and
+  // keep any real corrections from the same diff.
+  if (opts.isRecheckRequest && commandsIn.length > 0) {
+    const { safe, destructive } = partitionDestructiveCommands(commandsIn);
+    if (destructive.length > 0) {
+      for (const c of destructive) notes.push(describeDroppedCommand(c));
+      commandsIn = safe;
+    }
+  }
+  if (commandsIn.length === 0 && original.length > 0 && opts.isRecheckRequest) {
+    const nutrients = sumItemNutrients(original);
+    const weightGrams = Math.round(original.reduce((a, it) => a + (Number(it.weightGrams) || 0), 0));
+    return {
+      items: original,
+      nutrients,
+      weightGrams,
+      changed: false,
+      qa: false,
+      receiptTable: formatMealReceiptTable(original, nutrients, weightGrams),
+      notes: [...notes, 'Recheck turn: no mutation applied — meal left intact for a full re-read.'],
+      userLockedSlots: Array.isArray(opts.priorLocks) ? opts.priorLocks : [],
+      appliedCommands: [],
+    };
   }
 
   if (commandsIn.length === 0) {
@@ -1499,6 +1533,30 @@ export async function applyMealEdits(opts: {
     } else {
       notes.push(`skipped unknown action "${raw.action}"`);
     }
+  }
+
+  // Fail closed on an empty meal. Zero items is never a legitimate outcome of a
+  // nutrition edit: it renders a named meal with no food, a 0 kcal receipt and a
+  // "savable" flag. Live: job_1791044439374_4x4srekyi shipped exactly that.
+  if (original.length > 0 && items.length === 0) {
+    const nutrients = sumItemNutrients(original);
+    const weightGrams = Math.round(original.reduce((a, it) => a + (Number(it.weightGrams) || 0), 0));
+    return {
+      items: original,
+      nutrients,
+      weightGrams,
+      changed: false,
+      qa: false,
+      receiptTable: formatMealReceiptTable(original, nutrients, weightGrams),
+      notes: [
+        ...notes,
+        `refused: this edit would have removed every item (${original.length} → 0). Meal left unchanged.`,
+      ],
+      beforeItems: original,
+      userLockedSlots: Array.isArray(opts.priorLocks) ? opts.priorLocks : [],
+      appliedCommands: [],
+      refusedEmptyMeal: true,
+    };
   }
 
   const nutrients = sumItemNutrients(items);

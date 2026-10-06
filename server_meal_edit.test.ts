@@ -2453,7 +2453,11 @@ describe('golden', () => {
     expect(mealItemsHaveAtwaterCalories(result.items)).toBe(true);
   });
 
-  it('golden: remove_item all items one by one empties the meal', async () => {
+  it('golden: remove_item for every dish is refused — an edit may not empty a meal', async () => {
+    // Was: "remove_item all items one by one empties the meal". Zero items is not a
+    // legitimate outcome of a nutrition edit (live: job_1791044439374_4x4srekyi
+    // shipped a 0 kcal named meal that was still savable). Removing the whole meal
+    // is a delete of the log entry, which is a different user action.
     const result = await applyMealEdits({
       items: cakalangKangkungPlate(),
       userMessage: 'remove the cakalang and then remove the kangkung',
@@ -2463,13 +2467,25 @@ describe('golden', () => {
       ],
     });
 
+    expect(result.refusedEmptyMeal).toBe(true);
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(result.changed).toBe(false);
+    expect(result.weightGrams).toBeGreaterThan(0);
+    expect(result.notes.some((n) => /would have removed every item/.test(n))).toBe(true);
+  });
+
+  it('golden: removing every dish but one is applied', async () => {
+    const result = await applyMealEdits({
+      items: cakalangKangkungPlate(),
+      userMessage: 'remove the cakalang',
+      commands: [{ action: 'remove_item', itemName: 'Cakalang' }],
+    });
+
+    expect(result.refusedEmptyMeal).toBeUndefined();
     expect(result.changed).toBe(true);
-    expect(result.items).toHaveLength(0);
-    expect(result.weightGrams).toBe(0);
-    expect(result.items.some((it: any) => /cakalang|kangkung/i.test(it.name))).toBe(false);
-    expect(result.notes.filter((n) => /^remove_item "/.test(n))).toHaveLength(2);
+    expect(result.items).toHaveLength(1);
+    expect(result.items.some((it: any) => /cakalang/i.test(it.name))).toBe(false);
     expect(result.notes.some((n) => /remove_item "Cakalang"/.test(n))).toBe(true);
-    expect(result.notes.some((n) => /remove_item "Kangkung"/.test(n))).toBe(true);
   });
 
   it('golden: duplicate remove_item for the same dish removes once and notes the second miss', async () => {
@@ -4101,5 +4117,104 @@ describe('G10 golden — photo edit clarifies ONE dish, adds photo, scales only 
     expect(scaled.saturatedFat).toBe(0);
     expect(scaled.nutrients.totalFat).toBeGreaterThan(0);
     expect(scaled.nutrients.totalFat).toBeGreaterThanOrEqual(scaled.nutrients.saturatedFat);
+  });
+});
+
+/**
+ * Live regression: job_1791044439374_4x4srekyi. The user typed "This is
+ * incorrect check again" on a one-item meal; the model answered with a delete,
+ * the edit emptied the meal, and the pipeline attached the empty meal as
+ * savable. Two guards: a recheck turn drops removals, and no edit may leave
+ * zero items.
+ */
+describe('applyMealEdits — recheck and empty-meal guards', () => {
+  const beerMeal = () => [
+    {
+      scoutIndex: 0,
+      name: 'Desperados Original Beer',
+      canonicalDbName: 'Desperados Original Beer',
+      originalName: 'Desperados Original Beer',
+      weightGrams: 440,
+      calories: 88,
+      protein: 0,
+      carbohydrates: 22,
+      totalFat: 0,
+      nutrients: { calories: 88, protein: 0, carbohydrates: 22, totalFat: 0, saturatedFat: 0, sodium: 0 },
+      sourceImageIndex: 0,
+    },
+  ];
+
+  it('a recheck turn never applies the model delete', async () => {
+    const res = await applyMealEdits({
+      items: beerMeal(),
+      commands: [{ action: 'remove_item', itemName: 'Desperados Original Beer' }],
+      userMessage: 'This is incorrect check again',
+      isRecheckRequest: true,
+    });
+    expect(res.items.length).toBe(1);
+    expect(res.changed).toBe(false);
+    expect(res.appliedCommands).toEqual([]);
+    expect(res.notes.join(' | ')).toMatch(/recheck guard|left intact/);
+  });
+
+  it('a recheck turn still applies a legitimate correction from the same diff', async () => {
+    const res = await applyMealEdits({
+      items: beerMeal(),
+      commands: [
+        { action: 'remove_item', itemName: 'Desperados Original Beer' },
+        { action: 'set_weight', itemName: 'Desperados Original Beer', newWeightGrams: 220 },
+      ],
+      userMessage: 'This is incorrect check again',
+      isRecheckRequest: true,
+    });
+    expect(res.items.length).toBe(1);
+    expect(res.items[0].weightGrams).toBe(220);
+  });
+
+  it('without the recheck flag an explicit removal of one of two items is allowed', async () => {
+    const two = [
+      ...beerMeal(),
+      { scoutIndex: 1, name: 'Roast Chicken Drumsticks', weightGrams: 450, calories: 723, nutrients: { calories: 723 } },
+    ];
+    const res = await applyMealEdits({
+      items: two,
+      commands: [{ action: 'remove_item', itemName: 'Desperados Original Beer' }],
+      userMessage: 'remove the beer',
+    });
+    expect(res.items.length).toBe(1);
+    expect(res.items[0].name).toBe('Roast Chicken Drumsticks');
+    expect(res.changed).toBe(true);
+  });
+
+  it('fails closed when an edit would remove every item', async () => {
+    const res = await applyMealEdits({
+      items: beerMeal(),
+      commands: [{ action: 'remove_item', itemName: 'Desperados Original Beer' }],
+      userMessage: 'remove the beer',
+    });
+    expect(res.refusedEmptyMeal).toBe(true);
+    expect(res.items.length).toBe(1);
+    expect(res.items[0].calories).toBe(88);
+    expect(res.changed).toBe(false);
+    expect(res.notes.join(' ')).toMatch(/would have removed every item/);
+  });
+
+  it('fails closed on the scout delete dialect too', async () => {
+    const res = await applyMealEdits({
+      items: beerMeal(),
+      commands: [{ action: 'delete', itemName: 'Desperados Original Beer', replacesDish: 'Desperados Original Beer' }],
+      userMessage: 'this is not what I had',
+    });
+    expect(res.items.length).toBe(1);
+    expect(res.changed).toBe(false);
+  });
+
+  it('an edit starting from an empty meal is not treated as a refusal', async () => {
+    const res = await applyMealEdits({
+      items: [],
+      commands: [{ action: 'remove_item', itemName: 'Nothing' }],
+      userMessage: 'remove the beer',
+    });
+    expect(res.refusedEmptyMeal).toBeUndefined();
   });
 });

@@ -8,8 +8,35 @@ import { fileURLToPath } from 'node:url';
 
 import { TelegramApi, TelegramError, isSendableMedia } from './lib/tg-api.mjs';
 import { chunkForTelegram } from './lib/tg-copy-code.mjs';
-import { formatWorkingHeadline, ctxLimitFor } from './lib/tg-progress.mjs';
+import { formatWorkingHeadline, formatUsageSuffix, ctxLimitFor, phaseLabelFor } from './lib/tg-progress.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
+import {
+  BOT,
+  HUMAN,
+  findSeatByUsername,
+  normalizePeers,
+  receiveVerdict,
+  resolvePolicy,
+  resolvePeerUsername,
+  sendVerdict,
+  senderTypeOf,
+} from './lib/tg-peers.mjs';
+import {
+  checkReceiveBounds,
+  checkSendBounds,
+  deadLetter,
+  decodeEnvelope,
+  emptyLedger,
+  encodeEnvelope,
+  proposalLine,
+} from './lib/tg-handoff.mjs';
+import {
+  TURNS_KINDS,
+  chainIdOf,
+  delegationPrompt,
+  readAgreement,
+  COLLAB_DEFAULTS as HANDOFF_DEFAULTS,
+} from './lib/b2b-collab.mjs';
 import {
   sessionKey,
   projectIdForWorkspace,
@@ -29,7 +56,7 @@ import {
   repointWorkView,
 } from './lib/work-session.mjs';
 import { checkRegistry } from './lib/lane-contract.mjs';
-import { compressReasoning } from './lib/reasoning-compress.mjs';
+import { createReasoningReducer } from './lib/reasoning-compress.mjs';
 import { recordFailure, loadFailures } from './lib/failure-log.mjs';
 import { providerReadiness, setupGaps, setServiceUnit } from './lib/setup-gaps.mjs';
 import {
@@ -47,6 +74,7 @@ import {
   parseRetryAfter,
 } from './lib/agent-opencode.mjs';
 import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from './lib/opencode-tui.mjs';
+import { issueToken } from './tui-gateway.mjs';
 import { KNOWN_HOSTS, workerStatus, isLocalHost, machineLabel } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
@@ -56,9 +84,10 @@ import { routeState, routeFor, armRoute, confirmRoute, rollbackRoute, validateCa
 import { acquirePollerLease, releasePollerLease, renewPollerLease } from './lib/poller-lease.mjs';
 import { buildPack, packWithContents } from './lib/swap-pack.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
-import { tuiSurfaceFor as tuiSurface, latestClineSessionId } from './lib/tui-surface.mjs';
+import { tuiSurfaceFor as tuiSurface, latestClineSessionId, canOpenSharedTui } from './lib/tui-surface.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
+import { parsePermissionCallback, startPermissionWatch, stopPermissionWatch } from './lib/permission-bridge.mjs';
 import { recordError, noteHealthy, recordRecoveryAttempt, classifyErrorKind, evaluateRecovery } from './lib/error-log.mjs';
 import {
   parseModelRef,
@@ -99,6 +128,7 @@ import {
   isHardModelFailure,
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
+  HARD_MODEL_FAILURE_COOLDOWN_MS,
   freemodelDisplayTier,
   sortFreemodelTierRows,
   freemodelRatingOf,
@@ -122,6 +152,9 @@ import {
 import {
   parseCommand,
   resolveCommandName,
+  isKnownCommand,
+  greetingReply,
+  normalizeSkillCommand,
   isAddressedToUs,
   resolveGroupAddressing,
   recordActiveThread,
@@ -146,8 +179,17 @@ import {
 import {
   buildStatusSnapshot,
   formatStatusPlain,
-  COMPACT_SUMMARY_PROMPT,
 } from './lib/bot-status.mjs';
+import {
+  compactSession,
+  formatCompactEmpty,
+  formatCompactFailure,
+  formatCompactReceipt,
+} from './lib/compact-session.mjs';
+import {
+  fleetChatStatus,
+  formatFleetStatusTable,
+} from './lib/fleet-status.mjs';
 import {
   selectInboundMedia,
   sanitizeFileName,
@@ -172,7 +214,7 @@ import {
 } from './lib/project-registry.mjs';
 import { runPmCommand } from './lib/pm-run.mjs';
 import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-runner.mjs';
-import { classifyHealthGroupTurn, answerHealthGroup, dedicatedHealthRoleIds, readHealthVerify } from './lib/health-group.mjs';
+import { classifyHealthGroupTurn, answerHealthGroup, dedicatedHealthRoleIds, readHealthVerify, healthRoleOf, HEALTH_SEAT_IDS } from './lib/health-group.mjs';
 import { gateFromArtifact } from './lib/health/docs.mjs';
 import {
   answerTaxGroup,
@@ -183,7 +225,9 @@ import {
   readTaxSnapshot,
   rememberTaxGroup,
   taxDeskBotId,
+  taxRoleOf,
   TAX_PROJECT_ID,
+  TAX_SEAT_IDS,
 } from './lib/tax-group.mjs';
 // The Personal Health Coach's data loop. `/health` is deliberately not gated on
 // the chat's active project: the command names its own project, so a verify can
@@ -523,7 +567,10 @@ function shortProviderModel(model) {
  * → `deepseek-v4.1-flash`, `tokenharbor/deepseek-v4.1-flash:free` →
  * `tokenharbor/deepseek-v4.1-flash` (the vendor dir stays because the
  * headline provider for that bar reads OpenCode), `opencode/space-bunny-free`
- * → `space-bunny-free`. Plain ids pass through untouched, so unit-test
+ * → `space-bunny-free`. `opencode-go/space-bunny-free` keeps its prefix:
+ * it is a different free pool from `opencode/space-bunny-free`, and stripping
+ * both to `space-bunny-free` made a failover line read "X is depleted — ran
+ * on X instead". Plain ids pass through untouched, so unit-test
  * lanes like `m1` render exactly as before. Display only — routing still
  * uses the full ref.
  */
@@ -533,9 +580,33 @@ export function chatLaneName(ref) {
   s = s.replace(/^cline-free\//i, '').replace(/:free$/i, '');
   if (r.provider && s.toLowerCase().startsWith(`${String(r.provider).toLowerCase()}/`)) {
     const rest = s.slice(String(r.provider).length + 1);
-    if (!/^tokenharbor\//i.test(s)) s = rest;
+    const provider = String(r.provider || '').toLowerCase();
+    // The prefixes that disambiguate distinct pools stay. tokenharbor shares
+    // one bar with its opencode twin but reads under the OpenCode headline,
+    // so the dir carries the meaning; opencode-go is a separate pool from
+    // opencode (live 2026-10-04: one depleted while the other answered).
+    if (!/^tokenharbor\//i.test(s) && provider !== 'opencode-go') s = rest;
   }
   return s || String(ref || '');
+}
+
+/**
+ * A bare `PONG` is not an answer. Connectivity pings ("reply PONG") circulate
+ * on the shared opencode service (TUI-side checks, lane watchers), and a turn
+ * resuming a session that last saw one can come back with a lone `PONG` to a
+ * prompt that never asked for it — which the chat then receives as the reply.
+ * True only for the bare word (optional trailing punctuation); a prompt that
+ * actually requests it alongside a request verb (reply/say/ping/…) is
+ * honoured. Deliberately pong-only: a bare `ok` can be a legitimate
+ * acknowledgement, and the failover sensors use it as their success fixture.
+ */
+export function isUnpromptedProbeEcho(text, prompt) {
+  const t = String(text ?? '').trim().toLowerCase().replace(/[!.\s]+$/, '');
+  if (t !== 'pong') return false;
+  const p = String(prompt ?? '');
+  if (p.length <= 120 && /\bpong\b/i.test(p)
+    && /\b(reply|say|send|respond|repeat|ping|test|probe|answer|echo)\b/i.test(p)) return false;
+  return true;
 }
 
 /**
@@ -640,14 +711,69 @@ async function getVariants(config, caches, modelId) {
   return entry?.variants || [];
 }
 
-async function getContextLimit(config, caches, modelId) {
+/**
+ * The variant the next `-m` argument may carry (plan/TG_TOOL_SURFACE.md M3).
+ *
+ * A stored level the model does not offer must never reach the child argv:
+ * `ring-2.6-1t-free#xhigh` dies as "Invalid model reference" and burns the
+ * whole failover walk (live 2026-10-04: three lanes down before gemini
+ * answered). Models with no variants run bare — same shape as the Cline
+ * branch, which only forwards levels in CLINE_THINKING_LEVELS.
+ */
+export function pickOfferedVariant(variant, offered) {
+  if (!variant) return undefined;
+  return Array.isArray(offered) && offered.includes(variant) ? variant : undefined;
+}
+
+/**
+ * Context window of a lane ref, from the OpenCode model catalog.
+ *
+ * A legacy `gemini:` ref runs through the direct Gemini API (the OpenCode
+ * `google/` provider needs a credential some hosts do not have wired) but
+ * names the SAME model the catalog knows as `google/…` — `GEMINI_TO_OPENCODE`
+ * is that mapping and `/model` migration already uses it. Without the hop the
+ * lookup missed, so `formatUsage` printed its no-limit fallback (`ctx 539
+ * tokens`) and the chat lost the `(16%)` share of the window for a lane whose
+ * window the catalog carries (live 2026-10-06: a turn that failed over to
+ * `gemini:gemini/gemini-3.8-flash`). Exported for the unit sensor.
+ */
+export async function getContextLimit(config, caches, modelId) {
   if (!caches.verbose) {
     caches.verbose = parseModelsVerbose(
       await listModelsVerbose({ opencodeBin: config.agent.opencodeBin, env: opencodeEnv(config) }),
     );
   }
-  const entry = caches.verbose.find((m) => m.id === modelId);
-  return entry?.context || 0;
+  const catalogLimit = (id) => caches.verbose.find((m) => m.id === id)?.context || 0;
+  const direct = catalogLimit(modelId);
+  if (direct) return direct;
+  const legacy = GEMINI_TO_OPENCODE[parseModelRef(modelId).id];
+  return legacy ? catalogLimit(legacy) : 0;
+}
+
+/**
+ * Context windows for the lanes a turn may walk, keyed by the lane ref, from
+ * the catalog the answer footer already reads.
+ *
+ * The headline's static map (`ctxLimitFor`) knows a handful of free lanes, so
+ * every other lane rendered a bare token count — no share of its window — even
+ * when the window is catalog truth (live 2026-10-06: a turn that failed over
+ * to `gemini:gemini/gemini-3.8-flash` ended with a bare `- 31.9K` and a
+ * `ctx 539 tokens` footer, on a model whose window the catalog carries).
+ * Best-effort by design: a lane the catalog cannot resolve is simply absent,
+ * and the headline keeps its old fallback rather than inventing a percentage.
+ */
+export async function laneContextLimits(config, caches, models = []) {
+  const out = new Map();
+  for (const model of Array.isArray(models) ? models : []) {
+    if (!model || out.has(model)) continue;
+    try {
+      const limit = await getContextLimit(config, caches, model);
+      if (limit > 0) out.set(model, limit);
+    } catch {
+      // an unknown lane is not an error — it just shows the bare count
+    }
+  }
+  return out;
 }
 
 async function getAgents(config, caches) {
@@ -671,6 +797,43 @@ async function getFreeModels(caches, config) {
     caches.freeLocation = location;
   }
   return caches.free;
+}
+
+/**
+ * Boot warmup for the turn path (plan/TG_TOOL_SURFACE.md M1).
+ *
+ * The first turn after a restart paid ~3s building the free-model list
+ * inside the send→session-row budget (M1 proof runs measured 6.8s/7.4s
+ * against a 5s budget; buildFreeModelList alone is ~2.6s cold on this host).
+ * These are the same zero-burn local reads the turn would do anyway
+ * (catalog/auth files, `--version` probes) — warming them once at boot
+ * moves the cost out of the message path. Best-effort: the turn rebuilds
+ * whatever is still missing.
+ */
+export async function warmTurnCaches(config, caches) {
+  try {
+    hostReadiness(caches, config?.id);
+  } catch {
+    /* the turn path recomputes this */
+  }
+  try {
+    await getFreeModels(caches, config);
+  } catch {
+    /* the turn path rebuilds this */
+  }
+  // The variant gate on the turn path (pickOfferedVariant) reads the verbose
+  // catalog: warm it here so the first turn after boot does not pay a
+  // `models --verbose` spawn inside the send→session-row budget.
+  try {
+    if (!caches.verbose) {
+      caches.verbose = parseModelsVerbose(
+        await listModelsVerbose({ opencodeBin: config?.agent?.opencodeBin, env: opencodeEnv(config) }),
+      );
+    }
+  } catch {
+    /* getVariants rebuilds this */
+  }
+  return caches;
 }
 
 /**
@@ -742,7 +905,8 @@ export function stampLaneCooldown({ botId, model, errText, kind = 'connection-fa
     const { dir } = ensureBotLedger(botId || 'default');
     const stamped = stampCooldown({ stateDir: dir, provider, model: m, errText, kind, now });
     if (stamped.stamped) {
-      console.log(`[${botId}] connection cooldown on ${provider}/${m} until ${new Date(now + CONNECTION_FAILED_COOLDOWN_MS).toISOString()}`);
+      const until = Date.now() + (kind === 'model-unavailable' ? HARD_MODEL_FAILURE_COOLDOWN_MS : CONNECTION_FAILED_COOLDOWN_MS);
+      console.log(`[${botId}] ${kind} cooldown on ${provider}/${m} until ${new Date(until).toISOString()}`);
     }
     return stamped;
   } catch {
@@ -986,7 +1150,10 @@ export function trackRunQuota({ botId, modelRef, result }) {
     const filtered = extractLogError(result.stderr || '') || String(result.lastError || '');
     if (text || !filtered || !isQuotaOrLimitError(filtered)) return null;
     const { provider, model } = freemodelRefToRoute(modelRef || '');
-    if (!provider || !model || provider === 'gemini') return null;
+    // Keyed Gemini lanes stamp like any other lane: the key carries its own
+    // quota (vendor countdown or default TTL) and the host-account mirror
+    // shares it, so a spent key is skipped instead of re-burned every turn.
+    if (!provider || !model) return null;
     const { dir } = ensureBotLedger(botId || 'default');
     // Carry the vendor's own retry countdown into the stamp: a Cline daily
     // cap ("try again in 22h") must not decay to the 6h default TTL, or the
@@ -1130,13 +1297,26 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   // double-list problem one level down.
   const seen = new Set();
   const buttons = [];
-  for (const g of tierGroups) {
+  // Keyed (non-free) rows leave their tier group for one trailing group: the
+  // keyboard spends free lanes first and the user's own key last (live VM5
+  // 2026-10-03). The groups above keep their counts honest — a moved row is
+  // not counted twice.
+  const isKeyedRow = (r) => (r.plan || (r.lane ? planCodeForLane(r.lane) : '')) === 'GM';
+  const keyedFallback = [];
+  const displayGroups = tierGroups
+    .map((g) => ({ ...g, rows: (g.rows || []).filter((r) => {
+      if (isKeyedRow(r)) { keyedFallback.push(r); return false; }
+      return true;
+    }) }))
+    .filter((g) => (g.rows || []).length > 0);
+  if (keyedFallback.length) displayGroups.push({ tier: 'keyed', rows: keyedFallback });
+  for (const g of displayGroups) {
     // A keyboard has no subheadings, so the tier title is a row of its own:
     // `VPS Standard model (10)` — location-scoped, with the group's count.
     // `noop` is the callback the router already uses for a non-actionable
     // keyboard row, and the tap handler answers it silently.
-    if (tierGroups.length > 1) {
-      buttons.push({ text: headingWidth(`${freemodelDisplayTier(g.tier, location || 'vps')} (${g.rows.length})`), data: 'noop', header: true });
+    if (displayGroups.length > 1) {
+      buttons.push({ text: headingWidth(g.tier === 'keyed' ? `VPS Keyed fallback (${g.rows.length})` : `${freemodelDisplayTier(g.tier, location || 'vps')} (${g.rows.length})`), data: 'noop', header: true });
     }
   for (const r of g.rows) {
     const label = r.laneLabel || r.label;
@@ -1327,30 +1507,108 @@ export function readTuiUrl(env = process.env, file = miniappUrlFile()) {
   return readMiniappUrl(file);
 }
 
+/**
+ * The URL `/tui` hands out for the opencode web UI (split solution: opencode
+ * chats read/scroll in the DOM web UI, cline/grok/freebuff keep the TUI).
+ * Served by opencode-web.service on localhost, fronted by Caddy on its own
+ * hostname behind the same Telegram-initData gate as the TUI — no Tailscale.
+ * `OPENCODE_WEB_URL` overrides (tests); empty when unset-and-no-default
+ * would apply, so callers can hide the button instead of handing out a dead one.
+ */
+export function readWebUiUrl(env = process.env) {
+  const raw = String(env.OPENCODE_WEB_URL ?? 'https://web.health-tracker.co.uk').trim().replace(/\/+$/, '');
+  if (/^https:\/\/[A-Za-z0-9.-]+$/.test(raw)) return raw;
+  return '';
+}
+
+/** Short-lived personal web UI links minted by /web. */
+export const WEB_LINK_TTL_SEC = 900;
+
+/**
+ * The gateway signing secret, read at call time from the host's own env
+ * file (same pattern as the seat-tags credentials: host files, never the
+ * repo). Empty when absent — the caller says so instead of minting.
+ */
+export function gatewaySecretFromHostEnv({ readFile = fs.readFileSync, home = os.homedir() } = {}) {
+  try {
+    for (const line of String(readFile(path.join(home, '.config', 'bot-host', 'tui-gateway.env'), 'utf8')).split('\n')) {
+      const m = line.match(/^TUI_GATEWAY_SECRET=(.+)$/);
+      if (m) return m[1].trim().replace(/^["']|["']$/g, '');
+    }
+  } catch { /* host may not have this file */ }
+  return String(process.env.TUI_GATEWAY_SECRET || '').trim();
+}
+
+/**
+ * A personal web UI login link: a freshly minted ?token= URL no cache or
+ * snapshot has ever seen, so it always loads live (the Mini App button's
+ * fixed URL can be served a stale saved copy with no server signal). Same
+ * short-lived chat-bound bearer the gateway accepts on query; nothing new
+ * is trusted. Pure (sensor-covered); '' when anything is missing.
+ */
+export function personalWebUiLink({ webUrl, botId, chatId, secret, ttlSec = WEB_LINK_TTL_SEC, now = Date.now() } = {}) {
+  if (!webUrl || !botId || chatId === undefined || chatId === null || String(chatId) === '' || !secret) return '';
+  const token = issueToken({ botId: String(botId), chatId: String(chatId), secret, ttlSec, now });
+  return `${String(webUrl).replace(/\/+$/, '')}/?token=${encodeURIComponent(token)}`;
+}
+
 export class ProgressRenderer {
-  constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, dryRun = false, providerLabel = '', modelLabel = '', thinking = '', onMessageId = null }) {
+  constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, heartbeatMs, progressMode = 'gist', dryRun = false, providerLabel = '', modelLabel = '', thinking = '', onMessageId = null }) {
     this.api = api;
     this.throttle = throttle;
     this.chatId = chatId;
     this.mode = mode;
-    this.maxChars = maxChars;
-    this.maxEdits = maxEdits;
+    this.maxChars = maxChars ?? 220;
+    this.maxEdits = maxEdits ?? 120;
+    this.heartbeatMs = Math.max(5000, Number(heartbeatMs) || 12000);
     this.dryRun = dryRun;
     this.providerLabel = providerLabel;
     this.modelLabel = modelLabel;
     this.thinkingLevel = thinking;
+    // 'gist' = today's behaviour (reasoning prose on the user surface).
+    // 'phase' = a truthful label from the tool lifecycle instead. Default
+    // 'gist' so this ships as a capability, not a product change; flipping it
+    // is config only (`progress.mode` in bots/registry.json).
+    this.progressMode = progressMode === 'phase' ? 'phase' : 'gist';
     this.onMessageId = onMessageId;
     this.startedAt = null;
     this.usedTokens = null;
+    // The context window of the lane actually running, when the catalog knows
+    // it (set by the turn at attempt start, right beside setHeadline). 0 means
+    // unknown, and the headline then falls back to the static free-lane map —
+    // never a percentage invented from a missing limit.
+    this.ctxLimit = 0;
     this.messageId = null;
     this.edits = 0;
     this.creating = false;
     this.createRetryAt = 0;
-    this.thinking = '';
+    // `thinkingLevel` is the configured reasoning LEVEL (low/high/xhigh).
+    // `thinkingText` is a gist of the reasoning CONTENT. They were both called
+    // "thinking" and both rendered under that one word, so /status reporting a
+    // level and the headline reporting a sentence looked like the same field.
+    this.thinkingText = '';
+    this.reasoning = createReasoningReducer({ maxChars: this.maxChars });
     this.tool = '';
+    this.toolDetail = '';
+    this.toolStartedAt = null;
+    // M2 ledger (plan/TG_TOOL_SURFACE.md): the last six tools, each with
+    // name, status, target, and a duration that starts when that tool starts.
+    // A repeated call of the same tool replaces that tool's line without
+    // resetting its clock; identical consecutive calls collapse with a count.
+    this.steps = [];
+    // Set when the tool list changes since the last paint: tool changes (and
+    // heartbeats) still paint after the reasoning edit budget is spent, so
+    // the bubble coalesces to the latest body instead of freezing.
+    this.toolChangedSincePaint = false;
+    // Settle label for the final bubble: '✓ Done', 'Stopped', or 'Aborted'.
+    this.settledLabel = '';
+    this.lastOutput = '';
+    this.lastEventAt = null;
+    this.lastRendered = '';
     this.status = 'starting';
     this.typingTimer = null;
     this.typingIntervalMs = 4000;
+    this.heartbeatTimer = null;
   }
 
   setHeadline({ providerLabel, modelLabel, thinking } = {}) {
@@ -1359,22 +1617,102 @@ export class ProgressRenderer {
     if (thinking != null) this.thinkingLevel = thinking;
   }
 
+  /** The running lane's context window, from the catalog (best-effort). */
+  setCtxLimit(limit) {
+    const value = Number(limit) || 0;
+    if (value > 0) this.ctxLimit = value;
+  }
+
+  _tail(text, max = 180) {
+    const oneLine = String(text ?? '').replace(/\s+/g, ' ').trim();
+    if (!oneLine) return '';
+    return oneLine.length > max ? `…${oneLine.slice(-max)}` : oneLine;
+  }
+
+  /** Where the turn got to, for error notices: last tool + last output. */
+  lastActivityLine() {
+    const bits = [];
+    if (this.tool) {
+      const runtime = this.toolStartedAt
+        ? ` · ${Math.max(0, Math.round((Date.now() - this.toolStartedAt) / 1000))}s`
+        : '';
+      const detail = this.toolDetail ? ` ${this._tail(this.toolDetail, 80)}` : '';
+      bits.push(`Tool ${this.tool}${runtime}${detail}`);
+    }
+    if (this.lastOutput) bits.push(`Out: ${this._tail(this.lastOutput, 140)}`);
+    else if (this.thinkingText) bits.push(`Thinking: ${this._tail(this.thinkingText, 140)}`);
+    if (!bits.length) return '';
+    return `Last: ${bits.join(' / ')}`;
+  }
+
+  timeoutResumeHint() {
+    return 'Next: reply to continue the same session, or /new to restart — smaller asks finish faster.';
+  }
+
   _render() {
     const lines = [];
-    const elapsedSec = this.startedAt ? (Date.now() - this.startedAt) / 1000 : 0;
-    lines.push(
-      formatWorkingHeadline({
-        providerLabel: this.providerLabel || 'Agent',
-        modelLabel: this.modelLabel,
-        thinking: this.thinkingLevel,
-        elapsedSec,
+    const now = Date.now();
+    const elapsedSec = this.startedAt ? (now - this.startedAt) / 1000 : 0;
+    if (this.settledLabel) {
+      const modelBit = [this.providerLabel, this.modelLabel].filter(Boolean).join(' ');
+      // The usage block the working headline showed, built by the same helper.
+      // It used to be dropped here, so the ONE bubble the turn ends on — the
+      // one left at the bottom of the chat — was the only one with no tokens
+      // and no context percent, while the line it replaced seconds earlier had
+      // both (`✓ Done · Gemini … · 110s` beside a bare `ctx 539 tokens` footer,
+      // live 2026-10-06). Parity is by construction: both branches read the
+      // same fields through `formatUsageSuffix`.
+      const { suffix } = formatUsageSuffix({
         used: this.usedTokens,
-        ctxLimit: ctxLimitFor(this.modelLabel),
-        detail: this.status,
-      }),
-    );
-    if (this.thinking) lines.push(`Thinking: ${this.thinking}`);
-    if (this.tool) lines.push(`Tool: ${this.tool}`);
+        ctxLimit: this.ctxLimit || ctxLimitFor(this.modelLabel),
+      });
+      lines.push(`${this.settledLabel}${modelBit ? ` · ${modelBit}` : ''} · ${Math.max(0, Math.round(elapsedSec))}s${suffix}`);
+    } else {
+      lines.push(
+        formatWorkingHeadline({
+          providerLabel: this.providerLabel || 'Agent',
+          modelLabel: this.modelLabel,
+          thinking: this.thinkingLevel,
+          elapsedSec,
+          used: this.usedTokens,
+          ctxLimit: this.ctxLimit || ctxLimitFor(this.modelLabel),
+          detail: this.status,
+        }),
+      );
+    }
+    // Node 3 (PROGRESS-SURFACES-1) ships as a CAPABILITY, off by default.
+    //
+    // The evidence says the user surface should carry a truthful phase label
+    // rather than reasoning prose: visible chain-of-thought mentioned the
+    // driving hint only 25% of the time on Claude 3.7 and 39% on R1, and
+    // users end up arguing with the reasoning instead of the answer
+    // (ollama #8528, open-webui #8706 ask for it hidden outright).
+    //
+    // That is a product decision, so it is NOT made here. Default `off` keeps
+    // today's behaviour byte-for-byte; flipping it to `phase` is a one-word
+    // config change and needs no code edit.
+    if (this.progressMode === 'phase') {
+      const phase = phaseLabelFor(this.tool, this.settledLabel ? 'done' : this.status);
+      if (phase) lines.push(`Phase: ${phase}`);
+    } else if (this.thinkingText) {
+      lines.push(`Thinking: ${String(this.thinkingText).replace(/\s+/g, ' ').trim()}`);
+    }
+    if (this.steps.length > 1) {
+      lines.push('So far:');
+      for (const step of this.steps) lines.push(`· ${this._stepLine(step, now)}`);
+    } else if (this.steps.length === 1) {
+      lines.push(`Tool: ${this._stepLine(this.steps[0], now)}`);
+    } else if (this.tool) {
+      const running = this.toolStartedAt ? ` · ${Math.max(0, Math.round((now - this.toolStartedAt) / 1000))}s` : '';
+      const detail = this.toolDetail ? ` ${this._tail(this.toolDetail, 90)}` : '';
+      lines.push(`Tool: ${this.tool}${running}${detail}`);
+    }
+    if (this.lastOutput) lines.push(`Result: ${this._tail(this.lastOutput, 140)}`);
+    if (this.startedAt) {
+      const idleSec = Math.max(0, Math.round((now - (this.lastEventAt || this.startedAt)) / 1000));
+      if (idleSec >= 45) lines.push(`⚠️ no update ${idleSec}s — still running (long tool or stuck?)`);
+      else lines.push(`↻ upd ${idleSec}s ago`);
+    }
     return lines.join('\n');
   }
 
@@ -1385,7 +1723,9 @@ export class ProgressRenderer {
       return;
     }
     this.startedAt = Date.now();
+    this.lastEventAt = this.startedAt;
     this._startTyping();
+    this._startHeartbeat();
   }
 
   /**
@@ -1424,45 +1764,130 @@ export class ProgressRenderer {
     if (typeof this.typingTimer.unref === 'function') this.typingTimer.unref();
   }
 
+  _startHeartbeat() {
+    if (this.dryRun || this.heartbeatTimer) return;
+    this.heartbeatTimer = setInterval(() => {
+      try {
+        this._schedule(true);
+      } catch {}
+    }, this.heartbeatMs);
+    if (typeof this.heartbeatTimer.unref === 'function') this.heartbeatTimer.unref();
+  }
+
+  _stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
   stopTyping() {
     if (this.typingTimer) {
       clearInterval(this.typingTimer);
       this.typingTimer = null;
     }
+    this._stopHeartbeat();
+  }
+
+  /** One ledger line per tool step (plan/TG_TOOL_SURFACE.md M2). */
+  _stepLine(step, now) {
+    const secs = Math.max(0, Math.round(((now || Date.now()) - step.startedAt) / 1000));
+    const count = step.count > 1 ? ` ×${step.count}` : '';
+    const target = step.target ? ` ${this._tail(step.target, 60)}` : '';
+    return `${step.label}${count} (${step.status})${target} · ${secs}s`;
+  }
+
+  _recordTool(name, status, target, output) {
+    const now = Date.now();
+    const label = String(name || 'tool');
+    const key = label;
+    const cleanTarget = String(target || '').replace(/\s+/g, ' ').trim();
+    const out = output != null ? String(output) : '';
+    const last = this.steps.length ? this.steps[this.steps.length - 1] : null;
+    const existing = this.steps.find((s) => s.key === key);
+    if (last && last.key === key && last.status === status && last.target === cleanTarget && !out.trim()) {
+      // Identical consecutive call: one line with a count, clock untouched.
+      last.count = (last.count || 1) + 1;
+      last.updatedAt = now;
+    } else if (existing) {
+      // Repeated call of the same tool: replace that tool's line, keep its clock.
+      existing.status = status;
+      if (cleanTarget) existing.target = cleanTarget;
+      existing.count = 1;
+      existing.updatedAt = now;
+    } else {
+      this.steps.push({ key, label, status, target: cleanTarget, startedAt: now, updatedAt: now, count: 1 });
+      if (this.steps.length > 6) this.steps.shift();
+    }
+    // Legacy single-tool fields stay for lastActivityLine() compat.
+    this.tool = `${label} (${status})`;
+    const clock = existing || this.steps[this.steps.length - 1];
+    this.toolStartedAt = clock ? clock.startedAt : now;
+    this.toolDetail = cleanTarget || (out ? out : '');
+    // One Result: line from tool output; cleared when the next tool has none.
+    this.lastOutput = out.trim() ? out : '';
+    this.toolChangedSincePaint = true;
   }
 
   onEvent(event) {
+    if (!event || typeof event !== 'object') return;
     if (event.kind === 'reasoning' && event.text) {
-      const gist = compressReasoning(event.text, { maxChars: this.maxChars });
-      // Drop compressor fragments (".", "/", "check", "at", ":") and repeats:
-      // each accepted gist would otherwise become its own chat message.
-      // Single-word reasoning shards ("anywhere") also read as nonsense on the
-      // `Thinking:` line, so a gist needs at least two words to be shown.
-      const clean = gist.trim();
-      if (!clean || clean.length < 12 || clean.split(/\s+/).length < 2 || clean === this.thinking) return;
-      this.thinking = gist;
+      // Proof of life even when the gist is filtered below: a filtered shard
+      // still means the model is streaming, so the freshness line keeps that
+      // truth instead of crying stuck.
+      this.lastEventAt = Date.now();
+      // The reducer compresses the ACCUMULATED stream, keyed by part id, so
+      // the gist advances with the phase instead of summarising whichever
+      // fragment happened to arrive last. It tolerates a delta that beats its
+      // own part registration (opencode #26924) and an unbalanced fragment
+      // (opencode #43312). `part.type` is the only trustworthy signal — opencode
+      // publishes reasoning deltas with field:"text".
+      const gist = this.reasoning.push(event.part, { text: event.text });
+      // A one-word "gist" is a fragment that slipped through, not a summary.
+      if (!gist || gist === this.thinkingText) return;
+      this.thinkingText = gist;
       this.status = 'thinking';
       this._schedule();
     } else if (event.kind === 'tool') {
-      this.tool = `${event.tool} (${event.status})`;
+      this.lastEventAt = Date.now();
+      const inp = event.input;
+      let target = '';
+      if (typeof inp === 'string') target = inp;
+      else if (inp && typeof inp === 'object') {
+        target = String(inp.command || inp.file_path || inp.path || inp.filePath || inp.pattern || inp.glob || '');
+      }
+      const out = event.output != null ? String(event.output) : '';
+      if (!target && out) target = out;
+      this._recordTool(event.tool, event.status, target, out);
       this.status = 'working';
       this._schedule();
+    } else if (event.kind === 'text' && event.text) {
+      // Answer streaming is proof of life only: it must not replace the tool
+      // story in the bubble (the final answer is its own message on settle).
+      this.lastEventAt = Date.now();
+      if (this.status === 'starting') this.status = 'working';
+      this._schedule();
     } else if (event.kind === 'step_finish') {
+      this.lastEventAt = Date.now();
       if (event.tokens != null && Number.isFinite(Number(event.tokens))) {
         this.usedTokens = (this.usedTokens || 0) + Number(event.tokens);
       }
       this.status = 'working';
       this._schedule();
+    } else if (event.kind === 'step_start' || event.kind === 'other' || event.kind === 'error') {
+      // Proof of life without a paint: the heartbeat carries the freshness.
+      this.lastEventAt = Date.now();
     }
   }
 
-  _schedule() {
+  _schedule(isHeartbeat = false) {
     if (this.dryRun) {
       console.log(`[progress] ${this._render().replace(/\n/g, ' | ')}`);
       return;
     }
+    if (!this.throttle || typeof this.throttle.submit !== 'function') return;
     if (this.messageId == null) {
-      if (!this.thinking && !this.tool) return;
+      if (!this.thinkingText && !this.tool && !this.lastOutput) return;
       // One progress message per run: never queue a second create while the
       // first is in flight, and back off after a failed create (rate-limit
       // returns null) instead of spawning a new message per event.
@@ -1471,9 +1896,11 @@ export class ProgressRenderer {
       this.throttle
         .submit(async () => {
           try {
-            const result = await this._guarded(() => this.api.sendMessage(this.chatId, this._render()));
+            const body = this._render();
+            const result = await this._guarded(() => this.api.sendMessage(this.chatId, body));
             if (result?.message_id != null) {
               this.messageId = result.message_id;
+              this.lastRendered = body;
               if (typeof this.onMessageId === 'function') {
                 try { this.onMessageId(this.messageId); } catch {}
               }
@@ -1489,8 +1916,20 @@ export class ProgressRenderer {
         });
       return;
     }
-    if (this.edits >= this.maxEdits) return;
-    this.edits += 1;
+    // Content edits keep the maxEdits budget (spam guard). Heartbeats bypass
+    // it so the clock + freshness line keep moving on long runs — they are
+    // still throttled to one edit per throttle window. Tool changes also
+    // still paint after the reasoning budget is spent: skipping the
+    // intermediate reasoning edits is how flood control is handled, and the
+    // next tool change or heartbeat paints the coalesced latest body.
+    if (!isHeartbeat) {
+      if (this.edits >= this.maxEdits && !this.toolChangedSincePaint) return;
+      this.edits += 1;
+    }
+    const body = this._render();
+    if (body === this.lastRendered) return;
+    this.lastRendered = body;
+    this.toolChangedSincePaint = false;
     this.throttle
       .submit(() => this._guarded(() => this.api.editMessageText(this.chatId, this.messageId, this._render())))
       .catch(() => {});
@@ -1541,8 +1980,33 @@ export class ProgressRenderer {
     }
   }
 
+  /** Final bubble: label + elapsed + the same step list (M2). Bypasses the
+   * reasoning edit budget like a heartbeat; the final answer stays a
+   * separate send and is never gated. */
+  settle(label) {
+    this.settledLabel = label;
+    if (label === '✓ Done') this.status = 'done';
+    else if (label === 'Aborted') this.status = 'aborted';
+    else this.status = 'stopped';
+    if (this.messageId != null) this._schedule(true);
+  }
+
   async finish(result, { footer = '' } = {}) {
     this.stopTyping();
+    // The bubble may never have been created (every create/edit failed or
+    // was throttled away): without this, a turn whose progress never
+    // painted delivers only the answer and the whole work record — tools,
+    // durations, thinking — is silently lost ("everything at once at the
+    // end", live 2026-10-04). So when no bubble exists, send the settled
+    // body as its own message first; the answer below stays separate.
+    // Never throws: the answer must still go out.
+    if (this.messageId == null && !this.dryRun) {
+      try {
+        await this.deliver(this._render());
+      } catch {
+        /* the answer below matters more */
+      }
+    }
     const withFooter = (body) => (footer ? `${body}\n\n${footer}` : body);
     const partial = String(result.finalText || '').trim();
     const errText = String(result.lastError || '').trim();
@@ -1553,7 +2017,7 @@ export class ProgressRenderer {
     const killedNoOutput = result.code == null && !errText && stderrBlank && !partial;
     if (killedNoOutput) {
       this.status = 'failed';
-      if (this.messageId != null) this._schedule();
+      this.settle('Stopped');
       await this.deliver(
         withFooter(
           'Interrupted before the model produced output (the bot process restarted mid-run). Nothing was computed — just send your request again.',
@@ -1563,20 +2027,20 @@ export class ProgressRenderer {
     }
     if (errText && !partial) {
       this.status = 'failed';
-      if (this.messageId != null) this._schedule();
-      const friendly = humanizeRunError(errText);
+      this.settle('Stopped');      const friendly = humanizeRunError(errText);
       let hint = '';
       let lead = `Error: ${friendly}`;
       if (isTimeoutError(errText)) {
         lead = `⏱ ${friendly}`;
+        const last = this.lastActivityLine();
         hint =
-          '\nTip: retry with /thinking medium, a smaller ask, /model for a faster model, or /new for a fresh session.';
+          `${last ? `\n${last}` : ''}\n${this.timeoutResumeHint()}\nTip: retry with /thinking medium, a smaller ask, /model for a faster model, or /new for a fresh session.`;
       }
       await this.deliver(`${lead}${errTail}${hint}`);
       return;
     }
     this.status = 'done';
-    if (this.messageId != null) this._schedule();
+    this.settle('✓ Done');
     if (!partial) {
       const code = result.code === 0 ? '' : ` (exit ${result.code})`;
       await this.deliver(withFooter(`Done${code}, but the model returned no text output.`));
@@ -1589,8 +2053,14 @@ export class ProgressRenderer {
     if (blocks.length) await this.deliver(blocks.join('\n\n'));
     if (errText) {
       // Partial output arrived but the run still errored (e.g. a late timeout):
-      // never swallow the error silently.
-      await this.deliver(`(Finished with an error after partial output: ${humanizeRunError(errText)})`);
+      // never swallow the error silently. On a timeout say where it got to
+      // and how to continue — the bare "didn't finish" strands the user.
+      let note = `(Finished with an error after partial output: ${humanizeRunError(errText)})`;
+      if (isTimeoutError(errText)) {
+        const last = this.lastActivityLine();
+        note += `${last ? `\n${last}` : ''}\n${this.timeoutResumeHint()}`;
+      }
+      await this.deliver(note);
     }
   }
 
@@ -1624,7 +2094,7 @@ async function sendChunked(api, chatId, text) {
 
 const CLEAR_KEYBOARD = { inline_keyboard: [] };
 
-async function noteUsage({ chatId, result, eff, config, caches, totals, lastUsage }) {
+export async function noteUsage({ chatId, result, eff, config, caches, totals, lastUsage }) {
   let contextLimit = 0;
   try {
     contextLimit = await getContextLimit(config, caches, eff.model);
@@ -1642,6 +2112,10 @@ async function noteUsage({ chatId, result, eff, config, caches, totals, lastUsag
   prev.runs += 1;
   prev.tokens += Number(result.usage?.tokens?.total) || 0;
   prev.cost += raw.cost;
+  // Last-run snapshot beside the cumulative totals: sibling bots read this
+  // file (not our memory), so without it no one else can show this chat's
+  // session usage or its share of the context window.
+  prev.last = { ...raw, at: Date.now() };
   totals.set(chatId, prev);
   saveTotals(config.id, totals);
   return formatUsage(raw);
@@ -1656,6 +2130,33 @@ async function noteUsage({ chatId, result, eff, config, caches, totals, lastUsag
 export function workLocation() {
   if (process.env.BOT_LOCATION) return process.env.BOT_LOCATION;
   return os.homedir() === '/root' ? 'mobile' : 'vps';
+}
+
+/**
+ * The name of THIS machine, which is not the same question as workLocation().
+ *
+ * workLocation() answers "which compute pool should this turn run on" and
+ * answers `vps` on this box. The nudge inbox is keyed by the machine's own
+ * identity: every sweep (pending_sweep, session_link, watch_activity,
+ * proof_linker) reads `~/.agents/location`, and the duty tells agents to read
+ * `~/.agents/nudges/inbox-<location>.md`. Writing proposals to
+ * `inbox-vps.md` when the duty says `inbox-vps-france.md` files them where
+ * nobody looks — a proposal no agent will ever read is the same as no proposal.
+ *
+ * `BOT_MACHINE` overrides for tests and for a box with no location file.
+ */
+export function machineLocation() {
+  const override = String(process.env.BOT_MACHINE || '').trim();
+  if (override) return override;
+  try {
+    const declared = fs.readFileSync(path.join(os.homedir(), '.agents', 'location'), 'utf8')
+      .trim()
+      .split(/\s+/)[0];
+    if (declared) return declared;
+  } catch {
+    /* no location file: fall through to the pool name */
+  }
+  return workLocation();
 }
 
 /**
@@ -2137,6 +2638,65 @@ async function bugsListText() {
   return formatBugsListText(parsed);
 }
 
+/**
+ * `/do-*` skills the operator can type (plan/TG_TOOL_SURFACE.md M3).
+ * Telegram menus cannot register a hyphen, so these are typed, not buttons —
+ * and the slash-forward in handleMessage delivers them to the tool as the
+ * prompt. Sources: the canonical `~/.agents/skills` plus this bot's
+ * `agent.sharedSkills` (workspace-relative entries resolve against the
+ * workspace, `~` against home). A skill counts when its directory holds a
+ * SKILL.md.
+ */
+export function listTypedSkills(config) {
+  const found = new Map();
+  const roots = [];
+  try {
+    roots.push(path.join(os.homedir(), '.agents', 'skills'));
+  } catch {}
+  const shared = config?.agent?.sharedSkills;
+  const list = Array.isArray(shared) ? shared : [];
+  for (const raw of list) {
+    const value = String(raw ?? '').trim();
+    if (!value) continue;
+    if (value === '~') roots.push(os.homedir());
+    else if (value.startsWith('~/')) roots.push(path.join(os.homedir(), value.slice(2)));
+    else if (path.isAbsolute(value)) roots.push(value);
+    else roots.push(path.resolve(config?.agent?.workspace || '.', value));
+  }
+  for (const root of roots) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry || typeof entry.isDirectory !== 'function' || !entry.isDirectory()) continue;
+      const dirName = String(entry.name || '');
+      if (!dirName.startsWith('do-')) continue;
+      const skillFile = path.join(root, dirName, 'SKILL.md');
+      let readable = false;
+      try {
+        readable = fs.statSync(skillFile).isFile();
+      } catch {
+        readable = false;
+      }
+      if (!readable) continue;
+      const cmd = `/${dirName}`;
+      if (!found.has(cmd)) {
+        let blurb = '';
+        try {
+          const head = String(fs.readFileSync(skillFile, 'utf8')).slice(0, 1200);
+          const m = head.match(/^\s*description\s*:\s*>?-?\s*(.+)$/m);
+          if (m) blurb = m[1].trim().slice(0, 120);
+        } catch {}
+        found.set(cmd, blurb);
+      }
+    }
+  }
+  return [...found.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+}
+
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId = 0, kind = 'direct' }) {
   const eff = effective(config, prefs, chatId);
 
@@ -2149,7 +2709,59 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       await api.sendMessage(chatId, helpText(config, eff));
       return;
 
-    case 'status': case 'status_all': {
+    case 'status_all': {
+      // Council table, not a second /status: one row per agent in this
+      // chat's council (coordinator + seat holders), read from on-disk state
+      // (each bot is its own process, so live memory of other bots is not
+      // visible here — the table says which bot to ask for its own /status).
+      // In a group the addressed bot (bare command: the master) renders it,
+      // so the room gets one table, not one reply per bot.
+      const statusAllProject = getChatProject(chatId);
+      const statusAllWorkspace = statusAllProject.type === 'external' ? statusAllProject.workspace : config.agent.workspace;
+      const statusAllTax = statusAllProject.id === TAX_PROJECT_ID;
+      const fleetRows = fleetChatStatus({
+        chatId: String(chatId),
+        workspace: statusAllWorkspace,
+        root: REPO_ROOT,
+        home: HOME,
+        seats: statusAllTax ? TAX_SEAT_IDS : HEALTH_SEAT_IDS,
+        roleOf: statusAllTax ? taxRoleOf : healthRoleOf,
+      });
+      const statusAllCaption = `Fleet status · chat ${String(chatId)} · ${fleetRows.length} agent${fleetRows.length === 1 ? '' : 's'} (via ${config.id})`;
+      // The readable table ships as the telegram-tables skill grid
+      // (JSON -> qa-evidence/build-table.py -> HTML document, the /allowance
+      // table pattern): Telegram text has no grid rendering. Anything failing
+      // here falls back to the monospace text table, so the command never
+      // comes back empty.
+      try {
+        const { writeFleetStatusDoc } = await import('./lib/fleet-status-html.mjs');
+        const live = fleetRows.filter((r) => r.enabled !== false);
+        const uniform =
+          live.length > 0 && live.every((r) => r.model === live[0].model && r.agent === live[0].agent);
+        const htmlDir = path.join(os.tmpdir(), `bot-host-status-all-${config.id}`);
+        fs.mkdirSync(htmlDir, { recursive: true });
+        const doc = writeFleetStatusDoc(fleetRows, {
+          title: statusAllCaption,
+          subtitle: uniform ? `all: ${live[0].model || '—'} · ${live[0].agent || '—'}` : '',
+          dir: htmlDir,
+        });
+        try {
+          await api.sendMediaFile(chatId, doc.htmlPath, { caption: statusAllCaption });
+          return;
+        } finally {
+          try {
+            fs.unlinkSync(doc.htmlPath);
+          } catch {}
+          try {
+            fs.unlinkSync(doc.jsonPath);
+          } catch {}
+        }
+      } catch {}
+      await api.sendMessage(chatId, formatFleetStatusTable(fleetRows, { chatId: String(chatId), via: config.id }));
+      return;
+    }
+
+    case 'status': {
       const location = workLocation();
       const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
       const work = statusForTelegram(workId, { sessionName: WORK_VIEW_SESSION });
@@ -2228,7 +2840,37 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       saveSessions(config.id, sessions);
       clearFollowups(chatId);
       clearActiveThread(chatId);
-      await api.sendMessage(chatId, 'Started a fresh session.');
+      // Failproof-sync: an open terminal belongs to the OLD session. Leaving
+      // it up guarantees the "TUI shows another conversation" desync, so /new
+      // takes it down (verified kill, same path as /tui off) and the next /tui
+      // tap rebuilds on the fresh session. The old session itself is untouched.
+      let paneNote = '';
+      const stalePane = readTuiPane(config.id);
+      if (stalePane && hasTuiPane(stalePane)) {
+        killTuiPane(stalePane);
+        if (!hasTuiPane(stalePane)) {
+          try {
+            fs.rmSync(tuiLeasePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          try {
+            fs.rmSync(tuiPanePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          // The honest half: /new deleted the session row above, so there is
+          // no session for /tui to attach to until the next message binds one.
+          // This used to promise /tui a fresh terminal on the new session, which
+          // cannot be true at this moment, and it is exactly what a user acted on
+          // 20s later to reach a terminal that refused to open
+          // (live 2026-10-05).
+          paneNote = `\nClosed the old terminal pane (\`${stalePane}\`) — it showed the previous session. This chat has no session of its own yet: the next message you send starts one, and \`/tui\` after that lands on it.`;
+        } else {
+          paneNote = `\n⚠️ Could not close the old terminal pane (\`${stalePane}\`) — it still shows the previous session. \`/tui off\` retries the kill.`;
+        }
+      }
+      await api.sendMessage(chatId, `Started a fresh session.${paneNote}`);
       return;
 
     case 'compact': {
@@ -2243,51 +2885,42 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         compactProject.type === 'external' ? compactProject.workspace : config.agent.workspace,
       );
       if (!compactSessionId) {
-        await api.sendMessage(chatId, 'Nothing to compact — no active session in this chat yet.');
+        await api.sendMessage(chatId, formatCompactEmpty());
         return;
       }
-      await api.sendMessage(chatId, 'Compacting — summarizing this session, then starting fresh…');
+      // One bubble, edited in place when the answer lands. Compaction is slow
+      // enough that a second "done" message is just noise above the receipt.
+      const notice = await api.sendMessage(chatId, 'Compacting this session…');
+      const receipt = (text) => (notice && typeof api.editMessageText === 'function'
+        ? api.editMessageText(chatId, notice.messageId, text).catch(() => api.sendMessage(chatId, text))
+        : api.sendMessage(chatId, text));
       try {
-        // Compact the session the chat is actually on. On an external project
-        // that is the external folder, with the same restricted child env as
-        // a normal turn, not the website checkout.
+        // Compact the session the chat is actually on, in place: the tool
+        // collapses the transcript into one summary entry and the same session
+        // id carries the next turn, so there is nothing to rebind and no
+        // handoff brief to inject. On an external project that is the external
+        // folder, with the same restricted child env as a normal turn, not the
+        // website checkout.
         const compactProject = getChatProject(chatId);
         const compactExternal = compactProject.type === 'external';
-        const result = await runOpencode({
-          prompt: COMPACT_SUMMARY_PROMPT,
-          model: eff.model,
-          variant: eff.variant,
+        running.set(chatId, { aborted: false });
+        const outcome = await compactSession({
+          sessionId: compactSessionId,
           workspace: compactExternal ? compactProject.workspace : config.agent.workspace,
-          thinking: config.agent.thinking,
-          timeoutMs: config.agent.timeoutMs,
-          opencodeBin: config.agent.opencodeBin,
-          onSpawn: (child) => running.set(chatId, { child, aborted: false }),
-          extraArgs: ['--session', compactSessionId],
           env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
           envMode: compactExternal ? 'project' : 'inherit',
+          opencodeBin: config.agent.opencodeBin,
+          timeoutMs: config.agent.timeoutMs,
         });
-        if (running.get(chatId)?.aborted) {
-          await api.sendMessage(chatId, 'Aborted — session kept as-is.');
-        } else if (result.code !== 0 || !result.finalText?.trim()) {
-          await api.sendMessage(chatId, `Compact failed (${result.lastError || `exit ${result.code}`}) — session kept as-is.`);
+        if (outcome.ok) {
+          await receipt(formatCompactReceipt(outcome));
+        } else if (outcome.reason === 'empty') {
+          await receipt(formatCompactEmpty());
         } else {
-          const brief = result.finalText.trim().slice(0, 2000);
-          setPref(prefs, chatId, { handoff: brief });
-          savePrefs(config.id, prefs);
-          // Drop the old project's session row. Without this the chat kept a
-        // session id from the workspace it just left, and the TUI — which
-        // resolves its session from this same file — went on attaching the
-        // previous project's conversation after a switch.
-        sessions.delete(String(chatId));
-          saveSessions(config.id, sessions);
-          const compactUsage = await noteUsage({ chatId, result, eff, config, caches, totals, lastUsage });
-          await api.sendMessage(
-            chatId,
-            `Compacted. Fresh session starts on your next message; the brief below carries over once.\n\n${brief}${compactUsage ? `\n\n${compactUsage}` : ''}`,
-          );
+          await receipt(formatCompactFailure({ sessionId: compactSessionId, reason: outcome.reason }));
         }
       } catch (err) {
-        await api.sendMessage(chatId, `Compact failed: ${err.message} — session kept as-is.`).catch(() => {});
+        await receipt(formatCompactFailure({ sessionId: compactSessionId, reason: err.message })).catch(() => {});
       } finally {
         running.delete(chatId);
       }
@@ -2537,8 +3170,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     case 'thinking': {
       const ref = parseModelRef(eff.model);
       // Gemini is single-shot: no variants, no opencode verbose lookup.
+      // One refusal, no turn, no stored level (plan/TG_TOOL_SURFACE.md M4).
+      if (ref.surface === 'gemini') {
+        await api.sendMessage(chatId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.');
+        return;
+      }
       const variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : ref.surface === 'gemini' ? [] : await getVariants(config, caches, eff.model);
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
       if (!cmd.args) {
         if (!variants.length) {
           await api.sendMessage(chatId, `No thinking levels exposed for ${eff.model}.`);
@@ -2560,6 +3198,17 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'skills': {
+      const typed = listTypedSkills(config);
+      if (!typed.length) {
+        await api.sendMessage(chatId, 'No /do-* skills found on this host. The canonical copy is ~/.agents/skills.');
+        return;
+      }
+      const lines = typed.map(([cmd, blurb]) => (blurb ? `${cmd} — ${blurb}` : cmd));
+      await api.sendMessage(chatId, `Skills you can type here (typed, not buttons — just send the line):\n${lines.join('\n')}`);
+      return;
+    }
+
     case 'tui': {
       // /tui off closes this bot's pane; /tui status reports it. Both live here
       // rather than in the shell because the pane's name belongs to a service
@@ -2569,15 +3218,54 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // drift the first time either side changed, and a wrong name means killing
       // nothing while reporting success.
       const tuiSub = String(cmd.args || '').trim().toLowerCase();
+      // The workspace this chat is actually in right now — the same expression
+      // the turn uses. Resolved up here (not only on the open path) because
+      // /tui status and /tui off below already need the session id: declaring
+      // it after them is a temporal-dead-zone ReferenceError that answers
+      // neither (every /tui status went silently missing).
+      const tuiProject = getChatProject(chatId);
+      const tuiWorkspace = tuiProject.type === 'external' ? tuiProject.workspace : config.agent.workspace;
+      // Scoped, so /tui hands tui-attach.sh the session for the workspace the
+      // chat is in — the identical id the next turn passes.
+      const tuiSessionId = sessionForWorkspace(sessions, chatId, tuiWorkspace);
+      // The lane, and whether a terminal could be opened on THIS chat's session
+      // right now. Resolved here, above status/off/refresh, because all three
+      // name the session in their answers and two of them used to promise a
+      // terminal that could not be opened (see tuiCanOpen below).
+      const tuiSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
+      const tuiCanOpen = canOpenSharedTui(tuiSurface.surface, tuiSessionId);
+      // What to say instead of "tap /tui for a terminal" when there is no
+      // session behind the promise. Named once because three answers need it and
+      // a fresh chat has no session at all until its next message binds one
+      // (live 2026-10-05: /new then /tui twenty seconds later).
+      const tuiNoSessionAdvice = 'Send me any message first: that starts the conversation this chat shares with the terminal, and `/tui` after it lands on that conversation.';
       if (tuiSub === 'status') {
         await api.sendMessage(chatId, `⌨️ ${tuiStatusLine(config.id, tuiSessionId)}`);
         return;
       }
       if (tuiSub === 'off' || tuiSub === 'kill' || tuiSub === 'stop') {
         const lease = readTuiLease(config.id, tuiSessionId);
-        if (!lease || !lease.pane) {
-          await api.sendMessage(chatId, '⌨️ No TUI pane is open for this chat — nothing to close. `/tui` opens one.');
-          return;
+        // The lease only exists while a client is attached; a kept pane
+        // outlives it (live 2026-10-04: VM-tui-vm2 alive, no lease, and /tui
+        // off answered "nothing to close"). Fall back to the last published
+        // pane name — a name whose session is gone reads as already closed.
+        let pane = lease?.pane || null;
+        let sessionLabel = lease?.session ? ` (session ${lease.session.slice(0, 12)}…)` : '';
+        if (!pane) {
+          pane = readTuiPane(config.id);
+          if (!pane) {
+            await api.sendMessage(chatId, '⌨️ No TUI pane is open for this chat — nothing to close. `/tui` opens one.');
+            return;
+          }
+          if (!hasTuiPane(pane)) {
+            try {
+              fs.rmSync(tuiPanePath(config.id), { force: true });
+            } catch {
+              /* the pane is gone either way */
+            }
+            await api.sendMessage(chatId, `⌨️ No TUI pane is running — \`${pane}\` is already gone. \`/tui\` opens a fresh one.`);
+            return;
+          }
         }
         // Refuse while this bot is mid-turn, unless forced. Killing the pane
         // takes the terminal's opencode process with it, and if a turn is
@@ -2586,26 +3274,70 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         if (running.has(chatId) && !/\b(force|yes)\b/.test(tuiSub)) {
           await api.sendMessage(chatId, [
             '⏸ A turn is running right now, so I will not close the terminal out from under it.',
-            `Say \`/tui off force\` to close \`${lease.pane}\` anyway, or wait for the turn to finish first.`,
+            `Say \`/tui off force\` to close \`${pane}\` anyway, or wait for the turn to finish first.`,
           ].join('\n'));
           return;
         }
-        const killed = killTuiPane(lease.pane);
-        // The lease goes with the pane. tui-attach.sh clears it on exit, but a
-        // killed pane never runs its trap, so the bot clears it here or /status
-        // keeps reporting a terminal that no longer exists. It would expire on
-        // its heartbeat anyway; this just makes the answer immediate.
-        try {
-          fs.rmSync(tuiLeasePath(config.id), { force: true });
-        } catch {
-          /* the pane is gone either way */
+        killTuiPane(pane);
+        // Verify the kill landed: only then do the lease and the published
+        // pane name go with it. A surviving session keeps its records, so a
+        // failed kill still reports a pane /status can see.
+        const gone = !hasTuiPane(pane);
+        if (gone) {
+          try {
+            fs.rmSync(tuiLeasePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          try {
+            fs.rmSync(tuiPanePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
         }
-        await api.sendMessage(chatId, killed
+        await api.sendMessage(chatId, gone
           ? [
-            `💤 Closed \`${lease.pane}\`${lease.session ? ` (session ${lease.session.slice(0, 12)}…)` : ''}.`,
+            `💤 Closed \`${pane}\`${sessionLabel}.`,
             'Your scrollback went with it, and it costs nothing while closed. `/tui` opens a fresh one on this same conversation whenever you want it back.',
           ].join('\n')
-          : `⚠️ Could not close \`${lease.pane}\` — tmux refused. It may already be gone; \`/tui status\` will say.`);
+          : `⚠️ Could not close \`${pane}\` — tmux refused. It may already be gone; \`/tui status\` will say.`);
+        return;
+      }
+      // The universal resync: whatever the pane shows (stale session after a
+      // lane failover, a stuck boot like VM-tui-vm3 on the 742-row session, a
+      // half-dead attach), killing it verified-dead and reopening rebuilds on
+      // THIS chat's current session via the attach-time resolution. /new does
+      // this kill automatically; refresh is the manual version. Reopening
+      // always needs a fresh tap — ttyd only runs the attach on a new client.
+      if (tuiSub === 'refresh' || tuiSub === 'reopen' || tuiSub === 'reload' || tuiSub === 'resync') {
+        const refreshPane = readTuiLease(config.id, tuiSessionId)?.pane || readTuiPane(config.id);
+        if (!refreshPane || !hasTuiPane(refreshPane)) {
+          try {
+            fs.rmSync(tuiPanePath(config.id), { force: true });
+          } catch {
+            /* nothing published either way */
+          }
+          await api.sendMessage(chatId, `⌨️ No terminal pane is running — nothing to refresh. ${tuiCanOpen ? '`/tui` opens one on this chat\'s current session.' : tuiNoSessionAdvice}`);
+          return;
+        }
+        killTuiPane(refreshPane);
+        if (!hasTuiPane(refreshPane)) {
+          try {
+            fs.rmSync(tuiLeasePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          try {
+            fs.rmSync(tuiPanePath(config.id), { force: true });
+          } catch {
+            /* the pane is gone either way */
+          }
+          await api.sendMessage(chatId, tuiCanOpen
+            ? `🔄 Closed \`${refreshPane}\`. Tap \`/tui\` again — the new pane attaches to this chat's current session.`
+            : `🔄 Closed \`${refreshPane}\`. ${tuiNoSessionAdvice}`);
+        } else {
+          await api.sendMessage(chatId, `⚠️ Could not close \`${refreshPane}\` — tmux refused. \`/tui status\` will say what survived.`);
+        }
         return;
       }
       // The actual TUI: ttyd serves a real PTY and mounts it under the same
@@ -2653,22 +3385,35 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // broken.
       const moved = lastMiniappUrl && lastMiniappUrl !== tuiUrl;
       lastMiniappUrl = tuiUrl;
-      const tuiSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
-      // The workspace this chat is actually in right now — the same expression
-      // the turn uses. Advertising config.agent.workspace unconditionally is what
-      // let a /tui in an external chat promise the website repo while the chat
-      // was pointed somewhere else entirely.
-      const tuiProject = getChatProject(chatId);
-      const tuiWorkspace = tuiProject.type === 'external' ? tuiProject.workspace : config.agent.workspace;
-      // Scoped, so /tui hands tui-attach.sh the session for the workspace the
-      // chat is in — the identical id the next turn passes.
-      const tuiSessionId = sessionForWorkspace(sessions, chatId, tuiWorkspace);
+      // tuiSurface / tuiCanOpen are resolved at the top of this case, with the
+      // session they depend on (status, off and refresh all need it).
       if (!tuiSurface.terminal) {
         // An API-only lane has no screen to attach to. Handing it a PTY anyway
         // would be a scraped badge, not a terminal.
         await api.sendMessage(chatId, [
           `⌨️ No terminal for this chat — it is on \`${tuiSurface.tool}\`, which answers in one shot and has no session to attach to.`,
           '`/tx on` still gives you the live tool feed here, and `/freemodel` moves the chat to a lane with a real terminal if you want one.',
+        ].join('\n'));
+        return;
+      }
+      // No session to share means no terminal worth opening: tui-attach.sh
+      // refuses a sessionless opencode open (live 2026-10-04), so the button
+      // below would promise a conversation and deliver that refusal on the
+      // user's screen. Say it here, where the answer belongs. Asked BEFORE the
+      // tui-open.json write so a null session is never recorded as a fact about
+      // the chat — that snapshot with `sessionId: null` is what an auditor reads
+      // afterwards and cannot tell from a broken record.
+      //
+      // Live 2026-10-05: `/new` cleared the chat's session row at 10:54:23,
+      // `/tui` ran at 10:54:43, wrote the null snapshot and sent the button,
+      // and the tap 20s later printed "No chat session recorded yet — nothing
+      // shared to attach to" on a phone. tuiSessionId was already resolved at the
+      // top of this case; nothing read it on the open path.
+      if (!tuiCanOpen) {
+        await api.sendMessage(chatId, [
+          '⌨️ There is nothing for the terminal to attach to yet — this chat has no session.',
+          tuiNoSessionAdvice,
+          '(`/new` puts you here on purpose: a fresh chat has no session until your next message.)',
         ].join('\n'));
         return;
       }
@@ -2697,6 +3442,22 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       } catch {
         // fall through to the button below
       }
+      // Split solution (plan/WEBUI_MIGRATION.md): opencode chats get the DOM web
+      // UI first (native scroll, real text, same sessions via serve) with the
+      // terminal as fallback; every other lane keeps the TUI button only —
+      // cline/grok/freebuff have no web UI to point at.
+      const webUiUrl = tuiSurface.sharedSession ? readWebUiUrl() : '';
+      const freshWebLink = webUiUrl
+        ? personalWebUiLink({ webUrl: webUiUrl, botId: config.id, chatId, secret: gatewaySecretFromHostEnv() })
+        : '';
+      const openButtons = [
+        ...(freshWebLink
+          ? [{ text: '🌐 Open web UI', url: freshWebLink }]
+          : webUiUrl
+            ? [{ text: '🌐 Open web UI', web_app: { url: `${webUiUrl}/?bot=${config.id}` } }]
+            : []),
+        { text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } },
+      ];
       await api.sendMessage(chatId, [
         moved ? '⚠️ *The tunnel was reconnected*, so any earlier /tui button is dead — use this one.' : null,
         tuiSurface.sharedSession
@@ -2710,8 +3471,9 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           ? 'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.'
           : 'It runs under tmux, so closing the Mini App keeps your place, and you can reopen the same thread whenever you want.',
         'We both keep working with it open. The terminal waits for a turn I am running, and I wait for a turn you started — one at a time, never two writers at once. Opening it proves you are the Telegram user this chat belongs to, so there is no password to remember.',
+        ...(webUiUrl ? [`🌐 Prefer reading over typing? The *web UI* shows this same conversation as a normal page — scrolls natively, no terminal frames.${freshWebLink ? ' The button above is minted fresh for this tap and lasts 15 minutes.' : ''}`] : []),
       ].filter(Boolean).join('\n'), {
-        reply_markup: { inline_keyboard: [[{ text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } }]] },
+        reply_markup: { inline_keyboard: [openButtons] },
       });
       return;
     }
@@ -2784,13 +3546,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'fleet': {
       // Dynamic fleet dashboard (Mini App). Same web_app button + initData door
-      // as /tui, /bugs, and /forge: served by the gateway under /fleet/. Scoped
-      // to the VM bot: it owns the fleet projection.
-      const FLEET_BOTS = ['vm'];
-      if (!FLEET_BOTS.includes(config.id)) {
-        await api.sendMessage(chatId, '📋 The fleet dashboard lives on the VM bot — ask it for /fleet and it will hand you the button.');
-        return;
-      }
+      // as /tui, /bugs, and /forge: served by the gateway under /fleet/.
+      // Served by every bot-host bot: the button carries ?bot=<this bot> and
+      // the gateway validates the opener's initData against that bot's token
+      // (auto-matching any token it holds), so no per-bot allowlist lives here.
       const fleetGatewayUrl = readTuiUrl();
       if (!fleetGatewayUrl) {
         await api.sendMessage(chatId, '📋 Fleet dashboard is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /fleet again.');
@@ -2802,6 +3561,30 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         'Live tickets from PM sheet, terminal panes across all locations (Mac, VM, Mobile, Collab), and fleet bot activity.',
       ].join('\n'), {
         reply_markup: { inline_keyboard: [[{ text: '📋 Open Fleet Dashboard', web_app: { url: fleetUrl } }]] },
+      });
+      return;
+    }
+
+    case 'review': {
+      // Human review queue (Mini App). Same web_app button + initData door
+      // as /fleet, served by the gateway under /review/. Unlike the fleet
+      // board it is NOT scoped to the VM bot: every bot serves its own
+      // button, and the gateway accepts initData from any configured bot.
+      // Agents set a row's Status to `review` when work is ready for human
+      // eyes; the app shows proof screenshots over the original request, and
+      // 👍 archives the row while comments append back to the sheet.
+      const reviewGatewayUrl = readTuiUrl();
+      if (!reviewGatewayUrl) {
+        await api.sendMessage(chatId, '⭐ Review queue is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /review again.');
+        return;
+      }
+      const reviewUrl = `${reviewGatewayUrl}/review/?bot=${config.id}`;
+      await api.sendMessage(chatId, [
+        '⭐ *Review Queue*',
+        'Work marked ready for review: proof screenshots over the original request.',
+        '👍 archives a finished item; 💬 sends feedback back to the sheet.',
+      ].join('\n'), {
+        reply_markup: { inline_keyboard: [[{ text: '⭐ Open Review Queue', web_app: { url: reviewUrl } }]] },
       });
       return;
     }
@@ -2845,6 +3628,32 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       await handleTxCommand({ api, config, chatId, arg: cmd.args, lane: parseModelRef(eff.model).surface });
       return;
     }
+
+    case 'notify': {
+      // Finish alerts for runs started outside Telegram (finish-watch.mjs
+      // reads the same prefs file). Default on; `notify: false` silences.
+      const sub = String(cmd.args || '').trim().toLowerCase();
+      const kept = prefFor(prefs, chatId);
+      if (sub === 'off') {
+        setPref(prefs, chatId, { ...kept, notify: false });
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, '🔕 Finish alerts off for this chat — runs you start elsewhere stay there.');
+        return;
+      }
+      if (sub === 'on') {
+        const { notify: _dropped, ...rest } = kept;
+        setPref(prefs, chatId, rest);
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, '🔔 Finish alerts on for this chat — when a run you start in the web UI or TUI finishes, its answer lands here and the thread continues on either surface.');
+        return;
+      }
+      const on = kept?.notify !== false;
+      await api.sendMessage(chatId, on
+        ? '🔔 Finish alerts are on for this chat. `/notify off` silences them.'
+        : '🔕 Finish alerts are off for this chat. `/notify on` brings them back.');
+      return;
+    }
+
 
     case 'resume': {
       if (running.get(chatId)) {
@@ -3365,6 +4174,18 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         }
         return;
       }
+      if (sub === 'link' || sub.startsWith('link ')) {
+        // The four document links, from the workspace registry. A lookup, so it
+        // is not under the running-guard (nothing is written and no lane is
+        // called) and it needs no argument to be useful: `/health link` gives
+        // all four, `/health link test plan` gives one and where the rest are.
+        // Routed through answerHealthGroup so the command and the room's plain
+        // "give me the link" are the same turn, not two readers of the registry.
+        const ws = KNOWN_PROJECTS[projectId]?.workspace || KNOWN_PROJECTS['external-health'].workspace;
+        const res = await answerHealthGroup({ mode: 'link', roleId: null, question: rawArgs.slice(4).trim(), workspace: ws });
+        await api.sendMessage(chatId, res.text);
+        return;
+      }
       if (sub === 'doctor') {
         // The seat that checks the other seats. It writes only its own report;
         // a refusal (no credential, a report the checker refuses) writes
@@ -3489,6 +4310,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
       return;
     }
+    case 'tell': {
+      // B2B-1: one bounded message to one named seat. Everything about this is
+      // refusal-first — an unresolvable target, an absent --ref or a tripped
+      // bound all send nothing and say why in one line.
+      const verdict = await sendPeerHandoff({ config, args: cmd.args || '' });
+      await api.sendMessage(chatId, verdict.text);
+      break;
+    }
+
     case 'location': {
       const loc = workLocation();
       if (!cmd.args) {
@@ -3559,6 +4389,32 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
   }
 }
 
+/**
+ * Resolve a /freemodel keyboard tap to its annotated row (plan/TG_TOOL_SURFACE.md M4).
+ *
+ * A tap carries the button's route identity (`fm:<route>`), but terminal-only
+ * rows are keyed with their vendor (`freebuff/deepseek/deepseek-v4.1-flash`)
+ * while the button carries the vendorless route
+ * (`deepseek/deepseek-v4.1-flash` — surface prefix stripped). Without the
+ * suffix fallback the tap resolves to nothing and the chat gets "Expired, run
+ * /freemodel again" instead of the terminal-only refusal. The fallback only
+ * matches terminal-only rows, so a selectable row is never reached through
+ * an ambiguous tap; exact matches always win.
+ */
+export function resolveFreemodelTap({ annotated = [], value } = {}) {
+  const wanted = String(value || '').replace(/^❌\s*/, '').trim();
+  const direct = (annotated || []).find(
+    (a) => a.ref === value || a.laneLabel === wanted || a.label === wanted || a.ref === wanted,
+  );
+  if (direct) return { hit: direct };
+  if (!wanted || wanted.startsWith('#')) return { hit: null };
+  const terminal = (annotated || []).find(
+    (a) => (a.terminalOnly || /^freebuff\//i.test(String(a.ref || '')))
+      && (String(a.ref || '') === wanted || String(a.ref || '').endsWith(`/${wanted}`)),
+  );
+  return { hit: terminal || null };
+}
+
 async function handleCallback({ api, config, prefs, caches, running = null, query }) {
   // String once, at the boundary: Map keys written with the raw Telegram id
   // never match the same keys after a disk round-trip stringifies them, so
@@ -3574,6 +4430,19 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
   try {
     if (kind === 'noop') {
       await api.answerCallbackQuery(query.id);
+      return;
+    }
+    if (kind === 'perm') {
+      // Permission tap for a live run: resolve the watcher waiting on this
+      // chat. A tap with no waiter is a stale keyboard from an ended run.
+      const parsed = parsePermissionCallback(value);
+      const waiter = running?.get(chatId)?.permWait;
+      if (!parsed || !waiter || waiter.token !== parsed.token) {
+        await api.answerCallbackQuery(query.id, { text: 'Expired — the run already moved on.' });
+        return;
+      }
+      waiter.resolve(parsed.decision);
+      await api.answerCallbackQuery(query.id, { text: parsed.decision });
       return;
     }
     if (kind === 'mp') {
@@ -3656,9 +4525,7 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
             return (available.length ? available : selectable)[Number(wanted.slice(1))] || null;
           })()
         : null;
-      const hit = byPosition || (bundle.annotated || []).find(
-        (a) => a.ref === value || a.laneLabel === wanted || a.label === wanted || a.ref === wanted,
-      );
+      const hit = byPosition || resolveFreemodelTap({ annotated: bundle.annotated || [], value }).hit;
       const entries = bundle.entries?.length ? bundle.entries : await getFreeModels(caches, config);
       const entry = hit
         ? entries.find((e) => e.ref === hit.ref) || hit
@@ -3690,6 +4557,17 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
         await api.answerCallbackQuery(query.id, { text: `Depleted (reset in ${resetIn}) — pick ${nextName}` });
         await sendHtml(api, chatId, `That lane is depleted (reset in ${resetIn}).\n\n${allowance}`);
         return;
+      }
+      // Terminal-only rows (Freebuff) are shown for visibility but must not
+      // become the chat's model: the keyboard never starts a headless turn
+      // (plan/TG_TOOL_SURFACE.md M4). One reply, pref untouched.
+      {
+        const annHit = (bundle.annotated || []).find((a) => a.ref === entry.ref);
+        if (annHit?.terminalOnly || /^freebuff\//i.test(String(entry.ref || ''))) {
+          await api.answerCallbackQuery(query.id, { text: 'Terminal-only lane' });
+          await api.sendMessage(chatId, 'Freebuff runs in the terminal — it cannot take a headless turn from chat. Your model is unchanged and nothing was spent.');
+          return;
+        }
       }
       setPref(prefs, chatId, { model: entry.ref });
       savePrefs(config.id, prefs);
@@ -3735,9 +4613,14 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
       const eff = effective(config, prefs, chatId);
       const ref = parseModelRef(eff.model);
       // Cline models expose fixed thinking levels, not opencode model variants.
-      // Gemini exposes none (single-shot lane).
+      // Gemini exposes none (single-shot lane): one refusal, nothing stored.
+      if (ref.surface === 'gemini') {
+        await api.answerCallbackQuery(query.id, { text: 'No levels on this model' });
+        await api.editMessageText(chatId, messageId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.').catch(() => {});
+        return;
+      }
       let variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : ref.surface === 'gemini' ? [] : await getVariants(config, caches, eff.model);
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
       // New buttons carry the name (`v:high`); old keyboards carry an index
       // (`v:0`). Support both so already-shown keyboards keep working.
       let variant = variants.includes(value) ? value : variants[Number(value)];
@@ -3844,11 +4727,11 @@ export function stickyModelAfterTurn({ chatModel, answeredModel, answered }) {
  * the old one was skipped. A host with no ledger yet keeps the old two-entry
  * chain, so a fresh install behaves exactly as before.
  */
-export function selectTurnLanes({ botId, model, fallback, now = Date.now(), readiness = null } = {}) {
+export function selectTurnLanes({ botId, model, fallback, now = Date.now(), readiness = null, catalogEntries = null } = {}) {
   const legacy = failoverModels(model, fallback);
   let ledger;
   try {
-    ledger = loadFreeLaneLedger({ stateDir: ensureBotLedger(botId || 'default').dir });
+    ledger = loadFreeLaneLedger({ stateDir: ensureBotLedger(botId || 'default').dir, catalogEntries });
   } catch {
     return { models: legacy, skipped: [], fromLedger: false };
   }
@@ -3859,7 +4742,7 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   // The same projection /allowance and /freemodel read, so the walk can only
   // offer what those two surfaces call selectable.
   const projection = projectLanes(table, ledger.session || {}, { now, location: botId, readiness });
-  const lanes = projection.filter((r) => r.selectable).map((r) => ({ provider: r.provider, model: r.model, pref: r.pref, family: r.family, label: r.label }));
+  const lanes = projection.filter((r) => r.selectable).map((r) => ({ provider: r.provider, model: r.model, pref: r.pref, family: r.family, label: r.label, plan: r.plan }));
   const skipped = projection.filter((r) => !r.selectable).map((r) => ({
     provider: r.provider,
     model: r.model,
@@ -3902,9 +4785,13 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
     if (ra.rank !== rb.rank) return ra.rank - rb.rank;
     return (Number(a.pref) || 0) - (Number(b.pref) || 0);
   };
-  const byTierThenRating = (a, b) => (walkTierRank(a.model) - walkTierRank(b.model)) || byRating(a, b);
+  // Keyed (non-free) lanes are the last resort in every tier: they spend the
+  // user's own key, so free lanes of any tier go first (live VM5 2026-10-03).
+  const keyedRank = (l) => (l?.plan === 'GM' ? 1 : 0);
+  const byTierThenRating = (a, b) => (keyedRank(a) - keyedRank(b)) || (walkTierRank(a.model) - walkTierRank(b.model)) || byRating(a, b);
+  const bySameTier = (a, b) => (keyedRank(a) - keyedRank(b)) || byRating(a, b);
   const orderedLanes = model
-    ? [...fallbackLanes].filter((l) => tierOf(l) === currentGroup).sort(byRating)
+    ? [...fallbackLanes].filter((l) => tierOf(l) === currentGroup).sort(bySameTier)
       .concat([...fallbackLanes].filter((l) => tierOf(l) !== currentGroup).sort(byTierThenRating))
     : [...fallbackLanes].sort(byTierThenRating);
   const codingLeft = orderedLanes.filter((l) => tierOf(l) === 'high').length;
@@ -4008,6 +4895,24 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
         partialTexts.push(partialText);
         midstreamDead.push(model);
         attemptResult = { ...attemptResult, finalText: '' };
+      }
+      // A bare connectivity-probe echo (PONG) is not an answer: it
+      // leaks in through the shared opencode session and must never be
+      // delivered as the turn's reply. Empty it so the failover chain tries
+      // the next lane; on the last lane the run surfaces as an error.
+      // Never throws: a filter hiccup must not cost the chat its answer.
+      try {
+        const echoText = String(attemptResult?.finalText || '').trim();
+        if (echoText && isUnpromptedProbeEcho(echoText, prompt) && !isAborted()) {
+          console.log(`[${config?.id}] ${model} answered bare probe echo ${JSON.stringify(echoText.slice(0, 40))}; treating as no answer`);
+          attemptResult = {
+            ...attemptResult,
+            finalText: '',
+            lastError: `bare probe echo (${echoText.slice(0, 40)}) instead of an answer — nothing was computed, send your message again`,
+          };
+        }
+      } catch {
+        // fall through with the original attempt result
       }
       // One retry, and only for a transport failure. A quota answer is final
       // for that lane and the ledger stamp already says so. Two ECONNREFUSEDs
@@ -4136,6 +5041,46 @@ function tuiLeasePath(botId) {
   return path.join(stateDir(botId), 'tui-lease.json');
 }
 
+function tuiPanePath(botId) {
+  return path.join(stateDir(botId), 'tui-pane');
+}
+
+/**
+ * The tmux session name the attach script last published for this bot.
+ * Unlike the lease it survives detach, so a pane outliving its last client
+ * stays closeable and reportable (live 2026-10-04: VM-tui-vm2 alive with no
+ * lease after the Mini App detached, and /tui off answered "nothing to
+ * close"). A name whose session is gone reads as already-closed, never live.
+ */
+export function readTuiPane(botId, stateRoot = null) {
+  try {
+    const file = stateRoot ? path.join(stateRoot, 'tui-pane') : tuiPanePath(botId);
+    const name = String(fs.readFileSync(file, 'utf8') || '').trim();
+    return name || null;
+  } catch {
+    return null;
+  }
+}
+
+export function hasTuiPane(pane, tmux = defaultTmuxRunner) {
+  if (!pane) return false;
+  try {
+    return Boolean(tmux(['has-session', '-t', pane]));
+  } catch {
+    return false;
+  }
+}
+
+/** The `<surface>:<session>` mark tui-attach.sh wrote on its last run, or null. */
+export function readTuiMark(botId) {
+  try {
+    const name = String(fs.readFileSync(path.join(os.tmpdir(), `tui-session-id-${botId}`), 'utf8') || '').trim();
+    return name || null;
+  } catch {
+    return null;
+  }
+}
+
 export function tuiIsAttached(botId, sessionId) {
   return Boolean(readTuiLease(botId, sessionId));
 }
@@ -4161,9 +5106,14 @@ function readTuiLease(botId, sessionId) {
   if (!heartbeat || Date.now() - heartbeat > TUI_LEASE_MAX_AGE_MS) return null;
   const held = String(lease?.session || '');
   const wanted = String(sessionId || '');
-  // A lease with no session id predates the id, so treat it as "a TUI is open"
-  // rather than guessing. A lease for a *different* session is not ours.
-  if (held && wanted && held !== wanted) return null;
+  // The lease names its session and the caller names the turn's: attach only
+  // when they are the same conversation. A lease with no session id is a
+  // terminal on nothing shared (a pre-message tap that launched bare) — with
+  // a turn session in hand that is NOT our terminal, so it must not trigger
+  // the "same session" claim (live 2026-10-04: VM-tui-vm3 opened blank on ""
+  // while the turn ran on ses_ef7b…, and the chat still promised both match).
+  // With no turn session yet (status right after /new) any live lease counts.
+  if (wanted && held !== wanted) return null;
   const since = Number(lease?.since || 0);
   return {
     session: held || null,
@@ -4199,16 +5149,24 @@ function killTuiPane(pane, tmux = defaultTmuxRunner) {
 }
 
 /** One line for /status: is a terminal open, which one, and is anyone in it. */
-export function tuiStatusLine(botId, sessionId) {
+export function tuiStatusLine(botId, sessionId, tmux = defaultTmuxRunner, stateRoot = null) {
   const lease = readTuiLease(botId, sessionId);
-  if (!lease) return 'tui: none open (open one with /tui)';
-  const who = lease.pane || 'unknown pane';
-  const use = lease.clients > 0
-    ? `${lease.clients} client${lease.clients === 1 ? '' : 's'} attached`
-    : 'no client attached (pane kept for your place)';
-  const age = lease.since ? ` · up ${humanAge(Date.now() - lease.since)}` : '';
-  const sess = lease.session ? ` · ${lease.session.slice(0, 12)}…` : '';
-  return `tui: ${who} · ${use}${age}${sess}`;
+  if (lease) {
+    const who = lease.pane || 'unknown pane';
+    const use = lease.clients > 0
+      ? `${lease.clients} client${lease.clients === 1 ? '' : 's'} attached`
+      : 'no client attached (pane kept for your place)';
+    const age = lease.since ? ` · up ${humanAge(Date.now() - lease.since)}` : '';
+    const sess = lease.session ? ` · ${lease.session.slice(0, 12)}…` : '';
+    return `tui: ${who} · ${use}${age}${sess}`;
+  }
+  // No live lease: the pane may still be there, kept after detach. Report
+  // that instead of "none open" so /tui off has something to close.
+  const pane = readTuiPane(botId, stateRoot);
+  if (pane && hasTuiPane(pane, tmux)) {
+    return `tui: ${pane} · pane kept, nobody attached — /tui reopens it, /tui off closes it`;
+  }
+  return 'tui: none open (open one with /tui)';
 }
 
 /**
@@ -4240,7 +5198,648 @@ export async function answerBriefAsk({ projectId = 'external-health', botId = ''
   return { answered: true, usedModel: false, text: formatRefreshText(res), markdown: true };
 }
 
-async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0 }) {
+/**
+ * Build and send one b2b envelope (B2B-1). Exported so the sensor can prove the
+ * refusal paths without a network: every failure returns text that says what
+ * stopped it, and sends nothing.
+ */
+export async function sendPeerHandoff({ config, args = '', api = null, stateDirPath = null, policy = undefined, peers = undefined, now = Date.now() } = {}) {
+  const root = stateDirPath || path.join(HOME, '.local', 'state', 'bot-host');
+  const peersMap = peers === undefined ? peersFromEnv() : peers;
+  const resolvedPolicy = policy === undefined ? process.env.TG_SENDER_POLICY : policy;
+
+  const refuse = (code, reason, extra = '') => ({
+    ok: false,
+    code,
+    reason,
+    text: `🤖↔️ not sent — ${reason}${extra}`,
+    envelope: null,
+  });
+
+  const match = String(args).match(/^\s*(\S+)\s+([\s\S]+)$/);
+  if (!match) {
+    return refuse('BAD_ARGS', 'usage: /tell <bot> "<text>" --ref <ticket-key>');
+  }
+  const target = match[1].trim();
+  let body = match[2].trim();
+  const refMatch = body.match(/\s*--ref\s+(\S+)\s*$/);
+  const ref = refMatch ? refMatch[1] : '';
+  if (refMatch) body = body.slice(0, refMatch.index).trim();
+  if (!ref) return refuse('NO_REF', 'a handoff must name tracked work: add --ref <ticket-key>');
+  if (!body) return refuse('NO_BODY', 'nothing to say — /tell <bot> "<text>" --ref <ticket-key>');
+
+  // Policy, peer resolution and every bound are decided inside sendPeerEnvelope,
+  // so `/tell` and a peer-driven delegation cannot drift apart.
+  return sendPeerEnvelope({
+    config,
+    to: target,
+    kind: 'ask',
+    ref,
+    body,
+    // A plain `/tell` starts its own conversation with that seat, exactly as it
+    // always has. Chaining is opt-in and explicit — see sendPeerEnvelope.
+    chainId: `tell:${config.id}:${target}`,
+    api,
+    root,
+    peers: peersMap,
+    policy: resolvedPolicy,
+    now,
+  });
+}
+
+/**
+ * Put one envelope on the wire to a peer seat. This is the only function that
+ * sends peer traffic, so every bound and every refusal is applied in one place
+ * whether the sender was a human typing `/tell` or a peer whose turn just ended.
+ *
+ * `chainId` is the caller's to choose. `/tell` passes a fresh per-pair id; a
+ * collaboration passes one id for every round, which is what keeps depth, turn
+ * count and the terminal flag attached to the whole negotiation instead of
+ * restarting at each hop.
+ */
+export async function sendPeerEnvelope({
+  config,
+  to,
+  kind = 'ask',
+  ref,
+  body,
+  chainId,
+  replyTo = '-',
+  api = null,
+  root = null,
+  peers = undefined,
+  policy = undefined,
+  now = Date.now(),
+} = {}) {
+  const stateRoot = root || path.join(HOME, '.local', 'state', 'bot-host');
+  const peersMap = peers === undefined ? peersFromEnv() : peers;
+  const resolvedPolicy = policy === undefined ? process.env.TG_SENDER_POLICY : policy;
+  const target = String(to || '').trim();
+
+  const refuse = (code, reason, extra = '') => ({
+    ok: false,
+    code,
+    reason,
+    text: `🤖↔️ not sent — ${reason}${extra}`,
+    envelope: null,
+  });
+
+  if (!target) return refuse('BAD_ARGS', 'no peer seat named');
+  if (!ref) return refuse('NO_REF', 'a handoff must name tracked work: add --ref <ticket-key>');
+  if (!body) return refuse('NO_BODY', 'nothing to say');
+
+  const verdict = sendVerdict({ policy: resolvedPolicy, peers: peersMap, from: config.id, to: target });
+  if (!verdict.ok) {
+    const extra = verdict.peers?.length ? `\n\naddressable peers: ${verdict.peers.join(', ')}` : '';
+    return refuse(verdict.code, verdict.reason, extra);
+  }
+
+  const named = resolvePeerUsername(stateRoot, target);
+  if (!named.ok) return refuse(named.code, `${named.reason} (${named.botId || target})`);
+
+  // The chain id goes into the envelope BEFORE it is rendered. `checkSendBounds`
+  // also sets it on the returned envelope, but by then the chat text has already
+  // been built — and the text is what the peer's classifier reads, so a chain
+  // that only existed on the local object would never reach the wire and every
+  // reply would land in a fresh chain.
+  const effectiveChain = String(chainId || `tell:${config.id}:${target}`);
+  const built = encodeEnvelope({
+    from: config.id,
+    to: target,
+    kind,
+    ref,
+    body,
+    depth: 1,
+    now,
+    reply_to: replyTo,
+    chain: effectiveChain,
+  });
+  if (!built.ok) return refuse(built.code, built.reason);
+
+  // Root-relative, like the classifier's lookup: the caller owns the root, so a
+  // test can never write into a live seat's state dir.
+  const ledgerPath = path.join(stateRoot, config.id, 'handoff.json');
+  const bounded = checkSendBounds({
+    ledger: readJson(ledgerPath, emptyLedger()),
+    edge: verdict.edge,
+    now,
+    chainId: effectiveChain,
+    envelope: built.envelope,
+  });
+  if (!bounded.ok) {
+    const file = deadLetter(process.env.TG_DEAD_LETTER_DIR || path.join(process.cwd(), 'specs', 'bot-handoff-dead-letter'), {
+      envelope: built.envelope,
+      code: bounded.code,
+      reason: bounded.reason,
+      at: now,
+    });
+    return refuse(bounded.code, `${bounded.reason}${file ? '' : ' (dead-letter write also failed)'}`);
+  }
+  try {
+    writeJson(ledgerPath, bounded.ledger);
+  } catch (err) {
+    return refuse('LEDGER_WRITE', `could not record the send: ${err.message}`);
+  }
+
+  // Where the bytes land. A private bot-to-bot chat has exactly two members —
+  // the two bots — so a handoff sent there is invisible to the operator, which
+  // is what "I didn't see anything on tg" turned out to mean. When
+  // TG_B2B_GROUP_ID is set, the human's group is the transport instead; the
+  // envelope still names the SEAT, so the receiving half is unchanged and a
+  // group message and a private one are the same message.
+  const groupId = String(process.env.TG_B2B_GROUP_ID || '').trim();
+  const wireTo = groupId || named.username;
+  const where = groupId ? `group ${groupId}` : `dm ${named.username}`;
+
+  const telegram = api || new TelegramApi(resolveToken(config));
+  try {
+    const res = await telegram.call('sendMessage', {
+      chat_id: wireTo,
+      text: built.text,
+      // LOUD by default. This started silent, on the reasoning that a handoff is
+      // machine traffic and the operator does not want a buzz per message. Then
+      // the operator asked to be aware of the traffic as it happens, and a
+      // silent channel is indistinguishable from a broken one — three hops went
+      // past unseen before that was noticed.
+      //
+      // The bounds are what keep this from becoming spam, not the mute: the
+      // per-pair cooldown is 60s, so the worst case is one buzz per minute per
+      // pair, and the global send budget still applies on top.
+      // TG_B2B_NOTIFY=0 puts it back to silent without a deploy.
+      disable_notification: String(process.env.TG_B2B_NOTIFY ?? '1') === '0' ? 'true' : 'false',
+    });
+    return {
+      ok: true,
+      code: 'SENT',
+      envelope: bounded.envelope,
+      messageId: res?.message_id ?? null,
+      text: `📨 handed to ${wireTo} — ${ref} (depth ${bounded.envelope.depth}, id ${bounded.envelope.id}, via ${where})`,
+    };
+  } catch (err) {
+    return refuse('SEND_FAILED', `${named.username}: ${err.message}`);
+  }
+}
+
+/**
+ * The peers map, from the environment. The registry is frozen for this packet,
+ * and it is the right call anyway: peers are a *deployment* fact about which
+ * seat may address which on this box, not a property of the bot.
+ */
+function peersFromEnv() {
+  const raw = String(process.env.TG_PEERS_JSON || '').trim();
+  if (!raw) return {};
+  try {
+    return normalizePeers(JSON.parse(raw));
+  } catch (err) {
+    console.error(`[b2b] TG_PEERS_JSON is not valid JSON, treating as empty: ${err.message}`);
+    return {};
+  }
+}
+
+/**
+ * Bot-to-bot ingress (B2B-1). Decides what an update is BEFORE the
+ * allowedUserIds gate, because that gate is a user-id check: once Telegram
+ * delivers `from.is_bot=true` on the existing long-poll, a bot sender is
+ * refused there and this code would never run.
+ *
+ * Three outcomes, and only the first may become a turn:
+ *   human       — the ordinary path, untouched
+ *   bot-handoff — a valid, in-bounds proposal from an allowlisted seat
+ *   bot-refused — anything else, dead-lettered with the reason
+ *
+ * A bot-sourced update NEVER starts an agent turn. It files one line in the
+ * location nudge inbox and returns. That is the whole loop defence on the
+ * receive side: 20.6% of confirmed infinite-agentic-loop findings in real
+ * projects are multi-agent chat without a turn bound.
+ *
+ * Exported for the sensor in tests/bot-host.test.ts — the classification is the
+ * contract, not the plumbing.
+ */
+export function classifyInboundSender({ message, stateDirPath, self, policy, peers, ledger = emptyLedger(), now = Date.now() } = {}) {
+  const from = message?.from;
+  const type = senderTypeOf(from);
+  if (type === null) return { kind: 'unknown', code: 'SENDER_UNKNOWN', reason: 'update has no sender id' };
+  if (type === HUMAN) return { kind: 'human' };
+
+  const resolvedPolicy = resolvePolicy(policy);
+  if (resolvedPolicy === 'humans-only') {
+    return {
+      kind: 'bot-refused',
+      code: 'POLICY_HUMANS_ONLY',
+      reason: 'bot-to-bot is off for this seat (TG_SENDER_POLICY)',
+    };
+  }
+
+  const seat = findSeatByUsername(stateDirPath, from?.username);
+  if (!seat) {
+    return {
+      kind: 'bot-refused',
+      code: 'SENDER_UNKNOWN_SEAT',
+      reason: `no seat claims @${String(from?.username || '').replace(/^@/, '')}`,
+    };
+  }
+
+  const verdict = receiveVerdict({ policy: resolvedPolicy, peers, from: seat.seat, to: self });
+  if (!verdict.ok) {
+    return {
+      kind: 'bot-refused',
+      code: verdict.code,
+      reason: verdict.reason,
+      seat: seat.seat,
+      addressable: verdict.peers || [],
+    };
+  }
+
+  const decoded = decodeEnvelope(message?.text || message?.caption || '');
+  if (!decoded.ok) {
+    return { kind: 'bot-refused', code: decoded.code, reason: decoded.reason, seat: seat.seat };
+  }
+  if (decoded.envelope.from !== seat.seat) {
+    return {
+      kind: 'bot-refused',
+      code: 'FROM_MISMATCH',
+      reason: `envelope claims from=${decoded.envelope.from} but the sender is ${seat.seat}`,
+      seat: seat.seat,
+    };
+  }
+
+  const bounded = checkReceiveBounds({ ledger, envelope: decoded.envelope, now, self, edge: verdict.edge });
+  if (!bounded.ok) {
+    return { kind: 'bot-refused', code: bounded.code, reason: bounded.reason, seat: seat.seat, envelope: decoded.envelope, ledger: bounded.ledger };
+  }
+  return {
+    kind: 'bot-handoff',
+    seat: seat.seat,
+    envelope: bounded.envelope,
+    ledger: bounded.ledger,
+    edge: verdict.edge,
+    // Whether this envelope was allowed to cost an agent turn, and whether this
+    // round has now collected two agreements. Both are decided in the bounds,
+    // not here, so no caller can widen them.
+    spendsTurn: bounded.spendsTurn,
+    converged: bounded.converged,
+    round: bounded.round,
+    turnsUsed: bounded.turnsUsed,
+    maxTurns: bounded.maxTurns,
+    maxRounds: bounded.maxRounds,
+  };
+}
+
+/**
+ * Run one delegated turn and hand the result to the peer.
+ *
+ * `handleMessage` is reused whole rather than reimplemented: the delegation gets
+ * the same session, the same lane, the same model preference, the same progress
+ * render and the same skill loading as a message the human typed. That is the
+ * whole point — a peer's request must not be a lesser turn than the operator's.
+ *
+ * The synthetic message is attributed to the operator's own user id because that
+ * is the id the seat's user gate checks, and because the work belongs in the
+ * operator's chat. The PROVENANCE IS NOT FAKED: the prompt's first line says
+ * plainly that this is not from the human, so the model is told the truth even
+ * though the transport is the human's chat.
+ */
+export async function runDelegatedTurn({
+  config,
+  api,
+  envelope,
+  verdict,
+  handleMessage,
+  runContext = {},
+  now = Date.now(),
+} = {}) {
+  const cfg = delegationConfig(process.env, { self: config.id });
+  if (!cfg.ok) {
+    console.warn(`[${config.id}] b2b delegation refused: ${cfg.reason}`);
+    return { ok: false, code: cfg.code, reason: cfg.reason, text: '' };
+  }
+
+  // The chat the work belongs in: the operator's own private chat with this
+  // seat. That is where the human reads it and where the finished letter lands.
+  const operatorId = Number(config.telegram?.allowedUserIds?.[0] || 0);
+  if (!operatorId) {
+    return { ok: false, code: 'NO_OPERATOR', reason: 'seat has no allowedUserIds to run delegated work in', text: '' };
+  }
+  const chatId = String(operatorId);
+
+  // One seat, one turn at a time per chat. A delegation that arrives while the
+  // operator is mid-request waits rather than colliding with it — a lost turn
+  // here would silently truncate the collaboration, which is worse than a wait.
+  const busy = runContext.busy;
+  const waitedFor = Date.now();
+  while (busy?.has(chatId) && Date.now() - waitedFor < 90_000) {
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (busy?.has(chatId)) {
+    console.warn(`[${config.id}] b2b delegation skipped: the operator's chat was still busy after 90s`);
+    return { ok: false, code: 'CHAT_BUSY', reason: 'the operator chat stayed busy', text: '' };
+  }
+
+  const root = path.join(HOME, '.local', 'state', 'bot-host');
+  let source = '';
+  if (cfg.sheetId) {
+    const src = await fetchDelegationSource({
+      sheetId: cfg.sheetId,
+      tabs: cfg.sourceTabs,
+      cachePath: delegationSourcePath(root, cfg.sheetId),
+      now,
+    });
+    source = src.ok ? src.text : '';
+    console.log(`[${config.id}] b2b source material ${src.cached ? 'read from cache' : src.note}: ${source.length} chars`);
+  }
+
+  const turnsLeft = Math.max(0, (verdict.maxTurns || DEFAULTS.maxTurns) - (verdict.turnsUsed || 0));
+  const prompt = delegationPrompt(envelope, {
+    self: config.id,
+    round: verdict.round || 1,
+    turnsLeft,
+    maxRounds: verdict.maxRounds || DEFAULTS.maxRounds,
+    source,
+  });
+
+  console.log(
+    `[${config.id}] b2b DELEGATED TURN from ${verdict.seat} kind=${envelope.kind} `
+    + `ref=${envelope.ref} round=${verdict.round} turn=${verdict.turnsUsed}/${verdict.maxTurns}`,
+  );
+
+  // `delegation` is the capture slot: handleMessage writes the finished text
+  // into it, so the host — not the model — decides what goes back on the wire.
+  const capture = { text: '' };
+  const synthetic = {
+    message_id: envelope.id,
+    date: Math.floor(now / 1000),
+    chat: { id: operatorId, type: 'private' },
+    from: { id: operatorId, is_bot: false, first_name: 'operator' },
+    text: prompt,
+  };
+
+  try {
+    await handleMessage({
+      ...runContext,
+      api,
+      config,
+      message: synthetic,
+      // A delegated turn is not a follow-up of anything; keep it at depth 0 so
+      // the follow-up queue cannot chain further turns off it.
+      depth: 0,
+      delegation: capture,
+    });
+  } catch (err) {
+    console.error(`[${config.id}] b2b delegated turn failed: ${err.message}`);
+    return { ok: false, code: 'TURN_FAILED', reason: err.message, text: '' };
+  }
+
+  const text = String(capture.text || '').trim();
+  if (!text) {
+    console.warn(`[${config.id}] b2b delegated turn produced no text; nothing sent to ${verdict.seat}`);
+    return { ok: false, code: 'EMPTY_TURN', reason: 'the turn returned no text', text: '' };
+  }
+
+  const { agreed, letter } = readAgreement(text);
+  const chainId = chainIdOf(envelope);
+
+  // The host decides the reply kind. A turn that printed the verdict marker
+  // becomes an `agree` (terminal); anything else is `feedback` back to the peer
+  // for the next pass. The model cannot choose, and cannot send.
+  const sent = await sendPeerEnvelope({
+    config,
+    to: verdict.seat,
+    kind: agreed ? 'agree' : 'feedback',
+    ref: envelope.ref,
+    body: letter.slice(0, HANDOFF_DEFAULTS.maxBodyChars),
+    chainId,
+    replyTo: envelope.id,
+    api,
+    root,
+  });
+
+  console.log(
+    `[${config.id}] b2b replied ${sent.ok ? sent.code : sent.code} to ${verdict.seat}: `
+    + `kind=${agreed ? 'agree' : 'feedback'} round=${verdict.round} `
+    + `${sent.ok ? '' : `(${sent.reason})`}`,
+  );
+
+  // Both flags in hand means both seats have agreed in this round. Only the
+  // seat that receives the second agree can see this, which is exactly the seat
+  // that should close the chain and deliver the letter.
+  let converged = Boolean(verdict.converged);
+  let delivered = null;
+  if (agreed) {
+    const ledgerPath = path.join(root, config.id, 'handoff.json');
+    const led = readJson(ledgerPath, emptyLedger());
+    const rec = led.chains?.[chainId] || {};
+    converged = rec.peerAgree === rec.ourAgree && Boolean(rec.ourAgree);
+  }
+  if (converged) {
+    delivered = await api.sendMessage(
+      chatId,
+      `🤝 **${config.id} and ${verdict.seat} agree** on \`${envelope.ref}\` after ${verdict.round} round(s).\n\n${letter}`,
+      { parse_mode: 'Markdown' },
+    ).then(() => true).catch((err) => {
+      console.error(`[${config.id}] b2b agreement could not be delivered: ${err.message}`);
+      return false;
+    });
+    console.log(`[${config.id}] b2b CONVERGED on ${envelope.ref} (round ${verdict.round}); letter ${delivered ? 'delivered' : 'NOT delivered'}`);
+  }
+
+  return { ok: sent.ok, code: sent.code || 'SENT', agreed, converged, delivered, text: letter, chainId };
+}
+
+/* ==================================================================== B2B-2 ===
+ * DELEGATION: the one place a peer message is allowed to spend a model turn.
+ *
+ * WHAT IS DIFFERENT FROM EVERY OTHER PEER MESSAGE
+ * -----------------------------------------------
+ * `ask`, `answer`, `blocked` and `handoff-request` file a line in the inbox and
+ * cost nothing. A `delegate` or a `feedback` instead runs a real agent turn on
+ * this seat, because two seats that cannot hand work to each other are two
+ * note-takers rather than two collaborators.
+ *
+ * WHY THAT IS SAFE ANYWAY
+ * -----------------------
+ * 1. Opt-in per seat. TG_B2B_DELEGATE is unset everywhere by default, and the
+ *    policy still has to be humans-and-allowlisted-bots for a bot sender to get
+ *    this far at all. Two independent switches, both off by default.
+ * 2. The bounds were already applied before we get here. checkReceiveBounds has
+ *    counted the turn, refused an over-budget chain and refused an over-round
+ *    one; this function cannot start a turn the bounds did not permit.
+ * 3. The MODEL NEVER TOUCHES THE WIRE. It writes text. This process wraps that
+ *    text in an envelope, applies the send bounds, and sends. A model that
+ *    ignores its instructions costs one turn and the chain stops — it cannot
+ *    address a peer, forge a depth, or spend a second turn.
+ * 4. The turn runs in the operator's own private chat with this seat, not in
+ *    the group. So the human watches the work live, the final letter arrives
+ *    where they read it, and a group message cannot be mistaken for a command.
+ * 5. The collaboration peer is a fixed, declared pair — the same directed edge
+ *    that had to exist for the message to be accepted at all — not anything
+ *    the envelope names.
+ */
+
+/** The seat this one collaborates with, and whether delegation is on at all. */
+export function delegationConfig(env = process.env, { self = '', peers = null } = {}) {
+  const on = String(env.TG_B2B_DELEGATE || '').trim() === '1';
+  const peer = String(env.TG_B2B_AUTO_PEER || '').trim();
+  if (!on || !peer) return { ok: false, code: 'DELEGATE_OFF', reason: 'peer delegation is not enabled (TG_B2B_DELEGATE / TG_B2B_AUTO_PEER)' };
+  const map = peers || peersFromEnv();
+  // The peer must already be a declared edge. Re-checked here so a typo in the
+  // environment fails at configuration time instead of at the first message.
+  if (!map?.[self] || !map[self][peer]) {
+    return { ok: false, code: 'TARGET_UNKNOWN', reason: `${self} has no declared edge to ${peer} in TG_PEERS_JSON` };
+  }
+  return {
+    ok: true,
+    peer,
+    ref: String(env.TG_B2B_REF || 'b2b-collab').trim() || 'b2b-collab',
+    sheetId: String(env.TG_B2B_SHEET || '').trim(),
+    sourceTabs: String(env.TG_B2B_SOURCE_TABS || 'GP letter,Medical results').trim(),
+  };
+}
+
+/**
+ * The material both seats review, read ONCE and cached on disk.
+ *
+ * Two reviewers must argue about the same bytes. If each seat fetched the sheet
+ * itself at a different moment they could end up reviewing different versions
+ * and "we disagree" would really mean "we read different things" — a loop that
+ * burns rounds on a phantom disagreement. So the host reads it, writes it once
+ * with its content hash and modification time, and both turns read that file.
+ *
+ * A seat with no working Google credential is the failure this avoids: handed
+ * only a link it would have produced a confident letter about a document it
+ * never opened.
+ */
+export function delegationSourcePath(stateRoot, sheetId) {
+  return path.join(stateRoot, 'b2b-source', `${String(sheetId).replace(/[^A-Za-z0-9_-]/g, '')}.md`);
+}
+
+/**
+ * Read the named tabs of the sheet into one text block. Zero-burn on failure:
+ * returns '' and logs, and the prompt then says plainly that no source was
+ * available rather than pretending the reviewers had seen something.
+ */
+export async function fetchDelegationSource({ sheetId, tabs = '', cachePath = '', ttlMs = 900_000, now = Date.now() } = {}) {
+  if (!sheetId) return { ok: true, text: '', cached: false, note: 'no sheet configured' };
+  try {
+    const stat = fs.statSync(cachePath);
+    if (now - stat.mtimeMs < ttlMs) {
+      return { ok: true, text: fs.readFileSync(cachePath, 'utf8'), cached: true, note: 'from cache' };
+    }
+  } catch { /* no cache yet */ }
+
+  try {
+    const { loadHostEnv, identityFromEnv, accessToken, SCOPES } = await import('./lib/google-store.mjs');
+    const { env } = loadHostEnv('b2b-collab');
+    const who = identityFromEnv(env);
+    if (!who.ok) return { ok: false, note: who.reason || 'no Google identity on this host' };
+    const tok = await accessToken(who, { scopes: Object.values(SCOPES) });
+    if (!tok?.ok || !tok.token) return { ok: false, note: tok?.error || 'could not mint a Google token' };
+    const auth = { authorization: `Bearer ${tok.token}` };
+    const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(sheetId)}?fields=${encodeURIComponent('properties,sheets.properties')}`, { headers: auth });
+    const meta = await metaRes.json();
+    if (!metaRes.ok) return { ok: false, note: JSON.stringify(meta).slice(0, 200) };
+    const available = (meta.sheets || []).map((x) => x.properties.title);
+    const wanted = String(tabs || '').split(',').map((t) => t.trim()).filter(Boolean);
+    const chosen = wanted.length ? wanted.filter((t) => available.includes(t)) : available;
+    const chunks = [`# ${meta.properties?.title || sheetId} (read ${new Date(now).toISOString()})`];
+    for (const tab of chosen) {
+      const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(sheetId)}/values/${encodeURIComponent(tab)}`, { headers: auth });
+      const v = await r.json();
+      if (!r.ok) { chunks.push(`\n## ${tab}\n(unreadable)`); continue; }
+      chunks.push(`\n## ${tab}`);
+      for (const row of (v.values || [])) {
+        // One quoted CSV line per cell is how this sheet stores a table; join on
+        // a visible separator so a reviewer can still read the columns.
+        chunks.push(row.map((c) => String(c ?? '').replace(/\s*\n\s*/g, ' ⏎ ')).join(' | '));
+      }
+    }
+    const text = chunks.join('\n');
+    if (cachePath) {
+      fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+      fs.writeFileSync(cachePath, text, 'utf8');
+    }
+    return { ok: true, text, cached: false, note: 'fetched' };
+  } catch (err) {
+    return { ok: false, note: String(err?.message || err).slice(0, 200) };
+  }
+}
+
+/**
+ * Run one bot-sourced update: persist the ledger, dead-letter a refusal, and
+ * file the proposal. Returns the classification so the caller can log it.
+ */
+async function handlePeerHandoff({ config, message, verdict, runDelegation = null } = {}) {
+  const dir = stateDir(config.id);
+  const deadLetterDir = process.env.TG_DEAD_LETTER_DIR
+    || path.join(process.cwd(), 'specs', 'bot-handoff-dead-letter');
+  try {
+    writeJson(path.join(dir, 'handoff.json'), verdict.ledger);
+  } catch (err) {
+    console.error(`[${config.id}] b2b ledger write failed: ${err.message}`);
+  }
+
+  if (verdict.kind === 'bot-refused') {
+    const file = deadLetter(deadLetterDir, {
+      envelope: verdict.envelope || null,
+      code: verdict.code,
+      reason: verdict.reason,
+    });
+    console.warn(
+      `[${config.id}] b2b refused ${verdict.code}${verdict.seat ? ` from ${verdict.seat}` : ''}: ${verdict.reason}`
+      + `${file ? ` -> ${file}` : ' (dead-letter write failed)'}`,
+    );
+    return verdict;
+  }
+
+  // A `delegate` or a `feedback` is the B2B-2 exception: it may start a real
+  // agent turn, but only after the bounds above have counted and permitted it,
+  // and only when the seat has delegation switched on. Everything else — and
+  // everything else still, if delegation is off — lands here as a proposal.
+  if (runDelegation && TURNS_KINDS.includes(String(verdict.envelope?.kind))) {
+    const result = await runDelegation({ config, message, verdict });
+    if (result?.ok !== false || result?.code !== 'DELEGATE_OFF') {
+      return { ...verdict, delegation: result };
+    }
+    console.warn(`[${config.id}] b2b ${result.code} for ${verdict.envelope?.kind}; filing as a proposal instead`);
+  }
+
+  // A proposal, not a turn. The owning seat decides; this process does not act.
+  const inbox = path.join(os.homedir(), '.agents', 'nudges', `inbox-${machineLocation()}.md`);
+  const line = proposalLine(verdict.envelope, { self: config.id });
+  try {
+    fs.mkdirSync(path.dirname(inbox), { recursive: true });
+    fs.appendFileSync(inbox, `${line}\n`, 'utf8');
+    console.log(`[${config.id}] b2b proposal from ${verdict.seat} ref ${verdict.envelope.ref} in chat ${message?.chat?.id ?? '?'} -> ${inbox}`);
+  } catch (err) {
+    console.error(`[${config.id}] b2b proposal could not be filed: ${err.message} (envelope ${verdict.envelope.id})`);
+  }
+  return verdict;
+}
+
+async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0, delegation = null }) {
+  // Bot-to-bot first: a bot sender must be classified before the user-id gate,
+  // which would otherwise drop it silently and leave the operator guessing.
+  if (senderTypeOf(message?.from) === BOT) {
+    const verdict = classifyInboundSender({
+      message,
+      stateDirPath: path.join(HOME, '.local', 'state', 'bot-host'),
+      self: config.id,
+      policy: process.env.TG_SENDER_POLICY,
+      peers: peersFromEnv(),
+      ledger: readJson(path.join(stateDir(config.id), 'handoff.json'), emptyLedger()),
+    });
+    await handlePeerHandoff({
+      config,
+      message,
+      verdict,
+      runDelegation: (ctx) => runDelegatedTurn({
+        ...ctx,
+        api,
+        handleMessage,
+        runContext: { throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy },
+      }),
+    });
+    return;
+  }
   // Same boundary rule as handleCallback: one String type for chat ids
   // everywhere downstream, so disk round-trips stop invalidating sessions.
   const chatId = String(message.chat.id);
@@ -4284,14 +5883,37 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   if (addr.delayMs && addr.delayMs > 0) {
     await new Promise((r) => setTimeout(r, addr.delayMs));
   }
-  const text = (addr.cleanText || message.text || message.caption || '').trim();
+  let text = (addr.cleanText || message.text || message.caption || '').trim();
+  // Menu-tapped skills arrive underscored (/do_github_sync — Telegram forbids
+  // hyphens in commands). Restore the hyphen form before anything parses, so
+  // a tap behaves exactly like the typed line.
+  text = normalizeSkillCommand(text);
   const hasMedia = selectInboundMedia(message).length > 0;
   if (!text && !hasMedia) return;
 
   const cmd = text ? parseCommand(text) : null;
-  if (cmd) {
-    await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId, kind: chatKind(message) });
+  // A leading `/` that is not a bot command is NOT a command: it falls
+  // through to the turn path as the user prompt (plan/TG_TOOL_SURFACE.md M3).
+  // That is how typed `/do-*` skills reach the tool. Bot commands win.
+  const route = cmd ? resolveCommandName(cmd) : null;
+  if (cmd && isKnownCommand(route)) {
+    await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd: { ...cmd, name: route }, userId, kind: chatKind(message) });
     return;
+  }
+
+  // Bare greetings become a one-word connectivity ping, not smalltalk and
+  // not a canned reply: the operator uses "hi" to check the whole chain is
+  // alive, so it must exercise the real turn path (session, model, reply) —
+  // cheaply, with no tools and an exact echo to check against. A static
+  // auto-reply would prove nothing; the raw greeting invites a rambling
+  // turn. Group rooms keep existing behavior; media takes the normal path.
+  // Connectivity pings run on a throwaway session: their scaffolding must
+  // never land in the chat's transcript or the TUI (declared here, ahead of
+  // use — a later `let` would be a temporal-dead-zone throw on every ping).
+  let isPingTurn = false;
+  if (chatKind(message) !== 'group' && !hasMedia && greetingReply(text)) {
+    text = `[connectivity ping for ${JSON.stringify(text.trim())}: reply with exactly PONG, no tools]`;
+    isPingTurn = true;
   }
 
   // A named health seat, or a bare question to the room, is answered here.
@@ -4326,9 +5948,24 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
     busy.add(chatId);
     const workspace = KNOWN_PROJECTS['external-health'].workspace;
+    // A link ask is a registry lookup: no seats, no lane, no typing indicator,
+    // and nothing to wait for. It is answered and posted here, and the guard is
+    // released immediately because no turn is occupying the room — which is also
+    // why it is not turned away by one that is. Purely additive: the seat path
+    // below is untouched.
+    if (healthTurn.mode === 'link') {
+      busy.delete(chatId);
+      const linkReply = await answerHealthGroup({ ...healthTurn, workspace });
+      if (linkReply?.text) await api.sendMessage(chatId, linkReply.text).catch(() => {});
+      return;
+    }
     console.log(`[${config.id}] health group ${healthTurn.mode}${healthTurn.roleId ? ` ${healthTurn.roleId}` : ''}`);
     let reply;
     let typing;
+    // The winning lane's measured usage for this turn. The council path has
+    // no coder turn, so without this accumulator the seat's per-chat Usage
+    // stays — forever no matter how much it talks in the room.
+    const seatUsage = { tokens: 0, cost: 0, model: '' };
     try {
       if (healthTurn.mode === 'brief') {
         // A brief ask is not a question for the seats: it runs the publisher,
@@ -4368,6 +6005,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
               botModel: config.agent.model,
               timeoutMs: 120000,
             });
+            try {
+              const t = Number(res?.usage?.tokens?.total ?? res?.usage?.tokens) || 0;
+              const c = Number(res?.usage?.cost) || 0;
+              if (t > 0 || c > 0) {
+                seatUsage.tokens += t;
+                seatUsage.cost += c;
+                if (!seatUsage.model && res?.answeredBy) seatUsage.model = res.answeredBy;
+              }
+            } catch {}
             const out = String(res?.finalText || '').trim();
             if (!out) throw new Error(res?.lastError || 'the model returned no text');
             return out;
@@ -4386,6 +6032,24 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
     if (reply?.text) {
       await api.sendMessage(chatId, reply.text, reply.markdown ? { parse_mode: 'Markdown' } : undefined).catch(() => {});
+      // Persist this turn beside the cumulative chat totals, the same record
+      // the coder path keeps: without it /status_all can only show — for a
+      // seat that answers in this room every day. A council answer is a
+      // stateless one-shot and the lane reports no token events for it
+      // (verified against the live CLI), so this is usually runs-only until
+      // the lane measures more; the snapshot (agent, limit, timestamp) is
+      // still kept for the compaction question.
+      try {
+        await noteUsage({
+          chatId,
+          result: { usage: { tokens: { total: seatUsage.tokens }, cost: seatUsage.cost } },
+          eff: { ...eff, model: seatUsage.model || eff.model },
+          config,
+          caches,
+          totals,
+          lastUsage,
+        });
+      } catch {}
     }
     if (reply?.answered) {
       if (healthTurn.mode === 'seat') forgetTaxGroup(taxWorkspace, chatId);
@@ -4515,6 +6179,27 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     worktree: config.agent.workspace,
   }).claimed;
 
+  // Lane preflight, before the turn starts (plan/TG_TOOL_SURFACE.md M4).
+  // Freebuff is terminal-only (laneSupports('freebuff','headless') === false):
+  // the model keyboard must not start a headless turn. Cline cannot load the
+  // opencode `/do-*` skill library. Each is one recorded refusal: no session
+  // is burned and no turn runs. Gemini `/do-*` is run as a normal prompt.
+  {
+    const laneEff = effective(config, prefs, chatId);
+    const laneRef = parseModelRef(laneEff.model);
+    const lane = laneRef.surface === 'cline' ? 'cline' : laneRef.surface === 'gemini' ? 'gemini' : 'opencode';
+    if (/^freebuff\//i.test(String(laneEff.model || ''))) {
+      try { releaseFiles(claimed, claimId); } catch {}
+      await api.sendMessage(chatId, 'Freebuff runs in the terminal — it cannot take a headless turn from chat. No session was started and nothing was spent. Pick another lane with /freemodel.');
+      return;
+    }
+    if (lane === 'cline' && /^\/do[-_][a-z]/i.test(String(text || '').trim())) {
+      try { releaseFiles(claimed, claimId); } catch {}
+      await api.sendMessage(chatId, 'Cline cannot load that skill — it runs without the opencode skill library, so this text was not run and nothing was spent. Switch lane with /model, or run it in the terminal. (Cline’s screen is its own thread, not this chat.)');
+      return;
+    }
+  }
+
   // A TUI attached to this same conversation does NOT stop a turn.
   //
   // This used to defer every message while the terminal was open, queue it as a
@@ -4528,9 +6213,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   // terminal looks, from the chat, like the bot ran something twice. The note
   // rides the progress line's first paint rather than being its own message, so
   // an ordinary turn is not made noisier by it.
-  // Assigned inside the turn body, once the workspace is known. Declared out here
-  // because the presence note below is emitted before that code runs. Absent
+  // Assigned inside the turn body, once the workspace is known. Absent
   // means "no session for this workspace yet" — the first turn after a switch.
+  // The TUI presence note below reads it, so it runs after the resolve.
   let turnSessionId = null;
 
   busy.add(chatId);
@@ -4554,6 +6239,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   // the same turn spools under the same name and stays idempotent.
   const turnStartedAt = Date.now();
   const storeFacts = { bot: config.id, chat: chatId, location: process.env.LOCATION || '', at: new Date(turnStartedAt).toISOString() };
+  // The turn's seat is read inside the try, but the finished-turn record in the
+  // `finally` reads it too. A `let` declared inside the try block is not in
+  // scope there, so every turn that reached the record threw
+  // "activeRole is not defined" and the thread was never recorded. Declared out
+  // here, assigned in the try: both blocks see the same binding.
+  let activeRole = null;
   try {
     await renderer.start();
     // One shared working headline (provider + model + elapsed + usage) for
@@ -4583,21 +6274,6 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // at once; the old lazy path left only bare typing until the first
     // model event, which on a slow lane looks stuck.
     await renderer.announce().catch(() => {});
-    // A TUI is open on this same conversation, so the user can watch this turn
-    // happen in the terminal as well. It shares the session, so what runs here
-    // shows up there — one turn at a time, never two at once.
-    //
-    // Only true on a lane with a shared session. Cline's terminal resumes the
-    // LAST Cline thread and each new message starts a fresh one, so claiming
-    // "same session" there would be a lie the user discovers by watching a turn
-    // that never appears. Say the true thing instead.
-    if (tuiIsAttached(config.id, turnSessionId)) {
-      const openSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
-      await api.sendMessage(chatId, openSurface.sharedSession
-        ? '⌨️ A TUI is open on this conversation — you can watch this turn in the terminal. Same session, so it shows up in both; one turn at a time.'
-        : `⌨️ A ${openSurface.tool} terminal is open, but ${openSurface.tool} cannot resume a thread headlessly — this turn will not appear there. The terminal stays on the last ${openSurface.tool} thread.`
-      ).catch(() => {});
-    }
     const handoff = prefFor(prefs, chatId).handoff || '';
     const quotedPrompt = buildQuotedPrompt(text, message.reply_to_message);
     const basePrompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${quotedPrompt}` : quotedPrompt;
@@ -4615,7 +6291,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const promptWithMedia = media.length ? buildInboundPrompt(prompt, media) : prompt;
 
     let activeProject = getChatProject(chatId);
-    let activeRole = getChatRole(chatId);
+    activeRole = getChatRole(chatId);
 
     if (addr?.roleId) {
       activeRole = addr.roleId;
@@ -4683,8 +6359,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
     // A `/freemodel` switch after `/tx on` must move the live view with the
     // lane: stale OpenCode TUI panes are dropped for Cline/Gemini and the TUI
-    // is re-ensured when the lane comes back to OpenCode.
-    if (workSession.tx) {
+    // is re-ensured when the lane comes back to OpenCode. Only for an
+    // already-live TUI view (plan/TG_TOOL_SURFACE.md M1): a stale `tx: true`
+    // row must not boot a private `opencode serve` on an ordinary message.
+    if (workSession.tx && workSession.viewMode === 'tui' && workSession.serverUrl && workSession.opencodeSessionId) {
       try {
         workSession = await reconcileWorkViewForLane({
           session: workSession,
@@ -4708,6 +6386,52 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
         ? workSession.opencodeSessionId
         : undefined);
+    // Connectivity pings run throwaway: force a fresh session so their
+    // scaffolding never lands in the chat's transcript or the TUI.
+    if (isPingTurn) turnSessionId = null;
+
+
+    // A TUI is open on this same conversation, so the user can watch this turn
+    // happen in the terminal as well. It shares the session, so what runs here
+    // shows up there — one turn at a time, never two at once.
+    //
+    // Only true on a lane with a shared session. Cline's terminal resumes the
+    // LAST Cline thread and each new message starts a fresh one, so claiming
+    // "same session" there would be a lie the user discovers by watching a turn
+    // that never appears. Say the true thing instead.
+    //
+    // This runs AFTER the resolve above on purpose: it used to run before the
+    // headline announce with turnSessionId still null, and a null wanted
+    // matches any lease — so the chat was told "same session" for a TUI on a
+    // different conversation. No session yet (first turn) means no claim.
+    if (turnSessionId && tuiIsAttached(config.id, turnSessionId)) {
+      const openSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
+      await api.sendMessage(chatId, openSurface.sharedSession
+        ? '⌨️ A TUI is open on this conversation — you can watch this turn in the terminal. Same session, so it shows up in both; one turn at a time.'
+        : `⌨️ A ${openSurface.tool} terminal is open, but ${openSurface.tool} cannot resume a thread headlessly — this turn will not appear there. The terminal stays on the last ${openSurface.tool} thread.`
+      ).catch(() => {});
+    }
+
+    // A TUI is open on this same conversation, so the user can watch this turn
+    // happen in the terminal as well. It shares the session, so what runs here
+    // shows up there — one turn at a time, never two at once.
+    //
+    // Only true on a lane with a shared session. Cline's terminal resumes the
+    // LAST Cline thread and each new message starts a fresh one, so claiming
+    // "same session" there would be a lie the user discovers by watching a turn
+    // that never appears. Say the true thing instead.
+    //
+    // This runs AFTER the resolve above on purpose: it used to run before the
+    // headline announce with turnSessionId still null, and a null wanted
+    // matches any lease — so the chat was told "same session" for a TUI on a
+    // different conversation. No session yet (first turn) means no claim.
+    if (turnSessionId && tuiIsAttached(config.id, turnSessionId)) {
+      const openSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
+      await api.sendMessage(chatId, openSurface.sharedSession
+        ? '⌨️ A TUI is open on this conversation — you can watch this turn in the terminal. Same session, so it shows up in both; one turn at a time.'
+        : `⌨️ A ${openSurface.tool} terminal is open, but ${openSurface.tool} cannot resume a thread headlessly — this turn will not appear there. The terminal stays on the last ${openSurface.tool} thread.`
+      ).catch(() => {});
+    }
 
     // Only when a tx view is NOT live: with one, the session comes from the
     // work-session row instead. The id is workspace-scoped now, so a chat that
@@ -4722,7 +6446,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       fanoutProgressEvent({ renderer, observer, event, context: observerContext });
     };
     let lastAttemptModel = eff.model;
-    const runSurfaceModel = (model) => {
+    const runSurfaceModel = async (model) => {
       const candidate = parseModelRef(model);
       if (candidate.surface === 'cline') {
         return runCline({
@@ -4747,10 +6471,22 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
         });
       }
+      // Only a level this model offers travels as `#variant`. Anything else
+      // runs bare: an unoffered suffix is a hard "Invalid model reference"
+      // on strict models (see pickOfferedVariant). The verbose catalog is
+      // warmed at boot, so this is a cache read on a warm poller.
+      let opencodeVariant;
+      if (eff.variant) {
+        try {
+          opencodeVariant = pickOfferedVariant(eff.variant, await getVariants(config, caches, model));
+        } catch {
+          opencodeVariant = undefined;
+        }
+      }
       return runOpencode({
         prompt: finalPrompt,
         model,
-        variant: eff.variant,
+        variant: opencodeVariant,
         workspace: effectiveWorkspace,
         thinking: config.agent.thinking,
         timeoutMs: config.agent.timeoutMs,
@@ -4887,7 +6623,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         // thread that just ran — otherwise /tx keeps showing the conversation
         // from the previous host until something else rewrites it.
         workSession = setWorkView(workSession.id, { opencodeSessionId: handed.sessionID }) || workSession;
-        if (workSession.tx) {
+        if (workSession.tx && workSession.viewMode === 'tui' && workSession.serverUrl && workSession.opencodeSessionId) {
           try {
             workSession = await reconcileWorkViewForLane({
               session: workSession,
@@ -4916,7 +6652,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           const pack = await resolvePackPath({
             manifest: handed.packManifest,
             failedLane: handed.model || '',
-            lanesFn: async () => (selectTurnLanes({ botId: config.id, model: eff.model, fallback: config.agent.model }).models || []),
+            lanesFn: async () => (selectTurnLanes({ botId: config.id, model: eff.model, fallback: config.agent.model, readiness: hostReadiness(caches, config.id), catalogEntries: await getFreeModels(caches, config) }).models || []),
             summarizeFn: async ({ model: lane, manifest: man }) => (await runOpencode({
               prompt: `Summarize this handoff pack in 10 lines or less (files changed, what the next turn needs):\n${(man.files || []).map((f) => `- ${f.path} (${f.bytes} bytes)`).join('\n')}`,
               model: lane,
@@ -4936,6 +6672,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       // arrived 26s after the abort ack because this call had no aborted check.
       if (running.get(chatId)?.aborted) {
         renderer.status = 'aborted';
+        renderer.settle('Aborted');
         await renderer.deliver('Aborted.').catch(() => {});
       } else {
         await renderer.finish(
@@ -4947,10 +6684,16 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     };
     // The ledger picks the walk. A lane it already stamped is not retried, an
     // ended lane is never offered, and a terminal-only row is never chosen.
+    // Readiness is passed so a vendor with no credential on this host reads as
+    // needs-setup (not selectable) instead of burning a turn on `Model
+    // unavailable` every message (live VM5 2026-10-03: tokenharbor/cloudflare
+    // have no key on the VPS).
     const laneChoice = selectTurnLanes({
       botId: config.id,
       model: eff.model,
       fallback: config.agent.model,
+      readiness: hostReadiness(caches, config.id),
+      catalogEntries: await getFreeModels(caches, config),
     });
     if (laneChoice.exhausted) {
       // QS-9: the local ledger is empty, but that verdict only covers this
@@ -5051,12 +6794,34 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       return;
     }
 
+    // A bot turn (`opencode run`, stdin ignored) that hits a permission would
+    // hang to the turn timeout with no word in the chat. Watch its session and
+    // ask here instead: Allow once / Always / Reject, timeout rejects. The
+    // dev-TUI external-directory dialog is a different process and is not
+    // bridged — approve that one in the TUI.
+    const permWatch = startPermissionWatch({
+      api,
+      chatId,
+      running,
+      getSessionId: () => turnSessionId,
+      workspace: effectiveWorkspace,
+      env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+      envMode: turnEnvMode,
+      opencodeBin: config.agent.opencodeBin,
+    });
+    // The lanes this turn may walk (the ledger's own projection), and their
+    // context windows from the catalog — so the headline can show a share of
+    // the window on the lane that is actually answering, not only on the few
+    // lanes the static map happens to know. Best-effort, and it runs before the
+    // walk: the cache it reads is the one the footer reads anyway.
+    const turnLaneModels = laneChoice.models.length ? laneChoice.models : failoverModels(eff.model, config.agent.model);
+    const laneLimits = await laneContextLimits(config, caches, turnLaneModels);
     const result = await runOpencodeWithFailover({
       api,
       config,
       chatId,
       prompt: finalPrompt,
-      models: laneChoice.models.length ? laneChoice.models : failoverModels(eff.model, config.agent.model),
+      models: turnLaneModels,
       onCooldown: ({ model, errText }) => {
         console.log(`[${config.id}] ${model} connection-failed twice; cooling it down instead of retrying it next message`);
       },
@@ -5069,9 +6834,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         if (observer) observer.write('run_start', {}, observerContext);
         // A mid-turn failover (ledger missed it, the lane died at runtime)
         // must move the headline too, or the progress line keeps naming the
-        // dead lane while another one does the work.
+        // dead lane while another one does the work — and the same for the
+        // window the usage share is measured against: the lane's own, or the
+        // static fallback when the catalog has no row for it.
         try {
           renderer.setHeadline({ providerLabel: headlineForLane(model), modelLabel: chatLaneName(model) });
+          renderer.setCtxLimit(laneLimits.get(model));
         } catch {
           // a UI hiccup must never break failover
         }
@@ -5087,6 +6855,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       },
       isAborted: () => Boolean(running.get(chatId)?.aborted),
     });
+    await stopPermissionWatch(permWatch);
     // The OpenCode surface already reports through onAttemptComplete. Other
     // surfaces (Cline, Gemini) report nothing, so their terminal state is
     // written here. The old call was writeObserverTerminal(result), which does
@@ -5112,7 +6881,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // turn stored nothing at all (runCline always resolved null), so the TUI
     // kept attaching to whatever stale opencode id was left in the map.
     const resultSurface = parseModelRef(lastAttemptModel).surface;
-    if (result.sessionID) {
+    // Ping turns never bind back: the throwaway session belongs to the
+    // check, not the chat. Everything else (usage, ledger, sticky lane)
+    // behaves exactly like a normal turn.
+    if (result.sessionID && !isPingTurn) {
       if (resultSurface === 'cline') {
         const clineSessions = loadClineSessions(config.id);
         clineSessions.set(chatId, result.sessionID);
@@ -5174,6 +6946,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
     if (running.get(chatId)?.aborted) {
       renderer.status = 'aborted';
+      renderer.settle('Aborted');
       await renderer.deliver('Aborted.');
     } else {
       // Sticky failover: the chat asked for eff.model but the answer came from
@@ -5218,6 +6991,53 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         };
       }
       await renderer.finish(displayResult, { footer: usageText });
+
+      // B2B-2: publish the finished text to whoever is hosting this turn. For a
+      // human message there is no host and `delegation` is null, so this is a
+      // single null check on the ordinary path. For a delegated turn the host
+      // reads this string and puts it in an envelope — the model never sees the
+      // wire, which is the property the whole design rests on.
+      if (delegation) {
+        delegation.text = String(displayResult?.finalText || '').trim();
+        delegation.usage = displayResult?.usage || null;
+        delegation.finishedAt = Date.now();
+      }
+
+      // Failproof-sync (turn-end hook): the pane shows whatever the last
+      // attach resolved; the chat follows whatever just bound. On a
+      // shared-session lane a mismatch means the open terminal is showing
+      // another conversation — take it down verified-dead so the next tap
+      // rebuilds on this one (live 2026-10-04: VM-tui-vm3 sat blank on ""
+      // while the turn bound ses_ef7b…). Cline excluded: a fresh thread per
+      // message makes mismatch normal there. Ping turns excluded: a
+      // connectivity check must not move anything. Best-effort, never
+      // breaking delivery; fires only on genuine mismatch, so matching
+      // turns cost two file reads.
+      if (!isPingTurn && resultSurface === 'opencode' && result?.sessionID) {
+        try {
+          const turnMark = `opencode:${result.sessionID}`;
+          const paneMark = readTuiMark(config.id);
+          const paneName = readTuiPane(config.id);
+          if (paneMark && paneMark !== turnMark && paneName && hasTuiPane(paneName)) {
+            killTuiPane(paneName);
+            if (!hasTuiPane(paneName)) {
+              try {
+                fs.rmSync(tuiLeasePath(config.id), { force: true });
+              } catch {
+                /* the pane is gone either way */
+              }
+              try {
+                fs.rmSync(tuiPanePath(config.id), { force: true });
+              } catch {
+                /* the pane is gone either way */
+              }
+              await api.sendMessage(chatId, `🔄 The open terminal was on another session, so I closed \`${paneName}\`. Tap \`/tui\` again — the new pane follows this conversation.`).catch(() => {});
+            }
+          }
+        } catch {
+          /* sync must never break delivery */
+        }
+      }
     }
   } catch (err) {
     if (observer && !observerTerminalWritten) {
@@ -5225,6 +7045,13 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       observer.write('failed', {}, observerContext || {});
     }
     await api.sendMessage(chatId, `Error: ${err.message}`).catch(() => {});
+    if (delegation) {
+      // Deliberately left EMPTY, not the error text: the host must not forward a
+      // failure notice to a peer as though it were the work. An empty capture is
+      // how it learns the turn did not finish.
+      delegation.text = '';
+      delegation.error = String(err?.message || err).slice(0, 200);
+    }
   } finally {
     renderer.stopTyping();
     running.delete(chatId);
@@ -5289,6 +7116,9 @@ async function runLoop({ api, config }) {
   const health = { okAt: 0, errAt: 0, err: '' };
   let offset = loadOffset(config.id);
   let running_ = true;
+  // M1 boot warmup (see warmTurnCaches): the first turn after a restart must
+  // not pay the ~3s cold catalog build inside the send→session-row budget.
+  await warmTurnCaches(config, caches);
   // In-flight update handlers. On SIGTERM (service restart/redeploy) we stop
   // polling for NEW updates but let running requests finish (bounded) so a
   // restart no longer kills runs into "exit null, no text output".
@@ -5532,10 +7362,23 @@ async function main() {
 // Group addressing needs to know who this process is. Without it, five bots in
 // one group would all answer everything.
 config.me = { id: Number(me.id) || 0, username: String(me.username || '') };
+  // Write down who we are, so another seat can address us by name without
+  // holding our token or asking Telegram on its message path. Read back by
+  // `resolvePeerUsername` / `findSeatByUsername` in lib/tg-peers.mjs.
+  try {
+    writeJson(path.join(stateDir(config.id), 'identity.json'), {
+      id: config.id,
+      username: config.me.username,
+      telegramId: config.me.id,
+      at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error(`[${config.id}] identity.json write failed (peer addressing unavailable): ${err.message}`);
+  }
   try {
     assertValidCommands(BOT_COMMANDS);
     await api.call('setMyCommands', { commands: toTelegramCommands() });
-    console.log(`[${config.id}] published ${BOT_COMMANDS.length} bot commands`);
+    console.log(`[${config.id}] published ${toTelegramCommands().length} bot commands`);
   } catch (err) {
     console.error(`[${config.id}] setMyCommands failed (non-fatal): ${err.message}`);
   }

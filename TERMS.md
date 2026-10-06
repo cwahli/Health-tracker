@@ -1,6 +1,6 @@
 # Conditions d'utilisation — agent Google Workspace store
 
-**Canonical page:** [https://health-tracking.duckdns.org/terms](https://health-tracking.duckdns.org/terms) — served from the project's own domain. This file
+**Canonical page:** [https://health-tracker.co.uk/terms](https://health-tracker.co.uk/terms) — served from the project's own domain. This file
 is the source of truth for its content and edit history. Companion to
 [PRIVACY.md](./PRIVACY.md).
 

@@ -97,8 +97,11 @@ export const DOC_SPECS = [
  */
 export const SECTION_SOURCES = {
   // 01 Health Snapshot
+  'Latest on the sheet': 'data.latest',
   'What is trusted': 'data.trusted',
   'What is a placeholder, not data': 'data.placeholders',
+  'What the fix list still says': 'data.fixlist',
+  'What disagrees': 'data.conflicts',
   'What is missing': 'data.missing',
   'Where this is not enough': 'data.limits',
   // 02 Conditions & Actions
@@ -345,11 +348,50 @@ export function renderHeader({ spec, artifact, gate, now, action }) {
 
 /* ------------------------------------------------------------------ data sections */
 
+function factLine(row) {
+  return `- ${row.label} ${row.value}${row.unit ? ` ${row.unit}` : ''} — ${row.date}`;
+}
+
+function renderLatest(artifact) {
+  if (!artifact || !Object.prototype.hasOwnProperty.call(artifact, 'latest')) {
+    return ['_No latest-sheet list in this snapshot. Run `/health verify`, then `/health refresh`._'];
+  }
+  const rows = artifact.latest || [];
+  if (!rows.length) return ['_The sheet snapshot has no valued rows._'];
+  const L = rows.slice(0, 60).map(factLine);
+  if (rows.length > 60) L.push(`- … and ${rows.length - 60} more markers.`);
+  return L;
+}
+
 function renderTrusted(artifact) {
   const rows = artifact?.matches || [];
   if (!rows.length) return ['_No marker in the app copy matches this sheet snapshot exactly._'];
-  const L = rows.slice(0, 40).map((m) => `- ${m.label} ${m.value}${m.unit ? ` ${m.unit}` : ''} — ${m.date}`);
+  const L = rows.slice(0, 40).map(factLine);
   if (rows.length > 40) L.push(`- … and ${rows.length - 40} more exact matches.`);
+  return L;
+}
+
+function renderFixList(artifact) {
+  const items = artifact?.fixList?.items || [];
+  if (!items.length) return ['_No fix list in this snapshot. Run `/health verify`._'];
+  const pending = items.filter((item) => item.state !== 'closed');
+  if (!pending.length) return ['_Every fix-list item is closed._'];
+  return pending.map((item) => `- **${item.id}** (${item.state}) — ${item.title}. ${item.detail || ''}`.trim());
+}
+
+function renderConflicts(artifact) {
+  if (!artifact || !Object.prototype.hasOwnProperty.call(artifact, 'conflicts')) {
+    return ['_This snapshot has no disagreement list. Run `/health verify`, then `/health refresh`._'];
+  }
+  const rows = artifact.conflicts || [];
+  if (!rows.length) return ['_No sheet value disagrees with the app on the value or the date._'];
+  const L = rows.slice(0, 40).map((row) => {
+    if (row.kind === 'date') {
+      return `- ${row.label} ${row.value}${row.unit ? ` ${row.unit}` : ''} is on the sheet at ${row.date}; the app has ${JSON.stringify(row.appValue)} on ${row.appDate}`;
+    }
+    return `- ${row.label} on ${row.date}: app ${JSON.stringify(row.appValue)} vs sheet ${JSON.stringify(row.value)}`;
+  });
+  if (rows.length > 40) L.push(`- … and ${rows.length - 40} more disagreements.`);
   return L;
 }
 
@@ -473,8 +515,11 @@ export function renderSection({ heading, source, artifact, gate, analysis = {}, 
       body: body.length ? body : ['_Awaiting the analysis pass — run `/health analyze` when the gate is closed._'],
     };
   }
+  if (source === 'data.latest') return { heading, refused: false, body: renderLatest(artifact) };
   if (source === 'data.trusted') return { heading, refused: false, body: renderTrusted(artifact) };
   if (source === 'data.placeholders') return { heading, refused: false, body: renderPlaceholders(artifact) };
+  if (source === 'data.fixlist') return { heading, refused: false, body: renderFixList(artifact) };
+  if (source === 'data.conflicts') return { heading, refused: false, body: renderConflicts(artifact) };
   if (source === 'data.missing') return { heading, refused: false, body: renderMissing(artifact) };
   if (source === 'data.limits') return { heading, refused: false, body: renderLimits(artifact) };
   if (source === 'renewal_log') return { heading, refused: false, body: renderRenewalLog({ registry, spec, now, gate }) };

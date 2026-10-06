@@ -23,6 +23,7 @@ import {
   sessionIdMatchesSurface,
   resolveTuiLaunch,
   tuiLaunchCommand,
+  canOpenSharedTui,
   latestClineSessionId,
 } from '../scripts/lib/tui-surface.mjs';
 
@@ -63,9 +64,21 @@ describe('TUI presence is observable', () => {
     expect(mod.tuiIsAttached(BOT, SESSION)).toBe(false);
   });
 
-  it('treats a lease with no session id as present rather than guessing', () => {
+  it('never counts a sessionless lease as this conversation, and still reports it as open', () => {
+    // A lease naming no session is a terminal on nothing shared — a pre-message
+    // tap that launched bare (live 2026-10-04: VM-tui-vm3 open on "" while the
+    // turn ran on ses_ef7b…). With a turn session in hand that is NOT our
+    // terminal, so it must not back the same-session claim. With no turn session
+    // yet — /status right after /new — it is still a live client, and /tui off
+    // has to be able to name and close it.
+    //
+    // This asserted the opposite (`true`) and was left standing by the commit
+    // that changed the contract: the code, the comment above it and this
+    // expectation could not all be right. Separate commit on purpose: it is
+    // someone else's red, not this fix's.
     writeLease({ pid: 1234, heartbeat: Date.now() });
-    expect(mod.tuiIsAttached(BOT, SESSION)).toBe(true);
+    expect(mod.tuiIsAttached(BOT, SESSION)).toBe(false);
+    expect(mod.tuiIsAttached(BOT, '')).toBe(true);
   });
 
   it('reads a lease whose heartbeat has expired as gone', () => {
@@ -241,6 +254,29 @@ describe('the terminal launches the lane the chat is on', () => {
     expect(tuiSurfaceFor('gemini:gemini-2.5-pro').terminal).toBe(false);
   });
 
+  it('will not offer the button on a shared lane with no session to share', () => {
+    // Live 2026-10-05: /new cleared the chat's session row, /tui ran 20s later
+    // and sent the button anyway, and the tap walked into the attach script's
+    // refusal. The button must not exist for a shared lane with nothing behind
+    // it — the refusal stays as the backstop for a stale button.
+    expect(canOpenSharedTui('opencode', 'ses_abc')).toBe(true);
+    expect(canOpenSharedTui('opencode', '')).toBe(false);
+    expect(canOpenSharedTui('opencode', null)).toBe(false);
+    // A cline-shaped id in the opencode map is the cross-tool bug, not a session.
+    expect(canOpenSharedTui('opencode', '1790714599861_80trx')).toBe(false);
+    // A model ref spells the same lane as the bare surface name.
+    expect(canOpenSharedTui('opencode/space-bunny-free', 'ses_abc')).toBe(true);
+    expect(canOpenSharedTui('opencode/space-bunny-free', '')).toBe(false);
+  });
+
+  it('keeps the button on cline, which opens a thread of its own', () => {
+    // Not a shared-session surface: no session here is a fresh Cline thread, so
+    // the gate must not take the button away from a lane that never claimed to
+    // share the turn session.
+    expect(canOpenSharedTui('cline', '')).toBe(true);
+    expect(canOpenSharedTui('cline:cline-free/deepseek-v4.1-flash', '')).toBe(true);
+  });
+
   it('resumes the newest cline thread for the same workspace, and no other', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cline-sessions-'));
     const write = (id: string, cwd: string, startedAt: string) => {
@@ -308,7 +344,7 @@ describe('presence is not a lock', () => {
 
   it('still tells the user a TUI is watching, or the turn looks like it ran twice', async () => {
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    expect(src).toMatch(/if \(tuiIsAttached\(config\.id, turnSessionId\)\) \{/);
+    expect(src).toMatch(/if \(turnSessionId && tuiIsAttached\(config\.id, turnSessionId\)\) \{/);
   });
 
   it('reads presence per session, so a terminal on another project is not claimed', async () => {
@@ -322,7 +358,7 @@ describe('presence is not a lock', () => {
     // The note is inside the presence check, not unconditional — otherwise every
     // ordinary turn in every chat grows a line about a terminal that is not there.
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    const guard = 'if (tuiIsAttached(config.id, turnSessionId)) {';
+    const guard = 'if (turnSessionId && tuiIsAttached(config.id, turnSessionId)) {';
     const start = src.indexOf(guard);
     expect(start).toBeGreaterThan(-1);
     const noteAt = src.indexOf('A TUI is open on this conversation');

@@ -1,0 +1,16 @@
+{
+  "slug": "sheets-oauth-read-promote",
+  "node": "planner",
+  "at": "2026-10-04T21:49:59.605Z",
+  "git": {
+    "head": "1ce658b070605d6feb285cb1906ff15f2139313d",
+    "stashCommit": "b97b9bb18102e54ee4d7f71cd30bb81f5ce8edcd"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/sheets-oauth-read-promote.md"
+  ]
+}

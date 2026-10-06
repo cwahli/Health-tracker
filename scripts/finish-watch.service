@@ -1,0 +1,22 @@
+# finish-watch: forwards answers the bot did not produce.
+# Polls this host's opencode serve for completions in sessions bound to
+# Telegram chats (web UI / TUI runs) and delivers each answer once, then the
+# thread continues on either surface. Bot-busy sessions and the settle
+# window are consumed, never echoed. See scripts/finish-watch.mjs.
+[Unit]
+Description=Telegram finish alerts for off-chat opencode runs
+After=network.target opencode-web.service
+Wants=opencode-web.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/bot-host
+Environment=HOME=/home/ubuntu
+ExecStart=/usr/bin/node /home/ubuntu/bot-host/scripts/finish-watch.mjs
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

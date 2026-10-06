@@ -192,6 +192,7 @@
         "plan": false,
         "abort": false,
         "watch": false,
+        "notify": false,
         "debug": false,
         "handoff": false,
         "resume": false,
@@ -202,10 +203,13 @@
         "health": false,
         "tax": false,
         "location": false,
+        "tell": false,
         "tui": true,
         "bugs": false,
         "forge": false,
         "fleet": false,
+        "review": false,
+        "skills": false,
         "routerOnly": ["switch", "unlock"],
         "aliases": ["think"]
       }

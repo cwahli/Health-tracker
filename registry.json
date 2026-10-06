@@ -43,7 +43,7 @@
       "progress": {
         "mode": "concise",
         "editIntervalMs": 2500,
-        "maxEdits": 40,
+        "maxEdits": 120,
         "maxChars": 220
       },
       "session": {
@@ -81,7 +81,7 @@
       "progress": {
         "mode": "concise",
         "editIntervalMs": 2500,
-        "maxEdits": 40,
+        "maxEdits": 120,
         "maxChars": 220
       },
       "session": {
@@ -269,7 +269,7 @@
       "progress": {
         "mode": "concise",
         "editIntervalMs": 2500,
-        "maxEdits": 40,
+        "maxEdits": 120,
         "maxChars": 220
       },
       "session": {
@@ -306,7 +306,7 @@
       "progress": {
         "mode": "concise",
         "editIntervalMs": 2500,
-        "maxEdits": 40,
+        "maxEdits": 120,
         "maxChars": 220
       },
       "session": {

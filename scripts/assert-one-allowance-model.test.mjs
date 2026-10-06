@@ -76,7 +76,7 @@ try {
   ];
   const folded = withCatalogLanes(baseTable, foldCatalog, { now: Date.now() });
   check('a catalogued model with no lane row gets one', folded.added.length === 3, JSON.stringify(folded.added.map((l) => l.model)));
-  check('a gemini model reached through opencode gets a row', folded.table.lanes.some((l) => l.model === 'google/gemini-3.8-flash'));
+  check('a gemini model reached through opencode gets a row', folded.table.lanes.some((l) => l.model.endsWith('gemini-3.8-flash')));
   check('a gemini: ref gets a row too', folded.table.lanes.some((l) => l.model === 'gemini-3.7-flash'));
   check('a pending-signin placeholder is not turned into a lane', !folded.table.lanes.some((l) => String(l.model).includes('pending:')));
   check('an existing row is not duplicated', folded.table.lanes.filter((l) => l.model === 'opencode/muse-spark-1.3-contributor-free').length === 1);
@@ -91,9 +91,9 @@ try {
   check('a folded label keeps a real product name intact',
     withCatalogLanes({ version: 3, lanes: [] }, [{ ref: 'cline:cline-free/kat-coder-pro', label: 'cline:kat coder pro (free)' }]).added[0].label === 'kat coder pro');
   const foldedRows = projectLanes(folded.table, {});
-  check('a folded gemini row is selectable', foldedRows.find((r) => r.model === 'google/gemini-3.8-flash')?.selectable === true);
-  check('a folded gemini row is planned as GM', foldedRows.find((r) => r.model === 'google/gemini-3.8-flash')?.plan === 'GM');
-  check('a vendor-prefixed opencode lane is planned as OC', foldedRows.find((r) => /space-bunny-free$/.test(r.model))?.plan === 'OC');
+  check('a folded gemini row is selectable', foldedRows.find((r) => r.model.endsWith('gemini-3.8-flash'))?.selectable === true);
+  check('a folded gemini row is planned as GM', foldedRows.find((r) => r.model.endsWith('gemini-3.8-flash'))?.plan === 'GM');
+  check('a vendor-prefixed opencode lane is planned as OG', foldedRows.find((r) => /space-bunny-free$/.test(r.model))?.plan === 'OG');
   // A bullet naming a second vendor prefix for a model the table already carries
   // must resolve to that row, not claim the model has no ledger row.
   const twinTable = { version: 3, lanes: [
@@ -114,12 +114,12 @@ try {
   check('a tokenharbor row and an opencode row for the same base name both survive',
     twoProviders.table.lanes.length === 2 && twoProviders.added.length === 1,
     JSON.stringify(twoProviders.table.lanes.map((l) => l.model)));
-  // The same model under two vendor prefixes must not become two rows.
+  // Distinct provider pools (opencode vs opencode-go) each survive with their own quota.
   const twice = withCatalogLanes({ version: 3, lanes: [] }, [
     { ref: 'opencode/space-bunny-free' },
     { ref: 'opencode-go/space-bunny-free' },
   ]);
-  check('the same model under two vendor prefixes is one row', twice.added.length === 1, JSON.stringify(twice.added.map((l) => l.model)));
+  check('distinct provider pools for the same model both survive with their own quota', twice.added.length === 2, JSON.stringify(twice.added.map((l) => l.model)));
   // A provider with no credential here still gets a row, and the projection is what
   // refuses it — that is the "X at the bottom", not a missing row.
   const noKey = projectLanes(withCatalogLanes({ version: 3, lanes: [] }, [{ ref: 'cloudflare/@cf/qwen/qwen3.8-27b' }]).table, {},
@@ -350,8 +350,9 @@ try {
     planCodeForLane({ provider: 'google', model: 'google/gemini-3.8-flash' }) === 'GM'
     && planCodeForLane({ provider: 'gemini', model: 'gemini-3.8-flash' }) === 'GM',
     `${planCodeForLane({ provider: 'google', model: 'google/gemini-3.8-flash' })}/${planCodeForLane({ provider: 'gemini', model: 'gemini-3.8-flash' })}`);
-  check('and folds an opencode vendor twin onto the same code',
-    planCodeForLane({ provider: 'opencode-go', model: 'opencode-go/space-bunny-free' }) === planCodeForLane({ provider: 'opencode', model: 'opencode/space-bunny-free' }));
+  check('opencode-go has its own pool code OG distinct from OC',
+    planCodeForLane({ provider: 'opencode-go', model: 'opencode-go/space-bunny-free' }) === 'OG'
+    && planCodeForLane({ provider: 'opencode', model: 'opencode/space-bunny-free' }) === 'OC');
   const twinLanes = { version: 3, buckets: {}, lanes: [
     { pref: 5, provider: 'opencode', model: 'tokenharbor/deepseek-v4.1-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'OpenCode Token Harbor DeepSeek V4.1 Flash free' },
     { pref: 7, provider: 'tokenharbor', model: 'deepseek-v4.1-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'Token Harbor chat DeepSeek V4.1 Flash free' },
@@ -379,7 +380,7 @@ try {
   const canon = canonicalAllowanceLanes({ table: shared, session: {}, readiness: null });
   const canonKeys = canon.map((r) => `${r.plan}|${String(r.model).toLowerCase().split('/').filter(Boolean).pop()}`);
   check('the Token Harbor pair is one row', canonKeys.filter((k) => k.startsWith('TH|')).length === 1, JSON.stringify(canonKeys));
-  check('a vendor twin is one row', canonKeys.filter((k) => /space-bunny/.test(k)).length === 1, JSON.stringify(canonKeys));
+  check('distinct provider pools for space-bunny both survive', canonKeys.filter((k) => /space-bunny/.test(k)).length === 2, JSON.stringify(canonKeys));
   check('the google/gemini lane is one GM row', canonKeys.filter((k) => k.startsWith('GM|')).length === 1, JSON.stringify(canonKeys));
   check('every row is unique', new Set(canonKeys).size === canonKeys.length, JSON.stringify(canonKeys));
   check('and /allowance renders exactly that many rows', (() => {
@@ -522,7 +523,7 @@ try {
   // The titles are keyboard heading rows now, not a line of body text, and the
   // current lane is not printed at all — there is nowhere to print it.
   check('/freemodel titles the Standard/Light groups as heading rows, not as a body line',
-    /buttons\.push\(\{ text: headingWidth\(`\$\{freemodelDisplayTier\(g\.tier, location \|\| 'vps'\)/.test(botSrc) && !/current: \$\{current/.test(botSrc));
+    /buttons\.push\(\{\s*text:\s*headingWidth\(.*freemodelDisplayTier\(g\.tier/.test(botSrc) && !/current: \$\{current/.test(botSrc));
   check('/freemodel never prints the old location brief', !/Free models\$\{location0\}/.test(botSrc));
   // The reason a row cannot be used is on the row's own button — the ❌ mark and
   // the compact reset countdown — rather than in a footer that listed the same

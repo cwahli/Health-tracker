@@ -60,13 +60,41 @@ export function attachHappyPathMealBuild(opts: {
         mode: activeMeal ? (activeMeal.mode || 'edit') : 'new_log',
       })
   );
+  const parsedPatch: any = fromPendingFoodLog(parsedData, { id: base.id, mode: base.mode || 'new_log' });
+  // Never attach an empty meal as savable. A meal with zero items keeps its old
+  // name, quantity and receipt while reporting 0 kcal, and the diet narrative
+  // congratulates the user on food that is no longer there (live:
+  // job_1791044439374_4x4srekyi — "Desperados Beer", 0 kcal, verdict "good").
+  // An explicitly empty patch is authoritative: only a patch that says nothing
+  // about its items falls back to the meal already on record.
+  const patchCarriesItems = Array.isArray(parsedData?.items) || Array.isArray(parsedData?.itemsBreakdown);
+  const resultingItems = patchCarriesItems
+    ? (Array.isArray(parsedPatch.items) ? parsedPatch.items : [])
+    : Array.isArray(base.items)
+      ? base.items
+      : [];
+  const isEmptyMeal = resultingItems.length === 0;
+  if (isEmptyMeal) {
+    delete parsedPatch.verdict;
+    parsedPatch.receiptTable = '';
+    parsedPatch.items = [];
+    parsedPatch.itemsBreakdown = [];
+    parsedPatch.weightGrams = 0;
+    parsedPatch.serving_grams = 0;
+    parsedPatch.quantity = '';
+    parsedPatch.composition = '';
+    parsedPatch.scoutItems = [];
+  }
+  const allDegradedStages = Array.from(
+    new Set([...(degradedStages || []), ...(isEmptyMeal ? ['empty_meal'] : [])])
+  );
   let meal = consolidateMeal(
     base,
     {
-      ...fromPendingFoodLog(parsedData, { id: base.id, mode: base.mode || 'new_log' }),
-      savable: true,
-      lastCompletedStage: degradedStages?.length ? 'calculation' : 'diet',
-      degradedStages: degradedStages || [],
+      ...parsedPatch,
+      savable: !isEmptyMeal,
+      lastCompletedStage: allDegradedStages.length ? 'calculation' : 'diet',
+      degradedStages: allDegradedStages,
       diningEnvironment: diningEnvironment || base.diningEnvironment,
       scoutSnapshot: scoutItems || base.scoutSnapshot,
       staleDietNarrative: false,
@@ -74,6 +102,15 @@ export function attachHappyPathMealBuild(opts: {
     'calculation',
     { actor: 'job_stage_calculation', stageKey: `${base.id}|calculation|1`, attempt: 1 }
   );
+  if (isEmptyMeal) {
+    meal = appendHistory(meal, {
+      type: 'error',
+      timestamp: new Date().toISOString(),
+      stage: 'calculation',
+      message: 'Empty meal refused: nothing left to save. Ask the user what the meal contained.',
+    } as any);
+    return { mealBuild: meal, pendingFoodLog: toPendingFoodLog(meal) };
+  }
   meal = appendHistory(meal, {
     type: 'stage_complete',
     timestamp: new Date().toISOString(),

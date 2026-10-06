@@ -76,7 +76,7 @@ Learned 2026-09-14 (false greens + stuck helpers):
 
 ## Live (Render)
 
-Origin: `https://health-tracker-backend-64gt.onrender.com`. Evidence: `current/live/`. A local helper change that is not on Render is FAIL (`live_origin`). Inventories on the live JSON must equal `instruction/inventories/structure.json` (missing / extra / swapped = FAIL).
+Origin: `https://health-tracker.co.uk`. Evidence: `current/live/`. A local helper change that is not on the live host is FAIL (`live_origin`). Inventories on the live JSON must equal `instruction/inventories/structure.json` (missing / extra / swapped = FAIL).
 
 **Agent instructions:** this process does not edit scout / diet / receptionist prompts. If a class cannot be gated in TypeScript, RFC (net-zero or human approval). Do not add instruction tokens to pass.
 

@@ -222,9 +222,9 @@ describe('bugSnapshot', () => {
     const abs = buildBugEvidenceText({
       tagId: 'tag-1',
       reports: [{ id: 'iss-9', reportId: 'iss-9', shot_count: 1 }],
-      origin: 'https://health-tracking.duckdns.org',
+      origin: 'https://health-tracker.co.uk',
     });
-    expect(abs).toContain('https://health-tracking.duckdns.org/api/bugs/tag-1/artifacts?');
+    expect(abs).toContain('https://health-tracker.co.uk/api/bugs/tag-1/artifacts?');
     expect(abs).toMatch(/shot 1: https:\/\/[^\s]+\/api\/bugs\//);
   });
 

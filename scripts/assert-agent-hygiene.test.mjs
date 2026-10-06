@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { beat, isLive, readBeats, slug } from './agent-heartbeat.mjs';
-import { BRANCH_GRACE_DAYS, OPEN_GRACE_H, PR_AGE_DAYS, hoursSince, tierForBranch, tierForPR } from './agent-hygiene.mjs';
+import { BRANCH_GRACE_DAYS, OPEN_GRACE_H, PR_AGE_DAYS, hoursSince, isProtectedBranch, tierForBranch, tierForPR } from './agent-hygiene.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HYGIENE = fs.readFileSync(path.join(HERE, 'agent-hygiene.mjs'), 'utf8');
@@ -128,6 +128,18 @@ check('a branch name becomes a safe filename and back', () => {
 
 check('main can never be named by any tier', () => {
   return /PROTECTED/.test(HYGIENE) && /'main'/.test(HYGIENE) && !/tierForPR\(\{[^}]*branch:\s*['"]main['"]/.test(HYGIENE);
+});
+
+check('lock/* edit locks are protected in every loop', () => {
+  return isProtectedBranch('lock/pm-table-fix') === true
+    && isProtectedBranch('lock/anything') === true
+    && isProtectedBranch('main') === true
+    && isProtectedBranch('master') === true
+    && isProtectedBranch('HEAD') === true
+    && isProtectedBranch('') === true
+    && isProtectedBranch('agent/bot-12') === false
+    && isProtectedBranch('agent/locksmith') === false
+    && (HYGIENE.match(/isProtectedBranch\(branch\)/g) || []).length >= 2;
 });
 
 check('every delete audit carries the tip SHA (reversible from the log alone)', () => {

@@ -42,6 +42,7 @@ import {
   COMMAND_NAMES,
   HIDDEN_COMMANDS,
   HELP_USAGE,
+  SKILL_MENU_COMMANDS,
   assertValidCommands,
   helpText,
   toTelegramCommands,
@@ -116,6 +117,7 @@ const asJson = process.argv.includes('--json');
 const failures = (() => {
   try {
     assertValidCommands(BOT_COMMANDS);
+    assertValidCommands(SKILL_MENU_COMMANDS);
   } catch (err) {
     return [{ kind: 'invalid-commands', command: '', detail: String(err?.message || err) }];
   }
@@ -128,10 +130,14 @@ const failures = (() => {
   for (const name of ['HELP_USAGE', 'HIDDEN_COMMANDS']) {
     if (!shim.includes(name)) extra.push({ kind: 'shim-drift', command: '', detail: `bot-commands.mjs shim does not re-export ${name} — a second source of truth by omission.` });
   }
-  // toTelegramCommands must be the same set (the popup IS the menu list).
+  // toTelegramCommands is the menu list: bot commands plus menu-only skill
+  // entries (underscore form — Telegram forbids hyphens). The skills are
+  // deliberately NOT in COMMAND_NAMES, so a tapped entry still falls through
+  // to the turn path as a prompt instead of hitting handleCommand.
   const published = toTelegramCommands().map((c) => c.command).sort();
-  if (published.join(',') !== [...COMMAND_NAMES].sort().join(',')) {
-    extra.push({ kind: 'popup-drift', command: '', detail: 'toTelegramCommands() drifted from BOT_COMMANDS — the popup is no longer the menu list.' });
+  const expectedMenu = [...COMMAND_NAMES, ...SKILL_MENU_COMMANDS.map((c) => c.command)].sort();
+  if (published.join(',') !== expectedMenu.join(',')) {
+    extra.push({ kind: 'popup-drift', command: '', detail: 'toTelegramCommands() drifted from BOT_COMMANDS + SKILL_MENU_COMMANDS — the popup is no longer the menu list.' });
   }
   // Boot must reconcile narrow scopes — a stale per-scope list shadows the
   // default menu in matching chats (/forge vanished from vm private chats
@@ -191,6 +197,6 @@ else if (failures.length) {
   console.error(`command-parity FAILED (${failures.length}):`);
   for (const f of failures) console.error(`- [${f.kind}] ${f.command ? `/${f.command} ` : ''}${f.detail}`);
 } else {
-  console.log(`command-parity OK — ${COMMAND_NAMES.length} menu commands, ${Object.keys(HIDDEN_COMMANDS).length} declared hidden, help generated from the one list.`);
+  console.log(`command-parity OK — ${COMMAND_NAMES.length} menu commands + ${SKILL_MENU_COMMANDS.length} skill entries, ${Object.keys(HIDDEN_COMMANDS).length} declared hidden, help generated from the one list.`);
 }
 process.exit(failures.length ? 1 : 0);
