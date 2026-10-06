@@ -1385,13 +1385,59 @@ export function allowanceTableLines(table, session, { now = Date.now(), labelFn 
   return formatCompactAllowanceChat(table, session, { now, labelFn, rows, currentModel: "", location, readiness, tableOnly: true });
 }
 
-export function formatCompactAllowanceChat(table, session, { now = Date.now(), labelFn = defaultResetLabel, rows = null, currentModel = "", tableOnly = false } = {}) {
-  const t = overlayLiveQuota(table, session, { now, labelFn });
+/**
+ * The usable lanes of a ledger, in the walk's order, plus the overlaid table
+ * they came from. ONE setup, so the table's "Next up" and a tap notice rank the
+ * same ledger the same way instead of each deriving its own order.
+ */
+function usableLanesFor(table, session, { now, labelFn, rows = null, currentModel = "" } = {}) {
+  const t = overlayLiveQuota(table || {}, session || {}, { now, labelFn });
   // TH + OC-TH are one row (display-only); failover still uses both lanes.
   const lanes = dedupeTokenHarborLanes([...(t.lanes || [])].filter(laneInAllowanceTable));
   const usable = lanes
     .filter(laneIsUsable)
     .sort((a, b) => (Number(a.pref) || 0) - (Number(b.pref) || 0));
+  // Ranking: the same order the turn walks. The chat's current lane first when
+  // it is usable, then preference order — so the first row of the table is the
+  // lane that will actually be used next, and "Next up" cannot disagree with it.
+  const usableOrdered = rows
+    ? orderLikeWalk(usable, currentModel)
+    : usable;
+  return { t, lanes, usable, usableOrdered };
+}
+
+/**
+ * The lane the turn would take next: the first usable row the projection can
+ * actually run — never a terminal-only row, never one blocked on setup.
+ *
+ * ONE picker, so a tap notice and the table it appends cannot name two
+ * different lanes. Live 2026-10-06: the depleted-tap notice picked the first
+ * non-depleted *catalog* row (`opencode-go/longcat-2.5-preview-free`, which had
+ * no ledger row and that the table never printed) while the table's own "Next
+ * up" named a Cloudflare row — the same reply offered two answers, and the one
+ * on top was a lane the walk cannot take.
+ */
+export function pickNextUsableLane({ usable = [], usableOrdered = null, rows = null } = {}) {
+  const selectableIn = (l) => l.tg !== false && !rows?.find((r) => laneKey(r.lane) === laneKey(l))?.needsSetup;
+  return (rows ? (usableOrdered || usable) : usable).find(selectableIn) || null;
+}
+
+/**
+ * `pickNextUsableLane` for callers outside the renderer (a tap notice, its
+ * toast): same inputs as `buildAllowanceTextForBots` — including the tapped
+ * route as `provider`/`model`, which is what puts the chat's own lane first.
+ * `rows` is that function's projection (`projectLanes`), so pass the one built
+ * with the host's readiness.
+ */
+export function nextUsableLane({ table, session = null, rows = null, provider = "", model = "", now = Date.now(), labelFn = defaultResetLabel } = {}) {
+  if (!table) return null;
+  const currentModel = provider && model ? `${provider}/${model}` : "";
+  const { usable, usableOrdered } = usableLanesFor(table, session, { now, labelFn, rows, currentModel });
+  return pickNextUsableLane({ usable, usableOrdered, rows });
+}
+
+export function formatCompactAllowanceChat(table, session, { now = Date.now(), labelFn = defaultResetLabel, rows = null, currentModel = "", tableOnly = false } = {}) {
+  const { t, lanes, usable, usableOrdered } = usableLanesFor(table, session, { now, labelFn, rows, currentModel });
   const depleted = lanes
     .filter((l) => !laneIsUsable(l))
     .sort((a, b) => {
@@ -1400,12 +1446,6 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
       if (am !== bm) return am - bm;
       return (Number(a.pref) || 0) - (Number(b.pref) || 0);
     });
-  // Ranking: the same order the turn walks. The chat's current lane first when
-  // it is usable, then preference order — so the first row of the table is the
-  // lane that will actually be used next, and "Next up" cannot disagree with it.
-  const usableOrdered = rows
-    ? orderLikeWalk(usable, currentModel)
-    : usable;
   const ordered = rows ? [...usableOrdered, ...depleted] : [...usable, ...depleted];
   const advice = activeRouteAdvice(t, session, { now, labelFn });
   // One width for every line in the block, so it reads as a flush-left rectangle
@@ -1486,8 +1526,7 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   // (Freebuff and friends) stays in the table so the user can see it, but it is
   // never the next lane: offering "Next up: FB (terminal)" sent the user looking
   // for a turn that can never run on it.
-  const selectableIn = (l) => l.tg !== false && !rows?.find((r) => laneKey(r.lane) === laneKey(l))?.needsSetup;
-  const firstUsable = (rows ? usableOrdered : usable).find(selectableIn) || null;
+  const firstUsable = pickNextUsableLane({ usable, usableOrdered, rows });
   if (firstUsable) {
     const u = firstUsable;
     const term = u.tg === false ? " (terminal)" : "";
@@ -2098,7 +2137,11 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
     let resetIn = "-";
     try {
       const routeHit = liveRecForRoutes(routeCandidates(ref), session, now);
-      const at = lane?.nextResetAt || lane?.cooldownUntil || routeHit?.rec?.depletedUntil || null;
+      // The projection's own reset comes first: the table row for this lane is
+      // printed from `verdict.resetAt`, so reading the table/lane copies first
+      // let a notice say "reset in -" (the placeholder) for a lane the table
+      // right below it showed as "5h 15" (live 2026-10-06).
+      const at = verdict?.resetAt ?? lane?.nextResetAt ?? lane?.cooldownUntil ?? routeHit?.rec?.depletedUntil ?? null;
       resetIn = depleted ? formatResetIn(at, now) : "-";
     } catch {}
     return {
