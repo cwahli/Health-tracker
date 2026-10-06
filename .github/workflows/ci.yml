@@ -311,6 +311,17 @@ jobs:
       - name: Model failover gate (assert-model-failover)
         run: HOME="$(mktemp -d)" node scripts/assert-model-failover.mjs
 
+      # The walk must offer the CLI a ref it can route. A bare slug is rejected
+      # BEFORE dispatch (`Invalid model reference`), so each one burns a spawn, a
+      # round trip and a "switching to" line the user has to read: nine of them
+      # inside a fourteen-hop walk for the prompt "hi" (live VM4 2026-10-06).
+      # `assert-r16-failover` could not see it because its fixture stores
+      # `model:'opencode/x'` WITH the prefix while `withCatalogLanes` strips it —
+      # this gate folds a real catalog entry and reads what the walk dispatches.
+      # HOME pinned for the same reason as the step above: it imports bot-host.
+      - name: Walk ref gate (assert-walk-refs)
+        run: HOME="$(mktemp -d)" node scripts/assert-walk-refs.mjs
+
       # The group surfaces ran nowhere in CI, which is how #458 merged green
       # while main was red: two bots were seated as health_analyst and two as
       # test_planner, and assert-health-group — the sensor that refuses exactly
