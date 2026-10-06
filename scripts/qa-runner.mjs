@@ -43,7 +43,7 @@ function getArg(name, defaultValue) {
 }
 
 const journey = getArg('journey', 'meal');
-const baseUrl = getArg('url', process.env.PLAYWRIGHT_TEST_BASE_URL || 'https://health-tracking.duckdns.org');
+const baseUrl = getArg('url', process.env.PLAYWRIGHT_TEST_BASE_URL || 'https://health-tracker.co.uk');
 const outputDir = getArg('output-dir', path.join(process.cwd(), 'qa-evidence'));
 const ticket = getArg('ticket', null);
 const reproCommand = getArg('command', null);

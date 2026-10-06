@@ -9,7 +9,7 @@
 # deployed gateway accepts what Telegram would send and nothing else.
 set -uo pipefail
 
-BASE="${TUI_BASE:-https://tui.health-tracking.duckdns.org}"
+BASE="${TUI_BASE:-https://tui.health-tracker.co.uk}"
 ENV_FILE="${TUI_GATEWAY_ENV:-/home/ubuntu/.config/bot-host/tui-gateway.env}"
 BOT_ID="${TUI_BOT_ID:-vm}"
 CHAT_ID="${TUI_CHAT_ID:-6218257274}"
@@ -162,6 +162,6 @@ done
 
 echo
 echo "--- the website hostname must not serve this"
-code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://health-tracking.duckdns.org/health")
+code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://health-tracker.co.uk/health")
 [ "$code" = "200" ] && printf '  PASS  %-46s HTTP %s (the site, not the gateway)\n' "site /health is the website" "$code" \
                     || printf '  FAIL  %-46s HTTP %s\n' "site /health is the website" "$code"
