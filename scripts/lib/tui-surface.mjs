@@ -12,7 +12,7 @@
  *
  * - `opencode` — a background server serialises turns, so the bot and the
  *   terminal are two clients of ONE session. `sharedSession: true`.
- * - `cline`    — no headless resume. Measured on 3.0.65: `cline --id <id> --json`
+ * - `cline`    — no headless resume. Measured on 3.0.65, re-verified on 3.0.68 2026-10-04: `cline --id <id> --json`
  *   answers "JSON output mode requires a prompt argument or piped stdin
  *   (interactive mode is unsupported)" and `cline --id <id>` without a TTY
  *   answers "interactive mode requires a TTY". `-i` is the only mode that
@@ -66,6 +66,34 @@ export function sessionIdMatchesSurface(id, surface) {
   const raw = String(id || '').trim();
   if (!raw) return false;
   return surface === 'cline' ? CLINE_SESSION_ID_RE.test(raw) : /^ses_/.test(raw);
+}
+
+/**
+ * May `/tui` offer the button for this chat right now?
+ *
+ * Only a shared-session surface can promise the terminal is *this*
+ * conversation, and it can only keep that promise with a session id to share:
+ * `tui-attach.sh` refuses a sessionless opencode open rather than launch a bare
+ * terminal the bot never joins (that refusal is live 2026-10-04). So the bot
+ * asks this first and says why, instead of handing out a button that walks
+ * straight into that refusal on the user's phone.
+ *
+ * Live 2026-10-05: `/new` deleted the chat's session row, `/tui` twenty seconds
+ * later wrote `tui-open.json` with `sessionId: null` and sent the button anyway,
+ * and the tap printed "No chat session recorded yet" — a dead terminal screen
+ * where an answer in the chat belonged. Refusing before the write also stops the
+ * null session from being recorded as if it were a fact about the chat.
+ *
+ * Cline is deliberately exempt: its terminal resumes the last thread as a
+ * thread of its own and never claimed to share the turn session, so a missing
+ * session there is a fresh thread, not a broken promise. The id must also be the
+ * shape the surface issues — a Cline id in the opencode map is the cross-tool
+ * bug this module exists to refuse.
+ */
+export function canOpenSharedTui(surface, sessionId) {
+  const known = TUI_SURFACES[normalizeSurface(surface)] || TUI_SURFACES[DEFAULT_TUI_SURFACE];
+  if (!known.sharedSession) return true;
+  return sessionIdMatchesSurface(sessionId, known.surface);
 }
 
 function quote(value) {

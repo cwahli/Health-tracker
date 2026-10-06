@@ -32,7 +32,7 @@ export const LANES = {
   cline: {
     kind: 'cli', apiOnly: false, tools: true, session: false,
     degraded: ['resume'],
-    degradedReason: 'Cline CLI 3.0.65 headless-resume is broken (--id forces interactive mode); every run starts fresh.',
+    degradedReason: 'Cline CLI 3.0.65-3.0.68 headless-resume is broken (--id forces interactive mode); every run starts fresh.',
     roles: [...ROLES],
   },
   grok: {
