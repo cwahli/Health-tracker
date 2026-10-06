@@ -308,7 +308,7 @@ describe('presence is not a lock', () => {
 
   it('still tells the user a TUI is watching, or the turn looks like it ran twice', async () => {
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    expect(src).toMatch(/if \(tuiIsAttached\(config\.id, turnSessionId\)\) \{/);
+    expect(src).toMatch(/if \(turnSessionId && tuiIsAttached\(config\.id, turnSessionId\)\) \{/);
   });
 
   it('reads presence per session, so a terminal on another project is not claimed', async () => {
@@ -322,7 +322,7 @@ describe('presence is not a lock', () => {
     // The note is inside the presence check, not unconditional — otherwise every
     // ordinary turn in every chat grows a line about a terminal that is not there.
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    const guard = 'if (tuiIsAttached(config.id, turnSessionId)) {';
+    const guard = 'if (turnSessionId && tuiIsAttached(config.id, turnSessionId)) {';
     const start = src.indexOf(guard);
     expect(start).toBeGreaterThan(-1);
     const noteAt = src.indexOf('A TUI is open on this conversation');
