@@ -554,9 +554,10 @@ export function laneWalkRef(provider, model) {
   }
   // Mirror freemodels.toModelRef: a bare chat-only id keeps its vendor so the
   // walk emits a routable ref instead of an `Invalid model reference` burn.
-  if (!surface || surface === 'opencode') return model;
+  // `opencode` is not an exception — see toModelRef for the nine-bare-slug VM4
+  // walk of 2026-10-06. An id already carrying a path is returned untouched.
   if (String(model || '').includes('/')) return model;
-  return `${surface}/${model}`;
+  return `${surface || 'opencode'}/${model}`;
 }
 
 /**

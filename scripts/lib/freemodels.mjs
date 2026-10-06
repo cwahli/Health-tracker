@@ -108,11 +108,19 @@ export function toModelRef(surface, id) {
   // model `mimo-v2.6-flash:free`) is not runnable as-is: the OpenCode CLI
   // answers `Invalid model reference` and the walk burns a turn on it every
   // time (live VM5 2026-10-03). Keep the vendor so the attempt is routed and
-  // stamped against the right lane and bucket. `opencode` surface behavior is
-  // unchanged (legacy bare ids still pass through).
-  if (!surface || surface === 'opencode') return id;
+  // stamped against the right lane and bucket.
+  //
+  // `opencode` is not an exception. `withCatalogLanes` strips `opencode/` off
+  // the stored lane for quota-key hygiene, so `toModelRef('opencode',
+  // 'big-pickle')` handed the CLI a bare slug and the walk burned nine turns on
+  // `Invalid model reference` before it reached a lane that worked (live VM4
+  // 2026-10-06, 14 hops for the prompt "hi"). An id that already carries a path
+  // (`opencode/big-pickle`, `tokenharbor/x`, `google/gemini-3.8-flash`) still
+  // returns as-is — that is the whole of the old behaviour — and only the
+  // genuinely bare id gains its surface. A provider-less lane is an OpenCode
+  // lane, which is also how `routeCandidates` reads it.
   if (String(id || '').includes('/')) return id;
-  return `${surface}/${id}`;
+  return `${surface || 'opencode'}/${id}`;
 }
 
 export function formatFreeLabel(ref) {
