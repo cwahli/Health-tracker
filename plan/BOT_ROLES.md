@@ -10,7 +10,7 @@ Practices this follows (Nous docs, HermesWatcher, HermesAgentTips, Loic Berthelo
 
 ## 0. Measured facts (do not rediscover)
 
-- Live site: `https://health-tracking.duckdns.org`. Push to `main` rebuilds it via the webhook. Dev checkout the script edits: `/home/ubuntu/src/Health-tracker`.
+- Live site: `https://health-tracker.co.uk`. Push to `main` rebuilds it via the webhook. Dev checkout the script edits: `/home/ubuntu/src/Health-tracker`.
 - Hermes home: `/home/ubuntu/.hermes`. Gateway cwd is `~/.hermes`, so the repo `AGENTS.md` is not injected into Telegram turns. Leave that cwd alone.
 - Profiles do not inherit memory. Missing `memories/USER.md` or `memories/MEMORY.md` means that agent has a blank user and a blank notebook.
 - Caps: `USER.md` 1,375 characters. `MEMORY.md` 2,200 characters. A save is on disk immediately and enters the prompt on the next session.
@@ -84,7 +84,7 @@ Do not edit `src/`. Do not restart `hermes-gateway`. Do not print or change toke
 ```markdown
 # Health-tracker default bot
 
-You are the health and app assistant for https://health-tracking.duckdns.org.
+You are the health and app assistant for https://health-tracker.co.uk.
 Reply in short sentences a phone can read. Match the user's language.
 Answer questions about the person's logs and how to use the app.
 If they ask to fix a bug, tell them to send it to the Meal, Biomarker, or Onboarding QA bot. Do not dispatch.
@@ -128,7 +128,7 @@ Cwah Li. Short replies. Screenshots belong in the chat, not as a file path.
 Replace default and `qa_meal` `MEMORY.md` with:
 
 ```markdown
-Live site is https://health-tracking.duckdns.org. Dev checkout is /home/ubuntu/src/Health-tracker.
+Live site is https://health-tracker.co.uk. Dev checkout is /home/ubuntu/src/Health-tracker.
 OpenCode model opencode/muse-spark-1.3 returned insufficient funds on 2026-09-22. Antigravity is blocked in this region.
 A QA bug is fixed only by scripts/run-coding-dispatch.sh. The OpenCode Telegram bot is a separate interactive door.
 ```

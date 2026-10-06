@@ -867,11 +867,11 @@ console.log('assert-tui-gateway:');
   check('the web host matches, case-insensitively, port stripped',
     isWebUiHost({ headers: hostOf('Web.Test:443') }, { OPENCODE_WEB_HOST: 'web.test' }) === true);
   check('the tui host is not the web host',
-    isWebUiHost({ headers: hostOf('tui.health-tracking.duckdns.org') }, { OPENCODE_WEB_HOST: 'web.test' }) === false);
+    isWebUiHost({ headers: hostOf('tui.health-tracker.co.uk') }, { OPENCODE_WEB_HOST: 'web.test' }) === false);
   check('no host header is not the web host',
     isWebUiHost({ headers: {} }, {}) === false);
   check('the default web host is the served one',
-    webUiHost({}) === 'web.health-tracking.duckdns.org');
+    webUiHost({}) === 'web.health-tracker.co.uk');
   check('the serve credential is composed as Basic, never bare',
     webUiAuthHeader({ OPENCODE_WEB_PASSWORD: 'pw' }) === `Basic ${Buffer.from('opencode:pw').toString('base64')}`
     && !webUiAuthHeader({ OPENCODE_WEB_PASSWORD: 'pw' }).includes('pw:'));
@@ -948,7 +948,7 @@ console.log('assert-tui-gateway:');
   check('the web exchange lands back on / with a token, never on a ttyd path',
     exch.code === 302 && String(exch.h.location || '').startsWith('/?token='));
 
-  const tuiRoot = await call('/', { host: 'tui.health-tracking.duckdns.org', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` });
+  const tuiRoot = await call('/', { host: 'tui.health-tracker.co.uk', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` });
   check('a tokened TUI root deep-links to its own terminal path (bot isolation kept)',
     tuiRoot.code === 302 && String(tuiRoot.h.location || '').startsWith('/tty/')
     && !tuiRoot.body.includes('serve index'));
