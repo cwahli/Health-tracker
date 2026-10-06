@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { recordFailure } from './failure-log.mjs';
 import { buildChildEnv } from './child-env.mjs';
+import { tierForModel } from './free-catalogs.mjs';
 
 const HOME = os.homedir();
 
@@ -371,6 +372,56 @@ export function isQuotaOrLimitError(msg) {
 const NO_RETRY_RE = /aborted|^Abort/i;
 
 /**
+ * Transport failures say nothing about quota: the lane may be healthy on the
+ * next attempt. Quota/depleted/unfunded decisions belong to the ledger walk.
+ * Exported so callers can stamp `unavailable` without re-reading the message.
+ */
+export function isTransportFailure(err) {
+  return /endpoint is unavailable|ECONNRESET|socket hang up|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|\b502\b|\b503\b|\b504\b|UNAVAILABLE|high demand/i.test(String(err || ''));
+}
+
+/**
+ * Tier of one model ref. Production resolves via the free catalog
+ * (`tierForModel`); tests inject a pure `tierOf`. Unknown → null (no pin).
+ */
+export function tierOfModel(ref, tierOf) {
+  if (typeof tierOf === 'function') {
+    try {
+      const v = tierOf(ref);
+      if (v && typeof v === 'object' && 'tier' in v) return v.tier || null;
+      if (typeof v === 'string') return v || null;
+    } catch {
+      return null;
+    }
+    return null;
+  }
+  try {
+    return tierForModel(ref)?.tier || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tier pin: a `high` primary never auto-falls to a `light` candidate.
+ * Returns the kept chain plus what was dropped. Opt out per-turn with
+ * `allowTierDowngrade: true` (explicit user tap). Non-high primaries and
+ * unknown tiers pass through untouched, so stub-only chains behave as before.
+ */
+export function pinTierModels(models, { tierOf = undefined, allowTierDowngrade = false } = {}) {
+  const list = [...new Set((models || []).filter(Boolean))];
+  if (allowTierDowngrade || list.length < 2) return { models: list, dropped: [] };
+  if (tierOfModel(list[0], tierOf) !== 'high') return { models: list, dropped: [] };
+  const kept = [list[0]];
+  const dropped = [];
+  for (const m of list.slice(1)) {
+    if (tierOfModel(m, tierOf) === 'light') dropped.push(m);
+    else kept.push(m);
+  }
+  return { models: kept, dropped };
+}
+
+/**
  * Failover chain for one dispatch: the chat's effective model first, then
  * the bot default. Identical entries collapse, so a chat on the default
  * model runs exactly once (current behavior). No invented models — both
@@ -394,8 +445,11 @@ export async function runWithModelFailover({
   makeRun,
   onSwitch,
   isRetryable = defaultIsRetryable,
+  allowTierDowngrade = false,
+  tierOf = undefined,
 }) {
-  const candidates = [...new Set((models || []).filter(Boolean))];
+  const pinned = pinTierModels(models, { tierOf, allowTierDowngrade });
+  const candidates = pinned.models;
   if (!candidates.length) throw new Error('runWithModelFailover needs at least one model');
   const attempts = [];
   let result = null;
@@ -412,7 +466,7 @@ export async function runWithModelFailover({
       }
     }
   }
-  return { result, attempts };
+  return { result, attempts, dropped: pinned.dropped, tierPinned: pinned.dropped.length > 0 };
 }
 
 /**
