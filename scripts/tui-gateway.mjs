@@ -125,7 +125,7 @@ export function issueToken({ botId, chatId, secret, ttlSec = 900, now = Date.now
 }
 
 /** Verify a session token: signature, then expiry. Returns the binding. */
-export function verifyToken(token, secret, { now = Date.now() } = {}) {
+export function verifyToken(token, secret, { now = Date.now(), renewGraceSec = 0 } = {}) {
   const bad = { ok: false, reason: 'bad token' };
   if (!token || !secret || typeof token !== 'string') return bad;
   const dot = token.lastIndexOf('.');
@@ -143,7 +143,23 @@ export function verifyToken(token, secret, { now = Date.now() } = {}) {
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return bad;
   const [botId, chatId, exp] = body.split('|');
   if (!botId || !chatId || !Number(exp)) return bad;
-  if (Number(exp) <= now) return { ok: false, reason: 'token expired' };
+  if (Number(exp) <= now) {
+    // RENEWAL, NOT RE-ADMISSION. A correctly-signed token that is past its
+    // expiry is normally refused, and stays refused everywhere except the one
+    // endpoint that mints a replacement. It is never treated as a live
+    // credential, and the grace is bounded, so an abandoned page still dies.
+    //
+    // Without this a session cannot outlive its own token. The terminal page
+    // stays open for hours and the 900s token does not, and the page's only
+    // recovery — the reconnect retry — re-presents the same dead token, so the
+    // loop can never terminate. That is the "Press ⏎ to Reconnect" the operator
+    // reported on 2026-10-05.
+    const graceSec = Number(renewGraceSec) > 0 ? Number(renewGraceSec) : 0;
+    if (graceSec > 0 && now - Number(exp) <= graceSec * 1000) {
+      return { ok: true, renew: true, botId, chatId, exp: Number(exp) };
+    }
+    return { ok: false, reason: 'token expired' };
+  }
   return { ok: true, botId, chatId, exp: Number(exp) };
 }
 
@@ -313,6 +329,54 @@ export function boardUpstream(env = process.env) {
 }
 
 /**
+ * opencode web UI upstream (split solution, plan/WEBUI_MIGRATION.md). The web
+ * UI is a same-origin SPA — page, assets, API and SSE all live under one
+ * host — so the gateway fronts the whole host and proxies everything past the
+ * Telegram door, the ttyd shape with an HTTP Basic credential (serve's own
+ * auth) substituted per request so the browser never holds it.
+ */
+export function webUiUpstream(env = process.env) {
+  return String(env.OPENCODE_WEB_UPSTREAM || 'http://127.0.0.1:4096').replace(/\/+$/, '');
+}
+
+/**
+ * Static paths served without the Telegram door. These are build output and
+ * PWA plumbing — identical for every user, no session data — and the flows
+ * that fetch them cannot present a credential: the HTML parser fires bundle
+ * and stylesheet requests before any script runs, and the service worker
+ * install/update runs outside every page patch. Gating them bought obscurity
+ * at the price of a unloadable app on cookie-swallowing WebViews. Everything
+ * else on the host — the HTML shell, /api/*, SSE — keeps the full door, and
+ * serve's own Basic credential is still injected upstream, so the browser
+ * never holds it. Explicit list only: no extension sniffing that could ever
+ * match a data route (WHATWG URL pathname matching, dot-segments already
+ * normalized, so /_assets/../api/x resolves to /api/x and stays gated).
+ */
+export function isWebStatic(pathname) {
+  const p = String(pathname || '');
+  if (p === '/sw.js' || p === '/site.webmanifest' || p === '/favicon.ico') return true;
+  return p.startsWith('/_assets/') || p.startsWith('/icons/');
+}
+
+/** Host header the web UI is served on; requests there take the web branch. */
+export function webUiHost(env = process.env) {
+  return String(env.OPENCODE_WEB_HOST || 'web.health-tracking.duckdns.org').trim().toLowerCase();
+}
+
+export function isWebUiHost(req, env = process.env) {
+  const raw = req?.headers?.host || req?.headers?.[':authority'] || '';
+  const host = String(raw).split(':')[0].trim().toLowerCase();
+  return host !== '' && host === webUiHost(env);
+}
+
+/** Basic credential for serve, composed here so only the header crosses. */
+export function webUiAuthHeader(env = process.env) {
+  const pw = String(env.OPENCODE_WEB_PASSWORD || '').trim();
+  if (!pw) return '';
+  return `Basic ${Buffer.from(`opencode:${pw}`).toString('base64')}`;
+}
+
+/**
  * Cold-start page for the bug board mini app (packet bug-board-miniapp,
  * Node 5). Same shape as BOOTSTRAP: Telegram hands initData to the page, the
  * page puts it in the query, the server exchanges it — the HMAC never runs
@@ -373,12 +437,17 @@ const BOOTSTRAP_BUGS = [
  * target host is fixed (boardUpstream); only the path+query come from the
  * caller, so this cannot be aimed elsewhere.
  */
-async function proxyPass(req, res, target) {
+async function proxyPass(req, res, target, { headers: extraHeaders = null, resHeaders: extraResHeaders = null } = {}) {
   try {
     const headers = {};
     for (const [k, v] of Object.entries(req.headers || {})) {
       if (['host', 'connection', 'content-length'].includes(String(k).toLowerCase())) continue;
       headers[k] = v;
+    }
+    // Extra headers win (e.g. the web UI's upstream Basic credential replaces
+    // the caller's gateway Bearer token, which serve would refuse).
+    if (extraHeaders) {
+      for (const [k, v] of Object.entries(extraHeaders)) headers[k] = v;
     }
     const chunks = [];
     for await (const c of req) chunks.push(c);
@@ -392,6 +461,9 @@ async function proxyPass(req, res, target) {
     const outHeaders = { 'cache-control': 'no-store' };
     const ct = up.headers.get('content-type');
     if (ct) outHeaders['content-type'] = ct;
+    if (extraResHeaders) {
+      for (const [k, v] of Object.entries(extraResHeaders)) outHeaders[k] = v;
+    }
     res.writeHead(up.status, outHeaders);
     if (up.body) {
       for await (const c of up.body) {
@@ -408,6 +480,112 @@ async function proxyPass(req, res, target) {
 
 function logGatewayError(err) {
   console.error('[tui-gateway] board proxy error:', err && err.message ? err.message : err);
+}
+
+/**
+ * Cookieless auth shim for the opencode web UI. Telegram WebViews swallow
+ * Set-Cookie (redirect and proxied alike), so the planted cookie never sticks
+ * and every cookieless /api/* + /_assets/* 401s — the SPA shell renders
+ * ("home") but data never loads. The shim persists the landing ?token= in
+ * sessionStorage on first HTML load and appends it to every same-origin
+ * fetch/XHR/EventSource, which the gateway already accepts as a query token.
+ * Same-origin only, so the short-lived chat-bound token never leaks to a
+ * third party (the page's only third-party request is telegram-web-app.js,
+ * untouched). Exported for the sensor, not for browsers to import.
+ */
+export const WEB_AUTH_STORAGE_KEY = 'tui_token';
+export function webAuthShimJs(cookieName = COOKIE_NAME) {
+  return `<script>(function(){try{var k=${JSON.stringify(WEB_AUTH_STORAGE_KEY)};var cn=${JSON.stringify(cookieName)};var q;try{q=new URLSearchParams(location.search).get('token')||''}catch(e){q=''}if(q){try{sessionStorage.setItem(k,q)}catch(e){}try{document.cookie=cn+'='+encodeURIComponent(q)+'; Secure; Path=/; SameSite=Strict; Max-Age=900'}catch(e){}}var t=q;if(!t){try{t=sessionStorage.getItem(k)||''}catch(e){t=''}}try{fetch('/__shim_diag?u='+(q?1:0)+'&s='+((t&&!q)?1:0),{method:'GET',keepalive:true}).catch(function(){})}catch(e){}if(!t)return;function add(u){try{var a=new URL(u,location.href);if(a.origin!==location.origin)return u;if(a.searchParams.get('token'))return u;a.searchParams.append('token',t);return a.pathname+a.search+a.hash}catch(e){return u}}if(window.fetch){var of=window.fetch;window.fetch=function(u,o){try{if(typeof u==='string'){u=add(u)}else if(u&&typeof u.url==='string'){var nu=add(u.url);if(nu!==u.url)u=new Request(nu,u)}}catch(e){}return of.call(this,u,o)}}if(window.XMLHttpRequest){var oo=window.XMLHttpRequest.prototype.open;window.XMLHttpRequest.prototype.open=function(m,u){try{arguments[1]=add(u)}catch(e){}return oo.apply(this,arguments)}}if(window.EventSource){var OE=window.EventSource;window.EventSource=function(u,c){try{u=add(u)}catch(e){}return new OE(u,c)};window.EventSource.prototype=OE.prototype}try{fetch('/__shim_diag?u=1&p=1',{method:'GET',keepalive:true}).catch(function(){})}catch(e){}try{if(navigator.serviceWorker){navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister()})}).catch(function(){})}}catch(e){}}catch(e){}})();</script>`;
+}
+
+/** Splice the auth shim into serve's HTML so it runs before the SPA bundle. */
+export function injectWebAuthShim(html, cookieName = COOKIE_NAME) {
+  const shim = webAuthShimJs(cookieName);
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => `${m}${shim}`);
+  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${shim}</head>`);
+  return `${shim}${html}`;
+}
+
+/** Upstream query without the gateway credential: serve never needs ?token=.
+ * Operates on the raw search string so surviving params keep their original
+ * encoding (a URLSearchParams round-trip would re-encode `/` as `%2F`). */
+export function webUpstreamQuery(search) {
+  const qs = String(search || '').replace(/^\?/, '');
+  if (!qs) return '';
+  const kept = qs.split('&').filter((p) => p && decodeURIComponent(p.split('=')[0] || '') !== 'token');
+  return kept.length ? `?${kept.join('&')}` : '';
+}
+
+/**
+ * Proxy to the opencode web UI past the Telegram door. Stateless per request
+ * (Basic is injected every time), so no serve-side session is needed and
+ * nothing credential-shaped reaches the browser. SSE and assets stream chunk
+ * by chunk; HTML is buffered once so the cookieless auth shim can be spliced
+ * in before the SPA bundle. When the caller authenticated with a query/Bearer
+ * token (no cookie yet — some Telegram WebViews swallow Set-Cookie on
+ * redirects and proxied responses alike), the token is planted as the cookie
+ * here AND the shim re-attaches it as a query token on every same-origin
+ * fetch/XHR/EventSource, so cookieless subresource and /api/* requests pass
+ * the same door instead of 401ing one by one.
+ */
+async function proxyWebUi(req, res, url, env, { ttlSec = 900 } = {}) {
+  const auth = webUiAuthHeader(env);
+  if (!auth) {
+    res.writeHead(503, { 'content-type': 'application/json' });
+    return res.end(JSON.stringify({ ok: false, error: 'gateway has no OPENCODE_WEB_PASSWORD' }));
+  }
+  const bearer = String(req?.headers?.authorization || '').startsWith('Bearer ')
+    ? String(req.headers.authorization).slice(7) : '';
+  const queryToken = String(url?.searchParams?.get('token') || '');
+  const hasCookie = String(req?.headers?.cookie || '').split(';')
+    .some((part) => part.trim().startsWith(`${COOKIE_NAME}=`));
+  // Plant only when the browser holds no cookie yet: with a cookie present
+  // there is nothing to fix, and a differing query token must not clobber it.
+  const plant = !hasCookie ? (bearer || queryToken) : '';
+  const setCookie = plant
+    ? `${COOKIE_NAME}=${encodeURIComponent(plant)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttlSec}`
+    : null;
+  // The gateway token authenticates AT the gateway; serve gets Basic only.
+  const target = `${webUiUpstream(env)}${url.pathname}${webUpstreamQuery(url?.search)}`;
+  try {
+    const headers = {};
+    for (const [k, v] of Object.entries(req.headers || {})) {
+      if (['host', 'connection', 'content-length'].includes(String(k).toLowerCase())) continue;
+      headers[k] = v;
+    }
+    headers.authorization = auth;
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const body = Buffer.concat(chunks);
+    const up = await fetch(target, {
+      method: req.method,
+      headers,
+      body: ['GET', 'HEAD'].includes(String(req.method)) || body.length === 0 ? undefined : body,
+      duplex: 'half',
+    });
+    const ct = up.headers.get('content-type') || '';
+    const outHeaders = { 'cache-control': 'no-store' };
+    if (ct) outHeaders['content-type'] = ct;
+    if (setCookie) outHeaders['set-cookie'] = setCookie;
+    if (/text\/html/i.test(ct)) {
+      const raw = Buffer.from(await up.arrayBuffer()).toString('utf8');
+      const injected = injectWebAuthShim(raw);
+      outHeaders['clear-site-data'] = '"cache"';
+      res.writeHead(up.status, outHeaders);
+      return res.end(injected);
+    }
+    res.writeHead(up.status, outHeaders);
+    if (up.body) {
+      for await (const c of up.body) {
+        if (!res.write(c)) await new Promise((r) => res.once('drain', r));
+      }
+    }
+    res.end();
+  } catch (err) {
+    logGatewayError(err);
+    if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'board upstream unreachable' }));
+  }
 }
 
 /**
@@ -734,14 +912,89 @@ function presentedTokens(req, url) {
   ].filter((t) => typeof t === 'string' && t.length > 0);
 }
 
+/**
+ * verifyAnyToken plus the page-URL fallback: parser-fired, worker and
+ * pre-patch clients present the landed ?token= as same-host Referer with no
+ * code needing to run. Same bearer, same short-lived chat-bound token — no
+ * weaker door, just one more channel. Exported for the sensor.
+ */
+export function verifyWithRefererFallback(req, url, secret, { renewGraceSec = 0 } = {}) {
+  const direct = verifyAnyToken(req, url, secret, { renewGraceSec });
+  if (direct.ok && !direct.renew) return direct;
+  // A live token presented as Referer beats a renewal anywhere else.
+  const rt = refererToken(req);
+  if (rt) {
+    const via = verifyToken(rt, secret, { renewGraceSec });
+    if (via.ok && !via.renew) return via;
+    if (via.ok) return via;
+  }
+  return direct;
+}
+
 /** Accept when ANY presented token verifies: a stale cookie must not shadow a fresh query token. */
-function verifyAnyToken(req, url, secret) {
+function verifyAnyToken(req, url, secret, { renewGraceSec = 0 } = {}) {
   let verdict = { ok: false, reason: 'bad token' };
   for (const t of presentedTokens(req, url)) {
-    verdict = verifyToken(t, secret);
-    if (verdict.ok) return verdict;
+    const got = verifyToken(t, secret, { renewGraceSec });
+    // A renewal-admitted token must not shadow a live one presented later, so
+    // the first LIVE match still wins: keep looking, and only remember a
+    // renewal as the fallback.
+    if (got.ok && !got.renew) return got;
+    if (got.ok) verdict = got;
   }
   return verdict;
+}
+
+/**
+ * The token in the page URL that sent this request, if any. Same-origin
+ * subresource, fetch, XHR and SSE requests carry `Referer: <page url>` by
+ * default, and our landed page URL holds `?token=` — so a cookieless browser
+ * that loaded the page still presents its credential on every request the
+ * parser or any client (shimmed or not, worker or window) fires, without any
+ * code needing to run first. Same-host only, so an external page cannot spend
+ * a token it merely saw; and it is still just a bearer for the same
+ * short-lived chat-bound token the query already accepts — no weaker door.
+ * Exported for the sensor. Never log its value.
+ */
+export function refererToken(req) {
+  const ref = String(req?.headers?.referer || req?.headers?.referrer || '');
+  if (!ref) return '';
+  let u;
+  try {
+    u = new URL(ref);
+  } catch {
+    return '';
+  }
+  const reqHost = String(req?.headers?.host || '').split(':')[0].trim().toLowerCase();
+  if (!reqHost || u.hostname.toLowerCase() !== reqHost) return '';
+  return u.searchParams.get('token') || '';
+}
+
+/**
+ * Non-secret shape of a web refusal, for logs: which credential channels
+ * were present (never values). A stuck phone screen reads as identical `web
+ * refused` lines; the shape says whether the client sent nothing at all
+ * (client-side attach failed) or something invalid (replay/expiry).
+ */
+export function describeWebRefusal(req, url) {
+  const bits = [];
+  bits.push(String(req?.headers?.cookie || '').length ? 'cookie' : 'nocookie');
+  const ref = String(req?.headers?.referer || req?.headers?.referrer || '');
+  if (!ref) bits.push('noreferer');
+  else {
+    try {
+      const u = new URL(ref);
+      const same = u.hostname.toLowerCase() === String(req?.headers?.host || '').split(':')[0].trim().toLowerCase();
+      bits.push(same ? (u.searchParams.get('token') ? 'referertoken' : 'referernotoken') : 'refererforeign');
+    } catch {
+      bits.push('refererbad');
+    }
+  }
+  bits.push(url && url.searchParams.get('token') ? 'querytoken' : 'noquerytoken');
+  if (String(req?.headers?.authorization || '').startsWith('Bearer ')) bits.push('bearer');
+  const ua = String(req?.headers?.['user-agent'] || '');
+  bits.push(/headless/i.test(ua) ? 'uaheadless' : /\bwv\b|; wv\)|\.wv/i.test(ua) ? 'uawv' : 'uastd');
+  return bits.join(' ');
 }
 
 function cookieValue(req, name) {
@@ -756,6 +1009,9 @@ function cookieValue(req, name) {
 export function createGateway({ env = process.env, log = () => {}, forge = null } = {}) {
   const secret = env.TUI_GATEWAY_SECRET || '';
   const ttl = Number(env.TUI_SESSION_TTL_SEC || 900);
+  // How long past its own expiry a correctly-signed token may still be RENEWED.
+  // 0 disables renewal entirely, which restores the old hard cliff.
+  const renewGrace = Number(env.TUI_TOKEN_RENEW_GRACE_SEC || 3600);
   // ttyd's own credential, base64 of user:password. It is substituted for the
   // caller's session token on the way upstream and is never sent to a browser.
   const ttydCredential = String(env.TUI_TTYD_CREDENTIAL || '').trim();
@@ -769,8 +1025,32 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // a session token that goes into an HttpOnly cookie — so the token never
     // appears in a URL, in browser history, or in a Referer.
     if (url.pathname === '/' || url.pathname === '/index.html') {
+      // The web UI host shares this landing: same initData exchange, but a
+      // successful exchange lands back on `/` with a token (which proxies
+      // serve's index below) instead of on a ttyd path.
+      const webMode = isWebUiHost(req, env);
       const initData = url.searchParams.get('initData') || '';
       if (!initData) {
+        if (webMode) {
+          const early = verifyAnyToken(req, url, secret);
+          if (early.ok) return proxyWebUi(req, res, url, env, { ttlSec: ttl });
+        } else {
+          // Personal-link deep link: a verified token without initData goes
+          // straight to its own terminal path (same 302 shape as a fresh
+          // exchange, cookie planted the same way). No initData and no token
+          // is still just a cold WebView below.
+          const deep = verifyAnyToken(req, url, secret);
+          if (deep.ok) {
+            const raw = presentedTokens(req, url).find((t) => verifyToken(t, secret).ok) || '';
+            log(`admitted bot=${deep.botId} chat=${deep.chatId} (deep link)`);
+            res.writeHead(302, {
+              'location': landingLocationFor(deep.botId, raw, env),
+              'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(raw)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+              'cache-control': 'no-store',
+            });
+            return res.end();
+          }
+        }
         // A cold WebView: Telegram gives initData to the page, not the URL.
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
         return res.end(BOOTSTRAP);
@@ -810,7 +1090,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       // readout so a phone screenshot carries the numbers. Remove with the
       // readout once the layout is confirmed.
       res.writeHead(302, {
-        'location': landingLocationFor(botId, token, env),
+        'location': webMode ? `/?token=${encodeURIComponent(token)}` : landingLocationFor(botId, token, env),
         'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
         'cache-control': 'no-store',
       });
@@ -854,6 +1134,47 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       return res.end(JSON.stringify({ ok: true, token, bot: botId, chat: verdict.chatId, ttyd: ttydPathFor(botId, env) }));
     }
 
+    // opencode web UI (split solution): the whole host past this point is
+    // serve's SPA, so paths stay absolute and nothing needs rewriting. Same
+    // Telegram door as the terminal (cookie/query/Bearer); any verified token
+    // admits, because sessions are per-user rather than per-bot, and the
+    // serve credential is substituted per request so the browser never holds
+    // it. Placed after `/` and `/auth` so the exchange itself stays shared.
+    // Cookieless fallback: the landed page URL holds ?token=, and same-origin
+    // subresource/fetch/XHR/SSE requests carry it back as Referer — so the
+    // parser-fired bundle and any unshimmed client pass the same door with no
+    // code needing to run first. Same bearer, same token, no weaker door.
+    if (isWebUiHost(req, env)) {
+      // Static build output skips the door (see isWebStatic): it carries no
+      // data and its fetchers carry no credential. Still proxied with the
+      // upstream Basic injected, token stripped, nothing secret downstream.
+      if (isWebStatic(url.pathname)) {
+        return proxyWebUi(req, res, url, env, { ttlSec: ttl });
+      }
+      // Client-health beacon from the injected shim (booleans only: token in
+      // URL / restored from storage / sent through the patched fetch). No
+      // auth: it exists precisely for clients that cannot authenticate, and
+      // it reveals nothing. Placed before the door so a failing client can
+      // still report. Never log values here.
+      if (url.pathname === '/__shim_diag') {
+        const flag = (k) => (url.searchParams.get(k) === '1' ? 1 : 0);
+        log(`shim-diag u=${flag('u')} s=${flag('s')} p=${flag('p')} ${describeWebRefusal(req, url)}`);
+        res.writeHead(204, { 'cache-control': 'no-store' });
+        return res.end();
+      }
+      let webVerdict = verifyAnyToken(req, url, secret);
+      if (!webVerdict.ok) {
+        const rt = refererToken(req);
+        if (rt) webVerdict = verifyToken(rt, secret);
+      }
+      if (!webVerdict.ok) {
+        log(`web refused (${webVerdict.reason}) ${describeWebRefusal(req, url)}`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: webVerdict.reason }));
+      }
+      return proxyWebUi(req, res, url, env, { ttlSec: ttl });
+    }
+
     // Caddy calls this before proxying the websocket. Answering 204 lets the
     // upgrade through; anything else stops it before a socket exists.
     if (url.pathname === '/authz') {
@@ -871,11 +1192,27 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // TOKEN_ROUTES). Same admission as the page below.
     const tokenBot = tokenRoutes(env)[url.pathname];
     if (tokenBot) {
-      const verdict = verifyAnyToken(req, url, secret);
+      // The ONLY endpoint given the renewal grace, and it is the right one: the
+      // page re-fetches ./token on every reconnect attempt, so the retry that
+      // was looping forever becomes the repair. It is also a browser-initiated
+      // fetch, so the replacement cookie set below actually reaches the browser
+      // — a Set-Cookie on the /authz response would be consumed by Caddy's
+      // auth_request instead, which is why /authz is left strict. The referer
+      // channel joins here too (same grace): parser-fired and worker clients
+      // that never see a cookie still repair through it.
+      const verdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace });
       if (!verdict.ok) {
         log(`token refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      // The grace never widens WHICH bot may open WHICH terminal — the check
+      // below still owns that, and runs unchanged.
+      const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
+      if (verdict.renew) {
+        const fresh = issueToken({ botId: verdict.botId, chatId: verdict.chatId, secret, ttlSec: ttl });
+        headers['set-cookie'] = `${COOKIE_NAME}=${encodeURIComponent(fresh)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`;
+        log(`token renewed bot=${verdict.botId} chat=${verdict.chatId} (expired ${Math.round((Date.now() - verdict.exp) / 1000)}s ago, grace ${renewGrace}s)`);
       }
       if (verdict.botId !== tokenBot && !(tokenBot === 'vm' && verdict.botId !== 'vm2')) {
         log(`token refused (token is for bot=${verdict.botId}, path is for bot=${tokenBot})`);
@@ -886,7 +1223,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         res.writeHead(503, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: 'gateway has no TUI_TTYD_CREDENTIAL' }));
       }
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.writeHead(200, headers);
       return res.end(JSON.stringify({ token: ttydCredential }));
     }
 
@@ -896,7 +1233,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // the vm2 terminal and land in another bot's conversation map.
     const route = ttydRoutes(env)[url.pathname];
     if (route) {
-      const verdict = verifyAnyToken(req, url, secret);
+      const verdict = verifyWithRefererFallback(req, url, secret);
       if (!verdict.ok) {
         log(`page refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
@@ -1593,15 +1930,32 @@ export const LAYOUT_JS = [
  * gateway or the phone. xterm passes bare PageUp/PageDown through to the PTY
  * (no modifiers for it to swallow), and both lanes bind them to page scroll.
  *
- * Feel: one page-key per ~1/8th of the screen would jump too far (a full page
- * per step), so the accumulator keeps the old ~1/24th-of-screen step: a drag
- * of one page-key worth of travel emits ONE page key, not one per line-px.
- * Both directions are paced to COOLDOWN_MS — page keys are the coarsest move
- * either lane has, and firing them flat out on a fast drag would jump whole
- * screens per touchmove. Up to MAX_KEYS per touchmove so a fast drag is never
- * throttled, a decaying fling for momentum, `preventDefault` only once a drag
- * is really scrolling (a tap still types), multi-touch left alone so
- * pinch-zoom survives, and one accumulator per gesture.
+ * Feel, and why it is still coarse. opencode runs in ALT-SCREEN mode (the TUI
+ * owns the whole screen and repaints in place), so there is no document flow
+ * and no scrollback for a browser to scroll — measured live: viewport
+ * scrollHeight == clientHeight, body overflow hidden, wheel and PageUp change
+ * nothing. Scrolling an alt-screen TUI has ONLY ever worked by sending keys to
+ * the app, which is what this bridge does. No renderer flag changes that; the
+ * DOM renderer changes how text is PAINTED, not what is scrollable.
+ *
+ * So the question is not "how do we get native scroll" (impossible here) but
+ * "how finely can we drive the keys". The bridge was sending one page key per
+ * ~1/24th of screen of travel: correct, and the reason a drag feels like a
+ * slideshow — each key jumps a WHOLE screen, so finger travel maps to a handful
+ * of full-screen jumps no matter how far you drag.
+ *
+ * opencode binds a LINE key (messages_line_up/down = ctrl+alt+y / ctrl+alt+e,
+ * confirmed against the keybind table in the binary and measured moving a live
+ * pane). Sending those instead of page keys maps finger travel one-to-one onto
+ * lines, which is what "feels like scrolling" actually means. cline has no
+ * line key (TRANSCRIPT_KEYBINDS has page and half-page only), so it keeps the
+ * half-page keys — finer than a full page, still coarse, and honest about it.
+ *
+ * Line keys are emitted one per LINE_PX of travel and paced to LINE_COOLDOWN_MS
+ * (far tighter than the page cooldown: a line is a small move, so a 300ms
+ * cadence would feel like a stall rather than motion). MAX_LINE_KEYS per
+ * touchmove bounds a fast flick without throttling it outright, and the fling
+ * decays the same way at line granularity.
  */
 export const TOUCH_SCROLL_JS = [
   '(function(){',
@@ -1614,6 +1968,21 @@ export const TOUCH_SCROLL_JS = [
   '// would jump full pages per line-px of drag.',
   'var PGUP=33,PGDN=34,MAX_KEYS=3,COOLDOWN_MS=300,',
   'FLING_PX_PER_STEP=160,MAX_FLING_STEPS=6;',
+  // Line granularity, and the per-lane split. opencode binds a LINE key',
+  '// (messages_line_up/down = ctrl+alt+y / ctrl+alt+e); cline has none, and',
+  '// binds half-page to ctrl+meta+u / ctrl+meta+d instead. Those two sets are',
+  '// DISJOINT — opencode binds ctrl+alt, cline binds ctrl+meta — so one',
+  '// gesture step can send both and each lane takes only the step it has a',
+  '// binding for. That is what makes this lane-agnostic: the bridge cannot',
+  '// know which lane is behind the terminal (it is per-chat and can change),',
+  '// so it sends the finest step EVERY lane binds rather than guessing.',
+  '//',
+  '// Verified moving a live opencode pane (ctrl+alt+y/e/u/d all moved it).',
+  '// The cline half-page pair is inherited from the TRANSCRIPT_KEYBINDS note',
+  '// above and has NOT been re-measured on this box — cline is not installed',
+  '// here. Treat cline-side granularity as unproven until someone tries it.',
+  'var LINE_UP="y",LINE_DOWN="e",HALF_UP="u",HALF_DOWN="d",',
+  'MAX_LINE_KEYS=6;',
   'var t=null,y0=0,acc=0,v=0,v0=0,last=0,active=0,lastDir=0,lastKeyAt=0;',
   'function screen(){return document.querySelector(".xterm-screen")||document.querySelector(".xterm");}',
   'function keys(){return document.querySelector(".xterm-helper-textarea")||screen();}',
@@ -1640,6 +2009,36 @@ export const TOUCH_SCROLL_JS = [
   'el.dispatchEvent(new KeyboardEvent("keyup",o));',
   '}catch(e){}',
   '}',
+  '// One LINE of travel on opencode, one HALF PAGE on cline, in the same',
+  '// gesture step. Both are sent because the bindings are disjoint — see the',
+  '// note above. ctrl+alt+e/y and ctrl+meta+d/u are distinct key combinations,',
+  '// so no lane sees a doubled step, and no modifier here is one xterm or the',
+  '// browser eats: alt+letter is the risky pair on some platforms, so a',
+  '// failure degrades to the coarse page key below rather than to nothing.',
+  'function pressFine(dir){',
+  'var el=keys();if(!el)return 0;',
+  'var sent=0;',
+  'try{',
+  'if(typeof el.focus==="function")el.focus();',
+  'var up=dir<0;',
+  'var fire=function(key,mods){',
+  'try{',
+  'var K=key.toUpperCase();',
+  'var o={bubbles:true,cancelable:true,keyCode:K.charCodeAt(0),which:K.charCodeAt(0),',
+  'key:key,code:"Key"+K,ctrlKey:!!mods.ctrl,altKey:!!mods.alt,',
+  'metaKey:!!mods.meta,shiftKey:false};',
+  'el.dispatchEvent(new KeyboardEvent("keydown",o));',
+  'el.dispatchEvent(new KeyboardEvent("keyup",o));',
+  'sent++;',
+  '}catch(e){}',
+  '};',
+  '// opencode messages_line_up/down -> ctrl+alt+y / ctrl+alt+e  (one line)',
+  'fire(up?LINE_UP:LINE_DOWN,{ctrl:true,alt:true});',
+  '// cline half-page -> ctrl+meta+u / ctrl+meta+d  (TRANSCRIPT_KEYBINDS)',
+  'fire(up?HALF_UP:HALF_DOWN,{ctrl:true,meta:true});',
+  '}catch(e){}',
+  'return sent;',
+  '}',
   '// Both directions paced: page keys jump a full page, so an unpaced drag',
   '// would skip whole screens per touchmove on either lane.',
   'function emit(dir){',
@@ -1647,10 +2046,35 @@ export const TOUCH_SCROLL_JS = [
   'if(t-lastKeyAt<COOLDOWN_MS)return;',
   'press(dir>0?PGDN:PGUP);lastDir=dir>0?1:-1;lastKeyAt=t;',
   '}',
+  '// LinePx is the whole point of this change: a page key is a WHOLE screen,',
+  '// so one page key per 1/24th of travel makes any drag feel like a handful',
+  '// of full-screen jumps. One LINE of finger travel per line key maps the',
+  '// gesture onto the content 1:1, which is what "scrolling" means to a thumb.',
+  'function linePx(){',
+  'try{return 18;}catch(e){return 18;}',
+  '}',
+  '// emitFine sends the finest step each lane binds (see pressFine), and has',
+  '// NO time-based cooldown. That is deliberate: the accumulator already',
+  '// admits exactly one key per LINE_PX of finger travel, so a key cannot',
+  '// escape without the finger having moved that far. Adding a timer on top',
+  '// decoupled keys from movement — the scroll would run on a clock instead of',
+  '// the thumb, which is the same "not real" feeling at a smaller scale. The',
+  '// page-key path below keeps its 300ms cooldown because a page key is a',
+  '// WHOLE screen and an unpaced burst would jump screens per touchmove.',
+  '//',
+  '// Falls back to the coarse page key if the fine dispatch sent nothing, so a',
+  '// platform that eats ctrl+alt / ctrl+meta degrades to the old behaviour',
+  '// rather than to a dead scroll.',
+  'function emitFine(dir){',
+  'if(pressFine(dir)>0){lastDir=dir>0?1:-1;return;}',
+  'var t=now();',
+  'if(t-lastKeyAt<COOLDOWN_MS)return;',
+  'press(dir>0?PGDN:PGUP);lastDir=dir>0?1:-1;lastKeyAt=t;',
+  '}',
   'function drain(){',
-  'var s=pagePx(),n=0;',
-  'while(acc>=s&&n<MAX_KEYS){acc-=s;emit(1);n++;}',
-  'while(acc<=-s&&n<MAX_KEYS){acc+=s;emit(-1);n++;}',
+  'var s=linePx(),n=0;',
+  'while(acc>=s&&n<MAX_LINE_KEYS){acc-=s;emitFine(1);n++;}',
+  'while(acc<=-s&&n<MAX_LINE_KEYS){acc+=s;emitFine(-1);n++;}',
   '}',
   'function down(e){',
   'if(active||!e.touches||e.touches.length!==1)return;',
@@ -1660,7 +2084,10 @@ export const TOUCH_SCROLL_JS = [
   'if(!t||!e.touches||e.touches.length!==1)return;',
   'var y=e.touches[0].clientY,dy=y0-y,n=now();',
   'y0=y;',
-  'if(!active&&Math.abs(acc+dy)>=pagePx()){active=1;}',
+  // A drag becomes a scroll at ONE LINE of travel, not one page-key worth: the',
+  '// gesture has to be unambiguous (a tap still types) without demanding a',
+  '// whole eighth-screen before anything moves.',
+  'if(!active&&Math.abs(acc+dy)>=linePx()){active=1;}',
   'acc+=dy;',
   'v=dy/Math.max(1,n-last);last=n;',
   'v0=v;',
@@ -1670,11 +2097,14 @@ export const TOUCH_SCROLL_JS = [
   'function up(){',
   'if(!t)return;',
   't=null;',
-  '// Momentum: a flick keeps scrolling for a few steps, one per frame, so it',
-  '// glides instead of stopping dead. Capped, and it ends on its own.',
+  // Momentum: a flick keeps scrolling for a few steps, one per frame, so it',
+  '// glides instead of stopping dead. Capped, and it ends on its own. The',
+  '// step count is measured in LINES now (linePx, not pagePx), so the fling',
+  '// covers a distance proportional to the flick rather than a fixed number',
+  '// of screen-jumps.',
   'var steps=0;',
   'try{',
-  'steps=Math.min(MAX_FLING_STEPS,Math.round(Math.abs(v)*FLING_PX_PER_STEP/pagePx()));',
+  'steps=Math.min(MAX_FLING_STEPS,Math.round(Math.abs(v)*FLING_PX_PER_STEP/linePx()));',
   '}catch(e){}',
   'var dir=v>0?1:-1;',
   'acc=0;active=0;v=0;',
@@ -1682,7 +2112,7 @@ export const TOUCH_SCROLL_JS = [
   'var n=0;',
   'var tick=function(){',
   'if(n++>=steps)return;',
-  'emit(dir);',
+  'emitFine(dir);',
   'try{requestAnimationFrame(tick);}catch(e){}',
   '};',
   'try{requestAnimationFrame(tick);}catch(e){}',

@@ -1,0 +1,20 @@
+# opencode web UI behind the Telegram-gated gateway (no Tailscale).
+# Localhost-only; the gateway fronts the whole web. host (same Telegram
+# door as the TUI) and injects serve's Basic credential per request, so the
+# browser never holds it. Rooted at $HOME so all workspaces' sessions are
+# visible. Password lives in the 0600 serve.env, not in git.
+[Unit]
+Description=OpenCode web UI for the Telegram Mini App (localhost only)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+EnvironmentFile=/home/ubuntu/.config/opencode-web/serve.env
+ExecStart=/home/ubuntu/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

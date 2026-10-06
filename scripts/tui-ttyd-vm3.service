@@ -26,8 +26,10 @@ Environment=TUI_TMUX_NAME=VM-tui-vm3
 EnvironmentFile=-/home/ubuntu/.config/bot-host/tui-ttyd.env
 # Loopback only. Base-path /tty3 keeps this socket's page and websocket under
 # /tty3/, so Caddy routes vm3's socket to its own ttyd.
+# --max-clients 0 (no cap), matching vm/vm2: a cap of 1 is the "tap Enter,
+# never reconnects" loop when a second screen joins the session.
 ExecStart=/usr/bin/ttyd --port 8900 --interface 127.0.0.1 --base-path /tty3 \
-  --writable --max-clients 1 --once=false \
+  --writable --max-clients 0 --once=false \
   -c ${TUI_TTYD_USER}:${TUI_TTYD_PASSWORD} \
   --check-origin --terminal-type xterm-256color \
   --client-option fontSize=13 \

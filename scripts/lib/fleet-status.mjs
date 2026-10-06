@@ -463,6 +463,35 @@ export function getFleetNodes(opts = {}) {
  * Read tickets from PM spreadsheet tab 'current' projecting the 8 human fields strictly by name.
  * Caches for 15s in memory. On failure, returns previous snapshot and age. Never writes to Google.
  */
+/**
+ * One sheet row → the ticket the mini app renders.
+ *
+ * Pure on purpose: `getByName` is injected, so both layouts the `current` tab
+ * has used (curated `Owner/Status/Completion proof`, and projected
+ * `owner/author/state/agent_note/stall_reason`) are testable without touching
+ * Google. Each field lists every header that has ever carried it.
+ */
+export function ticketFromRow(getByName, idx = 0) {
+  const idVal = getByName('key') || getByName('id') || getByName('#') || String(idx + 1);
+  const proof = getByName('Completion proof') || getByName('proof') || '—';
+  const proofShot = driveFileIdFrom(proof);
+  return {
+    id: idVal,
+    originalRequest: getByName('Original request') || getByName('goal') || getByName('title') || '—',
+    workDoneSoFar: getByName('Work done so far') || getByName('Work done') || getByName('note') || getByName('agent_note') || '—',
+    whatsLeftToDo: getByName("What's left to do") || getByName('What is left to do') || getByName('todo') || '—',
+    owner: getByName('Owner') || getByName('author') || '—',
+    status: getByName('Status') || getByName('state') || 'Pending',
+    // A Drive FILE link is a screenshot: the cell shows the picture, not the
+    // URL. Anything else (a folder, a key, prose) stays text.
+    completionProof: proofShot ? '' : proof,
+    proofFileId: proofShot,
+    completionProofText: proofShot ? proof : '',
+    completionGate: getByName('Completion gate') || getByName('gate') || getByName('stall_reason') || '—',
+    lastActivity: getByName('last_activity') || getByName('last activity') || getByName('Last activity') || getByName('built_at') || '—',
+  };
+}
+
 export async function getFleetTickets({ env = process.env, root = REPO_ROOT, refresh = false } = {}) {
   const now = Date.now();
   if (!refresh && fleetTicketsCache.cachedAt && now - fleetTicketsCache.cachedAt < FLEET_CACHE_TTL_MS && fleetTicketsCache.rows.length) {
@@ -496,24 +525,14 @@ export async function getFleetTickets({ env = process.env, root = REPO_ROOT, ref
                 return c >= 0 && vals[c] !== undefined ? String(vals[c]).trim() : '';
               };
 
-              const idVal = getByName('key') || getByName('id') || getByName('#') || String(idx + 1);
-              const proof = getByName('Completion proof') || getByName('proof') || '—';
-              const proofShot = driveFileIdFrom(proof);
-              return {
-                id: idVal,
-                originalRequest: getByName('Original request') || getByName('goal') || getByName('title') || '—',
-                workDoneSoFar: getByName('Work done so far') || getByName('note') || '—',
-                whatsLeftToDo: getByName("What's left to do") || getByName('todo') || '—',
-                owner: getByName('Owner') || '—',
-                status: getByName('Status') || 'Pending',
-                // A Drive FILE link is a screenshot: the cell shows the picture,
-                // not the URL. Anything else (a folder, a key, prose) stays text.
-                completionProof: proofShot ? '' : proof,
-                proofFileId: proofShot,
-                completionProofText: proofShot ? proof : '',
-                completionGate: getByName('Completion gate') || getByName('gate') || '—',
-                lastActivity: getByName('last_activity') || getByName('last activity') || getByName('built_at') || '—',
-              };
+              // The `current` tab has been laid out two ways (a curated one with
+              // Owner/Status/Completion proof, a projected one with
+              // owner/author/state/agent_note). Reading only the curated names
+              // blanked five columns the instant the layout flipped, even when
+              // the projected row carried the value. `ticketFromRow` names all
+              // the headers that have ever held each field, so a layout change
+              // costs one field instead of five.
+              return ticketFromRow(getByName, idx);
             });
 
             fleetTicketsCache = { cachedAt: now, rows: mapped };

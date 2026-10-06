@@ -11,6 +11,33 @@ import { chunkForTelegram } from './lib/tg-copy-code.mjs';
 import { formatWorkingHeadline, ctxLimitFor, phaseLabelFor } from './lib/tg-progress.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
 import {
+  BOT,
+  HUMAN,
+  findSeatByUsername,
+  normalizePeers,
+  receiveVerdict,
+  resolvePolicy,
+  resolvePeerUsername,
+  sendVerdict,
+  senderTypeOf,
+} from './lib/tg-peers.mjs';
+import {
+  checkReceiveBounds,
+  checkSendBounds,
+  deadLetter,
+  decodeEnvelope,
+  emptyLedger,
+  encodeEnvelope,
+  proposalLine,
+} from './lib/tg-handoff.mjs';
+import {
+  TURNS_KINDS,
+  chainIdOf,
+  delegationPrompt,
+  readAgreement,
+  COLLAB_DEFAULTS as HANDOFF_DEFAULTS,
+} from './lib/b2b-collab.mjs';
+import {
   sessionKey,
   projectIdForWorkspace,
   resolveSession,
@@ -47,6 +74,7 @@ import {
   parseRetryAfter,
 } from './lib/agent-opencode.mjs';
 import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from './lib/opencode-tui.mjs';
+import { issueToken } from './tui-gateway.mjs';
 import { KNOWN_HOSTS, workerStatus, isLocalHost, machineLabel } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
@@ -539,7 +567,10 @@ function shortProviderModel(model) {
  * → `deepseek-v4.1-flash`, `tokenharbor/deepseek-v4.1-flash:free` →
  * `tokenharbor/deepseek-v4.1-flash` (the vendor dir stays because the
  * headline provider for that bar reads OpenCode), `opencode/space-bunny-free`
- * → `space-bunny-free`. Plain ids pass through untouched, so unit-test
+ * → `space-bunny-free`. `opencode-go/space-bunny-free` keeps its prefix:
+ * it is a different free pool from `opencode/space-bunny-free`, and stripping
+ * both to `space-bunny-free` made a failover line read "X is depleted — ran
+ * on X instead". Plain ids pass through untouched, so unit-test
  * lanes like `m1` render exactly as before. Display only — routing still
  * uses the full ref.
  */
@@ -549,9 +580,33 @@ export function chatLaneName(ref) {
   s = s.replace(/^cline-free\//i, '').replace(/:free$/i, '');
   if (r.provider && s.toLowerCase().startsWith(`${String(r.provider).toLowerCase()}/`)) {
     const rest = s.slice(String(r.provider).length + 1);
-    if (!/^tokenharbor\//i.test(s)) s = rest;
+    const provider = String(r.provider || '').toLowerCase();
+    // The prefixes that disambiguate distinct pools stay. tokenharbor shares
+    // one bar with its opencode twin but reads under the OpenCode headline,
+    // so the dir carries the meaning; opencode-go is a separate pool from
+    // opencode (live 2026-10-04: one depleted while the other answered).
+    if (!/^tokenharbor\//i.test(s) && provider !== 'opencode-go') s = rest;
   }
   return s || String(ref || '');
+}
+
+/**
+ * A bare `PONG` is not an answer. Connectivity pings ("reply PONG") circulate
+ * on the shared opencode service (TUI-side checks, lane watchers), and a turn
+ * resuming a session that last saw one can come back with a lone `PONG` to a
+ * prompt that never asked for it — which the chat then receives as the reply.
+ * True only for the bare word (optional trailing punctuation); a prompt that
+ * actually requests it alongside a request verb (reply/say/ping/…) is
+ * honoured. Deliberately pong-only: a bare `ok` can be a legitimate
+ * acknowledgement, and the failover sensors use it as their success fixture.
+ */
+export function isUnpromptedProbeEcho(text, prompt) {
+  const t = String(text ?? '').trim().toLowerCase().replace(/[!.\s]+$/, '');
+  if (t !== 'pong') return false;
+  const p = String(prompt ?? '');
+  if (p.length <= 120 && /\bpong\b/i.test(p)
+    && /\b(reply|say|send|respond|repeat|ping|test|probe|answer|echo)\b/i.test(p)) return false;
+  return true;
 }
 
 /**
@@ -1411,6 +1466,51 @@ export function readTuiUrl(env = process.env, file = miniappUrlFile()) {
   return readMiniappUrl(file);
 }
 
+/**
+ * The URL `/tui` hands out for the opencode web UI (split solution: opencode
+ * chats read/scroll in the DOM web UI, cline/grok/freebuff keep the TUI).
+ * Served by opencode-web.service on localhost, fronted by Caddy on its own
+ * hostname behind the same Telegram-initData gate as the TUI — no Tailscale.
+ * `OPENCODE_WEB_URL` overrides (tests); empty when unset-and-no-default
+ * would apply, so callers can hide the button instead of handing out a dead one.
+ */
+export function readWebUiUrl(env = process.env) {
+  const raw = String(env.OPENCODE_WEB_URL ?? 'https://web.health-tracking.duckdns.org').trim().replace(/\/+$/, '');
+  if (/^https:\/\/[A-Za-z0-9.-]+$/.test(raw)) return raw;
+  return '';
+}
+
+/** Short-lived personal web UI links minted by /web. */
+export const WEB_LINK_TTL_SEC = 900;
+
+/**
+ * The gateway signing secret, read at call time from the host's own env
+ * file (same pattern as the seat-tags credentials: host files, never the
+ * repo). Empty when absent — the caller says so instead of minting.
+ */
+export function gatewaySecretFromHostEnv({ readFile = fs.readFileSync, home = os.homedir() } = {}) {
+  try {
+    for (const line of String(readFile(path.join(home, '.config', 'bot-host', 'tui-gateway.env'), 'utf8')).split('\n')) {
+      const m = line.match(/^TUI_GATEWAY_SECRET=(.+)$/);
+      if (m) return m[1].trim().replace(/^["']|["']$/g, '');
+    }
+  } catch { /* host may not have this file */ }
+  return String(process.env.TUI_GATEWAY_SECRET || '').trim();
+}
+
+/**
+ * A personal web UI login link: a freshly minted ?token= URL no cache or
+ * snapshot has ever seen, so it always loads live (the Mini App button's
+ * fixed URL can be served a stale saved copy with no server signal). Same
+ * short-lived chat-bound bearer the gateway accepts on query; nothing new
+ * is trusted. Pure (sensor-covered); '' when anything is missing.
+ */
+export function personalWebUiLink({ webUrl, botId, chatId, secret, ttlSec = WEB_LINK_TTL_SEC, now = Date.now() } = {}) {
+  if (!webUrl || !botId || chatId === undefined || chatId === null || String(chatId) === '' || !secret) return '';
+  const token = issueToken({ botId: String(botId), chatId: String(chatId), secret, ttlSec, now });
+  return `${String(webUrl).replace(/\/+$/, '')}/?token=${encodeURIComponent(token)}`;
+}
+
 export class ProgressRenderer {
   constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, heartbeatMs, progressMode = 'gist', dryRun = false, providerLabel = '', modelLabel = '', thinking = '', onMessageId = null }) {
     this.api = api;
@@ -1967,6 +2067,33 @@ export async function noteUsage({ chatId, result, eff, config, caches, totals, l
 export function workLocation() {
   if (process.env.BOT_LOCATION) return process.env.BOT_LOCATION;
   return os.homedir() === '/root' ? 'mobile' : 'vps';
+}
+
+/**
+ * The name of THIS machine, which is not the same question as workLocation().
+ *
+ * workLocation() answers "which compute pool should this turn run on" and
+ * answers `vps` on this box. The nudge inbox is keyed by the machine's own
+ * identity: every sweep (pending_sweep, session_link, watch_activity,
+ * proof_linker) reads `~/.agents/location`, and the duty tells agents to read
+ * `~/.agents/nudges/inbox-<location>.md`. Writing proposals to
+ * `inbox-vps.md` when the duty says `inbox-vps-france.md` files them where
+ * nobody looks — a proposal no agent will ever read is the same as no proposal.
+ *
+ * `BOT_MACHINE` overrides for tests and for a box with no location file.
+ */
+export function machineLocation() {
+  const override = String(process.env.BOT_MACHINE || '').trim();
+  if (override) return override;
+  try {
+    const declared = fs.readFileSync(path.join(os.homedir(), '.agents', 'location'), 'utf8')
+      .trim()
+      .split(/\s+/)[0];
+    if (declared) return declared;
+  } catch {
+    /* no location file: fall through to the pool name */
+  }
+  return workLocation();
 }
 
 /**
@@ -3252,6 +3379,22 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       } catch {
         // fall through to the button below
       }
+      // Split solution (plan/WEBUI_MIGRATION.md): opencode chats get the DOM web
+      // UI first (native scroll, real text, same sessions via serve) with the
+      // terminal as fallback; every other lane keeps the TUI button only —
+      // cline/grok/freebuff have no web UI to point at.
+      const webUiUrl = tuiSurface.sharedSession ? readWebUiUrl() : '';
+      const freshWebLink = webUiUrl
+        ? personalWebUiLink({ webUrl: webUiUrl, botId: config.id, chatId, secret: gatewaySecretFromHostEnv() })
+        : '';
+      const openButtons = [
+        ...(freshWebLink
+          ? [{ text: '🌐 Open web UI', url: freshWebLink }]
+          : webUiUrl
+            ? [{ text: '🌐 Open web UI', web_app: { url: `${webUiUrl}/?bot=${config.id}` } }]
+            : []),
+        { text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } },
+      ];
       await api.sendMessage(chatId, [
         moved ? '⚠️ *The tunnel was reconnected*, so any earlier /tui button is dead — use this one.' : null,
         tuiSurface.sharedSession
@@ -3265,8 +3408,9 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           ? 'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.'
           : 'It runs under tmux, so closing the Mini App keeps your place, and you can reopen the same thread whenever you want.',
         'We both keep working with it open. The terminal waits for a turn I am running, and I wait for a turn you started — one at a time, never two writers at once. Opening it proves you are the Telegram user this chat belongs to, so there is no password to remember.',
+        ...(webUiUrl ? [`🌐 Prefer reading over typing? The *web UI* shows this same conversation as a normal page — scrolls natively, no terminal frames.${freshWebLink ? ' The button above is minted fresh for this tap and lasts 15 minutes.' : ''}`] : []),
       ].filter(Boolean).join('\n'), {
-        reply_markup: { inline_keyboard: [[{ text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } }]] },
+        reply_markup: { inline_keyboard: [openButtons] },
       });
       return;
     }
@@ -3421,6 +3565,32 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       await handleTxCommand({ api, config, chatId, arg: cmd.args, lane: parseModelRef(eff.model).surface });
       return;
     }
+
+    case 'notify': {
+      // Finish alerts for runs started outside Telegram (finish-watch.mjs
+      // reads the same prefs file). Default on; `notify: false` silences.
+      const sub = String(cmd.args || '').trim().toLowerCase();
+      const kept = prefFor(prefs, chatId);
+      if (sub === 'off') {
+        setPref(prefs, chatId, { ...kept, notify: false });
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, '🔕 Finish alerts off for this chat — runs you start elsewhere stay there.');
+        return;
+      }
+      if (sub === 'on') {
+        const { notify: _dropped, ...rest } = kept;
+        setPref(prefs, chatId, rest);
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, '🔔 Finish alerts on for this chat — when a run you start in the web UI or TUI finishes, its answer lands here and the thread continues on either surface.');
+        return;
+      }
+      const on = kept?.notify !== false;
+      await api.sendMessage(chatId, on
+        ? '🔔 Finish alerts are on for this chat. `/notify off` silences them.'
+        : '🔕 Finish alerts are off for this chat. `/notify on` brings them back.');
+      return;
+    }
+
 
     case 'resume': {
       if (running.get(chatId)) {
@@ -3941,6 +4111,18 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         }
         return;
       }
+      if (sub === 'link' || sub.startsWith('link ')) {
+        // The four document links, from the workspace registry. A lookup, so it
+        // is not under the running-guard (nothing is written and no lane is
+        // called) and it needs no argument to be useful: `/health link` gives
+        // all four, `/health link test plan` gives one and where the rest are.
+        // Routed through answerHealthGroup so the command and the room's plain
+        // "give me the link" are the same turn, not two readers of the registry.
+        const ws = KNOWN_PROJECTS[projectId]?.workspace || KNOWN_PROJECTS['external-health'].workspace;
+        const res = await answerHealthGroup({ mode: 'link', roleId: null, question: rawArgs.slice(4).trim(), workspace: ws });
+        await api.sendMessage(chatId, res.text);
+        return;
+      }
       if (sub === 'doctor') {
         // The seat that checks the other seats. It writes only its own report;
         // a refusal (no credential, a report the checker refuses) writes
@@ -4065,6 +4247,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
       return;
     }
+    case 'tell': {
+      // B2B-1: one bounded message to one named seat. Everything about this is
+      // refusal-first — an unresolvable target, an absent --ref or a tripped
+      // bound all send nothing and say why in one line.
+      const verdict = await sendPeerHandoff({ config, args: cmd.args || '' });
+      await api.sendMessage(chatId, verdict.text);
+      break;
+    }
+
     case 'location': {
       const loc = workLocation();
       if (!cmd.args) {
@@ -4628,6 +4819,24 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
         midstreamDead.push(model);
         attemptResult = { ...attemptResult, finalText: '' };
       }
+      // A bare connectivity-probe echo (PONG) is not an answer: it
+      // leaks in through the shared opencode session and must never be
+      // delivered as the turn's reply. Empty it so the failover chain tries
+      // the next lane; on the last lane the run surfaces as an error.
+      // Never throws: a filter hiccup must not cost the chat its answer.
+      try {
+        const echoText = String(attemptResult?.finalText || '').trim();
+        if (echoText && isUnpromptedProbeEcho(echoText, prompt) && !isAborted()) {
+          console.log(`[${config?.id}] ${model} answered bare probe echo ${JSON.stringify(echoText.slice(0, 40))}; treating as no answer`);
+          attemptResult = {
+            ...attemptResult,
+            finalText: '',
+            lastError: `bare probe echo (${echoText.slice(0, 40)}) instead of an answer — nothing was computed, send your message again`,
+          };
+        }
+      } catch {
+        // fall through with the original attempt result
+      }
       // One retry, and only for a transport failure. A quota answer is final
       // for that lane and the ledger stamp already says so. Two ECONNREFUSEDs
       // in a row is not a blip, so the lane gets a short cooldown and the walk
@@ -4912,7 +5121,648 @@ export async function answerBriefAsk({ projectId = 'external-health', botId = ''
   return { answered: true, usedModel: false, text: formatRefreshText(res), markdown: true };
 }
 
-async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0 }) {
+/**
+ * Build and send one b2b envelope (B2B-1). Exported so the sensor can prove the
+ * refusal paths without a network: every failure returns text that says what
+ * stopped it, and sends nothing.
+ */
+export async function sendPeerHandoff({ config, args = '', api = null, stateDirPath = null, policy = undefined, peers = undefined, now = Date.now() } = {}) {
+  const root = stateDirPath || path.join(HOME, '.local', 'state', 'bot-host');
+  const peersMap = peers === undefined ? peersFromEnv() : peers;
+  const resolvedPolicy = policy === undefined ? process.env.TG_SENDER_POLICY : policy;
+
+  const refuse = (code, reason, extra = '') => ({
+    ok: false,
+    code,
+    reason,
+    text: `🤖↔️ not sent — ${reason}${extra}`,
+    envelope: null,
+  });
+
+  const match = String(args).match(/^\s*(\S+)\s+([\s\S]+)$/);
+  if (!match) {
+    return refuse('BAD_ARGS', 'usage: /tell <bot> "<text>" --ref <ticket-key>');
+  }
+  const target = match[1].trim();
+  let body = match[2].trim();
+  const refMatch = body.match(/\s*--ref\s+(\S+)\s*$/);
+  const ref = refMatch ? refMatch[1] : '';
+  if (refMatch) body = body.slice(0, refMatch.index).trim();
+  if (!ref) return refuse('NO_REF', 'a handoff must name tracked work: add --ref <ticket-key>');
+  if (!body) return refuse('NO_BODY', 'nothing to say — /tell <bot> "<text>" --ref <ticket-key>');
+
+  // Policy, peer resolution and every bound are decided inside sendPeerEnvelope,
+  // so `/tell` and a peer-driven delegation cannot drift apart.
+  return sendPeerEnvelope({
+    config,
+    to: target,
+    kind: 'ask',
+    ref,
+    body,
+    // A plain `/tell` starts its own conversation with that seat, exactly as it
+    // always has. Chaining is opt-in and explicit — see sendPeerEnvelope.
+    chainId: `tell:${config.id}:${target}`,
+    api,
+    root,
+    peers: peersMap,
+    policy: resolvedPolicy,
+    now,
+  });
+}
+
+/**
+ * Put one envelope on the wire to a peer seat. This is the only function that
+ * sends peer traffic, so every bound and every refusal is applied in one place
+ * whether the sender was a human typing `/tell` or a peer whose turn just ended.
+ *
+ * `chainId` is the caller's to choose. `/tell` passes a fresh per-pair id; a
+ * collaboration passes one id for every round, which is what keeps depth, turn
+ * count and the terminal flag attached to the whole negotiation instead of
+ * restarting at each hop.
+ */
+export async function sendPeerEnvelope({
+  config,
+  to,
+  kind = 'ask',
+  ref,
+  body,
+  chainId,
+  replyTo = '-',
+  api = null,
+  root = null,
+  peers = undefined,
+  policy = undefined,
+  now = Date.now(),
+} = {}) {
+  const stateRoot = root || path.join(HOME, '.local', 'state', 'bot-host');
+  const peersMap = peers === undefined ? peersFromEnv() : peers;
+  const resolvedPolicy = policy === undefined ? process.env.TG_SENDER_POLICY : policy;
+  const target = String(to || '').trim();
+
+  const refuse = (code, reason, extra = '') => ({
+    ok: false,
+    code,
+    reason,
+    text: `🤖↔️ not sent — ${reason}${extra}`,
+    envelope: null,
+  });
+
+  if (!target) return refuse('BAD_ARGS', 'no peer seat named');
+  if (!ref) return refuse('NO_REF', 'a handoff must name tracked work: add --ref <ticket-key>');
+  if (!body) return refuse('NO_BODY', 'nothing to say');
+
+  const verdict = sendVerdict({ policy: resolvedPolicy, peers: peersMap, from: config.id, to: target });
+  if (!verdict.ok) {
+    const extra = verdict.peers?.length ? `\n\naddressable peers: ${verdict.peers.join(', ')}` : '';
+    return refuse(verdict.code, verdict.reason, extra);
+  }
+
+  const named = resolvePeerUsername(stateRoot, target);
+  if (!named.ok) return refuse(named.code, `${named.reason} (${named.botId || target})`);
+
+  // The chain id goes into the envelope BEFORE it is rendered. `checkSendBounds`
+  // also sets it on the returned envelope, but by then the chat text has already
+  // been built — and the text is what the peer's classifier reads, so a chain
+  // that only existed on the local object would never reach the wire and every
+  // reply would land in a fresh chain.
+  const effectiveChain = String(chainId || `tell:${config.id}:${target}`);
+  const built = encodeEnvelope({
+    from: config.id,
+    to: target,
+    kind,
+    ref,
+    body,
+    depth: 1,
+    now,
+    reply_to: replyTo,
+    chain: effectiveChain,
+  });
+  if (!built.ok) return refuse(built.code, built.reason);
+
+  // Root-relative, like the classifier's lookup: the caller owns the root, so a
+  // test can never write into a live seat's state dir.
+  const ledgerPath = path.join(stateRoot, config.id, 'handoff.json');
+  const bounded = checkSendBounds({
+    ledger: readJson(ledgerPath, emptyLedger()),
+    edge: verdict.edge,
+    now,
+    chainId: effectiveChain,
+    envelope: built.envelope,
+  });
+  if (!bounded.ok) {
+    const file = deadLetter(process.env.TG_DEAD_LETTER_DIR || path.join(process.cwd(), 'specs', 'bot-handoff-dead-letter'), {
+      envelope: built.envelope,
+      code: bounded.code,
+      reason: bounded.reason,
+      at: now,
+    });
+    return refuse(bounded.code, `${bounded.reason}${file ? '' : ' (dead-letter write also failed)'}`);
+  }
+  try {
+    writeJson(ledgerPath, bounded.ledger);
+  } catch (err) {
+    return refuse('LEDGER_WRITE', `could not record the send: ${err.message}`);
+  }
+
+  // Where the bytes land. A private bot-to-bot chat has exactly two members —
+  // the two bots — so a handoff sent there is invisible to the operator, which
+  // is what "I didn't see anything on tg" turned out to mean. When
+  // TG_B2B_GROUP_ID is set, the human's group is the transport instead; the
+  // envelope still names the SEAT, so the receiving half is unchanged and a
+  // group message and a private one are the same message.
+  const groupId = String(process.env.TG_B2B_GROUP_ID || '').trim();
+  const wireTo = groupId || named.username;
+  const where = groupId ? `group ${groupId}` : `dm ${named.username}`;
+
+  const telegram = api || new TelegramApi(resolveToken(config));
+  try {
+    const res = await telegram.call('sendMessage', {
+      chat_id: wireTo,
+      text: built.text,
+      // LOUD by default. This started silent, on the reasoning that a handoff is
+      // machine traffic and the operator does not want a buzz per message. Then
+      // the operator asked to be aware of the traffic as it happens, and a
+      // silent channel is indistinguishable from a broken one — three hops went
+      // past unseen before that was noticed.
+      //
+      // The bounds are what keep this from becoming spam, not the mute: the
+      // per-pair cooldown is 60s, so the worst case is one buzz per minute per
+      // pair, and the global send budget still applies on top.
+      // TG_B2B_NOTIFY=0 puts it back to silent without a deploy.
+      disable_notification: String(process.env.TG_B2B_NOTIFY ?? '1') === '0' ? 'true' : 'false',
+    });
+    return {
+      ok: true,
+      code: 'SENT',
+      envelope: bounded.envelope,
+      messageId: res?.message_id ?? null,
+      text: `📨 handed to ${wireTo} — ${ref} (depth ${bounded.envelope.depth}, id ${bounded.envelope.id}, via ${where})`,
+    };
+  } catch (err) {
+    return refuse('SEND_FAILED', `${named.username}: ${err.message}`);
+  }
+}
+
+/**
+ * The peers map, from the environment. The registry is frozen for this packet,
+ * and it is the right call anyway: peers are a *deployment* fact about which
+ * seat may address which on this box, not a property of the bot.
+ */
+function peersFromEnv() {
+  const raw = String(process.env.TG_PEERS_JSON || '').trim();
+  if (!raw) return {};
+  try {
+    return normalizePeers(JSON.parse(raw));
+  } catch (err) {
+    console.error(`[b2b] TG_PEERS_JSON is not valid JSON, treating as empty: ${err.message}`);
+    return {};
+  }
+}
+
+/**
+ * Bot-to-bot ingress (B2B-1). Decides what an update is BEFORE the
+ * allowedUserIds gate, because that gate is a user-id check: once Telegram
+ * delivers `from.is_bot=true` on the existing long-poll, a bot sender is
+ * refused there and this code would never run.
+ *
+ * Three outcomes, and only the first may become a turn:
+ *   human       — the ordinary path, untouched
+ *   bot-handoff — a valid, in-bounds proposal from an allowlisted seat
+ *   bot-refused — anything else, dead-lettered with the reason
+ *
+ * A bot-sourced update NEVER starts an agent turn. It files one line in the
+ * location nudge inbox and returns. That is the whole loop defence on the
+ * receive side: 20.6% of confirmed infinite-agentic-loop findings in real
+ * projects are multi-agent chat without a turn bound.
+ *
+ * Exported for the sensor in tests/bot-host.test.ts — the classification is the
+ * contract, not the plumbing.
+ */
+export function classifyInboundSender({ message, stateDirPath, self, policy, peers, ledger = emptyLedger(), now = Date.now() } = {}) {
+  const from = message?.from;
+  const type = senderTypeOf(from);
+  if (type === null) return { kind: 'unknown', code: 'SENDER_UNKNOWN', reason: 'update has no sender id' };
+  if (type === HUMAN) return { kind: 'human' };
+
+  const resolvedPolicy = resolvePolicy(policy);
+  if (resolvedPolicy === 'humans-only') {
+    return {
+      kind: 'bot-refused',
+      code: 'POLICY_HUMANS_ONLY',
+      reason: 'bot-to-bot is off for this seat (TG_SENDER_POLICY)',
+    };
+  }
+
+  const seat = findSeatByUsername(stateDirPath, from?.username);
+  if (!seat) {
+    return {
+      kind: 'bot-refused',
+      code: 'SENDER_UNKNOWN_SEAT',
+      reason: `no seat claims @${String(from?.username || '').replace(/^@/, '')}`,
+    };
+  }
+
+  const verdict = receiveVerdict({ policy: resolvedPolicy, peers, from: seat.seat, to: self });
+  if (!verdict.ok) {
+    return {
+      kind: 'bot-refused',
+      code: verdict.code,
+      reason: verdict.reason,
+      seat: seat.seat,
+      addressable: verdict.peers || [],
+    };
+  }
+
+  const decoded = decodeEnvelope(message?.text || message?.caption || '');
+  if (!decoded.ok) {
+    return { kind: 'bot-refused', code: decoded.code, reason: decoded.reason, seat: seat.seat };
+  }
+  if (decoded.envelope.from !== seat.seat) {
+    return {
+      kind: 'bot-refused',
+      code: 'FROM_MISMATCH',
+      reason: `envelope claims from=${decoded.envelope.from} but the sender is ${seat.seat}`,
+      seat: seat.seat,
+    };
+  }
+
+  const bounded = checkReceiveBounds({ ledger, envelope: decoded.envelope, now, self, edge: verdict.edge });
+  if (!bounded.ok) {
+    return { kind: 'bot-refused', code: bounded.code, reason: bounded.reason, seat: seat.seat, envelope: decoded.envelope, ledger: bounded.ledger };
+  }
+  return {
+    kind: 'bot-handoff',
+    seat: seat.seat,
+    envelope: bounded.envelope,
+    ledger: bounded.ledger,
+    edge: verdict.edge,
+    // Whether this envelope was allowed to cost an agent turn, and whether this
+    // round has now collected two agreements. Both are decided in the bounds,
+    // not here, so no caller can widen them.
+    spendsTurn: bounded.spendsTurn,
+    converged: bounded.converged,
+    round: bounded.round,
+    turnsUsed: bounded.turnsUsed,
+    maxTurns: bounded.maxTurns,
+    maxRounds: bounded.maxRounds,
+  };
+}
+
+/**
+ * Run one delegated turn and hand the result to the peer.
+ *
+ * `handleMessage` is reused whole rather than reimplemented: the delegation gets
+ * the same session, the same lane, the same model preference, the same progress
+ * render and the same skill loading as a message the human typed. That is the
+ * whole point — a peer's request must not be a lesser turn than the operator's.
+ *
+ * The synthetic message is attributed to the operator's own user id because that
+ * is the id the seat's user gate checks, and because the work belongs in the
+ * operator's chat. The PROVENANCE IS NOT FAKED: the prompt's first line says
+ * plainly that this is not from the human, so the model is told the truth even
+ * though the transport is the human's chat.
+ */
+export async function runDelegatedTurn({
+  config,
+  api,
+  envelope,
+  verdict,
+  handleMessage,
+  runContext = {},
+  now = Date.now(),
+} = {}) {
+  const cfg = delegationConfig(process.env, { self: config.id });
+  if (!cfg.ok) {
+    console.warn(`[${config.id}] b2b delegation refused: ${cfg.reason}`);
+    return { ok: false, code: cfg.code, reason: cfg.reason, text: '' };
+  }
+
+  // The chat the work belongs in: the operator's own private chat with this
+  // seat. That is where the human reads it and where the finished letter lands.
+  const operatorId = Number(config.telegram?.allowedUserIds?.[0] || 0);
+  if (!operatorId) {
+    return { ok: false, code: 'NO_OPERATOR', reason: 'seat has no allowedUserIds to run delegated work in', text: '' };
+  }
+  const chatId = String(operatorId);
+
+  // One seat, one turn at a time per chat. A delegation that arrives while the
+  // operator is mid-request waits rather than colliding with it — a lost turn
+  // here would silently truncate the collaboration, which is worse than a wait.
+  const busy = runContext.busy;
+  const waitedFor = Date.now();
+  while (busy?.has(chatId) && Date.now() - waitedFor < 90_000) {
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (busy?.has(chatId)) {
+    console.warn(`[${config.id}] b2b delegation skipped: the operator's chat was still busy after 90s`);
+    return { ok: false, code: 'CHAT_BUSY', reason: 'the operator chat stayed busy', text: '' };
+  }
+
+  const root = path.join(HOME, '.local', 'state', 'bot-host');
+  let source = '';
+  if (cfg.sheetId) {
+    const src = await fetchDelegationSource({
+      sheetId: cfg.sheetId,
+      tabs: cfg.sourceTabs,
+      cachePath: delegationSourcePath(root, cfg.sheetId),
+      now,
+    });
+    source = src.ok ? src.text : '';
+    console.log(`[${config.id}] b2b source material ${src.cached ? 'read from cache' : src.note}: ${source.length} chars`);
+  }
+
+  const turnsLeft = Math.max(0, (verdict.maxTurns || DEFAULTS.maxTurns) - (verdict.turnsUsed || 0));
+  const prompt = delegationPrompt(envelope, {
+    self: config.id,
+    round: verdict.round || 1,
+    turnsLeft,
+    maxRounds: verdict.maxRounds || DEFAULTS.maxRounds,
+    source,
+  });
+
+  console.log(
+    `[${config.id}] b2b DELEGATED TURN from ${verdict.seat} kind=${envelope.kind} `
+    + `ref=${envelope.ref} round=${verdict.round} turn=${verdict.turnsUsed}/${verdict.maxTurns}`,
+  );
+
+  // `delegation` is the capture slot: handleMessage writes the finished text
+  // into it, so the host — not the model — decides what goes back on the wire.
+  const capture = { text: '' };
+  const synthetic = {
+    message_id: envelope.id,
+    date: Math.floor(now / 1000),
+    chat: { id: operatorId, type: 'private' },
+    from: { id: operatorId, is_bot: false, first_name: 'operator' },
+    text: prompt,
+  };
+
+  try {
+    await handleMessage({
+      ...runContext,
+      api,
+      config,
+      message: synthetic,
+      // A delegated turn is not a follow-up of anything; keep it at depth 0 so
+      // the follow-up queue cannot chain further turns off it.
+      depth: 0,
+      delegation: capture,
+    });
+  } catch (err) {
+    console.error(`[${config.id}] b2b delegated turn failed: ${err.message}`);
+    return { ok: false, code: 'TURN_FAILED', reason: err.message, text: '' };
+  }
+
+  const text = String(capture.text || '').trim();
+  if (!text) {
+    console.warn(`[${config.id}] b2b delegated turn produced no text; nothing sent to ${verdict.seat}`);
+    return { ok: false, code: 'EMPTY_TURN', reason: 'the turn returned no text', text: '' };
+  }
+
+  const { agreed, letter } = readAgreement(text);
+  const chainId = chainIdOf(envelope);
+
+  // The host decides the reply kind. A turn that printed the verdict marker
+  // becomes an `agree` (terminal); anything else is `feedback` back to the peer
+  // for the next pass. The model cannot choose, and cannot send.
+  const sent = await sendPeerEnvelope({
+    config,
+    to: verdict.seat,
+    kind: agreed ? 'agree' : 'feedback',
+    ref: envelope.ref,
+    body: letter.slice(0, HANDOFF_DEFAULTS.maxBodyChars),
+    chainId,
+    replyTo: envelope.id,
+    api,
+    root,
+  });
+
+  console.log(
+    `[${config.id}] b2b replied ${sent.ok ? sent.code : sent.code} to ${verdict.seat}: `
+    + `kind=${agreed ? 'agree' : 'feedback'} round=${verdict.round} `
+    + `${sent.ok ? '' : `(${sent.reason})`}`,
+  );
+
+  // Both flags in hand means both seats have agreed in this round. Only the
+  // seat that receives the second agree can see this, which is exactly the seat
+  // that should close the chain and deliver the letter.
+  let converged = Boolean(verdict.converged);
+  let delivered = null;
+  if (agreed) {
+    const ledgerPath = path.join(root, config.id, 'handoff.json');
+    const led = readJson(ledgerPath, emptyLedger());
+    const rec = led.chains?.[chainId] || {};
+    converged = rec.peerAgree === rec.ourAgree && Boolean(rec.ourAgree);
+  }
+  if (converged) {
+    delivered = await api.sendMessage(
+      chatId,
+      `🤝 **${config.id} and ${verdict.seat} agree** on \`${envelope.ref}\` after ${verdict.round} round(s).\n\n${letter}`,
+      { parse_mode: 'Markdown' },
+    ).then(() => true).catch((err) => {
+      console.error(`[${config.id}] b2b agreement could not be delivered: ${err.message}`);
+      return false;
+    });
+    console.log(`[${config.id}] b2b CONVERGED on ${envelope.ref} (round ${verdict.round}); letter ${delivered ? 'delivered' : 'NOT delivered'}`);
+  }
+
+  return { ok: sent.ok, code: sent.code || 'SENT', agreed, converged, delivered, text: letter, chainId };
+}
+
+/* ==================================================================== B2B-2 ===
+ * DELEGATION: the one place a peer message is allowed to spend a model turn.
+ *
+ * WHAT IS DIFFERENT FROM EVERY OTHER PEER MESSAGE
+ * -----------------------------------------------
+ * `ask`, `answer`, `blocked` and `handoff-request` file a line in the inbox and
+ * cost nothing. A `delegate` or a `feedback` instead runs a real agent turn on
+ * this seat, because two seats that cannot hand work to each other are two
+ * note-takers rather than two collaborators.
+ *
+ * WHY THAT IS SAFE ANYWAY
+ * -----------------------
+ * 1. Opt-in per seat. TG_B2B_DELEGATE is unset everywhere by default, and the
+ *    policy still has to be humans-and-allowlisted-bots for a bot sender to get
+ *    this far at all. Two independent switches, both off by default.
+ * 2. The bounds were already applied before we get here. checkReceiveBounds has
+ *    counted the turn, refused an over-budget chain and refused an over-round
+ *    one; this function cannot start a turn the bounds did not permit.
+ * 3. The MODEL NEVER TOUCHES THE WIRE. It writes text. This process wraps that
+ *    text in an envelope, applies the send bounds, and sends. A model that
+ *    ignores its instructions costs one turn and the chain stops — it cannot
+ *    address a peer, forge a depth, or spend a second turn.
+ * 4. The turn runs in the operator's own private chat with this seat, not in
+ *    the group. So the human watches the work live, the final letter arrives
+ *    where they read it, and a group message cannot be mistaken for a command.
+ * 5. The collaboration peer is a fixed, declared pair — the same directed edge
+ *    that had to exist for the message to be accepted at all — not anything
+ *    the envelope names.
+ */
+
+/** The seat this one collaborates with, and whether delegation is on at all. */
+export function delegationConfig(env = process.env, { self = '', peers = null } = {}) {
+  const on = String(env.TG_B2B_DELEGATE || '').trim() === '1';
+  const peer = String(env.TG_B2B_AUTO_PEER || '').trim();
+  if (!on || !peer) return { ok: false, code: 'DELEGATE_OFF', reason: 'peer delegation is not enabled (TG_B2B_DELEGATE / TG_B2B_AUTO_PEER)' };
+  const map = peers || peersFromEnv();
+  // The peer must already be a declared edge. Re-checked here so a typo in the
+  // environment fails at configuration time instead of at the first message.
+  if (!map?.[self] || !map[self][peer]) {
+    return { ok: false, code: 'TARGET_UNKNOWN', reason: `${self} has no declared edge to ${peer} in TG_PEERS_JSON` };
+  }
+  return {
+    ok: true,
+    peer,
+    ref: String(env.TG_B2B_REF || 'b2b-collab').trim() || 'b2b-collab',
+    sheetId: String(env.TG_B2B_SHEET || '').trim(),
+    sourceTabs: String(env.TG_B2B_SOURCE_TABS || 'GP letter,Medical results').trim(),
+  };
+}
+
+/**
+ * The material both seats review, read ONCE and cached on disk.
+ *
+ * Two reviewers must argue about the same bytes. If each seat fetched the sheet
+ * itself at a different moment they could end up reviewing different versions
+ * and "we disagree" would really mean "we read different things" — a loop that
+ * burns rounds on a phantom disagreement. So the host reads it, writes it once
+ * with its content hash and modification time, and both turns read that file.
+ *
+ * A seat with no working Google credential is the failure this avoids: handed
+ * only a link it would have produced a confident letter about a document it
+ * never opened.
+ */
+export function delegationSourcePath(stateRoot, sheetId) {
+  return path.join(stateRoot, 'b2b-source', `${String(sheetId).replace(/[^A-Za-z0-9_-]/g, '')}.md`);
+}
+
+/**
+ * Read the named tabs of the sheet into one text block. Zero-burn on failure:
+ * returns '' and logs, and the prompt then says plainly that no source was
+ * available rather than pretending the reviewers had seen something.
+ */
+export async function fetchDelegationSource({ sheetId, tabs = '', cachePath = '', ttlMs = 900_000, now = Date.now() } = {}) {
+  if (!sheetId) return { ok: true, text: '', cached: false, note: 'no sheet configured' };
+  try {
+    const stat = fs.statSync(cachePath);
+    if (now - stat.mtimeMs < ttlMs) {
+      return { ok: true, text: fs.readFileSync(cachePath, 'utf8'), cached: true, note: 'from cache' };
+    }
+  } catch { /* no cache yet */ }
+
+  try {
+    const { loadHostEnv, identityFromEnv, accessToken, SCOPES } = await import('./lib/google-store.mjs');
+    const { env } = loadHostEnv('b2b-collab');
+    const who = identityFromEnv(env);
+    if (!who.ok) return { ok: false, note: who.reason || 'no Google identity on this host' };
+    const tok = await accessToken(who, { scopes: Object.values(SCOPES) });
+    if (!tok?.ok || !tok.token) return { ok: false, note: tok?.error || 'could not mint a Google token' };
+    const auth = { authorization: `Bearer ${tok.token}` };
+    const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(sheetId)}?fields=${encodeURIComponent('properties,sheets.properties')}`, { headers: auth });
+    const meta = await metaRes.json();
+    if (!metaRes.ok) return { ok: false, note: JSON.stringify(meta).slice(0, 200) };
+    const available = (meta.sheets || []).map((x) => x.properties.title);
+    const wanted = String(tabs || '').split(',').map((t) => t.trim()).filter(Boolean);
+    const chosen = wanted.length ? wanted.filter((t) => available.includes(t)) : available;
+    const chunks = [`# ${meta.properties?.title || sheetId} (read ${new Date(now).toISOString()})`];
+    for (const tab of chosen) {
+      const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(sheetId)}/values/${encodeURIComponent(tab)}`, { headers: auth });
+      const v = await r.json();
+      if (!r.ok) { chunks.push(`\n## ${tab}\n(unreadable)`); continue; }
+      chunks.push(`\n## ${tab}`);
+      for (const row of (v.values || [])) {
+        // One quoted CSV line per cell is how this sheet stores a table; join on
+        // a visible separator so a reviewer can still read the columns.
+        chunks.push(row.map((c) => String(c ?? '').replace(/\s*\n\s*/g, ' ⏎ ')).join(' | '));
+      }
+    }
+    const text = chunks.join('\n');
+    if (cachePath) {
+      fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+      fs.writeFileSync(cachePath, text, 'utf8');
+    }
+    return { ok: true, text, cached: false, note: 'fetched' };
+  } catch (err) {
+    return { ok: false, note: String(err?.message || err).slice(0, 200) };
+  }
+}
+
+/**
+ * Run one bot-sourced update: persist the ledger, dead-letter a refusal, and
+ * file the proposal. Returns the classification so the caller can log it.
+ */
+async function handlePeerHandoff({ config, message, verdict, runDelegation = null } = {}) {
+  const dir = stateDir(config.id);
+  const deadLetterDir = process.env.TG_DEAD_LETTER_DIR
+    || path.join(process.cwd(), 'specs', 'bot-handoff-dead-letter');
+  try {
+    writeJson(path.join(dir, 'handoff.json'), verdict.ledger);
+  } catch (err) {
+    console.error(`[${config.id}] b2b ledger write failed: ${err.message}`);
+  }
+
+  if (verdict.kind === 'bot-refused') {
+    const file = deadLetter(deadLetterDir, {
+      envelope: verdict.envelope || null,
+      code: verdict.code,
+      reason: verdict.reason,
+    });
+    console.warn(
+      `[${config.id}] b2b refused ${verdict.code}${verdict.seat ? ` from ${verdict.seat}` : ''}: ${verdict.reason}`
+      + `${file ? ` -> ${file}` : ' (dead-letter write failed)'}`,
+    );
+    return verdict;
+  }
+
+  // A `delegate` or a `feedback` is the B2B-2 exception: it may start a real
+  // agent turn, but only after the bounds above have counted and permitted it,
+  // and only when the seat has delegation switched on. Everything else — and
+  // everything else still, if delegation is off — lands here as a proposal.
+  if (runDelegation && TURNS_KINDS.includes(String(verdict.envelope?.kind))) {
+    const result = await runDelegation({ config, message, verdict });
+    if (result?.ok !== false || result?.code !== 'DELEGATE_OFF') {
+      return { ...verdict, delegation: result };
+    }
+    console.warn(`[${config.id}] b2b ${result.code} for ${verdict.envelope?.kind}; filing as a proposal instead`);
+  }
+
+  // A proposal, not a turn. The owning seat decides; this process does not act.
+  const inbox = path.join(os.homedir(), '.agents', 'nudges', `inbox-${machineLocation()}.md`);
+  const line = proposalLine(verdict.envelope, { self: config.id });
+  try {
+    fs.mkdirSync(path.dirname(inbox), { recursive: true });
+    fs.appendFileSync(inbox, `${line}\n`, 'utf8');
+    console.log(`[${config.id}] b2b proposal from ${verdict.seat} ref ${verdict.envelope.ref} in chat ${message?.chat?.id ?? '?'} -> ${inbox}`);
+  } catch (err) {
+    console.error(`[${config.id}] b2b proposal could not be filed: ${err.message} (envelope ${verdict.envelope.id})`);
+  }
+  return verdict;
+}
+
+async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0, delegation = null }) {
+  // Bot-to-bot first: a bot sender must be classified before the user-id gate,
+  // which would otherwise drop it silently and leave the operator guessing.
+  if (senderTypeOf(message?.from) === BOT) {
+    const verdict = classifyInboundSender({
+      message,
+      stateDirPath: path.join(HOME, '.local', 'state', 'bot-host'),
+      self: config.id,
+      policy: process.env.TG_SENDER_POLICY,
+      peers: peersFromEnv(),
+      ledger: readJson(path.join(stateDir(config.id), 'handoff.json'), emptyLedger()),
+    });
+    await handlePeerHandoff({
+      config,
+      message,
+      verdict,
+      runDelegation: (ctx) => runDelegatedTurn({
+        ...ctx,
+        api,
+        handleMessage,
+        runContext: { throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy },
+      }),
+    });
+    return;
+  }
   // Same boundary rule as handleCallback: one String type for chat ids
   // everywhere downstream, so disk round-trips stop invalidating sessions.
   const chatId = String(message.chat.id);
@@ -5021,6 +5871,17 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
     busy.add(chatId);
     const workspace = KNOWN_PROJECTS['external-health'].workspace;
+    // A link ask is a registry lookup: no seats, no lane, no typing indicator,
+    // and nothing to wait for. It is answered and posted here, and the guard is
+    // released immediately because no turn is occupying the room — which is also
+    // why it is not turned away by one that is. Purely additive: the seat path
+    // below is untouched.
+    if (healthTurn.mode === 'link') {
+      busy.delete(chatId);
+      const linkReply = await answerHealthGroup({ ...healthTurn, workspace });
+      if (linkReply?.text) await api.sendMessage(chatId, linkReply.text).catch(() => {});
+      return;
+    }
     console.log(`[${config.id}] health group ${healthTurn.mode}${healthTurn.roleId ? ` ${healthTurn.roleId}` : ''}`);
     let reply;
     let typing;
@@ -5275,9 +6136,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   // terminal looks, from the chat, like the bot ran something twice. The note
   // rides the progress line's first paint rather than being its own message, so
   // an ordinary turn is not made noisier by it.
-  // Assigned inside the turn body, once the workspace is known. Declared out here
-  // because the presence note below is emitted before that code runs. Absent
+  // Assigned inside the turn body, once the workspace is known. Absent
   // means "no session for this workspace yet" — the first turn after a switch.
+  // The TUI presence note below reads it, so it runs after the resolve.
   let turnSessionId = null;
 
   busy.add(chatId);
@@ -5336,21 +6197,6 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // at once; the old lazy path left only bare typing until the first
     // model event, which on a slow lane looks stuck.
     await renderer.announce().catch(() => {});
-    // A TUI is open on this same conversation, so the user can watch this turn
-    // happen in the terminal as well. It shares the session, so what runs here
-    // shows up there — one turn at a time, never two at once.
-    //
-    // Only true on a lane with a shared session. Cline's terminal resumes the
-    // LAST Cline thread and each new message starts a fresh one, so claiming
-    // "same session" there would be a lie the user discovers by watching a turn
-    // that never appears. Say the true thing instead.
-    if (tuiIsAttached(config.id, turnSessionId)) {
-      const openSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
-      await api.sendMessage(chatId, openSurface.sharedSession
-        ? '⌨️ A TUI is open on this conversation — you can watch this turn in the terminal. Same session, so it shows up in both; one turn at a time.'
-        : `⌨️ A ${openSurface.tool} terminal is open, but ${openSurface.tool} cannot resume a thread headlessly — this turn will not appear there. The terminal stays on the last ${openSurface.tool} thread.`
-      ).catch(() => {});
-    }
     const handoff = prefFor(prefs, chatId).handoff || '';
     const quotedPrompt = buildQuotedPrompt(text, message.reply_to_message);
     const basePrompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${quotedPrompt}` : quotedPrompt;
@@ -5467,10 +6313,33 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // scaffolding never lands in the chat's transcript or the TUI.
     if (isPingTurn) turnSessionId = null;
 
-    // The session id travels once, via runOpencode's `sessionId`
-    // (buildOpencodeArgs appends `--session` when it is set). The turn path
-    // used to also push `--session` into extraArgs here, so the child argv
-    // carried the flag twice — remove that push, pass it once.
+
+    // A TUI is open on this same conversation, so the user can watch this turn
+    // happen in the terminal as well. It shares the session, so what runs here
+    // shows up there — one turn at a time, never two at once.
+    //
+    // Only true on a lane with a shared session. Cline's terminal resumes the
+    // LAST Cline thread and each new message starts a fresh one, so claiming
+    // "same session" there would be a lie the user discovers by watching a turn
+    // that never appears. Say the true thing instead.
+    //
+    // This runs AFTER the resolve above on purpose: it used to run before the
+    // headline announce with turnSessionId still null, and a null wanted
+    // matches any lease — so the chat was told "same session" for a TUI on a
+    // different conversation. No session yet (first turn) means no claim.
+    if (turnSessionId && tuiIsAttached(config.id, turnSessionId)) {
+      const openSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
+      await api.sendMessage(chatId, openSurface.sharedSession
+        ? '⌨️ A TUI is open on this conversation — you can watch this turn in the terminal. Same session, so it shows up in both; one turn at a time.'
+        : `⌨️ A ${openSurface.tool} terminal is open, but ${openSurface.tool} cannot resume a thread headlessly — this turn will not appear there. The terminal stays on the last ${openSurface.tool} thread.`
+      ).catch(() => {});
+    }
+
+    // Only when a tx view is NOT live: with one, the session comes from the
+    // work-session row instead. The id is workspace-scoped now, so a chat that
+    // switched project passes nothing here rather than the previous project's
+    // conversation — which the tool would happily resume, in the wrong tree.
+    if (workSession.viewMode !== 'tui' && turnSessionId) extraArgs.push('--session', turnSessionId);
     try { observer = createObserver(workSession); } catch {}
     observerContext = { model: eff.model, attempt: 1, surface: ref.surface, provider: ref.surface };
     // Local fanout: headline + observer log always. The feed is
@@ -6014,6 +6883,18 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         };
       }
       await renderer.finish(displayResult, { footer: usageText });
+
+      // B2B-2: publish the finished text to whoever is hosting this turn. For a
+      // human message there is no host and `delegation` is null, so this is a
+      // single null check on the ordinary path. For a delegated turn the host
+      // reads this string and puts it in an envelope — the model never sees the
+      // wire, which is the property the whole design rests on.
+      if (delegation) {
+        delegation.text = String(displayResult?.finalText || '').trim();
+        delegation.usage = displayResult?.usage || null;
+        delegation.finishedAt = Date.now();
+      }
+
       // Failproof-sync (turn-end hook): the pane shows whatever the last
       // attach resolved; the chat follows whatever just bound. On a
       // shared-session lane a mismatch means the open terminal is showing
@@ -6056,6 +6937,13 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       observer.write('failed', {}, observerContext || {});
     }
     await api.sendMessage(chatId, `Error: ${err.message}`).catch(() => {});
+    if (delegation) {
+      // Deliberately left EMPTY, not the error text: the host must not forward a
+      // failure notice to a peer as though it were the work. An empty capture is
+      // how it learns the turn did not finish.
+      delegation.text = '';
+      delegation.error = String(err?.message || err).slice(0, 200);
+    }
   } finally {
     renderer.stopTyping();
     running.delete(chatId);
@@ -6366,6 +7254,19 @@ async function main() {
 // Group addressing needs to know who this process is. Without it, five bots in
 // one group would all answer everything.
 config.me = { id: Number(me.id) || 0, username: String(me.username || '') };
+  // Write down who we are, so another seat can address us by name without
+  // holding our token or asking Telegram on its message path. Read back by
+  // `resolvePeerUsername` / `findSeatByUsername` in lib/tg-peers.mjs.
+  try {
+    writeJson(path.join(stateDir(config.id), 'identity.json'), {
+      id: config.id,
+      username: config.me.username,
+      telegramId: config.me.id,
+      at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error(`[${config.id}] identity.json write failed (peer addressing unavailable): ${err.message}`);
+  }
   try {
     assertValidCommands(BOT_COMMANDS);
     await api.call('setMyCommands', { commands: toTelegramCommands() });

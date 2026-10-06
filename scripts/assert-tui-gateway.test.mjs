@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal, isWebStatic, verifyWithRefererFallback } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -467,45 +467,54 @@ console.log('assert-tui-gateway:');
     check('a small nudge does not scroll', keys.length === t0);
     check('a nudge is not taken off the page', prevented === 0);
 
-    // Down: one page key per eighth of the screen. pagePx() = 700/8 = 88px,
-    // so a 300px upward drag crosses ~3 steps (paced: at most one key per
-    // 300ms window, so the first touchmove fires once).
+    // Fine granularity: a LINE of travel emits the line keys, not a page key.
+    // A page key is a WHOLE screen, so keying on pagePx made any drag feel
+    // like a few full-screen jumps however far the finger travelled. linePx is
+    // 18px, so a 300px drag crosses ~16 lines (capped at MAX_LINE_KEYS per
+    // touchmove, paced to LINE_COOLDOWN_MS).
     reset();
     let b = keys.length;
     drag(600, 300, 6);
-    const downKeys = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 34);
-    check('an upward drag scrolls later, as PageDown',
-      downKeys.length >= 1 && downKeys.length <= 3);
-    check('page keys carry no modifiers (both lanes bind the bare key)',
-      downKeys.every((k) => k.ctrlKey === false && k.altKey === false && k.metaKey === false));
-    check('page keys name the key both lanes bind',
-      downKeys.every((k) => k.key === 'PageDown' && k.code === 'PageDown'));
+    const fineDown = keys.slice(b).filter((k) => k.type === 'keydown');
+    // Per gesture step the bridge sends BOTH lanes' finest keys, because the
+    // two binding sets are disjoint (opencode ctrl+alt, cline ctrl+meta) and
+    // the bridge cannot know which lane is behind the terminal.
+    const lineKeys = fineDown.filter((k) => k.key === 'e');
+    const halfKeys = fineDown.filter((k) => k.key === 'd');
+    check('an upward drag sends the opencode LINE key (ctrl+alt+e)',
+      lineKeys.length >= 1 && lineKeys.every((k) => k.ctrlKey === true && k.altKey === true));
+    check('...and the cline half-page key (ctrl+meta+d), since the bridge',
+      halfKeys.length >= 1 && halfKeys.every((k) => k.ctrlKey === true && k.metaKey === true));
+    check('the two lanes never both fire on one binding (disjoint modifiers)',
+      lineKeys.every((k) => k.metaKey === false) && halfKeys.every((k) => k.altKey === false));
+    check('a drag emits more steps than the old one-page-per-drag bridge',
+      lineKeys.length >= 3, `only ${lineKeys.length} line keys`);
+    check('one touchmove never floods (MAX_LINE_KEYS per move)',
+      lineKeys.length <= 6 * 6);
     check('a key is released as well as pressed',
-      keys.slice(b).some((k) => k.type === 'keyup' && k.keyCode === 34));
+      keys.slice(b).some((k) => k.type === 'keyup' && k.key === 'e'));
     check('the drag is taken off the page once scrolling', prevented >= 1);
+    check('NO bare page key is sent while the fine path works',
+      fineDown.every((k) => k.key !== 'PageDown' && k.key !== 'PageUp'));
 
-    // Up: same pacing. Same distance, so without pacing it would be
-    // a burst; page keys jump a full page, so at most one may escape.
+    // A tap smaller than one line must not scroll: a tap still types.
+    // reset() first: drag() never sends touchend, so without it this gesture
+    // inherits the previous one's y0 and reads as a huge jump.
+    reset();
+    const t1 = keys.length;
+    handlers.touchstart({ touches: [{ clientY: 600 }] });
+    handlers.touchmove({ touches: [{ clientY: 594 }], preventDefault() { prevented += 1; } });
+    check('a sub-line nudge does not scroll', keys.length === t1);
+
+    // Up: the opposite direction sends y / u, not e / d.
     reset();
     b = keys.length;
     drag(300, 600, 6);
-    const upBurst = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 33).length;
-    check('a burst of up steps is paced to the cooldown', upBurst <= 1);
-
-    // After the cooldown, up scrolls again.
-    reset();
-    b = keys.length;
-    drag(300, 600, 6);
-    check('up scrolls again once the cooldown has passed',
-      keys.slice(b).some((k) => k.type === 'keydown' && k.keyCode === 33 && k.altKey === false));
-
-    // A long down drag is capped per touchmove, not throttled overall.
-    b = keys.length;
-    reset();
-    handlers.touchstart({ touches: [{ clientY: 700 }] });
-    handlers.touchmove({ touches: [{ clientY: 0 }], preventDefault() { prevented += 1; } });
-    const jump = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 34).length;
-    check('one touchmove never fires more than three pages', jump <= 3 && jump >= 1);
+    const fineUp = keys.slice(b).filter((k) => k.type === 'keydown');
+    check('a downward drag sends the opencode line key (ctrl+alt+y)',
+      fineUp.some((k) => k.key === 'y' && k.ctrlKey === true && k.altKey === true));
+    check('...and the cline half-page key (ctrl+meta+u)',
+      fineUp.some((k) => k.key === 'u' && k.ctrlKey === true && k.metaKey === true));
 
     // Multi-touch is left alone so pinch-zoom survives.
     reset();
@@ -522,6 +531,48 @@ console.log('assert-tui-gateway:');
     handlers.touchend({});
     check('a flick adds momentum, capped at six steps',
       keys.slice(b).filter((k) => k.type === 'keydown').length <= 6);
+  }
+
+  // 12a7. The bridge binds on EVERY renderer, and there is a reason it is
+  //       worth stating because getting it wrong cost a phone its scrolling.
+  //
+  //       A previous pass added a stand-down: "on a DOM-rendered terminal the
+  //       browser scrolls natively, so unbind". That reasoning was WRONG.
+  //       opencode runs in ALT-SCREEN mode — the TUI owns the screen and
+  //       repaints in place — so there is no document flow and no scrollback to
+  //       scroll. Measured live: viewport scrollHeight == clientHeight, body
+  //       overflow hidden, wheel and PageUp change nothing. The DOM renderer
+  //       changes how text is PAINTED, not what is scrollable, and the bridge
+  //       is not competing with native scroll: it IS the scroll.
+  //
+  //       So this now pins the opposite: both renderers must keep the bridge.
+  //       If someone re-adds a renderer-conditional unbind, this goes red.
+  {
+    const runShim = (renderer) => {
+      const bound = {};
+      const rows = { children: [1, 2, 3] };
+      const screenEl = {
+        clientWidth: 360, clientHeight: 700,
+        querySelector: (sel) => (sel === 'canvas'
+          ? (renderer === 'canvas' ? {} : null)
+          : (sel === '.xterm-rows' ? rows : null)),
+        addEventListener: (ev, fn) => { bound[ev] = fn; },
+        removeEventListener: () => {},
+      };
+      const doc = { querySelector: (s) => (s === '.xterm-screen' ? screenEl : null) };
+      const timers = [];
+      new Function('window', 'document', 'KeyboardEvent', 'performance', 'setInterval', 'clearInterval', 'requestAnimationFrame', TOUCH_SCROLL_JS)(
+        { addEventListener: () => {} }, doc,
+        function KeyboardEvent(type, init) { this.type = type; Object.assign(this, init); },
+        { now: () => 1000 },
+        (fn) => { timers.push(fn); return timers.length; }, () => {}, () => 1,
+      );
+      for (const t of timers) t();
+      return bound;
+    };
+    check('a canvas-rendered terminal gets the drag bridge', !!runShim('canvas').touchmove);
+    check('a DOM-rendered terminal STILL gets it (alt-screen has no native scroll)',
+      !!runShim('dom').touchmove);
   }
 
   // 12a5. TEMP-DEBUG: the geometry readout rides on the landing redirect only
@@ -691,6 +742,72 @@ console.log('assert-tui-gateway:');
   check('no cookie gets no socket token', (await serveToken('vm', '/tty/token', false)).code === 401);
 }
 
+// Cookieless browser TUI: a plain browser holds no gateway cookie, and the
+// ttyd client's ./token fetch carries no query token of its own — but every
+// request carries the landed page URL as same-host Referer, and a verified
+// ?token= on the TUI root deep-links to its own terminal path (live
+// 2026-10-05: headless cookieless page loaded, socket died on a 401 ./token).
+{
+  const CRED = Buffer.from('tui:x').toString('base64');
+  const env = {
+    TUI_GATEWAY_SECRET: SECRET,
+    TUI_BOT_ID: 'vm',
+    TUI_BOT_TOKEN_VM: TOKEN,
+    TUI_BOT_TOKEN_VM2: TOKEN,
+    TUI_TTYD_URL: 'http://127.0.0.1:1',
+    TUI_TTYD_CREDENTIAL: CRED,
+  };
+  const token = issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+  const refOf = `https://t.example/?token=${encodeURIComponent(token)}`;
+  const call = (url, headers) => new Promise((resolve, reject) => {
+    let code = 0; let hh = {};
+    const res = {
+      writeHead: (c, h) => { code = c; hh = h || {}; },
+      write: () => true,
+      end: () => resolve({ code, h: hh }),
+    };
+    createGateway({ env, log: () => {} })(
+      { method: 'GET', url, headers, [Symbol.asyncIterator]: async function* () {} }, res).catch(reject);
+    setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+  });
+  const noCookie = { host: 't.example', referer: refOf };
+  check('a cookieless socket token with a page referer is admitted',
+    (await call('/tty/token', noCookie)).code === 200);
+  check('a foreign referer gets no socket token',
+    (await call('/tty/token', { host: 't.example', referer: `https://evil.test/?token=${encodeURIComponent(token)}` })).code === 401);
+  check('authz stays strict by design (Caddy consumes the response, not the browser)',
+    (await call('/authz', noCookie)).code === 401);
+  check('authz still admits the socket query token Caddy forwards',
+    (await call(`/authz?token=${encodeURIComponent(token)}`, { host: 't.example' })).code === 204);
+  check('an expired page referer renews the socket token within grace',
+    await (async () => {
+      const old = issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900, now: Date.now() - 1020000 });
+      const r = await call('/tty/token', { host: 't.example', referer: `https://t.example/?token=${encodeURIComponent(old)}` });
+      return r.code === 200 && String(r.h['set-cookie'] || '').includes(COOKIE_NAME);
+    })());
+  check('a tokened TUI root deep-links to the terminal path, never the bootstrap',
+    await (async () => {
+      const r = await call(`/?token=${encodeURIComponent(token)}`, { host: 't.example' });
+      return r.code === 302 && String(r.h.location || '').startsWith('/tty/')
+        && String(r.h['set-cookie'] || '').includes(COOKIE_NAME);
+    })());
+  check('a bare TUI root still gets the cold bootstrap',
+    await (async () => {
+      const chunks = [];
+      const code = await new Promise((resolve, reject) => {
+        const res = { writeHead: (c) => resolve(c), write: (c) => { chunks.push(Buffer.from(c)); return true; }, end: () => {} };
+        createGateway({ env, log: () => {} })(
+          { method: 'GET', url: '/', headers: { host: 't.example' }, [Symbol.asyncIterator]: async function* () {} }, res).catch(reject);
+        setTimeout(() => resolve(-2), 5000).unref?.();
+      });
+      return code === 200;
+    })());
+  check('the fallback prefers direct tokens and otherwise needs the referer',
+    verifyWithRefererFallback({ headers: { host: 't.example', cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` } }, new URL('http://x/'), SECRET).ok === true
+    && verifyWithRefererFallback({ headers: { host: 't.example', referer: refOf } }, new URL('http://x/'), SECRET).ok === true
+    && verifyWithRefererFallback({ headers: { host: 't.example' } }, new URL('http://x/'), SECRET).ok === false);
+}
+
 // 12. The bot forge mounted under /forge: the gateway owns the hostname and the
 // door, and the creation is the injected handler — the gateway never learns how
 // to create a bot, so there is still one creation path.
@@ -738,6 +855,253 @@ console.log('assert-tui-gateway:');
   check('the forge door refuses a forged hash', authorizeForgeAtGateway({ initData: forged, env, now }).ok === false);
   const otherKey = crypto.createHmac('sha256', 'WebAppData').update('987654:OTHER-BOT-TOKEN').digest();
   check('the forge door refuses a token this gateway does not hold', authorizeForgeAtGateway({ initData: makeInitData(fresh(), { secretKey: otherKey }), env, now }).ok === false);
+}
+
+// 14. The opencode web UI host (split solution): the whole host past the
+//     Telegram door proxies to serve with the serve credential substituted,
+//     so a browser never holds it. Live 2026-10-04: the first wiring proxied
+//     Caddy straight at serve, whose door answered {"ok":false,"error":"bad
+//     token"} with no way to ever log in — the gateway must own the exchange.
+{
+  const hostOf = (h) => ({ host: h });
+  check('the web host matches, case-insensitively, port stripped',
+    isWebUiHost({ headers: hostOf('Web.Test:443') }, { OPENCODE_WEB_HOST: 'web.test' }) === true);
+  check('the tui host is not the web host',
+    isWebUiHost({ headers: hostOf('tui.health-tracking.duckdns.org') }, { OPENCODE_WEB_HOST: 'web.test' }) === false);
+  check('no host header is not the web host',
+    isWebUiHost({ headers: {} }, {}) === false);
+  check('the default web host is the served one',
+    webUiHost({}) === 'web.health-tracking.duckdns.org');
+  check('the serve credential is composed as Basic, never bare',
+    webUiAuthHeader({ OPENCODE_WEB_PASSWORD: 'pw' }) === `Basic ${Buffer.from('opencode:pw').toString('base64')}`
+    && !webUiAuthHeader({ OPENCODE_WEB_PASSWORD: 'pw' }).includes('pw:'));
+  check('no serve password means no header (503 downstream, never anonymous)',
+    webUiAuthHeader({}) === '');
+
+  // Through the handler against a stub serve: the stub records what the
+  // gateway sent upstream, so the credential substitution is proven, not
+  // asserted from source.
+  const seen = [];
+  const serve = http.createServer((rq, rs) => {
+    let body = '';
+    rq.on('data', (c) => { body += c; });
+    rq.on('end', () => {
+      seen.push({ url: rq.url, auth: rq.headers.authorization || '' });
+      if (String(rq.url || '').startsWith('/api/session')) {
+        rs.writeHead(200, { 'content-type': 'application/json' });
+        return rs.end('[{"id":"ses_test"}]');
+      }
+      rs.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      rs.end('<html><body>serve index</body></html>');
+    });
+  });
+  await new Promise((r) => serve.listen(0, '127.0.0.1', r));
+  const sport = serve.address().port;
+  const wenv = {
+    TUI_GATEWAY_SECRET: SECRET,
+    TUI_BOT_TOKEN_VM: TOKEN,
+    OPENCODE_WEB_HOST: 'web.test',
+    OPENCODE_WEB_UPSTREAM: `http://127.0.0.1:${sport}`,
+    OPENCODE_WEB_PASSWORD: 'servepw',
+  };
+  const whandle = createGateway({ env: wenv, log: () => {} });
+  const call = (url, headers) => new Promise((resolve) => {
+    // proxyPass iterates the request body, so the stub must be async-iterable.
+    const req = {
+      method: 'GET', url, headers: headers || {},
+      [Symbol.asyncIterator]: async function* () {},
+    };
+    const res = {};
+    // capture writeHead+end together: stash code, resolve on end.
+    // proxyPass streams via res.write with byte chunks, so the stub decodes.
+    let code = 0; let hh = {}; const chunks = [];
+    res.writeHead = (c, h) => { code = c; hh = h || {}; };
+    res.write = (c) => { chunks.push(Buffer.from(c)); return true; };
+    res.end = (body) => { if (body) chunks.push(Buffer.from(body)); resolve({ code, h: hh, body: Buffer.concat(chunks).toString('utf8') }); };
+    whandle(req, res).catch(() => resolve({ code: -1 }));
+    setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+  });
+  const wtoken = issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+  const wcookie = { host: 'web.test', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` };
+
+  const refused = await call('/api/session', { host: 'web.test' });
+  check('the web host without a token is refused, not proxied',
+    refused.code === 401 && refused.body.includes('bad token') && seen.length === 0);
+
+  const page = await call('/', wcookie);
+  check('a cookied token on the web host reaches serve, not the bootstrap',
+    page.code === 200 && page.body.includes('serve index'));
+
+  const api = await call('/api/session?directory=/x', { host: 'web.test', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` });
+  check('the api path and query survive the proxy',
+    api.code === 200 && api.body.includes('ses_test') && seen.some((s) => s.url === '/api/session?directory=/x'));
+  check('serve sees Basic, never the gateway token or nothing',
+    seen.filter((s) => s.url.startsWith('/api')).every((s) => s.auth === `Basic ${Buffer.from('opencode:servepw').toString('base64')}`));
+
+  const exch = await new Promise((resolve) => {
+    const res = { writeHead: (c, h) => resolve({ code: c, h: h || {} }), end: () => {} };
+    const initData = makeInitData(fresh());
+    whandle({ method: 'GET', url: `/?bot=vm&initData=${encodeURIComponent(initData)}`, headers: { host: 'web.test' } }, res)
+      .catch(() => resolve({ code: -1 }));
+    setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+  });
+  check('the web exchange lands back on / with a token, never on a ttyd path',
+    exch.code === 302 && String(exch.h.location || '').startsWith('/?token='));
+
+  const tuiRoot = await call('/', { host: 'tui.health-tracking.duckdns.org', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` });
+  check('a tokened TUI root deep-links to its own terminal path (bot isolation kept)',
+    tuiRoot.code === 302 && String(tuiRoot.h.location || '').startsWith('/tty/')
+    && !tuiRoot.body.includes('serve index'));
+
+  // Cookie planting: subresource requests carry no token of their own, so a
+  // token-authed proxy plants the presented token as the cookie — otherwise
+  // every asset 401s one by one (live 2026-10-05: the whole SPA failed to
+  // boot in a cookie-swallowing WebView).
+  const planted = await (() => new Promise((resolve) => {
+    const res = {};
+    let code = 0; let hh = {}; const chunks = [];
+    res.writeHead = (c, h) => { code = c; hh = h || {}; };
+    res.write = (c) => { chunks.push(Buffer.from(c)); return true; };
+    res.end = (body) => { if (body) chunks.push(Buffer.from(body)); resolve({ code, h: hh, body: Buffer.concat(chunks).toString('utf8') }); };
+    const req = {
+      method: 'GET', url: `/?token=${encodeURIComponent(wtoken)}`,
+      headers: { host: 'web.test' },
+      [Symbol.asyncIterator]: async function* () {},
+    };
+    whandle(req, res).catch(() => resolve({ code: -1 }));
+    setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+  }))();
+  check('a token-authed page plants the cookie for subresources',
+    planted.code === 200 && String(planted.h['set-cookie'] || '').includes(encodeURIComponent(wtoken)));
+  check('an already-cookied proxy does not replant',
+    await (async () => {
+      let setCookie = null;
+      await new Promise((resolve) => {
+        const res = {};
+        res.writeHead = (c, h) => { setCookie = h?.['set-cookie'] || null; };
+        res.write = () => true;
+        res.end = () => resolve();
+        const req = {
+          method: 'GET', url: `/?token=${encodeURIComponent(wtoken)}`,
+          headers: { host: 'web.test', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` },
+          [Symbol.asyncIterator]: async function* () {},
+        };
+        whandle(req, res).catch(() => resolve());
+        setTimeout(resolve, 5000).unref?.();
+      });
+      return setCookie === null;
+    })());
+  // Cookieless shim (live 2026-10-05: shell rendered "home" but stuck
+  // loading — WebViews swallow Set-Cookie entirely, so /api/* 401s forever).
+  // The gateway token authenticates AT the gateway; serve must never see it.
+  check('the gateway token is stripped before reaching serve',
+    seen.some((s) => s.url === '/') && !seen.some((s) => s.url.includes(encodeURIComponent(wtoken).slice(0, 12))));
+  check('a directory query survives while the token is stripped',
+    await (async () => {
+      seen.length = 0;
+      const r = await call(`/api/session?directory=/x&token=${encodeURIComponent(wtoken)}`, { host: 'web.test' });
+      return r.code === 200 && seen.some((s) => s.url === '/api/session?directory=/x');
+    })());
+  check('a query-tokened api call passes without any cookie (the shim path)',
+    await (async () => {
+      const r = await call(`/api/session?token=${encodeURIComponent(wtoken)}`, { host: 'web.test' });
+      return r.code === 200 && r.body.includes('ses_test');
+    })());
+  check('the shim persists the token and re-attaches it same-origin only',
+    webAuthShimJs().includes(WEB_AUTH_STORAGE_KEY)
+    && webAuthShimJs().includes('sessionStorage')
+    && webAuthShimJs().includes('EventSource')
+    && webAuthShimJs().includes('location.origin')
+    && !webAuthShimJs().includes('telegram.org'));
+  check('the served html carries the shim before the bundle',
+    planted.body.includes(WEB_AUTH_STORAGE_KEY)
+    && planted.body.indexOf(WEB_AUTH_STORAGE_KEY) < planted.body.indexOf('serve index'));
+  check('shim injection prefers head, falls back without one',
+    injectWebAuthShim('<html><head><title>t</title></head><body>x</body></html>').includes(`<head>${webAuthShimJs()}`)
+    && injectWebAuthShim('<html><body>x</body></html>').includes('<head>')
+    && injectWebAuthShim('plain').startsWith('<script>'));
+  check('upstream query keeps other params and drops only the token',
+    webUpstreamQuery('?directory=/x&token=abc') === '?directory=/x'
+    && webUpstreamQuery('?token=abc') === ''
+    && webUpstreamQuery('') === ''
+    && webUpstreamQuery('?directory=/x') === '?directory=/x');
+  // Referer fallback (live 2026-10-05: cookieless phone polls /api/event
+  // with no token anywhere the shim can attach — the parser-fired bundle
+  // and worker clients only carry the page URL as Referer).
+  const refOf = (token) => `https://web.test/?token=${encodeURIComponent(token)}`;
+  check('a cookieless asset with a same-host referer token is admitted',
+    await (async () => {
+      const r = await call('/_assets/index-x.js', { host: 'web.test', referer: refOf(wtoken) });
+      return r.code === 200;
+    })());
+  check('a cross-host referer token is refused, never proxied',
+    await (async () => {
+      const n = seen.length;
+      const r = await call(`/api/session?x=1`, { host: 'web.test', referer: `https://evil.test/?token=${encodeURIComponent(wtoken)}` });
+      return r.code === 401 && seen.length === n;
+    })());
+  check('a same-host referer without a token is refused',
+    await (async () => {
+      const r = await call('/api/session', { host: 'web.test', referer: 'https://web.test/?foo=1' });
+      return r.code === 401;
+    })());
+  check('refererToken takes the page token same-host only, never values',
+    refererToken({ headers: { host: 'web.test', referer: refOf(wtoken) } }) === wtoken
+    && refererToken({ headers: { host: 'web.test', referer: 'https://evil.test/?token=abc' } }) === ''
+    && refererToken({ headers: { host: 'web.test', referer: 'https://web.test/' } }) === ''
+    && refererToken({ headers: { host: 'web.test' } }) === ''
+    && refererToken({ headers: { host: 'web.test', referer: 'not a url' } }) === '');
+  check('refusal shapes name channels, never values',
+    describeWebRefusal({ headers: {} }, new URL('http://x/api/info')) === 'nocookie noreferer noquerytoken uastd'
+    && describeWebRefusal({ headers: { 'user-agent': 'HeadlessChrome/120' } }, new URL('http://x/api/info')).includes('uaheadless')
+    && describeWebRefusal({ headers: { 'user-agent': 'Mozilla/5.0 (Linux; Android 14; Pixel) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120 Mobile Safari/537.36; wv)' } }, new URL('http://x/api/info')).includes('uawv')
+    && describeWebRefusal({ headers: { host: 'web.test', referer: refOf(wtoken) } }, new URL('http://x/api/info')).includes('referertoken')
+    && describeWebRefusal({ headers: { host: 'web.test', referer: 'https://evil.test/?token=abc' } }, new URL('http://x/api/info')).includes('refererforeign')
+    && !describeWebRefusal({ headers: { host: 'web.test', referer: refOf(wtoken) } }, new URL('http://x/api/info')).includes(wtoken.slice(0, 8)));
+  // Shim beacon: unauthenticated 204 that logs booleans only, plus the
+  // request's own shape (proves whether the patched fetch attached).
+  check('the diag beacon answers without auth and logs booleans only',
+    await (async () => {
+      let logged = '';
+      const h = createGateway({ env: wenv, log: (m) => { logged += m + '\n'; } });
+      const r = await new Promise((resolve) => {
+        const res = {};
+        res.writeHead = (c, hh) => { res.code = c; };
+        res.end = () => resolve(res);
+        const req = { method: 'GET', url: '/__shim_diag?u=1&s=0&p=1', headers: { host: 'web.test' }, [Symbol.asyncIterator]: async function* () {} };
+        h(req, res).catch(() => resolve({ code: -1 }));
+        setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+      });
+      return r.code === 204 && /shim-diag u=1 s=0 p=1/.test(logged) && !logged.includes(wtoken.slice(0, 8));
+    })());
+  check('the shim phones home once unpatched and once through the patch',
+    webAuthShimJs().includes('/__shim_diag?u=') && webAuthShimJs().includes('&p=1') && webAuthShimJs().includes('keepalive'));
+  check('the shim unregisters stale service workers',
+    webAuthShimJs().includes('getRegistrations') && webAuthShimJs().includes('unregister'));
+  // Static bypass (live 2026-10-05: parser-fired bundle + worker install run
+  // outside every page patch, so gating public build output bricks the app).
+  check('static build output is public code, data routes are not',
+    isWebStatic('/_assets/index-x.js') && isWebStatic('/sw.js')
+    && isWebStatic('/site.webmanifest') && isWebStatic('/favicon.ico')
+    && isWebStatic('/icons/prod/favicon.ico')
+    && !isWebStatic('/') && !isWebStatic('/api/session')
+    && !isWebStatic('/api/event') && !isWebStatic('/__shim_diag'));
+  check('dot-segment escape still lands behind the door',
+    await (async () => {
+      const n = seen.length;
+      const r = await call('/_assets/../api/session', { host: 'web.test' });
+      return r.code === 401 && seen.length === n;
+    })());
+  check('a credential-less bundle fetch reaches serve, stripped and Basic-only',
+    await (async () => {
+      seen.length = 0;
+      const r = await call('/_assets/index-x.js', { host: 'web.test' });
+      return r.code === 200 && seen.some((s) => s.url === '/_assets/index-x.js')
+        && seen.every((s) => s.auth === `Basic ${Buffer.from('opencode:servepw').toString('base64')}`);
+    })());
+  check('proxied html clears site caches so no stale shell survives',
+    planted.h['clear-site-data'] === '"cache"');
+  serve.close();
 }
 
 console.log(`\n${passed} pass, ${failed} fail`);

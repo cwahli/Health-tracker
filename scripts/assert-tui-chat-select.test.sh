@@ -156,17 +156,51 @@ grep -q 'list-clients -t "$TMUX_NAME"' "$ATTACH" \
 grep -q 'aggressive-resize on' "$ATTACH" \
   && { echo "  PASS  the pane keeps the largest client size"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  the pane shrinks to the smallest client"; FAIL=$((FAIL + 1)); }
-# 10d. Both shipped units must allow several browser clients on the one shell:
+# 10d. Every shipped unit must allow several browser clients on the one shell:
 #      --max-clients 1 is the "tap Enter, never reconnects" loop (the desktop
 #      holds the only slot, the phone gets no PTY, ttyd shows its overlay
 #      forever). 0 = no cap.
-for unit in tui-ttyd-vm tui-ttyd-vm2; do
+#
+#      vm3 is in this list because it was NOT, and that is how vm3 shipped with
+#      --max-clients 1 while its two siblings read 0 — the loop this check
+#      exists for was live on the newest unit and nothing looked at it. A gate
+#      that names two of three units is not a gate; it is a sample.
+for unit in tui-ttyd-vm tui-ttyd-vm2 tui-ttyd-vm3; do
   if grep -q -- '--max-clients 0' "$HERE/$unit.service" 2>/dev/null; then
     echo "  PASS  $unit allows several clients on one shell"; PASS=$((PASS + 1))
   else
     echo "  FAIL  $unit caps clients (second device gets the reconnect loop)"; FAIL=$((FAIL + 1))
   fi
 done
+# 10e. The terminal's SCROLL GRANULARITY, and the renderer flag that is NOT the
+#      answer. Both belong here because the same investigation produced both.
+#
+#      opencode runs in alt-screen mode: it owns the whole screen and repaints in
+#      place, so there is NO document flow and NO scrollback. Measured live —
+#      viewport scrollHeight == clientHeight, body overflow hidden, wheel and
+#      PageUp change nothing. So a browser cannot scroll this terminal no matter
+#      how the text is painted, and scrolling has always worked by sending keys
+#      to the app.
+#
+#      rendererType=dom (ttyd's canvas->elements switch) was tried on vm3 and
+#      REVERTED: it made scrolling die on the phone and bought nothing, because
+#      painting is not scrolling. No unit may carry the flag; a unit that does is
+#      trading a working scroll for nothing.
+for unit in tui-ttyd-vm tui-ttyd-vm2 tui-ttyd-vm3; do
+  if grep -q 'rendererType' "$HERE/$unit.service" 2>/dev/null; then
+    echo "  FAIL  $unit sets a renderer flag (alt-screen has no native scroll to gain)"; FAIL=$((FAIL + 1))
+  else
+    echo "  PASS  $unit sets no renderer flag"; PASS=$((PASS + 1))
+  fi
+done
+# The scroll fix is the bridge sending LINE keys (opencode ctrl+alt+y/e), one per
+# line of finger travel, instead of a page key — a page key is a WHOLE screen,
+# which is what made a drag feel like a slideshow. Pinned in the gateway sensor;
+# here we only check the keys are named, so a rename cannot silently drop the
+# fine path back to pages.
+grep -q 'LINE_UP="y",LINE_DOWN="e"' "$HERE/tui-gateway.mjs" \
+  && { echo "  PASS  the bridge drives opencode's line keys"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the bridge no longer names the line keys (scroll is coarse again)"; FAIL=$((FAIL + 1)); }
 grep -q 'set-option -t "$TMUX_NAME" status off' "$ATTACH" \
   && { echo "  PASS  the tmux frame stays off the phone screen"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  the tmux frame stays off the phone screen"; FAIL=$((FAIL + 1)); }
