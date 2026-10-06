@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { TelegramApi, TelegramError, isSendableMedia } from './lib/tg-api.mjs';
 import { chunkForTelegram } from './lib/tg-copy-code.mjs';
-import { formatWorkingHeadline, ctxLimitFor, phaseLabelFor } from './lib/tg-progress.mjs';
+import { formatWorkingHeadline, formatUsageSuffix, ctxLimitFor, phaseLabelFor } from './lib/tg-progress.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
 import {
   BOT,
@@ -725,14 +725,55 @@ export function pickOfferedVariant(variant, offered) {
   return Array.isArray(offered) && offered.includes(variant) ? variant : undefined;
 }
 
-async function getContextLimit(config, caches, modelId) {
+/**
+ * Context window of a lane ref, from the OpenCode model catalog.
+ *
+ * A legacy `gemini:` ref runs through the direct Gemini API (the OpenCode
+ * `google/` provider needs a credential some hosts do not have wired) but
+ * names the SAME model the catalog knows as `google/…` — `GEMINI_TO_OPENCODE`
+ * is that mapping and `/model` migration already uses it. Without the hop the
+ * lookup missed, so `formatUsage` printed its no-limit fallback (`ctx 539
+ * tokens`) and the chat lost the `(16%)` share of the window for a lane whose
+ * window the catalog carries (live 2026-10-06: a turn that failed over to
+ * `gemini:gemini/gemini-3.8-flash`). Exported for the unit sensor.
+ */
+export async function getContextLimit(config, caches, modelId) {
   if (!caches.verbose) {
     caches.verbose = parseModelsVerbose(
       await listModelsVerbose({ opencodeBin: config.agent.opencodeBin, env: opencodeEnv(config) }),
     );
   }
-  const entry = caches.verbose.find((m) => m.id === modelId);
-  return entry?.context || 0;
+  const catalogLimit = (id) => caches.verbose.find((m) => m.id === id)?.context || 0;
+  const direct = catalogLimit(modelId);
+  if (direct) return direct;
+  const legacy = GEMINI_TO_OPENCODE[parseModelRef(modelId).id];
+  return legacy ? catalogLimit(legacy) : 0;
+}
+
+/**
+ * Context windows for the lanes a turn may walk, keyed by the lane ref, from
+ * the catalog the answer footer already reads.
+ *
+ * The headline's static map (`ctxLimitFor`) knows a handful of free lanes, so
+ * every other lane rendered a bare token count — no share of its window — even
+ * when the window is catalog truth (live 2026-10-06: a turn that failed over
+ * to `gemini:gemini/gemini-3.8-flash` ended with a bare `- 31.9K` and a
+ * `ctx 539 tokens` footer, on a model whose window the catalog carries).
+ * Best-effort by design: a lane the catalog cannot resolve is simply absent,
+ * and the headline keeps its old fallback rather than inventing a percentage.
+ */
+export async function laneContextLimits(config, caches, models = []) {
+  const out = new Map();
+  for (const model of Array.isArray(models) ? models : []) {
+    if (!model || out.has(model)) continue;
+    try {
+      const limit = await getContextLimit(config, caches, model);
+      if (limit > 0) out.set(model, limit);
+    } catch {
+      // an unknown lane is not an error — it just shows the bare count
+    }
+  }
+  return out;
 }
 
 async function getAgents(config, caches) {
@@ -1532,6 +1573,11 @@ export class ProgressRenderer {
     this.onMessageId = onMessageId;
     this.startedAt = null;
     this.usedTokens = null;
+    // The context window of the lane actually running, when the catalog knows
+    // it (set by the turn at attempt start, right beside setHeadline). 0 means
+    // unknown, and the headline then falls back to the static free-lane map —
+    // never a percentage invented from a missing limit.
+    this.ctxLimit = 0;
     this.messageId = null;
     this.edits = 0;
     this.creating = false;
@@ -1571,6 +1617,12 @@ export class ProgressRenderer {
     if (thinking != null) this.thinkingLevel = thinking;
   }
 
+  /** The running lane's context window, from the catalog (best-effort). */
+  setCtxLimit(limit) {
+    const value = Number(limit) || 0;
+    if (value > 0) this.ctxLimit = value;
+  }
+
   _tail(text, max = 180) {
     const oneLine = String(text ?? '').replace(/\s+/g, ' ').trim();
     if (!oneLine) return '';
@@ -1603,7 +1655,18 @@ export class ProgressRenderer {
     const elapsedSec = this.startedAt ? (now - this.startedAt) / 1000 : 0;
     if (this.settledLabel) {
       const modelBit = [this.providerLabel, this.modelLabel].filter(Boolean).join(' ');
-      lines.push(`${this.settledLabel}${modelBit ? ` · ${modelBit}` : ''} · ${Math.max(0, Math.round(elapsedSec))}s`);
+      // The usage block the working headline showed, built by the same helper.
+      // It used to be dropped here, so the ONE bubble the turn ends on — the
+      // one left at the bottom of the chat — was the only one with no tokens
+      // and no context percent, while the line it replaced seconds earlier had
+      // both (`✓ Done · Gemini … · 110s` beside a bare `ctx 539 tokens` footer,
+      // live 2026-10-06). Parity is by construction: both branches read the
+      // same fields through `formatUsageSuffix`.
+      const { suffix } = formatUsageSuffix({
+        used: this.usedTokens,
+        ctxLimit: this.ctxLimit || ctxLimitFor(this.modelLabel),
+      });
+      lines.push(`${this.settledLabel}${modelBit ? ` · ${modelBit}` : ''} · ${Math.max(0, Math.round(elapsedSec))}s${suffix}`);
     } else {
       lines.push(
         formatWorkingHeadline({
@@ -1612,7 +1675,7 @@ export class ProgressRenderer {
           thinking: this.thinkingLevel,
           elapsedSec,
           used: this.usedTokens,
-          ctxLimit: ctxLimitFor(this.modelLabel),
+          ctxLimit: this.ctxLimit || ctxLimitFor(this.modelLabel),
           detail: this.status,
         }),
       );
@@ -6732,12 +6795,19 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       envMode: turnEnvMode,
       opencodeBin: config.agent.opencodeBin,
     });
+    // The lanes this turn may walk (the ledger's own projection), and their
+    // context windows from the catalog — so the headline can show a share of
+    // the window on the lane that is actually answering, not only on the few
+    // lanes the static map happens to know. Best-effort, and it runs before the
+    // walk: the cache it reads is the one the footer reads anyway.
+    const turnLaneModels = laneChoice.models.length ? laneChoice.models : failoverModels(eff.model, config.agent.model);
+    const laneLimits = await laneContextLimits(config, caches, turnLaneModels);
     const result = await runOpencodeWithFailover({
       api,
       config,
       chatId,
       prompt: finalPrompt,
-      models: laneChoice.models.length ? laneChoice.models : failoverModels(eff.model, config.agent.model),
+      models: turnLaneModels,
       onCooldown: ({ model, errText }) => {
         console.log(`[${config.id}] ${model} connection-failed twice; cooling it down instead of retrying it next message`);
       },
@@ -6750,9 +6820,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         if (observer) observer.write('run_start', {}, observerContext);
         // A mid-turn failover (ledger missed it, the lane died at runtime)
         // must move the headline too, or the progress line keeps naming the
-        // dead lane while another one does the work.
+        // dead lane while another one does the work — and the same for the
+        // window the usage share is measured against: the lane's own, or the
+        // static fallback when the catalog has no row for it.
         try {
           renderer.setHeadline({ providerLabel: headlineForLane(model), modelLabel: chatLaneName(model) });
+          renderer.setCtxLimit(laneLimits.get(model));
         } catch {
           // a UI hiccup must never break failover
         }

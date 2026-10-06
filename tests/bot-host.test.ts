@@ -115,6 +115,8 @@ import {
   sweepOrphanedLeases,
   selectTurnLanes,
   formatFreemodelWithDepletion,
+  getContextLimit,
+  laneContextLimits,
 } from '../scripts/bot-host.mjs';
 import { isHardModelFailure, ensureBotLedger, withCatalogLanes, stampCooldown, CONNECTION_FAILED_COOLDOWN_MS, HARD_MODEL_FAILURE_COOLDOWN_MS, canonicalAllowanceLanes, planCodeForLane } from '../scripts/lib/free-lanes.mjs';
 import {
@@ -3112,6 +3114,88 @@ describe('TG tool surface M2 — progress ledger (plan/TG_TOOL_SURFACE.md)', () 
       expect(bubble).toMatch(/47s|46s|48s/);
       renderer.stopTyping();
     }
+  });
+
+  it('settled bubble keeps the usage — tokens and share — it showed while working', async () => {
+    // #581 built the settled line by hand and dropped the usage block, so the
+    // bubble the turn ENDS on showed no tokens and no context percent while
+    // the working line above it had both (live 2026-10-06).
+    const { renderer, edited, flush } = makeRenderer({ modelLabel: 'glm-4.7-free' });
+    renderer.messageId = 7;
+    renderer.startedAt = Date.now() - 50_000;
+    renderer.onEvent({ kind: 'step_finish', tokens: 39321 });
+    await flush();
+    expect(renderer._render()).toContain('- 39.3K/131.1K (30%)');
+    renderer.settle('✓ Done');
+    await flush();
+    const bubble = edited[edited.length - 1];
+    expect(bubble).toContain('✓ Done');
+    expect(bubble).toContain('- 39.3K/131.1K (30%)');
+    renderer.stopTyping();
+  });
+
+  it('settled bubble shows the bare count, never a fake percent, when the window is unknown', async () => {
+    const { renderer, edited, flush } = makeRenderer({ modelLabel: 'mimo-v2.6-flash-free' });
+    renderer.messageId = 7;
+    renderer.startedAt = Date.now() - 12_000;
+    renderer.onEvent({ kind: 'step_finish', tokens: 539 });
+    await flush();
+    renderer.settle('✓ Done');
+    await flush();
+    const bubble = edited[edited.length - 1];
+    expect(bubble).toContain('- 539');
+    expect(bubble).not.toContain('%');
+    renderer.stopTyping();
+  });
+
+  it('a lane the catalog knows gets its real window, set beside the headline', async () => {
+    // The static free-lane map has no row for a gemini lane, so without the
+    // turn handing the renderer the catalog's window the finished bubble showed
+    // a bare count on a model whose window is catalog truth.
+    const { renderer, edited, flush } = makeRenderer({ modelLabel: 'gemini/gemini-3.8-flash' });
+    renderer.messageId = 7;
+    renderer.startedAt = Date.now() - 110_000;
+    renderer.onEvent({ kind: 'step_finish', tokens: 31900 });
+    renderer.setCtxLimit(200000);
+    await flush();
+    expect(renderer._render()).toContain('- 31.9K/200.0K (16%)');
+    renderer.settle('✓ Done');
+    await flush();
+    expect(edited[edited.length - 1]).toContain('- 31.9K/200.0K (16%)');
+    renderer.stopTyping();
+  });
+});
+
+describe('context limit resolution (answer footer usage)', () => {
+  const caches = (rows: Array<{ id: string; context?: number }>) => ({ verbose: rows }) as never;
+
+  it('resolves a legacy gemini: lane through the catalog sibling the mapping names', async () => {
+    const catalog = caches([{ id: 'google/gemini-3.8-flash', context: 1000000 }]);
+    expect(await getContextLimit({} as never, catalog, 'gemini:gemini/gemini-3.8-flash')).toBe(1000000);
+    expect(await getContextLimit({} as never, catalog, 'google/gemini-3.8-flash')).toBe(1000000);
+  });
+
+  it('answers 0 — the honest no-limit fallback — for a lane the catalog cannot resolve', async () => {
+    const catalog = caches([{ id: 'opencode/mimo-v2.6-flash-free', context: 200000 }]);
+    expect(await getContextLimit({} as never, catalog, 'tokenharbor/mimo-v2.6-flash:free')).toBe(0);
+    expect(await getContextLimit({} as never, catalog, 'gemini:gemini/unknown-flash')).toBe(0);
+  });
+
+  it('maps the turn\'s lanes to their windows, and omits the ones it cannot resolve', async () => {
+    const catalog = caches([
+      { id: 'google/gemini-3.8-flash', context: 1000000 },
+      { id: 'opencode/mimo-v2.6-flash-free', context: 200000 },
+    ]);
+    const limits = await laneContextLimits({} as never, catalog, [
+      'gemini:gemini/gemini-3.8-flash',
+      'opencode/mimo-v2.6-flash-free',
+      'tokenharbor/mimo-v2.6-flash:free',
+      'opencode/mimo-v2.6-flash-free',
+    ]);
+    expect([...limits.entries()]).toEqual([
+      ['gemini:gemini/gemini-3.8-flash', 1000000],
+      ['opencode/mimo-v2.6-flash-free', 200000],
+    ]);
   });
 });
 
