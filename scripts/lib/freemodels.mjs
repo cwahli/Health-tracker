@@ -101,6 +101,9 @@ export function toModelRef(surface, id) {
     const full = String(id || '').startsWith('gemini/') ? id : `gemini/${id}`;
     return `gemini:${full}`;
   }
+  if (surface === 'freebuff') {
+    return String(id || '').startsWith('freebuff/') ? id : `freebuff/${id}`;
+  }
   // A chat-only lane id without a vendor path (e.g. provider `tokenharbor`,
   // model `mimo-v2.6-flash:free`) is not runnable as-is: the OpenCode CLI
   // answers `Invalid model reference` and the walk burns a turn on it every

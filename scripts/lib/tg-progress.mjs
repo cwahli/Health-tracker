@@ -76,6 +76,32 @@ export function ctxLimitFor(model) {
   return null;
 }
 
+/**
+ * The ` - 31.9K/200K (16%)` usage block, and the percentage it carries.
+ *
+ * ONE builder for every bubble that shows usage. #581 split bot-host's
+ * `_render()` into a working branch (`formatWorkingHeadline`) and a settled
+ * branch built by hand — and the settled line had no usage at all, so the
+ * count a user watched for the whole turn vanished from the bubble the turn
+ * ENDED on, and with it the only signal that the context is filling. The two
+ * renderers share this so they cannot drift apart again.
+ *
+ * `used` is the LIVE token count (bot-host step totals / the router's session
+ * status), not a session's cumulative total. A live `pct` wins over a derived
+ * one. No usable `used` means no suffix and no percentage — never a `0`.
+ */
+export function formatUsageSuffix({ used = null, ctxLimit = null, pct = null } = {}) {
+  let p = pct == null ? null : Number(pct);
+  if (!Number.isFinite(p)) p = null;
+  if (used == null || !Number.isFinite(Number(used))) return { suffix: '', pct: null };
+  let suffix = ` - ${formatTokenCount(used)}`;
+  const limit = Number(ctxLimit) || null;
+  if (limit) suffix += `/${formatTokenCount(limit)}`;
+  if (p == null && limit) p = Math.round(((Number(used) / limit) * 100) * 100) / 100;
+  if (p != null) suffix += ` (${p.toFixed(0)}%)`;
+  return { suffix, pct: p };
+}
+
 export function formatWorkingHeadline({
   providerLabel = 'OpenCode',
   modelLabel = '',
@@ -90,20 +116,9 @@ export function formatWorkingHeadline({
   const thinkBit =
     thinking && thinking !== 'default' && thinking !== 'none' ? ` (${thinking})` : '';
   const timeBit = `${Math.max(0, Math.round(Number(elapsedSec) || 0))}s`;
-  let ctxBit = '';
-  // pct may be supplied live (router session status); otherwise derive it
-  // from used/limit when the limit is known (bot-host step totals).
-  let p = pct == null ? null : Number(pct);
-  if (!Number.isFinite(p)) p = null;
-  if (used != null && Number.isFinite(Number(used))) {
-    ctxBit = ` - ${formatTokenCount(used)}`;
-    const limit = Number(ctxLimit) || null;
-    if (limit) ctxBit += `/${formatTokenCount(limit)}`;
-    if (p == null && limit) p = (Number(used) / limit) * 100;
-    if (p != null) ctxBit += ` (${p.toFixed(0)}%)`;
-  } else {
-    p = null;
-  }
+  // pct may be supplied live (router session status); otherwise derived from
+  // used/limit when the limit is known (bot-host step totals).
+  const { suffix: ctxBit, pct: p } = formatUsageSuffix({ used, ctxLimit, pct });
   const warn =
     p != null && p >= 75
       ? '\n⚠️ Context high — /compact if answers get lost or slow'

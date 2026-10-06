@@ -549,6 +549,9 @@ export function laneWalkRef(provider, model) {
     const id = String(model || '');
     return `gemini:${id.startsWith('gemini/') ? id : `gemini/${id}`}`;
   }
+  if (surface === 'freebuff') {
+    return String(model || '').startsWith('freebuff/') ? model : `freebuff/${model}`;
+  }
   // Mirror freemodels.toModelRef: a bare chat-only id keeps its vendor so the
   // walk emits a routable ref instead of an `Invalid model reference` burn.
   if (!surface || surface === 'opencode') return model;
