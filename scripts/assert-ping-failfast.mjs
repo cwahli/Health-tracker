@@ -52,6 +52,8 @@ import fs from 'node:fs';
 const src = fs.readFileSync(path.join(ROOT, 'scripts/bot-host.mjs'), 'utf8');
 check('turn path prefers pingModels over the ledger walk',
   src.includes('pingModels || (laneChoice.models.length'));
+check('displaced stays-on notice suppressed on ping turns',
+  src.includes('if (laneChoice.displaced && !isPingTurn)'));
 
 console.log(`\n${pass} pass, ${fail} fail`);
 if (fail > 0) {
