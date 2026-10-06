@@ -119,6 +119,7 @@ import {
   laneContextLimits,
   resetInBit,
   depletedLaneProse,
+} from '../scripts/bot-host.mjs';
 import { isHardModelFailure, ensureBotLedger, withCatalogLanes, stampCooldown, CONNECTION_FAILED_COOLDOWN_MS, HARD_MODEL_FAILURE_COOLDOWN_MS, canonicalAllowanceLanes, planCodeForLane } from '../scripts/lib/free-lanes.mjs';
 import { projectLanes, nextUsableLane, formatCompactAllowanceChat, annotateFreemodelEntries } from '../scripts/lib/free-lanes.mjs';
 import {
