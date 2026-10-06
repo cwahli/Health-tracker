@@ -404,8 +404,16 @@ jobs:
 
       # pack-fixture: BUG-8449 fixture traceability + packer rules. Host-profile
       # bootstrap uses the committed fixture HOME on clean runners (CI-safe).
+      #
+      # HOME is pinned for the same reason the failover step above pins it: this
+      # gate reads "does ~/.hermes exist" as "am I on a real host?" — and the
+      # prepush chain now runs tests/bot-host.test.ts, which creates ~/.hermes as
+      # a side effect. Without the pin the step flips to the real-profile path.
+      # Measured 2026-10-06, on the PR that put that suite into prepush: three
+      # failures (SOUL.md, config.yaml, MEMORY.md) and no "(fixture HOME)" note
+      # in the check names — the tell that the host branch had been taken.
       - name: Bug pack fixture gate (assert-bug-pack)
-        run: node scripts/assert-bug-pack.mjs
+        run: HOME="$(mktemp -d)" node scripts/assert-bug-pack.mjs
 
       # continuity: §4.10 route-shape + offline projection walk (no chat).
       - name: Bug ticket continuity gate (assert-bug-ticket-continuity)
