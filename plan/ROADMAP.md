@@ -35,11 +35,10 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 These are one plan. Do not start a later phase while an earlier phase is open. Do not give two agents the same file (`scripts/bot-host.mjs`, `scripts/lib/free-lanes.mjs`, `scripts/lib/work-session.mjs`).
 
-1. **Now — R-14.1.** Cards in [R14_1_AGENT_PLAN.md](./R14_1_AGENT_PLAN.md), card state and evidence in [R14_1_LIVE_PASS.md](./R14_1_LIVE_PASS.md) — cards 1–8 are in with sensors and Telegram evidence, and card 9 is paused on a human gate (a Grok-router bot token, and the never-connected phone). Product shape [LOCATION_AGNOSTIC_AGENTS.md](./LOCATION_AGNOSTIC_AGENTS.md). This builds the spine: one poller per token, `/location` only when a worker is connected, `/project` and `/role`, the allowance stamp, the next lane on the same worker, the disk pack, and `work-view`. Registry asserts do not close it.
-2. **Then — TUI steps 1–4.** [TUI_IMPLEMENTATION.md](./TUI_IMPLEMENTATION.md) rows S1–S8. Proposal: [TG_Tui_Proposal1.md](../TG_Tui_Proposal1.md). Do not follow [Tui_proposal2b.md](../Tui_proposal2b.md). This attaches a screen to the spine. It does not invent a second location switch. The TUI scorecard is not the website master scorecard.
-3. **Then — one live scorecard.** The only done gate is R-16 below, rows QS-1–QS-15, one pass, live evidence on every row. R-14.1's card list and the TUI rows S1–S11 are checkpoints inside that table. They are not a second or third scorecard. Evidence is pasted once.
-4. **Then — BOT-24's remaining packets.** The shared `/freemodel` and `/allowance` projection. QS-8 is that proof. Do not start those packets during phase 1.
-5. **Then — R-15.** Omni lanes, after the exam is green. It does not add a bot.
+1. **R-14.1 COMPLETE (2026-10-06).** Cards in [R14_1_AGENT_PLAN.md](./R14_1_AGENT_PLAN.md), card state and evidence in [R14_1_LIVE_PASS.md](./R14_1_LIVE_PASS.md) — cards 1–8 proven live on `@VM_19485_bot`, card 9 re-scoped on the record to the VM-fleet baseline per owner directive. Location-agnostic spine built and verified.
+2. **TUI steps 1–4 COMPLETE (2026-10-06).** [TUI_IMPLEMENTATION.md](./TUI_IMPLEMENTATION.md) rows S1–S8 landed and deployed (`tui-gateway`, `/tui` Telegram Mini App auth/door, HMAC token renewal, line-by-line scrolling at `linePx = 18`). Mobile on-device touch feel is an open user checkpoint.
+3. **Now — R-16 Live Scorecard (Cross-Location Quota Resilience) & BOT-24.** Rows QS-1–QS-15 in [R16_QS_MATRIX.md](./R16_QS_MATRIX.md) and [R16_SCORECARD.md](./R16_SCORECARD.md). Canonical usable-choice projection (`scripts/lib/free-lanes.mjs`) shared by bot-host and router; failover, quota stamping, and multi-worker roaming across available devices.
+4. **R-15 COMPLETE (2026-10-02).** Omni-agent lanes formally declared in `scripts/lib/lane-contract.mjs` (`freebuff` degraded for headless/resume, `laneSupports` probe); gates green in `specs/done/r15-omni-agent-lanes.md`.
 
 6. **Progress surfaces (2 PRs, independent of the phases above — a hub-file
    concern, not a product phase).** One turn fans out at `fanoutProgressEvent`
