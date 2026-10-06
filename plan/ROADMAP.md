@@ -930,3 +930,36 @@ node scripts/assert-budgets.mjs
 ```
 
 Do **not** invent missing `scripts/assert-*.mjs` names from old map rows (Q-7).
+
+---
+
+## Appendix — chiwah-tax remaining work (audited 2026-10-06, findings D16–D20)
+
+Cross-project record. That system lives in a separate repository on the VM
+(`/home/ubuntu/tax`, which has **no git remote**). Authority for every line below
+is that repo's own `ROADMAP.md` (Tasks 5–12) and `docs/FINDINGS.md` (D1–D20);
+recorded here so it is tracked and reviewable in one place. No Health-tracker
+code or configuration is affected.
+
+**Updated 2026-10-07** with D21–D22 and the gate-registry conflict: items 3 and 7
+are rewritten, items 9–10 are new. D21–D22 are committed in that repo (`72fac9f`)
+but **nothing there is pushable — it has no git remote**, so this appendix is the
+only pushed record. The other agent's D16–D20 and its `rules.py`, `gates/` and
+`results/` changes are still uncommitted there.
+
+| # | Item | Gate / owner |
+|---|---|---|
+| 1 | **Filing decision (D19).** The 2021-22 and 2022-23 filed accounts are 19% of the *maintained sheet's* chargeable, not the engine's. 2022-23's sheet carries five real transactions back-dated out of FY 2023-24 (named by row and date in D19) plus a £566.51 journal with no bank row — exactly the £1,354.45 gap. The filing **understates CT by £257.34**; FY 2023-24 is overstated by £787.94. 2021-22's £4,048.39 is the sheet's own construction (depreciation £822.56, manual adjustments £547.86, £2,677.97 classification) and needs the tax treatment settled. | user / HMRC decision |
+| 2 | Re-cast the maintained sheet's year boundaries, then re-derive each year's chargeable and re-run the variance report. | G17 — never tune the gate to close it |
+| 3 | **Suspense, now decomposed (D22).** G13 still sits at **−£48,937.59**, but it is no longer opaque — read out of `results/postings.json` it decomposes to the penny per period. **TransferWise −£30,806.33 (21 rows) is 2019-20's entire −£29,858.38** — 61% of the whole balance — and that period also carries the whole £947.95 of the D20/D21 class, so its G13 line is fully explained and is not an engine defect. Monzo is 2025-26's +£13,806.07; 2020-21's −£24,845.00 is the lone movement item 1 covers; the remainder is small (+£62.00 in 2015-16, −£680.00 in 2026-27 and unnamed residue). TransferWise, Monzo, Tide, Chase, Lloyds, Barclays, Revolut, Vanguard and Interactive Brokers are **named in narratives but never ingested**, so those legs can never pair. G13 clears when those statements exist or the accounts are recorded as out of scope — never by inventing a pairing rule. | G13 |
+| 4 | Remaining red gates: G8 (67 error cells in the maintained workbook), G11 (19.00% / −41.68% / 38.00% against the 25% statutory rate), G12 (sheet 2024-25 chargeable −1,697.07 but tax 707.36). | G8, G11, G12 |
+| 5 | A `tools/build.py` rebuild leaves the rendered Google Sheet stale, so G9 red-lines until someone runs the render by hand — fold the render into the rebuild or into `gates/verify_all.sh`. | G9 |
+| 6 | Source the missing artefacts so S12 (no VAT returns), S13 (no FPS and no PAYE control account) and S14 (TB 2110 is cash payments, not a provision) can be gated. S13 also blocks the 2020-21 remuneration-vs-drawings question (D18). | S12–S14 |
+| 7 | **D20 class: measured, and the measuring tool had the defect it documents.** With the mirror token `("starling chiwah", "", "", None, "Transfer")` in place the class drops from **30 disagreeing pairs to 10** — measured by rebuilding the engine twice, once at HEAD (9 agree / 30 disagree) and once at the working tree (29 / 10). The 10 survivors are 2019-20/2020-21 Metrobank↔Starling, **£947.95** in total, each still posting one leg to DLA 2140 and the other to suspense 9000; they need the two-leg agreement pass, not another token. Separately, `tools/pair_sweep.py` missed **TransferWise** because `UNINGESTED_ACCOUNTS` held `"wise"` matched as `\bwise\b` while the export writes the counterparty as one word — the same clean-by-silence miss D21 recorded for `purchase`/`chase`, recurring inside the tool that documents it. `"transferwise"` is now in the list. | D20, D21, D22 |
+| 8 | Reconcile the two engine paths on 2014-15 / 2015-16 only (82,517.17 against 82,151.77). Pre-existing, unrelated to D16–D20. | pre-existing |
+| 9 | **The two honesty layers disagree, so the headline rate cannot be quoted as it stands.** `gates/check_controls.py` classes **G1–G4 and G7 as TOY and G9 as STUB** — and its `STUB_GATES` still describes G9 as "returns True unconditionally", which is stale, since G9 dumps the rendered sheet and compares it cell-for-cell. `gates/verify_all.sh` LAYER 3 hardcodes **all 17 gates REAL** and prints "of which TOY 0, of which STUB 0". Consequence: the register refuses to let a TOY gate back an arithmetic control, so **S1, S2 and S15 stay `planned` even though G1, G2 and G7 pass**; of 24 controls only S3/G14, S16 and S19 are `proven` (13 planned, 8 implemented, 3 proven). **S7 has no gate at all**, and a green gate still is not enough to promote — `proven` requires a negative test. Reconcile the layers before quoting any pass rate. | S24, LAYER 1 |
+| 10 | **Two questions only the user can settle, both blocking.** (a) **D8** — FRS 105 (micro) or FRS 102 s.1A (small)? It decides the only legal free-ish filing route. (b) **D7/D12** — was a CT600 actually submitted for 2023-24? The filed accounts show £0 tax (correct) and the sheet's −£261 appears nowhere filed, so only the HMRC account settles it. | user |
+
+Two invariants hold throughout that repo: **never** tune a gate, mapping rule or
+negative test to make a red gate pass, and **never** invent a pairing rule to
+force a suspense balance to net.
