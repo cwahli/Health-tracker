@@ -1637,7 +1637,7 @@ export function readWebUiUrl(env = process.env) {
 }
 
 /** Short-lived personal web UI links minted by /web. */
-export const WEB_LINK_TTL_SEC = 900;
+export const WEB_LINK_TTL_SEC = 4 * 60 * 60;
 
 /**
  * The gateway signing secret, read at call time from the host's own env

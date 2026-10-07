@@ -768,12 +768,15 @@ describe('commands', () => {
     expect(COMMAND_NAMES).not.toContain('web');
     const { personalWebUiLink, gatewaySecretFromHostEnv, WEB_LINK_TTL_SEC } =
       await import('../scripts/bot-host.mjs');
-    expect(WEB_LINK_TTL_SEC).toBe(900);
+    // 4 h, not the old 900 s: a personal /web link now outlives one sitting,
+    // which is what the renewal work is for — the page refreshes its own
+    // token long before the link dies (WEB_LINK_TTL_SEC = 4 * 60 * 60).
+    expect(WEB_LINK_TTL_SEC).toBe(4 * 60 * 60);
     const link = personalWebUiLink({ webUrl: 'https://web.test', botId: 'vm', chatId: '42', secret: 's3cret', now: 1000 });
     expect(link.startsWith('https://web.test/?token=')).toBe(true);
     const { verifyToken } = await import('../scripts/tui-gateway.mjs');
     expect(verifyToken(decodeURIComponent(link.split('token=')[1]), 's3cret', { now: 1000 }).ok).toBe(true);
-    expect(verifyToken(decodeURIComponent(link.split('token=')[1]), 's3cret', { now: 1000 + 901000 }).ok).toBe(false);
+    expect(verifyToken(decodeURIComponent(link.split('token=')[1]), 's3cret', { now: 1000 + (4 * 60 * 60 + 1) * 1000 }).ok).toBe(false);
     expect(personalWebUiLink({ webUrl: '', botId: 'vm', chatId: '42', secret: 's3cret' })).toBe('');
     expect(personalWebUiLink({ webUrl: 'https://web.test', botId: 'vm', chatId: '', secret: 's3cret' })).toBe('');
     expect(personalWebUiLink({ webUrl: 'https://web.test', botId: 'vm', chatId: '42', secret: '' })).toBe('');
