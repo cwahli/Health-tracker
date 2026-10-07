@@ -29,6 +29,13 @@
  *   node scripts/probe-free-lanes.mjs --burn-ping --lane 3  # one minimal ping
  *   node scripts/probe-free-lanes.mjs --burn-ping --first-available
  *   node scripts/probe-free-lanes.mjs --new-candidates      # catalog vs pref drift
+ *   node scripts/probe-free-lanes.mjs --recheck-depleted   # falsify unproven holds
+ *
+ * A hold with no vendor proof (kind `limit-unknown`, no countdown) is a guess,
+ * not a measurement: --recheck-depleted re-pings exactly those lanes and CLEARS
+ * the hold when one answers, so "this lane is empty" can be falsified instead of
+ * believed. --recheck-proven widens it to every hold; --all-burn lifts the
+ * single-ping limit.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -38,6 +45,7 @@ import {
   loadFreeLaneLedger,
   withCatalogLanes,
   annotateFreemodelEntries,
+  clearLaneHold,
   laneMatchesRoute,
   liveRecForLane,
   freemodelRefToRoute,
@@ -46,7 +54,7 @@ import {
 import { buildFreeModelList } from './lib/freemodels.mjs';
 import { isQuotaOrLimitError, parseRetryAfter, runOpencode, extractLogError } from './lib/agent-opencode.mjs';
 import { runCline } from './lib/agent-cline.mjs';
-import { probeKindForLane, probeModelForLane, selectBurnTargets } from './lib/free-lane-probe.mjs';
+import { holdEvidence, probeKindForLane, probeModelForLane, recheckTargets, selectBurnTargets } from './lib/free-lane-probe.mjs';
 
 const args = new Set(process.argv.slice(2));
 function argVal(name) {
@@ -59,7 +67,9 @@ const LOCATION = argVal('--location') || 'vps';
 const BOT_ID = argVal('--bot') || process.env.HTBOT_ID || 'vm2';
 const DRY = args.has('--dry-run');
 const LANE = argVal('lane');
-const BURN = args.has('--burn-ping');
+// A recheck IS a ping: the only way to falsify an unproven hold is to ask the lane.
+const RECHECK = args.has('--recheck-depleted');
+const BURN = args.has('--burn-ping') || RECHECK;
 const FIRST = args.has('--first-available');
 const ALL_BURN = args.has('--all-burn');
 // Cline lanes are part of the check like every other free lane (see the helper
@@ -98,10 +108,24 @@ if (args.has('--new-candidates') || (!BURN && !LANE)) {
   console.log(`ledger source: ${source} (${tablePath})`);
   console.log(`location: ${entries[0]?.location || 'unknown'}`);
   console.log(`freemodel today: ${entries.length} (cline ${entries.filter((e) => e.provider === 'cline' && e.selectable !== false).length}, tokenharbor ${entries.filter((e) => e.provider === 'tokenharbor' && e.selectable !== false).length}, gemini-through-opencode ${entries.filter((e) => /^(?:opencode|google)\/gemini-/i.test(e.ref)).length}, opencode ${entries.filter((e) => e.tool === 'opencode' && e.provider !== 'tokenharbor' && !/^(?:opencode|google)\/gemini-/i.test(e.ref) && e.selectable !== false).length}, pending ${entries.filter((e) => e.status === 'pending-signin').length}, terminal-only ${entries.filter((e) => e.selectable === false && e.status !== 'pending-signin').length})`);
-  console.log(`pref lanes: ${(table.lanes || []).length}, depleted now: ${annotated.filter((a) => a.depleted).length}`);
-  for (const a of annotated.filter((x) => x.depleted)) {
-    console.log(`  ❌ ${a.ref} — reset in ${a.resetIn}`);
+  const heldLanes = (table.lanes || [])
+    .map((l) => ({ lane: l, evidence: holdEvidence(l, session, { now }) }))
+    .filter((r) => r.evidence);
+  const unproven = heldLanes.filter((r) => !r.evidence.proven);
+  console.log(`pref lanes: ${(table.lanes || []).length}, held now: ${heldLanes.length} (${unproven.length} unproven)`);
+  for (const { lane: l, evidence } of heldLanes) {
+    // "Empty" has two very different meanings and a row has to say which: a vendor
+    // countdown is proof the bar is spent, a default-TTL stamp is our own guess —
+    // and naming the key explains why siblings went dark with this lane.
+    const proof = evidence.proven
+      ? `proven (${evidence.countdownParsed ? 'vendor countdown' : evidence.kind})`
+      : 'UNPROVEN (default-TTL stamp — re-ping to falsify)';
+    const who = evidence.shared
+      ? `${evidence.key}${evidence.heldBy ? `, stamped when ${evidence.heldBy} hit it` : ''}`
+      : evidence.key;
+    console.log(`  ❌ ${l.model} — ${proof}; held by ${who}; reset in ${evidence.until ? formatResetIn(evidence.until, now) : 'unknown'}`);
   }
+  if (unproven.length) console.log('  → unproven holds can be falsified: node scripts/probe-free-lanes.mjs --recheck-depleted');
   console.log(`catalog-vs-pref: ${fresh.length} opencode free(s) not in pref (tap-into candidates):`);
   for (const r of fresh.slice(0, 30)) console.log(`  + ${r}`);
   if (!BURN && !LANE) {
@@ -113,19 +137,37 @@ if (args.has('--new-candidates') || (!BURN && !LANE)) {
   if (!BURN || args.has('--new-candidates')) process.exit(0);
 }
 
-// Resolve burn targets: one lane, or first-available walk, or explicit all-burn.
-// The decision lives in the shared helper so it has a sensor (free-lane-probe).
-const selection = selectBurnTargets(table.lanes || [], {
-  lane: LANE,
-  first: FIRST,
-  all: ALL_BURN,
-  now,
-  isDepleted: (l) => Boolean(liveRecForLane(l, session, now)),
-  skipCline: !WITH_CLINE,
-});
-if (selection.error) { console.error(selection.error); process.exit(2); }
-const targets = selection.targets;
-if (FIRST && !targets.length) { console.log('no burn target: every TG lane is marked depleted (nothing to ping — saves quota)'); process.exit(0); }
+// Resolve burn targets: a recheck of the unproven holds, or one lane / the
+// first-available walk / explicit all-burn. The decisions live in the shared
+// helper so they have a sensor (free-lane-probe).
+let targets = [];
+if (RECHECK) {
+  const held = recheckTargets(table.lanes || [], session, { now, includeProven: args.has('--recheck-proven') });
+  if (!held.length) {
+    console.log('no unproven holds: every lane the ledger holds was held with vendor proof — nothing to falsify');
+    process.exit(0);
+  }
+  // The single-ping policy still applies: one lane per run unless --all-burn.
+  const take = ALL_BURN ? held : held.slice(0, 1);
+  targets = take.map((h) => h.lane);
+  console.log(`recheck: ${held.length} unproven hold(s)`);
+  for (const { lane: l, evidence } of take) {
+    console.log(`  pref ${l.pref} ${l.model} — ${evidence.key}${evidence.heldBy ? ` (stamped when ${evidence.heldBy} hit it)` : ''}, kind ${evidence.kind}, no countdown`);
+  }
+  if (take.length < held.length) console.log(`  pinging the first only — pass --all-burn to re-ping all ${held.length}`);
+} else {
+  const selection = selectBurnTargets(table.lanes || [], {
+    lane: LANE,
+    first: FIRST,
+    all: ALL_BURN,
+    now,
+    isDepleted: (l) => Boolean(liveRecForLane(l, session, now)),
+    skipCline: !WITH_CLINE,
+  });
+  if (selection.error) { console.error(selection.error); process.exit(2); }
+  targets = selection.targets;
+  if (FIRST && !targets.length) { console.log('no burn target: every TG lane is marked depleted (nothing to ping — saves quota)'); process.exit(0); }
+}
 if (!BURN) {
   for (const l of targets) {
     const dep = liveRecForLane(l, session, now);
@@ -138,6 +180,12 @@ if (!BURN) {
 if (targets.length > 1 && !ALL_BURN) {
   console.error(`refusing to burn ${targets.length} lanes without --all-burn (single-ping policy)`);
   process.exit(2);
+}
+
+/** The live ledger's two files, or null on a box that only has the pref fallback. */
+function liveLedgerPaths() {
+  if (!tablePath || tablePath.includes('free-lane-preference')) return null;
+  return { tablePath, sessionPath: path.join(path.dirname(tablePath), 'session.json') };
 }
 
 const workspace = process.cwd();
@@ -156,11 +204,13 @@ for (const lane of targets) {
     continue;
   }
   const runner = kind === 'cline' ? 'the Cline CLI' : 'OpenCode';
+  // Print the ref the ping will actually send, not the ledger's spelling of it.
+  const pingRef = probeModelForLane(lane);
   if (DRY) {
-    console.log(`dry-run: would ping pref ${lane.pref} ${provider}/${model} via ${runner} once ("Reply with exactly: ok", timeout ${TIMEOUT}ms) — no quota burned, ledger untouched`);
+    console.log(`dry-run: would ping pref ${lane.pref} ${pingRef} via ${runner} once ("Reply with exactly: ok", timeout ${TIMEOUT}ms) — no quota burned, ledger untouched`);
     continue;
   }
-  console.log(`ping pref ${lane.pref} ${provider}/${model} via ${runner} (timeout ${TIMEOUT}ms)…`);
+  console.log(`ping pref ${lane.pref} ${pingRef} via ${runner} (timeout ${TIMEOUT}ms)…`);
   let result;
   try {
     let child = null;
@@ -174,15 +224,14 @@ for (const lane of targets) {
         try { child.kill('SIGKILL'); } catch {}
       }
     };
-    const model = probeModelForLane(lane);
     result = kind === 'cline'
       // A Cline lane is pinged BY CLINE. Through `runOpencode` the ref
       // (`cline/cline-free/…`) is not a model OpenCode has, so a working lane
       // reported "model not found" and nothing ever checked it.
-      ? await runCline({ prompt: 'Reply with exactly: ok', model, workspace, timeoutMs: TIMEOUT, onSpawn, onEvent })
+      ? await runCline({ prompt: 'Reply with exactly: ok', model: pingRef, workspace, timeoutMs: TIMEOUT, onSpawn, onEvent })
       : await runOpencode({
           prompt: 'Reply with exactly: ok',
-          model,
+          model: pingRef,
           workspace,
           thinking: false,
           timeoutMs: TIMEOUT,
@@ -200,6 +249,19 @@ for (const lane of targets) {
   const err = filtered;
   if (text && !isQuotaOrLimitError(err)) {
     console.log(`  ✅ alive — first text: ${JSON.stringify(text.slice(0, 80))} (early-kill, minimal burn)`);
+    // A lane that answers has just falsified the hold on it (and, when the hold was
+    // the shared bar, on the siblings that bar covers) — so put the ledger back.
+    if (RECHECK) {
+      const paths = liveLedgerPaths();
+      if (!paths) {
+        console.log('  clear: pref fallback — this box has no live ledger to clear; run on the host that owns it');
+      } else {
+        const info = clearLaneHold({ ...paths, lane, source: 'probe-free-lanes --recheck-depleted: the lane answered' });
+        console.log(info.cleared
+          ? `  clear: ${info.clearedKeys.join(', ') || '(no session key)'} removed — ${info.resetLanes.length} lane(s) back to available (pref ${info.resetLanes.map((r) => r.pref).join(', ')})`
+          : `  clear failed: ${info.reason}`);
+      }
+    }
     continue;
   }
   if (isQuotaOrLimitError(err)) {

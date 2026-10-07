@@ -12,13 +12,16 @@
  *      while the check skipped Cline outright), so the check pings it — through
  *      the Cline CLI, which is the only runner that can answer for that lane.
  */
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join as pathJoin } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
 
 import { CLINE_FREE_MODELS, FREE_NAME_DENYLIST, listFreeOpenCode } from './freemodels.mjs';
-import { probeKindForLane, probeModelForLane, selectBurnTargets } from './free-lane-probe.mjs';
+import { clearHoldInPlace, clearLaneHold } from './free-lanes.mjs';
+import { holdEvidence, probeKindForLane, probeModelForLane, recheckTargets, selectBurnTargets } from './free-lane-probe.mjs';
 
 const PREF_DOC = fileURLToPath(
   new URL('../../tools/telegram-provider-router/docs/free-lane-preference.json', import.meta.url),
@@ -122,5 +125,123 @@ describe('the lane check', () => {
   it('honours an explicitly named lane as named, so the caller says why it is held out', () => {
     expect(selectBurnTargets([clineLane], { lane: '2', skipCline: true }).targets).toEqual([clineLane]);
     expect(selectBurnTargets([clineLane], { lane: '99' })).toEqual({ targets: [], error: 'no pref lane 99' });
+  });
+});
+
+describe('an empty lane, and whether it is really empty', () => {
+  const ZEN = 'opencode-zen-free';
+  const museZen = { pref: 1, provider: 'opencode', model: 'opencode/muse-spark-1.3-contributor-free', bucket: ZEN, tg: true };
+  const mimoZen = { pref: 3, provider: 'opencode', model: 'opencode/mimo-v2.6-flash-free', bucket: ZEN, tg: true };
+  // What a blanket "free limit hit" with no countdown writes: the 6h default TTL on
+  // the shared bar, with the lane that tripped it recorded as `hitBy`.
+  const DEFAULT_STAMP = {
+    depletedUntil: Date.now() + 6 * 3600 * 1000,
+    countdownParsed: false,
+    kind: 'limit-unknown',
+    lastError: 'free limit hit',
+    hitBy: 'opencode/muse-spark-1.3-contributor-free',
+  };
+  const sessionWith = (rec, key = `bucket:${ZEN}`) => ({ quota: { [key]: rec } });
+
+  it('reads a vendor countdown as proof, and a default-TTL stamp as a guess', () => {
+    const proven = holdEvidence(museZen, sessionWith({ ...DEFAULT_STAMP, countdownParsed: true, kind: 'allowance-empty' }), {});
+    expect(proven.proven).toBe(true);
+    expect(proven.held).toBe(true);
+
+    const guess = holdEvidence(museZen, sessionWith(DEFAULT_STAMP), {});
+    expect(guess.proven).toBe(false);
+    expect(guess.kind).toBe('limit-unknown');
+
+    // A 429 is measured, so it is proof even with no countdown.
+    expect(holdEvidence(museZen, sessionWith({ ...DEFAULT_STAMP, kind: 'rate-limit' }), {}).proven).toBe(true);
+    // And a lane with no live record at all is simply not held.
+    expect(holdEvidence(museZen, { quota: {} }, {})).toBe(null);
+  });
+
+  it('names the shared bar as the holder — why MiMo goes dark with Muse', () => {
+    const ev = holdEvidence(mimoZen, sessionWith(DEFAULT_STAMP), {});
+    expect(ev.shared).toBe(true);
+    expect(ev.bucket).toBe(ZEN);
+    expect(ev.heldBy).toBe('opencode/muse-spark-1.3-contributor-free');
+    expect(ev.key).toBe(`bucket:${ZEN}`);
+  });
+
+  it('offers only the unproven holds for re-pinging, in preference order', () => {
+    const clineLane = { pref: 15, provider: 'cline', model: 'cline-free/glm-5.3-flash', bucket: 'cline-per-model', tg: true };
+    const session = {
+      quota: {
+        [`bucket:${ZEN}`]: { ...DEFAULT_STAMP },
+        'cline/cline-free/glm-5.3-flash': { depletedUntil: Date.now() + 3600e3, countdownParsed: true, kind: 'allowance-empty' },
+      },
+    };
+    const lanes = [mimoZen, clineLane];
+    expect(recheckTargets(lanes, session, {}).map((h) => h.lane.pref)).toEqual([3]);
+    expect(recheckTargets(lanes, session, { includeProven: true }).map((h) => h.lane.pref)).toEqual([3, 15]);
+  });
+
+  it('clears the shared bar and its siblings when one lane answers, and nothing else', () => {
+    const clineLane = { pref: 15, provider: 'cline', model: 'cline-free/glm-5.3-flash', bucket: 'cline-per-model', tg: true, status: 'depleted', nextResetAt: '2999-01-01T00:00:00.000Z' };
+    const table = {
+      buckets: { [ZEN]: { resetRule: 'rolling / rate-limit', nextResetAt: '2999-01-01T00:00:00.000Z', nextResetLabel: 'x' } },
+      lanes: [museZen, mimoZen, clineLane],
+    };
+    const session = {
+      quota: {
+        [`bucket:${ZEN}`]: { ...DEFAULT_STAMP },
+        // Key spelling matches the writer: `${provider}/${model}`, and a
+        // pref-doc row's model carries its own vendor dir, so it doubles.
+        'opencode/opencode/muse-spark-1.3-contributor-free': { ...DEFAULT_STAMP },
+        'opencode/opencode/mimo-v2.6-flash-free': { ...DEFAULT_STAMP },
+        'cline/cline-free/glm-5.3-flash': { depletedUntil: Date.now() + 3600e3, countdownParsed: true, kind: 'allowance-empty' },
+      },
+    };
+    const info = clearHoldInPlace({ table, session, lane: mimoZen, source: 'test' });
+    expect(info.clearedKeys).toContain(`bucket:${ZEN}`);
+    expect(info.clearedKeys).toContain('opencode/opencode/mimo-v2.6-flash-free');
+    expect(info.resetLanes.map((r) => r.pref).sort()).toEqual([1, 3]);
+    expect(museZen.status).toBe('available');
+    expect(museZen.nextResetAt).toBe(null);
+    expect(table.buckets[ZEN].nextResetAt).toBe(null);
+    // A different bar's hold is not this lane's business.
+    expect(clineLane.status).toBe('depleted');
+    expect(session.quota['cline/cline-free/glm-5.3-flash']).toBeTruthy();
+  });
+
+  it('survives the file round trip: session first, then the table it is truth for', async () => {
+    const dir = mkdtempSync(pathJoin(tmpdir(), 'free-lane-pool-'));
+    const tablePath = pathJoin(dir, 'free-lane-table.json');
+    const sessionPath = pathJoin(dir, 'session.json');
+    writeFileSync(tablePath, JSON.stringify({ version: 3, buckets: { [ZEN]: { resetRule: 'rolling', nextResetAt: '2999-01-01T00:00:00.000Z' } }, lanes: [mimoZen, museZen] }, null, 2));
+    writeFileSync(sessionPath, JSON.stringify({ quota: { [`bucket:${ZEN}`]: { ...DEFAULT_STAMP } } }, null, 2));
+    const info = clearLaneHold({ tablePath, sessionPath, lane: mimoZen, source: 'test' });
+    expect(info.cleared).toBe(true);
+    const afterSession = JSON.parse(readFileSync(sessionPath, 'utf8'));
+    const afterTable = JSON.parse(readFileSync(tablePath, 'utf8'));
+    expect(afterSession.quota[`bucket:${ZEN}`]).toBeUndefined();
+    expect(afterTable.lanes.every((l) => l.status === 'available' && l.nextResetAt === null)).toBe(true);
+    // And the projection agrees: nothing is held any more.
+    expect(holdEvidence(afterTable.lanes[0], afterSession, {})).toBe(null);
+  });
+});
+
+describe('the lanes the operator verified working on 2026-10-07', () => {
+  it('Cline Muse Spark and OpenCode MiMo 2.6 are both pool members the check can ping', () => {
+    const rows = prefDoc().lanes || [];
+    const wanted = [
+      { model: MUSE_CLINE, provider: 'cline', kind: 'cline' },
+      { model: 'opencode/mimo-v2.6-flash-free', provider: 'opencode', kind: 'opencode' },
+    ];
+    for (const w of wanted) {
+      const row = rows.find((l) => String(l.model || '') === w.model);
+      expect(row, w.model).toBeTruthy();
+      expect(row.provider).toBe(w.provider);
+      // `tg: false` would hide the lane from every chat-facing walk and from
+      // --first-available, which is the "not in the check" state this pins shut.
+      expect(row.tg).not.toBe(false);
+      const lane = { ...row, tg: true };
+      expect(probeKindForLane(lane)).toBe(w.kind);
+      expect(probeModelForLane(lane)).toBe(w.model);
+      expect(selectBurnTargets([lane], { all: true }).targets).toHaveLength(1);
+    }
   });
 });

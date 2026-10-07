@@ -16,6 +16,8 @@
  * free) was never actually checked.
  */
 
+import { liveRecForLane } from './free-lanes.mjs';
+
 /** How a lane is pinged: its own CLI, or nothing at all. */
 export function probeKindForLane(lane) {
   const provider = String(lane?.provider || '').toLowerCase();
@@ -78,4 +80,69 @@ export function selectBurnTargets(
     return true;
   });
   return { targets: next ? [next] : [], error: null };
+}
+
+/**
+ * WHY a lane reads empty, and whether that "empty" is proof or a guess.
+ *
+ * `projectLanes` merges every hold into one `depleted` flag, so a lane whose bar
+ * was measured empty and a lane that is dark because a blanket error got the 6h
+ * default TTL look identical on screen. They are not the same claim. The vendor
+ * tells us which one we are looking at, and the writer already stores it:
+ *
+ *   kind: 'allowance-empty'  the vendor said the allowance is gone (countdown parsed)
+ *   kind: 'rate-limit'       a 429 — a real, measured limit
+ *   kind: 'limit-unknown'    neither, with no countdown: the DEFAULT TTL was applied
+ *
+ * Only the last one is unproven, and only it is worth re-pinging: a lane held by
+ * a `limit-unknown` stamp may be perfectly usable (the file was reading a quote
+ * of a limit message, a cosmetic sub-agent failed, or a sibling on the same shared
+ * bar tripped it), while nothing but a vendor countdown could have produced the
+ * other two.
+ *
+ * `key` is the exact record that holds the lane — a per-lane key, or the shared
+ * `bucket:…` bar. That distinction is the answer to "why is MiMo empty when Muse
+ * was the one that failed": on the OpenCode Zen free pool one bar is shared by
+ * muse/mimo/ling/nemotron/space-bunny, so the bucket key holds all of them.
+ */
+export function holdEvidence(lane, session, { now = Date.now() } = {}) {
+  const hit = liveRecForLane(lane, session || {}, now);
+  if (!hit) return null;
+  const rec = hit.rec || {};
+  const kind = String(rec.kind || 'limit-unknown');
+  const countdownParsed = Boolean(rec.countdownParsed);
+  const shared = /^bucket:/.test(String(hit.key || ''));
+  return {
+    held: true,
+    // A parsed countdown, an allowance-empty answer or a real rate limit is the
+    // vendor measuring the bar. Everything else is our own default TTL.
+    proven: countdownParsed || kind === 'allowance-empty' || kind === 'rate-limit',
+    kind,
+    countdownParsed,
+    key: hit.key || null,
+    shared,
+    bucket: shared ? String(hit.key).slice('bucket:'.length) : (lane?.bucket || null),
+    heldBy: rec.hitBy || null,
+    observedAt: rec.depletedObservedAt || null,
+    until: Number(rec.depletedUntil) || null,
+    lastError: String(rec.lastError || '').slice(0, 120),
+  };
+}
+
+/**
+ * The held lanes worth re-pinging to falsify, in preference order.
+ *
+ * Unproven holds by default — the ones a ping can actually settle. A proven hold
+ * is excluded because re-pinging it costs quota to re-learn something the vendor
+ * already told us; `includeProven` is for a full audit, not for routine use.
+ */
+export function recheckTargets(lanes, session, { now = Date.now(), includeProven = false } = {}) {
+  const held = [];
+  for (const lane of Array.isArray(lanes) ? lanes : []) {
+    if (!lane || lane.tg === false) continue;
+    const evidence = holdEvidence(lane, session, { now });
+    if (!evidence) continue;
+    if (!evidence.proven || includeProven) held.push({ lane, evidence });
+  }
+  return held.sort((a, b) => (Number(a.lane.pref) || 0) - (Number(b.lane.pref) || 0));
 }
