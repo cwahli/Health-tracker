@@ -1,0 +1,59 @@
+# ht-allowance-watch.service — the fleet's free-lane allowance watcher.
+#
+# VERSIONED 2026-10-07. This unit previously existed ONLY as
+# /etc/systemd/system/ht-allowance-watch.service on the box, so the defect it
+# caused could not be read, diffed or reproduced from the repo. Its PATH was
+#   /home/ubuntu/.opencode/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+# which does not contain ~/.npm-global/bin — where the Cline CLI is installed.
+# Every Cline probe therefore answered "not installed" -> uncertain, and the
+# watcher re-stamped that lane depleted on the default TTL every ~46 minutes
+# (27 times in one day) long after the real 429 behind it had expired. The
+# operator's row read ❌ for eleven days while Cline listed the model as free.
+#
+# Two things below are the fix:
+#   * ExecStart points at the DEPLOY clone, which the webhook resets to main —
+#     not at /home/ubuntu/bot-host-r14, a tree nothing deploys (43 commits behind
+#     main when this was written) where the watcher's code had to be copied by
+#     hand, and where the next hand-copy would silently undo the fix.
+#   * the wrapper no longer depends on PATH for a provider CLI: it resolves the
+#     binary through absolute candidates (allowance-watch-core.cjs
+#     `resolveCliBin`), exactly as scripts/lib/agent-cline.mjs already did for the
+#     bot. PATH is kept correct here as well, but it is no longer load-bearing.
+#
+# HT_LOG_DIR is set because the wrapper's default log path is /workspace/logs,
+# which does not exist on this host — so the watcher's file log had been silently
+# going nowhere since 2026-09-25 and only the journal recorded anything. A service
+# whose own log is dead is a service nobody can audit.
+#
+# ORDER MATTERS: ExecStart runs the deploy clone's copy, so this unit should be
+# installed AFTER the watcher fix has merged and the webhook deploy has reset that
+# clone. Installed before then it would run the clone's pre-fix wrapper (it was the
+# pre-fix file on 2026-10-07), which is the bug this unit is being fixed for.
+# Install — run as root; this is the one step that cannot be done from a checkout:
+#   install -m 644 systemd/ht-allowance-watch.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl restart ht-allowance-watch
+# Afterwards remove the temporary shim at ~/.local/bin/cline: it existed only
+# because this unit's PATH could not see the real binary.
+
+[Unit]
+Description=Free-Lane Allowance Watcher Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/deploy/Health-tracker
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.npm-global/bin:/home/ubuntu/.opencode/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=FREE_LANES_SHARED_DIR=/home/ubuntu/.local/state/shared-free-lanes
+Environment=HT_LOG_DIR=/home/ubuntu/.local/state/shared-free-lanes
+Environment=HT_WORKSPACE=/home/ubuntu/deploy/Health-tracker
+ExecStart=/usr/bin/node /home/ubuntu/deploy/Health-tracker/tools/telegram-provider-router/bin/ht-allowance-watch --daemon
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

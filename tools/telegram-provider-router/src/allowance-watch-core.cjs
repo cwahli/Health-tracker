@@ -1,4 +1,8 @@
 "use strict";
+
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 /**
  * allowance-watch-core.cjs — shared core for the ht-allowance-watch ticket
  * (tmp/ht-allowance-watch/TICKET.md).
@@ -541,6 +545,43 @@ function nextLane(tbl, session, wantTool, depletedModel, now = Date.now()) {
   return out ? `${String(out.provider || "").toLowerCase()}|${out.model}` : null;
 }
 
+/**
+ * Resolve a provider CLI to an ABSOLUTE path, the way the bot already does.
+ *
+ * The watcher probed Cline by shelling out to a bare `cline`, which resolves on
+ * PATH. Its unit runs with
+ *   PATH=/home/ubuntu/.opencode/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+ * which does NOT contain ~/.npm-global/bin — where the Cline CLI actually lives.
+ * So every Cline probe returned "cline: not installed" → uncertain, forever, and
+ * (before the fix above) re-stamped the lane depleted each time. Meanwhile the
+ * bot's own `resolveClineBin()` (scripts/lib/agent-cline.mjs) found it fine,
+ * because it tries absolute candidates instead of trusting PATH. That asymmetry
+ * is why /freemodel said Cline was ready while the watcher could never reach it.
+ *
+ * Same candidate list as resolveClineBin, in the same order, with the bare name
+ * as the LAST resort rather than the first guess. `access` is injectable so the
+ * order is testable without a real filesystem.
+ */
+function resolveCliBin(command, { home = os.homedir(), access = fs.accessSync, constants = fs.constants, join = path.join } = {}) {
+  const name = String(command || "").trim();
+  if (!name) return name;
+  const candidates = [
+    join(home, ".npm-global", "bin", name),
+    join(home, ".local", "bin", name),
+    `/usr/local/bin/${name}`,
+    `/usr/bin/${name}`,
+  ];
+  for (const candidate of candidates) {
+    try {
+      access(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // keep looking — a missing candidate is the normal case, not an error
+    }
+  }
+  return name; // last resort: let PATH decide, as before
+}
+
 module.exports = {
   RATE_LIMIT_TTL_MS,
   QUOTA_TTL_MS,
@@ -562,6 +603,7 @@ module.exports = {
   computeSweepPlan,
   pickProbeKind,
   probeCli,
+  resolveCliBin,
   stampDepleted,
   stampAvailable,
   opencodeLogQuota,
