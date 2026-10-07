@@ -321,6 +321,37 @@
           "sheets.googleapis.com/v4/spreadsheets"
         ]
       }
+    },
+    {
+      "id": "allowance_hold_needs_evidence",
+      "label": "A lane hold carries the evidence that created it and expires with it; an uncertain probe writes nothing",
+      "asked": "repeated",
+      "files_must_contain": {
+        "tools/telegram-provider-router/bin/ht-allowance-watch": [
+          "uncertainProbes",
+          "ledger left alone"
+        ],
+        "tools/telegram-provider-router/src/allowance-watch-core.cjs": [
+          "resolveCliBin"
+        ]
+      }
+    },
+    {
+      "id": "runtime_unit_is_versioned_and_checked",
+      "label": "A systemd unit running on the box is the copy in git, and a deployed-vs-repo checker proves it",
+      "asked": "repeated",
+      "files_must_contain": {
+        "systemd/ht-allowance-watch.service": [
+          "/home/ubuntu/deploy/Health-tracker/tools/telegram-provider-router/bin/ht-allowance-watch --daemon"
+        ],
+        "tools/telegram-provider-router/scripts/assert-allowance-watch-deployed.mjs": [
+          "DEPLOY_CLONE",
+          "undeployed"
+        ],
+        "tools/telegram-provider-router/package.json": [
+          "verify:deployed"
+        ]
+      }
     }
   ],
   "sibling_pairs": [
