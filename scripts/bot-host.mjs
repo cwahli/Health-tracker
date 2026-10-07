@@ -1256,6 +1256,52 @@ export function resetInBit(resetIn) {
 }
 
 /**
+ * One line per provider whose lanes this host cannot run, and why.
+ *
+ * `/allowance` already does this: a row whose provider has no credential on this
+ * host leaves the table and is listed underneath with the variable it needs.
+ * `/freemodel` dropped the same rows and said nothing at all — so on a host whose
+ * `cline` binary is missing or not signed in, Cline's entire free set disappeared
+ * from the keyboard with no way to tell "this model does not exist" from "this
+ * host cannot run it" (operator, 2026-10-07: "I still can't see Muse from Cline",
+ * while Cline's own catalog lists `muse-spark-1.3-contributor` as free).
+ *
+ * The count and the reason are the two facts the reader needs, and both come off
+ * the row the projection already built — nothing is inferred here, and no model is
+ * promised: the note says the lanes are not on this host, which is what is true.
+ */
+export function blockedProviderLines(rows) {
+  const byProvider = new Map();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r) continue;
+    const provider = String(r.provider || r.lane?.provider || r.effectiveProvider || '').toLowerCase();
+    if (!provider) continue;
+    const entry = byProvider.get(provider) || { provider, count: 0, reason: '' };
+    entry.count += 1;
+    const reason = String(r.reason || '').trim();
+    if (reason && !entry.reason) entry.reason = reason;
+    byProvider.set(provider, entry);
+  }
+  // The names the reader sees everywhere else: "Token Harbor" and "Cloudflare" are
+  // two words and "tokenharbor" is one, so a bare capitalise printed "Tokenharbor".
+  const DISPLAY_NAME = {
+    tokenharbor: 'Token Harbor',
+    cloudflare: 'Cloudflare',
+    opencode: 'OpenCode',
+    freebuff: 'Freebuff',
+    gemini: 'Gemini',
+    cline: 'Cline',
+  };
+  const named = (p) => DISPLAY_NAME[p] || p.charAt(0).toUpperCase() + p.slice(1);
+  const lines = [];
+  for (const e of byProvider.values()) {
+    const count = `${e.count} free lane${e.count === 1 ? '' : 's'}`;
+    lines.push(`${named(e.provider)}: ${count} not on this host${e.reason ? ` — ${e.reason}` : ''}`);
+  }
+  return lines;
+}
+
+/**
  * The two prose lines of a depleted-tap answer; the refreshed allowance table
  * is appended by the caller.
  *
@@ -1312,6 +1358,25 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   // way /allowance drops it from its table and names the variable underneath. It was
   // six rows here, which is why the two commands disagreed about the total even with
   // one canonical list.
+  // The blocked rows are read off the ANNOTATED union, not off `rows`: the canonical
+  // list this list is built from has already dropped them (it skips a needsSetup
+  // verdict), so they arrive here only as verdicts. What marks one is the same
+  // formula the projection used to clear `selectable` (projectLanes: selectable =
+  // !ended && !depleted && !terminalOnly && !needsSetup) read backwards — with the
+  // other four flags false and selectable false, the missing one can only be the
+  // setup verdict. That is exact, not a guess at the reason text, and it does not
+  // need `needsSetup` to survive the annotation. Deduped by ref, because the same
+  // lane arrives from both the catalog side and the table side.
+  const setupBlocked = (r) => Boolean(r)
+    && r.selectable === false && !r.depleted && !r.ended && !r.terminalOnly && !r.needsSetup;
+  const blockedByRef = new Map();
+  for (const r of [...(annotated || []), ...rows]) {
+    if (!setupBlocked(r)) continue;
+    if (String(r.ref || '').startsWith('pending:')) continue;
+    const key = String(r.ref || r.lane?.model || r.model || '');
+    if (key && !blockedByRef.has(key)) blockedByRef.set(key, r);
+  }
+  const blocked = [...blockedByRef.values()];
   const listed = rows.filter((r) => !r.needsSetup);
   const unusableOf = (r) => r.selectable === false || r.depleted || r.ended || r.terminalOnly;
   const usable = listed.filter((r) => !unusableOf(r));
@@ -1401,7 +1466,20 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   // which "blank" characters the API actually accepts — U+200B does not, and
   // shipping it took /freemodel down for every reader.
   // Counts are still returned for callers that want them.
-  return { text: FREEMODEL_EMPTY_BODY, buttons, rows, usable, unusable };
+  //
+  // The one thing the body may carry is what the keyboard CANNOT: a provider whose
+  // lanes are not on this host is not a row it could show, so the note goes above
+  // the buttons. Everything the keyboard does show is still unsaid above it.
+  const setupNote = blockedProviderLines(blocked);
+  return {
+    text: setupNote.length ? setupNote.join('\n') : FREEMODEL_EMPTY_BODY,
+    buttons,
+    rows,
+    usable,
+    unusable,
+    blocked,
+    setupNote,
+  };
 }
 
 /** Usable rows the ledger has no record for: honest, not hidden. */

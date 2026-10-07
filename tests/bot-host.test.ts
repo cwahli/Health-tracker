@@ -115,6 +115,8 @@ import {
   sweepOrphanedLeases,
   selectTurnLanes,
   formatFreemodelWithDepletion,
+  blockedProviderLines,
+  FREEMODEL_EMPTY_BODY,
   getContextLimit,
   laneContextLimits,
   resetInBit,
@@ -4476,5 +4478,61 @@ describe('B2B-2 peer envelope send', () => {
     const led = JSON.parse(fs.readFileSync(path.join(stateRoot, 'vm4', 'handoff.json'), 'utf8'));
     expect(led.chains['gp-letter-r1'].ourAgree).toBe(1);
     expect(led.chains['gp-letter-r1'].terminal).toBe(true);
+  });
+});
+
+/**
+ * A provider this host cannot run used to leave /freemodel without a trace.
+ *
+ * The operator's report on 2026-10-07 was "I still can't see muse from Cline",
+ * while Cline's own recommended-models catalog lists
+ * `cline-free/muse-spark-1.3-contributor` as free. The row was not missing: the
+ * projection marked every Cline lane `needsSetup` on a host with no signed-in
+ * Cline CLI, `canonicalAllowanceLanes` skips those verdicts, and the formatter
+ * filtered them out of the rows AND the keyboard — so the reader could not tell
+ * "this model does not exist" from "this host cannot run it", while /allowance
+ * has always named the missing variable under its table.
+ */
+describe('/freemodel names the provider a host cannot run', () => {
+  it('says which provider, how many lanes, and what is missing', () => {
+    expect(blockedProviderLines([
+      { ref: 'cline:cline-free/muse-spark-1.3-contributor', provider: 'cline', selectable: false, reason: 'needs a signed-in Cline CLI on this host' },
+      { ref: 'cline:cline-free/deepseek-v4.1-flash', provider: 'cline', selectable: false, reason: 'needs a signed-in Cline CLI on this host' },
+      { ref: 'tokenharbor/deepseek-v4.1-flash:free', provider: 'tokenharbor', selectable: false, reason: 'needs TOKEN_HARBOR_API_KEY' },
+    ])).toEqual([
+      'Cline: 2 free lanes not on this host — needs a signed-in Cline CLI on this host',
+      'Token Harbor: 1 free lane not on this host — needs TOKEN_HARBOR_API_KEY',
+    ]);
+  });
+
+  it('counts one lane once, and says so in the singular', () => {
+    expect(blockedProviderLines([{ ref: 'a', provider: 'cline', selectable: false, reason: 'no CLI' }]))
+      .toEqual(['Cline: 1 free lane not on this host — no CLI']);
+    expect(blockedProviderLines([])).toEqual([]);
+    expect(blockedProviderLines(undefined)).toEqual([]);
+  });
+
+  it('the note reaches the message for a blocked row, and never for a depleted one', () => {
+    const blocked = formatFreemodelWithDepletion([], [
+      { ref: 'cline:cline-free/muse-spark-1.3-contributor', provider: 'cline', selectable: false, depleted: false, ended: false, terminalOnly: false, reason: 'needs a signed-in Cline CLI on this host' },
+      { ref: 'opencode/muse-spark-1.3-contributor-free', provider: 'opencode', selectable: true, depleted: false, ended: false, terminalOnly: false, reason: 'available' },
+    ], { current: '', location: 'test', canonical: [], tableLanes: [] });
+    expect(blocked.text).toContain('Cline: 1 free lane not on this host — needs a signed-in Cline CLI on this host');
+    expect(blocked.blocked).toHaveLength(1);
+
+    // A depleted lane is unusable for a different reason, and the note must not
+    // claim its provider is absent from this host — that is the whole distinction.
+    const spent = formatFreemodelWithDepletion([], [
+      { ref: 'opencode/muse-spark-1.3-contributor-free', provider: 'opencode', selectable: false, depleted: true, ended: false, terminalOnly: false, reason: 'depleted until 3h' },
+    ], { current: '', location: 'test', canonical: [], tableLanes: [] });
+    expect(spent.text).not.toContain('not on this host');
+    expect(spent.blocked).toEqual([]);
+  });
+
+  it('so an empty body still means exactly that', () => {
+    const body = formatFreemodelWithDepletion([], [
+      { ref: 'opencode/muse-spark-1.3-contributor-free', provider: 'opencode', selectable: true, depleted: false, ended: false, terminalOnly: false, reason: 'available' },
+    ], { current: '', location: 'test', canonical: [], tableLanes: [] });
+    expect(body.text).toBe(FREEMODEL_EMPTY_BODY);
   });
 });
