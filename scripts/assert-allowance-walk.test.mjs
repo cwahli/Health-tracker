@@ -185,6 +185,13 @@ try {
       { provider: 'opencode', model: 'opencode/mimo-v2.6-flash-free', pref: 2, status: 'available', tg: true },
       { provider: 'opencode', model: 'cloudflare/@cf/qwen/qwen3.8-27b', pref: 3, status: 'available', tg: true },
       { provider: 'opencode', model: 'cloudflare/@cf/zai-org/glm-4.7-flash', pref: 4, status: 'available', tg: true },
+      // Two Light lanes, because the Qwen 27B above used to be one of them and the
+      // operator placed it in the coding pool on 2026-10-07 (OWNER_PLACEMENT in
+      // scripts/lib/free-catalogs.mjs). The invariant under test is unchanged —
+      // Light stays Light-first and never jumps up — so the fixture's Light
+      // representative moves to a lane the catalog still calls Light rather than
+      // the assertion being dropped. Laguna S 2.1 is catalog rank 6, "Proven light".
+      { provider: 'poolside', model: 'poolside/laguna-s-2.1', pref: 5, status: 'available', tg: true },
     ],
   };
   const { dir: tierDir } = ensureBotLedger('tier-bot');
@@ -199,13 +206,17 @@ try {
   });
   const tierChoice = selectTurnLanes({ botId: 'tier-bot', model: 'opencode/muse-spark-1.3-contributor-free', fallback: 'opencode/muse-spark-1.3-contributor-free' });
   check('a depleted Standard lane fails over inside Standard first', tierChoice.models[0] === 'opencode/mimo-v2.6-flash-free');
+  // The Light lane is named by the model that IS light (the Cloudflare GLM 4.7
+  // Flash), not by its vendor: `/cloudflare/i` now matches the Qwen 27B too, which
+  // is a Standard lane since the owner's re-placement, and a check that finds a
+  // Standard lane where it expected a Light one would pass for the wrong reason.
   check('and every Standard lane comes before any Light lane',
     tierChoice.models.indexOf('opencode/mimo-v2.6-flash-free') !== -1
-    && tierChoice.models.indexOf('opencode/mimo-v2.6-flash-free') < tierChoice.models.findIndex((m) => /cloudflare/i.test(m)));
-  const lightKeep = selectTurnLanes({ botId: 'tier-bot', model: 'opencode/cloudflare/@cf/qwen/qwen3.8-27b', fallback: 'opencode/muse-spark-1.3-contributor-free' });
-  check('a usable Light lane stays first', lightKeep.models[0] === 'opencode/cloudflare/@cf/qwen/qwen3.8-27b');
+    && tierChoice.models.indexOf('opencode/mimo-v2.6-flash-free') < tierChoice.models.findIndex((m) => /glm-4\.7/i.test(m)));
+  const lightKeep = selectTurnLanes({ botId: 'tier-bot', model: 'opencode/cloudflare/@cf/zai-org/glm-4.7-flash', fallback: 'opencode/muse-spark-1.3-contributor-free' });
+  check('a usable Light lane stays first', lightKeep.models[0] === 'opencode/cloudflare/@cf/zai-org/glm-4.7-flash');
   check('and Light lanes come before any Standard fallback',
-    lightKeep.models.findIndex((m) => /cloudflare.*glm/i.test(m)) < lightKeep.models.findIndex((m) => /mimo/i.test(m)));
+    lightKeep.models.findIndex((m) => /laguna/i.test(m)) < lightKeep.models.findIndex((m) => /mimo/i.test(m)));
 
   // 6. A host with no ledger keeps the old chain, so a fresh install is unchanged.
   const bare = selectTurnLanes({ botId: 'brand-new-bot', model: 'zen/muse', fallback: 'zen/nemotron' });
