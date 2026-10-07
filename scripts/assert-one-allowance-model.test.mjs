@@ -295,6 +295,11 @@ try {
   check('/allowance does not tick a terminal-only lane green', !/✅[^\n]*Freebuff/.test(fbText), fbText.split('\n').filter((l) => /Freebuff/.test(l)).join(' | '));
   check('/allowance says why it is not usable', /terminal only/.test(fbText));
   check('/freemodel marks the same lane not usable', /❌/.test(fbText) && /Freebuff/.test(fbText));
+  // The prose beside a ❌ must not sell the lane: the ledger holds no Freebucks
+  // stamp, so "ready" and the literal "~1h" were claims without a source
+  // (live 2026-10-06, the vm3 reply the operator pasted twice).
+  check('/allowance does not sell the terminal-only row as ready',
+    !/Freebuff:[^\n]*(ready|~1h)/.test(fbText), fbText.split('\n').filter((l) => /Freebuff/.test(l)).join(' | '));
 
   // 6e. Parity, asserted over a table that mixes every awkward shape at once: a
   // plain opencode lane, a terminal-only Freebuff lane whose projection ref carries

@@ -25,7 +25,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bakeoffVerdict, benchmarkFor, benchmarkLabel, catalogFacts, demonstratedModels, HIGH_TIER_MIN_AA, modelIdOf, scoreLabelFor, tierForModel, walkTierRank, CATALOG_FILES } from './lib/free-catalogs.mjs';
+import { bakeoffVerdict, benchmarkFor, benchmarkLabel, catalogFacts, demonstratedModels, HIGH_TIER_MIN_AA, modelIdOf, OWNER_PLACEMENT, scoreLabelFor, tierForModel, walkTierRank, CATALOG_FILES } from './lib/free-catalogs.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -110,7 +110,36 @@ console.log('  -- placement rule: rating decides, no rating is light unless demo
 check('AA >= 35 is the coding pool', tierForModel('muse-spark-1.3-contributor').tier === 'high' && tierForModel('deepseek-v4.1-flash').tier === 'high' && tierForModel('gemini-3.8-flash').tier === 'high');
 check('AA < 35 is the light pool', tierForModel('big-pickle').tier === 'light' && tierForModel('minimax-m3-free').tier === 'light' && tierForModel('solar-pro4').tier === 'light');
 check('an estimate counts as a figure', tierForModel('mimo-v2.6-flash').tier === 'high' && tierForModel('laguna-s-2.1').tier === 'light');
-check('no published figure is light, without exception', ['ox-alpha-free', 'x-preview-f-free', 'kimi-k2.5-free', 'north-mini-code-free', 'kat-coder-pro', 'hy3-free', 'qwen3.8-27b', 'glm-4.7-flash', 'ring-2.6-1t-free', 'trinity-large-preview-free'].every((m) => tierForModel(m).tier === 'light'));
+check('no published figure is light, without exception', ['ox-alpha-free', 'x-preview-f-free', 'kimi-k2.5-free', 'north-mini-code-free', 'kat-coder-pro', 'hy3-free', 'glm-4.7-flash', 'ring-2.6-1t-free', 'trinity-large-preview-free'].every((m) => tierForModel(m).tier === 'light'));
+// ...except the owner's own placement, which is the one other way in and is kept
+// in a single table in one file. It used to include qwen3.8-27b; on 2026-10-07 the
+// operator looked at the live /freemodel and placed the Qwen 27B, Exo and Fledge
+// alpha in the coding pool, because a model with no published figure is not the
+// same claim as a model that cannot code and only the owner can decide it. The
+// table is asserted below, so an entry cannot be added without a check noticing.
+check('the owner\'s placement is applied to the model and to every spelling of it',
+  tierForModel('opencode/exo-free').tier === 'high'
+  && tierForModel('exo-free').tier === 'high'
+  && tierForModel('opencode/fledge-alpha-free').tier === 'high'
+  && tierForModel('cloudflare/@cf/qwen/qwen3.8-27b').tier === 'high'
+  && tierForModel('qwen3.8-27b').tier === 'high');
+check('and it says who placed it, and when',
+  Object.values(OWNER_PLACEMENT).every((r) => /^\d{4}-\d{2}-\d{2}$/.test(String(r.since)) && String(r.why).length > 10)
+  && Object.values(OWNER_PLACEMENT).every((r) => r.tier === 'high'));
+check('it is a placement, not a number: no AA is invented for it',
+  /owner placement/.test(String(tierForModel('opencode/exo-free').why || ''))
+  && !/AA \d/.test(String(tierForModel('opencode/exo-free').why || '')));
+check('a published figure still decides, so the table cannot overrule the catalog',
+  tierForModel('cloudflare/@cf/qwen/qwen3.8-flash').why.includes('AA')
+  || tierForModel('tokenharbor/qwen3.8-flash:free').why.includes('AA'));
+check('and a lock still outranks the owner\'s placement', (() => {
+  // The order is the invariant: the lock returns before the owner lookup is even
+  // read, so a forbidden model cannot be re-placed by an entry in the table.
+  const src = fs.readFileSync(new URL('./lib/free-catalogs.mjs', import.meta.url), 'utf8');
+  const lockAt = src.indexOf("if (hit && (hit.terminalOnly || /forbidden/i.test(String(hit.why || '')))) {");
+  const ownerAt = src.indexOf('const owner = OWNER_PLACEMENT_BY_ID.get(');
+  return lockAt > 0 && ownerAt > lockAt && tierForModel('deepseek-v4').tier === null;
+})());
 check('except a demonstrated one, which is high on evidence', tierForModel('space-bunny-free').tier === 'high' && /ROADMAP|BOT_ROLES/.test(String(tierForModel('space-bunny-free').why || '')));
 check('and the exception list is exactly one row, with evidence', demonstratedModels().length === 1 && demonstratedModels()[0].name === 'Space Bunny');
 check('a vendor adjective is not evidence', /no published figure/.test(String(tierForModel('kat-coder-pro').why || '')));

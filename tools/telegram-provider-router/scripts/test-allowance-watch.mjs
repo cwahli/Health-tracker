@@ -12,6 +12,7 @@
  */
 import { createRequire } from "module";
 import fs from "fs";
+import os from "os";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
@@ -493,6 +494,163 @@ t("C15 prompt-file sidecar naming (ht-run ↔ ht-watch handshake, no inline long
   eq(contFile, "/workspace/logs/ht-fbac-a.cont", "cont sidecar path");
   const meta = JSON.parse(fs.readFileSync(join(TOOL_DIR, "package.json"), "utf8"));
   eq(meta.name, "tg-provider-router", "meta sanity (tool still parses JSON)");
+});
+
+// ------------------------------------ C16 an uncertain probe must not deplete a lane
+// The wrapper's third branch used to re-stamp a lane depleted with the default TTL
+// whenever the probe came back uncertain (hang, timeout, binary missing, no key).
+// The sweep only probes lanes that are ALREADY dark, so that reset the clock on
+// lanes whose darkness had expired, for as long as the probe stayed uncertain — a
+// lane nobody could reach, kept unreachable by a probe that learned nothing. Live
+// on the VM 2026-10-07 this was the operator's "I still can't see muse from Cline":
+// `cline-free/muse-spark-1.3-contributor` had a real 429 on 2026-09-26, then eleven
+// days of `uncertain → default TTL` re-stamps, while Cline's own catalog listed the
+// model as free. The rule is the Cline enrollment's own: uncertain changes nothing.
+// The probe here cannot succeed — PATH points at an empty directory, so the `cline`
+// binary does not exist — which is exactly the uncertain case.
+t("C16 an uncertain probe writes nothing to the ledger (no false depletion)", () => {
+  const tmp = fs.mkdtempSync(join(os.tmpdir(), "ht-ac-uncertain-"));
+  fs.mkdirSync(join(tmp, "state"), { recursive: true });
+  fs.mkdirSync(join(tmp, "empty-bin"), { recursive: true });
+  fs.mkdirSync(join(tmp, "empty-home"), { recursive: true });
+  const past = new Date(Date.now() - 11 * 24 * 3600 * 1000).toISOString();
+  const table = {
+    version: 3,
+    updatedAt: null,
+    buckets: { "cline-per-model": { resetRule: "per-model daily (Cline UI)", nextResetAt: null } },
+    lanes: [{
+      pref: 2, provider: "cline", model: "cline-free/muse-spark-1.3-contributor",
+      bucket: "cline-per-model", label: "Cline Muse Spark 1.3 contributor free", tg: true,
+      status: "depleted", nextReset: past, nextResetAt: past, cooldownUntil: past,
+      depletedObservedAt: past, lastPingNote: "a real 429 from eleven days ago",
+    }],
+  };
+  const tablePath = join(tmp, "state", "free-lane-table.json");
+  fs.writeFileSync(tablePath, JSON.stringify(table, null, 2));
+  fs.writeFileSync(join(tmp, "state", "session.json"), JSON.stringify({ quota: {} }, null, 2));
+
+  // `process.execPath`, not "node": the child's PATH is the empty directory below,
+  // and a literal "node" would then not resolve on a host that has no shell on that
+  // PATH. The wrapper needs no PATH to start; its `cline` lookup does, and finds
+  // nothing there — which is the uncertain probe under test.
+  const r = spawnSync(process.execPath, [join(TOOL_DIR, "bin", "ht-allowance-watch"), "--once"], {
+    encoding: "utf8",
+    timeout: 60000,
+    env: {
+      ...process.env,
+      PATH: join(tmp, "empty-bin"),
+      // HOME too: once the wrapper resolves the binary through absolute candidates
+      // (~/.npm-global/bin, ~/.local/bin, /usr/local/bin, /usr/bin), an empty PATH
+      // alone no longer makes the probe uncertain on a host that genuinely has the
+      // CLI installed — the test would pass on a bare Mac and fail on the VM. Point
+      // HOME at the temp dir so "no binary anywhere" is true, not merely "not on
+      // this PATH".
+      HOME: join(tmp, "empty-home"),
+      HT_ROUTER_DIR: tmp,
+      HT_CORE_PATH: join(TOOL_DIR, "src", "allowance-watch-core.cjs"),
+      HT_WORKSPACE: TOOL_DIR,
+      HT_LOG_DIR: tmp,
+    },
+  });
+  eq(r.status, 0, `wrapper --once exits 0 (stderr: ${String(r.stderr || "").trim().split("\n")[0] || "none"})`);
+  // The LANE, not the file: the sweep stamps its own `updatedAt` heartbeat either
+  // way, and that timestamp is not a claim about the model.
+  const after = JSON.parse(fs.readFileSync(tablePath, "utf8"));
+  eq(JSON.stringify(after.lanes), JSON.stringify(table.lanes),
+    "an uncertain probe must not rewrite a lane (status, cooldown and note all survive)");
+  const session = JSON.parse(fs.readFileSync(join(tmp, "state", "session.json"), "utf8"));
+  eq(Object.keys(session.quota || {}).length, 0, "and must not stamp a quota record for the lane");
+  // The fact that the probe learned nothing is kept — in the ping record, which is
+  // where a fact about a probe belongs, not in a depletion it did not measure.
+  const pings = JSON.parse(fs.readFileSync(join(tmp, "state", "allowance-watch-pings.json"), "utf8"));
+  const rec = (pings.probes || {})["cline/cline-free/muse-spark-1.3-contributor"];
+  ok(rec && rec.result === "uncertain", `the uncertainty is recorded as uncertain: ${JSON.stringify(rec)}`);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ------------------------------------ C18 the probe must not trust PATH for a binary
+// The watcher probed with a bare `cline`, so the unit's PATH decided whether Cline
+// existed. It does not contain ~/.npm-global/bin — where the CLI is installed — and
+// the lane was re-stamped dark every ~46 minutes as a result. resolveCliBin keeps
+// the bare name as the LAST resort instead of the first guess.
+t("C18 resolveCliBin: absolute candidates in order, bare name last", () => {
+  const home = "/home/u";
+  const only = (...present) => (p) => { if (!present.includes(p)) throw new Error("ENOENT"); };
+  const call = (access, command = "cline") => core.resolveCliBin(command, { home, access, constants: { X_OK: 1 }, join: (a, ...b) => [a, ...b].join("/") });
+
+  eq(call(only("/home/u/.npm-global/bin/cline")), "/home/u/.npm-global/bin/cline", "npm-global wins");
+  eq(call(only("/home/u/.local/bin/cline")), "/home/u/.local/bin/cline", "then .local/bin");
+  eq(call(only("/usr/local/bin/cline")), "/usr/local/bin/cline", "then /usr/local/bin");
+  eq(call(only("/usr/bin/cline")), "/usr/bin/cline", "then /usr/bin");
+  eq(call(only()), "cline", "nothing found -> bare name, i.e. the old behaviour is the fallback");
+  // order matters: the candidate list is a preference, not a set
+  eq(call(only("/home/u/.npm-global/bin/cline", "/home/u/.local/bin/cline")), "/home/u/.npm-global/bin/cline",
+    "npm-global beats .local when both exist");
+  eq(call(only(), ""), "", "an empty command stays empty (no cwd-relative surprise)");
+});
+
+t("C18b with an empty PATH, a probe still reaches a binary that exists only in ~/.npm-global/bin", () => {
+  const tmp = fs.mkdtempSync(join(os.tmpdir(), "ht-ac-resolve-"));
+  fs.mkdirSync(join(tmp, "state"), { recursive: true });
+  fs.mkdirSync(join(tmp, "empty-bin"), { recursive: true });
+  const home = join(tmp, "home");
+  fs.mkdirSync(join(home, ".npm-global", "bin"), { recursive: true });
+  const stub = join(home, ".npm-global", "bin", "cline");
+  fs.writeFileSync(stub, "#!/bin/sh\necho OK\n");
+  fs.chmodSync(stub, 0o755);
+
+  const past = new Date(Date.now() - 3600 * 1000).toISOString();
+  const table = {
+    version: 3, updatedAt: null,
+    buckets: { "cline-per-model": { resetRule: "per-model daily", nextResetAt: null } },
+    lanes: [{
+      pref: 2, provider: "cline", model: "cline-free/muse-spark-1.3-contributor",
+      bucket: "cline-per-model", label: "Cline Muse Spark 1.3 contributor free", tg: true,
+      status: "depleted", nextReset: past, nextResetAt: past, cooldownUntil: past,
+      depletedObservedAt: past, lastPingNote: "held by a probe that could not run",
+    }],
+  };
+  const tablePath = join(tmp, "state", "free-lane-table.json");
+  fs.writeFileSync(tablePath, JSON.stringify(table, null, 2));
+  fs.writeFileSync(join(tmp, "state", "session.json"), JSON.stringify({ quota: {} }, null, 2));
+
+  const r = spawnSync(process.execPath, [join(TOOL_DIR, "bin", "ht-allowance-watch"), "--once"], {
+    encoding: "utf8", timeout: 60000,
+    env: {
+      ...process.env,
+      PATH: join(tmp, "empty-bin"),   // the binary is NOT on PATH
+      HOME: home,                     // ...it is only in this HOME's ~/.npm-global/bin
+      HT_ROUTER_DIR: tmp, HT_CORE_PATH: join(TOOL_DIR, "src", "allowance-watch-core.cjs"),
+      HT_WORKSPACE: TOOL_DIR, HT_LOG_DIR: tmp,
+    },
+  });
+  eq(r.status, 0, `wrapper --once exits 0 (stderr: ${String(r.stderr || "").trim().split("\n")[0] || "none"})`);
+  const after = JSON.parse(fs.readFileSync(tablePath, "utf8")).lanes[0];
+  eq(after.status, "available", "the probe RAN and cleared the lane, on an empty PATH");
+  eq(after.nextResetAt, null, "and the hold is gone");
+  const pings = JSON.parse(fs.readFileSync(join(tmp, "state", "allowance-watch-pings.json"), "utf8"));
+  eq((pings.probes || {})["cline/cline-free/muse-spark-1.3-contributor"].result, "available", "recorded as available");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ------------------------------------ C19 the unit itself must be versioned
+// It lived only in /etc/systemd/system/ on the box, so the bug it caused — a PATH
+// with no ~/.npm-global/bin — could not be reviewed, diffed or reproduced here.
+t("C19 the watcher's unit is versioned, and starts the copy a deploy maintains", () => {
+  const repo = join(HERE, "..", "..", "..");
+  const unitPath = join(repo, "systemd", "ht-allowance-watch.service");
+  ok(fs.existsSync(unitPath), `the unit must be committed, or the PATH it needs is reproducible nowhere: ${unitPath}`);
+  const unit = fs.readFileSync(unitPath, "utf8");
+  const exec = (unit.match(/^ExecStart=(.*)$/m) || [])[1] || "";
+  ok(/tools\/telegram-provider-router\/bin\/ht-allowance-watch/.test(exec), `ExecStart runs the repo's own wrapper: ${exec}`);
+  ok(/\/home\/ubuntu\/deploy\/Health-tracker/.test(exec), `ExecStart points where the webhook deploy maintains the tree: ${exec}`);
+  ok(!/bot-host-r14/.test(exec), `ExecStart must not point at the tree nothing deploys: ${exec}`);
+  ok(/^Restart=always$/m.test(unit), "Restart=always, so a corrected file is picked up without a privileged restart");
+  ok(/Environment=HT_WORKSPACE=\/home\/ubuntu\/deploy\/Health-tracker/.test(unit), "HT_WORKSPACE pins the core to the same tree as ExecStart");
+  ok(/FREE_LANES_SHARED_DIR=/.test(unit), "the shared state dir is declared, not inferred");
+  ok(/Environment=HT_LOG_DIR=\/home\/ubuntu\/\.local\/state\/shared-free-lanes/.test(unit),
+    "the watcher log goes to the state dir — the wrapper default (/workspace/logs) does not exist here");
+  ok(/--daemon/.test(exec), "the service runs the daemon mode the unit is named for");
 });
 
 // ---- summary ----

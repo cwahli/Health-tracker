@@ -1265,11 +1265,14 @@ export function resetInBit(resetIn) {
  * (live 2026-10-06: the notice offered a catalog-only lane while the table below
  * it offered a Cloudflare one).
  */
-export function depletedLaneProse({ resetIn = '', next = null } = {}) {
+export function depletedLaneProse({ label = '', resetIn = '', next = null } = {}) {
   const nextBit = next
     ? `Next up: ${shortModelName(next)} · ${planCodeForLane(next)} · ${next.model}`
     : 'Next up: (no free lane available — use paid / wait for reset)';
-  return `That lane is depleted (${resetInBit(resetIn)}).\n${nextBit}`;
+  // The lane the user tapped is named. "That lane is depleted" left the reader to
+  // scroll the table it appends to find which row they had pressed.
+  const name = String(label || '').trim();
+  return `${name ? `${name} is` : 'That lane is'} depleted (${resetInBit(resetIn)}).\n${nextBit}`;
 }
 
 export function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [] } = {}) {
@@ -4592,7 +4595,7 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
         const projection = projectLanes(table, session, { now: Date.now(), location, readiness });
         const next = nextUsableLane({ table, session, rows: projection, provider: route.provider, model: route.model });
         await api.answerCallbackQuery(query.id, { text: `Depleted (${resetInBit(annHit?.resetIn)}) — pick ${next ? shortModelName(next) : 'another lane'}` });
-        await sendHtml(api, chatId, `${depletedLaneProse({ resetIn: annHit?.resetIn, next })}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location, readiness })}`);
+        await sendHtml(api, chatId, `${depletedLaneProse({ label: annHit?.label || entry.label, resetIn: annHit?.resetIn, next })}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location, readiness })}`);
         return;
       }
       // Terminal-only rows (Freebuff) are shown for visibility but must not
@@ -4755,6 +4758,39 @@ export function stickyModelAfterTurn({ chatModel, answeredModel, answered }) {
 }
 
 /**
+ * Execution ref for a configured model. The OpenCode `google/` provider is
+ * unavailable on hosts without a wired OpenCode google credential (live VPS:
+ * every `google/gemini-*` attempt ends `Model unavailable`), while
+ * GEMINI_API_KEY answers directly through the `gemini:` runner (pinged PONG
+ * on vm3 2026-10-06). A raw `google/<id>` ref therefore never reaches the
+ * CLI — it is rewritten to the direct runner. Every other surface passes
+ * through untouched (unknown refs stay first-choice per the 2026-09-25 rule).
+ * Idempotent: an already-direct `gemini:` ref has no `/`-prefix match.
+ */
+export function execModelRef(ref) {
+  const raw = String(ref || '');
+  const m = raw.match(/^(google|gemini)\/(.+)$/i);
+  if (!m) return raw;
+  const id = m[2].startsWith('gemini/') ? m[2] : `gemini/${m[2]}`;
+  return `gemini:${id}`;
+}
+
+/**
+ * Ping turns check exactly one lane. A bare greeting (`hi`) is rewritten into
+ * a connectivity ping that must exercise the real turn path (session, model,
+ * reply) — but walking the whole ledger on a ping turns one dead primary into
+ * N switch lines for a turn the user never cared about (live vm3 2026-10-06:
+ * `hi` walked longcat → gemini → qwen → glm → longcat, all hard-model-failure).
+ * Returns the single-model chain for pings, null otherwise (caller keeps the
+ * ledger walk for real prompts).
+ */
+export function pingOnlyModels({ isPingTurn, model, fallback } = {}) {
+  if (!isPingTurn) return null;
+  const single = [model || fallback].filter(Boolean);
+  return single.length ? single : null;
+}
+
+/**
  * The lanes this turn may use, in order, from this host's own ledger.
  *
  * The old chain was [chat model, bot default]: two fixed entries, so a lane the
@@ -4852,7 +4888,10 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   }
 
   const models = [];
-  if (model && !currentSkipped) models.push(model);
+  // The first entry executes, so it takes the execution ref: a raw `google/`
+  // id would burn the turn on an unwired provider. Ledger identity above
+  // (currentSkipped, groups) stays on the configured ref.
+  if (model && !currentSkipped) models.push(execModelRef(model));
   for (const lane of orderedLanes) models.push(toModelRef(lane.provider, lane.model));
   if (!models.length) models.push(fallback);
   const unique = [...new Set(models.filter(Boolean))];
@@ -6757,7 +6796,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       ).catch(() => {});
       return;
     }
-    if (laneChoice.displaced) {
+    // Pings answer on their own single lane (see pingOnlyModels): the
+    // pre-computed stays-on-X claim below would be false — sticky follows
+    // the answer, and the ping reply itself already names where it ran
+    // (live vm3 2026-10-06: notice said "stays on qwen" while the ping
+    // answered live on direct gemini and sticky followed it there).
+    if (laneChoice.displaced && !isPingTurn) {
       // Chat copy carries the compact countdown, never the ledger's absolute
       // stamp: "depleted until 2026-10-03T04:30:29Z (default TTL, no countdown
       // in vendor text) / Sat 11:30 WIB" is a log line, not a chat line (live
@@ -6851,7 +6895,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // the window on the lane that is actually answering, not only on the few
     // lanes the static map happens to know. Best-effort, and it runs before the
     // walk: the cache it reads is the one the footer reads anyway.
-    const turnLaneModels = laneChoice.models.length ? laneChoice.models : failoverModels(eff.model, config.agent.model);
+    // Pings check the chat's own lane only; real prompts walk the ledger.
+    const pingModels = pingOnlyModels({ isPingTurn, model: execModelRef(eff.model), fallback: execModelRef(config.agent.model) });
+    const turnLaneModels = pingModels || (laneChoice.models.length ? laneChoice.models : failoverModels(eff.model, config.agent.model));
     const laneLimits = await laneContextLimits(config, caches, turnLaneModels);
     const result = await runOpencodeWithFailover({
       api,

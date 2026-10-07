@@ -551,9 +551,10 @@ export function laneWalkRef(provider, model) {
   }
   // Mirror freemodels.toModelRef: a bare chat-only id keeps its vendor so the
   // walk emits a routable ref instead of an `Invalid model reference` burn.
-  if (!surface || surface === 'opencode') return model;
+  // `opencode` is not an exception — see toModelRef for the nine-bare-slug VM4
+  // walk of 2026-10-06. An id already carrying a path is returned untouched.
   if (String(model || '').includes('/')) return model;
-  return `${surface}/${model}`;
+  return `${surface || 'opencode'}/${model}`;
 }
 
 /**
@@ -848,9 +849,10 @@ export function planCodeForLane(lane) {
   if (provider === "cloudflare" || model.includes("cloudflare/") || bucket.includes("cloudflare")) return "CF";
   if (provider === "cline" || model.startsWith("cline")) return "CL";
   if (provider === "freebuff" || bucket.includes("freebuff")) return "FB";
-  // The go-plan pool is separate quota from the zen pool: it gets its own code
-  // so the two space-bunny rows survive the canonical dedupe as two rows and
-  // read as two pools (live VM5 2026-10-03).
+  // The go-plan pool is separate quota from the zen pool: it keeps its own code
+  // so such a row can never be deduped onto the zen free row and read as the same
+  // bar (live VM5 2026-10-03). It does not make the go lane free — the go plan is
+  // paid, and freemodels.mjs refuses to source it for the free inventory.
   if (provider === "opencode-go" || model.startsWith("opencode-go/")) return "OG";
   // Token Harbor free bar = TH for both paths: the OpenCode `tokenharbor/…`
   // tools lane and the chat-only `provider: tokenharbor` lane are the same
@@ -1540,9 +1542,36 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   if (advice.depleted && advice.active) {
     lines.push("Active sticky is empty — fail over to Next up (do not hang).");
   }
-  const fb = usable.find((l) => String(l.provider || "").toLowerCase() === "freebuff" || String(l.bucket || "").toLowerCase().includes("freebuff"));
+  // The Freebuff line reads the SAME verdict as the ❌/✅ row above it, or the two
+  // contradict: the mark comes from the projection (a terminal-only lane is ❌ —
+  // "terminal only, not selectable from chat") while this line took `usable`, the
+  // table's own verdict, so a lane the ledger had already spent was announced as
+  // "ready" directly under a ❌ row. Live 2026-10-06, on the vm3 bot's own reply.
+  //
+  // The other half of that contradiction is the terminal-only row itself, which the
+  // first fix missed. Its ❌ means "no chat tap", its Reset column is `—` because
+  // the ledger carries no Freebucks stamp (`nextResetAt: null`, resetRule "shared
+  // daily Freebucks (Freebuff UI)"), and this line still said "ready (~1h
+  // Freebucks)" — an availability claim plus a time figure, under the ❌, on no
+  // evidence: `~1h` was the string literal below, not a measurement. So the
+  // not-spent case now states what the ledger actually knows — terminal-only, no
+  // chat tap, bar untracked — and nothing is announced ready beside a ❌ row.
+  // Live 2026-10-06, second paste of the same reply.
+  const fb = (rows || []).find((r) => String(r.provider || "").toLowerCase().includes("freebuff") || String(r.bucket || "").toLowerCase().includes("freebuff"))
+    || usable.find((l) => String(l.provider || "").toLowerCase() === "freebuff" || String(l.bucket || "").toLowerCase().includes("freebuff"));
   if (fb) {
-    lines.push("Freebuff: " + escHtml(shortModelName(fb)) + " ready (~1h Freebucks) — terminal only; use it promptly.");
+    const spent = rows ? Boolean(fb.depleted || fb.ended) : !laneIsUsable(fb);
+    const fbName = escHtml(shortModelName(fb));
+    if (spent) {
+      const until = fb.resetAt ? ` (${escHtml(String(labelFn(fb.resetAt)))})` : "";
+      lines.push("Freebuff: " + fbName + (fb.ended ? " is over" : " is depleted") + until + " — terminal only; not usable right now.");
+    } else if (fb.tg === true) {
+      // A chat-selectable Freebuff lane (the experimental FREEBUFF_TG_LANE) is the
+      // one case that may call itself ready — still without an invented figure.
+      lines.push("Freebuff: " + fbName + " — ready; shared daily Freebucks.");
+    } else {
+      lines.push("Freebuff: " + fbName + " — terminal only; not selectable from chat. Shared daily Freebucks, reset not tracked here.");
+    }
   }
   // Token Harbor's free models share ONE rolling ~7-day value bar, which is what
   // the table's own resetRule says on every TH row and what the shared
@@ -1744,7 +1773,7 @@ export function laneScoreFromCatalog(lane) {
 export const TIER_GROUPS = [
   { tier: 'high', label: 'Coding-agent capable' },
   { tier: 'unlisted', label: 'Not in the catalog' },
-  { tier: 'light', label: 'Light · docs/inventory' },
+  { tier: 'light', label: 'No published figure · docs/inventory' },
 ];
 
 /**
@@ -1883,9 +1912,13 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
   // row for it and the table showed the same model twice under two plan codes, so
   // the model id is compared with the vendor prefix and the surface stripped —
   // but qualified by the EFFECTIVE provider: `opencode/space-bunny-free` and
-  // `opencode-go/space-bunny-free` are different free pools (both cost-0, live
-  // 2026-10-03) and each deserves its own row and quota, while the
-  // `opencode/tokenharbor/x` + `tokenharbor/x` twins share one bar and stay one.
+  // `opencode-go/space-bunny-free` are different POOLS — a row that exists under
+  // the go plan must never share the zen free row's quota (live 2026-10-03) —
+  // while the `opencode/tokenharbor/x` + `tokenharbor/x` twins share one bar and
+  // stay one. "Different pool" is a quota claim, NOT a freeness claim: the go
+  // plan is paid, so its Space Bunny is excluded from the free inventory
+  // (`FREE_NAME_DENYLIST` in freemodels.mjs) and is never offered as a second
+  // free bunny. Only the effective provider decides the fold.
   const foldKey = (provider, model) => {
     const k = modelKey(model);
     if (!k) return '';
@@ -2399,6 +2432,79 @@ export function readSessionWithSharedQuota(stateDir) {
     quota[key] = { ...rec, sharedFrom: "host-account" };
   }
   return { ...own, quota };
+}
+
+/**
+ * Clear a hold after a probe has just shown the lane answering.
+ *
+ * The mirror image of `stampDepleted` + `syncFreeLaneTableFromSession`, with the
+ * same semantics the router's `stampAvailable` has (and which its own C7 sensor
+ * pins): the session records go first, because the OVERLAY is what resurrects a
+ * lane — a table row flipped to `available` while `session.quota` still holds the
+ * key is dark again on the very next read. So both halves are written in one pass
+ * and preference order is never touched.
+ *
+ * A hold on the SHARED bar frees the whole bar, not one lane: on the OpenCode Zen
+ * free pool muse/mimo/ling/nemotron/space-bunny all draw on one allowance, so a
+ * lane that answers is evidence the bar was not empty, and every sibling drawing
+ * on that bar is reachable again — including the per-lane keys, because on this
+ * pool the writer records ONE observation under both the lane key and the bucket
+ * key. A lane whose hold came from a different bar is untouched; this proves one
+ * bar, not the others.
+ */
+export function clearHoldInPlace({ table, session, lane, now = Date.now(), source = "probe: OK" } = {}) {
+  const hit = liveRecForLane(lane, session || {}, now);
+  const bucket = hit && /^bucket:/.test(String(hit.key || "")) ? String(hit.key).slice("bucket:".length) : lane?.bucket || null;
+  const target = laneKey(lane || {});
+  const affected = (table?.lanes || []).filter(
+    (l) => l && (laneKey(l) === target || (bucket && String(l.bucket || "") === String(bucket))),
+  );
+  const nowIso = isoZ(now);
+  const resetLanes = [];
+  for (const l of affected) {
+    l.status = "available";
+    l.nextResetAt = null;
+    l.cooldownUntil = null;
+    l.cooldownLeft = "-";
+    l.nextReset = l.resetRule || table?.buckets?.[bucket]?.resetRule || "bucket reset rule";
+    l.lastPingAt = nowIso;
+    l.lastPingNote = source;
+    resetLanes.push({ pref: l.pref, model: l.model });
+  }
+  const clearedKeys = [];
+  if (session?.quota) {
+    const keys = bucket ? [`bucket:${bucket}`] : [];
+    for (const l of affected) if (l.provider && l.model) keys.push(`${l.provider}/${l.model}`);
+    for (const k of keys) {
+      if (k in session.quota) {
+        delete session.quota[k];
+        clearedKeys.push(k);
+      }
+    }
+  }
+  if (bucket && table?.buckets?.[bucket]?.nextResetAt) {
+    table.buckets[bucket].nextResetAt = null;
+    table.buckets[bucket].nextResetLabel = table.buckets[bucket].resetRule || "available";
+  }
+  return { clearedKeys, resetLanes, bucket };
+}
+
+/**
+ * Read + clear + write, for a caller that has the lane but not the file bodies.
+ * `lane` is matched by route key, not by object identity: the caller's copy came
+ * from a parse of the same file, and a fresh read is what goes back to disk.
+ */
+export function clearLaneHold({ tablePath, sessionPath, lane, now = Date.now(), source = "probe: OK", dryRun = false } = {}) {
+  const table = readJson(tablePath);
+  if (!table) return { cleared: false, reason: `no free-lane table at ${tablePath}` };
+  const session = sessionPath ? readJson(sessionPath) : null;
+  if (!session) return { cleared: false, reason: `no live session at ${sessionPath}` };
+  const info = clearHoldInPlace({ table, session, lane, now, source });
+  if (!dryRun) {
+    writeJsonAtomic(sessionPath, session);
+    writeJsonAtomic(tablePath, { ...table, updatedAt: isoZ(now) });
+  }
+  return { cleared: true, dryRun, ...info };
 }
 
 export function stampDepleted({ stateDir, provider, model, errText, depletedUntil = null, countdownHint = "", kind = "limit-unknown", now = Date.now() } = {}) {
