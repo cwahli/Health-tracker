@@ -130,6 +130,73 @@ export function holdEvidence(lane, session, { now = Date.now() } = {}) {
 }
 
 /**
+ * Vendor countdown, from the vendor's own refusal text: an ISO reset stamp, or
+ * "try again in 23h 15m". Mirror of the router core's `parseCountdownHint` (see
+ * `holdStampFromError` for why the two must agree).
+ */
+function countdownFromText(text, now) {
+  const s = String(text || '');
+  const iso = s.match(/(20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2}))/);
+  if (iso) {
+    const until = Date.parse(iso[1]);
+    if (Number.isFinite(until) && until > now) return { until, hint: iso[1], countdownParsed: true };
+  }
+  const verb = s.search(/try\s+again|retry|available\s+in|resets?\s+in|come\s+back\s+in/i);
+  if (verb >= 0) {
+    const chunk = s.slice(verb, verb + 120);
+    let ms = 0;
+    let found = false;
+    for (const m of chunk.matchAll(/(\d+)\s*(d|h|m|s)\b/gi)) {
+      const n = Number(m[1]);
+      const u = m[2].toLowerCase();
+      if (!Number.isFinite(n)) continue;
+      found = true;
+      ms += n * (u === 'd' ? 86400000 : u === 'h' ? 3600000 : u === 'm' ? 60000 : 1000);
+    }
+    if (found && ms > 0) return { until: now + ms, hint: chunk.trim().slice(0, 80), countdownParsed: true };
+  }
+  return { until: 0, hint: '', countdownParsed: false };
+}
+
+/**
+ * What a refusal actually proves, and until when — the stamp a ping may leave.
+ *
+ * This is the evidence half of the check: `holdEvidence` reads a stamp back and
+ * decides whether to call it proven, so whatever writes the stamp has to preserve
+ * what the vendor said. The three-way policy below is the router allowance
+ * watcher's own (`depletionUntilFromText` in
+ * tools/telegram-provider-router/src/allowance-watch-core.cjs, the canonical copy
+ * — its stem `parseCountdownHint` is ported above), because both surfaces stamp
+ * the same bars and a lane must not read "vendor countdown" on one and "unproven
+ * guess" on the other:
+ *
+ *   - a countdown in the text (ISO stamp, or "try again in 23h 15m") → that time,
+ *     kind `allowance-empty`: the vendor measured the bar and said when it refills;
+ *   - rate-limit wording with no countdown (429 / too many requests / throttled)
+ *     → the short burst TTL, kind `rate-limit`;
+ *   - anything else quota-shaped → the default TTL, kind `limit-unknown`.
+ *
+ * Only the last is a guess, and it is the one `holdEvidence` refuses to call
+ * proven. Writing every refusal as the guess was wrong in both directions: a lane
+ * Cline itself said was capped for 23h read as an unproven 6h guess, so the check
+ * re-pinged it (burning the very allowance it exists to protect) and the row came
+ * back "available" six hours before the vendor would answer — the exact yes-it-is
+ * / no-it-is-not argument the provenance column exists to settle.
+ */
+export function holdStampFromError(errText, { now = Date.now(), defaultTtlMs = 6 * 3600 * 1000, rateLimitTtlMs = 45 * 60 * 1000 } = {}) {
+  const text = String(errText || '');
+  const cd = countdownFromText(text, now);
+  if (cd.countdownParsed) {
+    return { until: cd.until, kind: 'allowance-empty', countdownParsed: true, countdownHint: cd.hint, ttlMs: cd.until - now };
+  }
+  const rateLimited = /rate\s*limit(?:ed)?|too\s+many\s+requests|\b429\b|throttl/i.test(text);
+  if (rateLimited) {
+    return { until: now + rateLimitTtlMs, kind: 'rate-limit', countdownParsed: false, countdownHint: '', ttlMs: rateLimitTtlMs };
+  }
+  return { until: now + defaultTtlMs, kind: 'limit-unknown', countdownParsed: false, countdownHint: '', ttlMs: defaultTtlMs };
+}
+
+/**
  * The held lanes worth re-pinging to falsify, in preference order.
  *
  * Unproven holds by default — the ones a ping can actually settle. A proven hold

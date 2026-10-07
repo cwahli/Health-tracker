@@ -54,7 +54,7 @@ import {
 import { buildFreeModelList } from './lib/freemodels.mjs';
 import { isQuotaOrLimitError, parseRetryAfter, runOpencode, extractLogError } from './lib/agent-opencode.mjs';
 import { runCline } from './lib/agent-cline.mjs';
-import { holdEvidence, probeKindForLane, probeModelForLane, recheckTargets, selectBurnTargets } from './lib/free-lane-probe.mjs';
+import { holdEvidence, holdStampFromError, probeKindForLane, probeModelForLane, recheckTargets, selectBurnTargets } from './lib/free-lane-probe.mjs';
 
 const args = new Set(process.argv.slice(2));
 function argVal(name) {
@@ -276,22 +276,29 @@ for (const lane of targets) {
       continue;
     }
     try {
-      const until = Date.now() + 6 * 3600 * 1000; // default TTL when vendor gives no countdown
+      // What the vendor's own text proves — not a blanket guess. A countdown in
+      // that text ("Try again in 23h 15m") is the vendor measuring the bar, and a
+      // measured hold must be stamped as one: stamped as a guess it would be
+      // re-pinged by `--recheck-depleted` (spending the allowance this check is
+      // here to guard) and, on the default 6h TTL, would read `available` up to
+      // 17h before the vendor answers again.
+      const stamp = holdStampFromError(err);
       const sess = JSON.parse(fs.readFileSync(sPath, 'utf8'));
       sess.quota = sess.quota || {};
       for (const key of quotaKeysForLane(lane)) {
         sess.quota[key] = {
-          depletedUntil: until,
+          depletedUntil: stamp.until,
           lastError: err.slice(0, 300),
           scope: key.startsWith('bucket:') ? 'shared' : 'per-model',
           depletedObservedAt: new Date().toISOString(),
-          countdownParsed: false,
-          kind: 'limit-unknown',
+          countdownParsed: stamp.countdownParsed,
+          kind: stamp.kind,
+          ...(stamp.countdownHint ? { countdownHint: stamp.countdownHint } : {}),
         };
       }
       fs.writeFileSync(sPath, JSON.stringify(sess, null, 2));
       const sync = syncFreeLaneTableFromSession({ tablePath, session: sess });
-      console.log(`  stamped ${sPath} (${quotaKeysForLane(lane).join(', ')}) + table sync: ${sync.updated ? `${(sync.changes || []).length} lane change(s)` : sync.reason}`);
+      console.log(`  stamped ${sPath} (${quotaKeysForLane(lane).join(', ')}) as ${stamp.kind}${stamp.countdownParsed ? ' from the vendor countdown' : ' (unproven default TTL)'} — held ${Math.round(stamp.ttlMs / 60000)}m; table sync: ${sync.updated ? `${(sync.changes || []).length} lane change(s)` : sync.reason}`);
     } catch (e) {
       console.log(`  stamp failed: ${String(e?.message || e).slice(0, 160)} — ledger untouched`);
     }

@@ -21,7 +21,7 @@ import { describe, it, expect } from 'vitest';
 
 import { CLINE_FREE_MODELS, FREE_NAME_DENYLIST, listFreeOpenCode } from './freemodels.mjs';
 import { clearHoldInPlace, clearLaneHold } from './free-lanes.mjs';
-import { holdEvidence, probeKindForLane, probeModelForLane, recheckTargets, selectBurnTargets } from './free-lane-probe.mjs';
+import { holdEvidence, holdStampFromError, probeKindForLane, probeModelForLane, recheckTargets, selectBurnTargets } from './free-lane-probe.mjs';
 
 const PREF_DOC = fileURLToPath(
   new URL('../../tools/telegram-provider-router/docs/free-lane-preference.json', import.meta.url),
@@ -243,5 +243,66 @@ describe('the lanes the operator verified working on 2026-10-07', () => {
       expect(probeModelForLane(lane)).toBe(w.model);
       expect(selectBurnTargets([lane], { all: true }).targets).toHaveLength(1);
     }
+  });
+});
+
+describe('what a refusal proves before it is written down', () => {
+  const lane = { pref: 2, provider: 'cline', model: 'cline-free/muse-spark-1.3-contributor', bucket: 'cline-per-model', tg: true };
+  const sessionWith = (rec) => ({ quota: { 'cline/cline-free/muse-spark-1.3-contributor': rec } });
+  const HOUR = 3600 * 1000;
+  // Cline's own words when its daily free unit is spent.
+  const CLINE_CAP = 'Daily free model limit reached. Try again in 23h 15m';
+
+  it('keeps the vendor countdown instead of filing it as a guess', () => {
+    const now = Date.parse('2026-10-07T12:00:00Z');
+    const stamp = holdStampFromError(CLINE_CAP, { now });
+    expect(stamp.kind).toBe('allowance-empty');
+    expect(stamp.countdownParsed).toBe(true);
+    // 23h15m, NOT the 6h default: on the default the lane reads `available` ~17h
+    // before the vendor will answer again, which is the false yes this whole
+    // column exists to prevent.
+    expect(stamp.until - now).toBe(23 * HOUR + 15 * 60 * 1000);
+    expect(stamp.ttlMs).toBe(stamp.until - now);
+  });
+
+  it('takes an ISO reset stamp the same way', () => {
+    const now = Date.parse('2026-10-07T12:00:00Z');
+    const stamp = holdStampFromError('quota exceeded; resets at 2026-10-08T00:00:00Z', { now });
+    expect(stamp.countdownParsed).toBe(true);
+    expect(stamp.until).toBe(Date.parse('2026-10-08T00:00:00Z'));
+  });
+
+  it('calls a bare 429 a measured burst, on the short TTL, not a guess', () => {
+    const now = Date.parse('2026-10-07T12:00:00Z');
+    const stamp = holdStampFromError('429 Too Many Requests', { now });
+    expect(stamp.kind).toBe('rate-limit');
+    expect(stamp.countdownParsed).toBe(false);
+    expect(stamp.until - now).toBe(45 * 60 * 1000);
+  });
+
+  it('still files a shapeless quota error as the guess it is', () => {
+    const stamp = holdStampFromError('free limit hit');
+    expect(stamp.kind).toBe('limit-unknown');
+    expect(stamp.countdownParsed).toBe(false);
+    expect(stamp.ttlMs).toBe(6 * HOUR);
+    expect(holdStampFromError('').kind).toBe('limit-unknown');
+  });
+
+  it('so a measured dead lane is not re-pinged, and a guess is', () => {
+    const observed = (errText) => {
+      const stamp = holdStampFromError(errText);
+      return { quota: { 'cline/cline-free/muse-spark-1.3-contributor': {
+        depletedUntil: stamp.until,
+        countdownParsed: stamp.countdownParsed,
+        kind: stamp.kind,
+      } } };
+    };
+    const capped = recheckTargets([lane], observed(CLINE_CAP));
+    expect(capped).toHaveLength(0);
+    expect(holdEvidence(lane, observed(CLINE_CAP), {}).proven).toBe(true);
+
+    const guess = recheckTargets([lane], observed('free limit hit'));
+    expect(guess).toHaveLength(1);
+    expect(guess[0].evidence.proven).toBe(false);
   });
 });
