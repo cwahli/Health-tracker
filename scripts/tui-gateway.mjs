@@ -494,13 +494,13 @@ function logGatewayError(err) {
  * untouched). Exported for the sensor, not for browsers to import.
  */
 export const WEB_AUTH_STORAGE_KEY = 'tui_token';
-export function webAuthShimJs(cookieName = COOKIE_NAME) {
-  return `<script>(function(){try{var k=${JSON.stringify(WEB_AUTH_STORAGE_KEY)};var cn=${JSON.stringify(cookieName)};var q;try{q=new URLSearchParams(location.search).get('token')||''}catch(e){q=''}if(q){try{sessionStorage.setItem(k,q)}catch(e){}try{document.cookie=cn+'='+encodeURIComponent(q)+'; Secure; Path=/; SameSite=Strict; Max-Age=900'}catch(e){}}var t=q;if(!t){try{t=sessionStorage.getItem(k)||''}catch(e){t=''}}try{fetch('/__shim_diag?u='+(q?1:0)+'&s='+((t&&!q)?1:0),{method:'GET',keepalive:true}).catch(function(){})}catch(e){}if(!t)return;function add(u){try{var a=new URL(u,location.href);if(a.origin!==location.origin)return u;if(a.searchParams.get('token'))return u;a.searchParams.append('token',t);return a.pathname+a.search+a.hash}catch(e){return u}}if(window.fetch){var of=window.fetch;window.fetch=function(u,o){try{if(typeof u==='string'){u=add(u)}else if(u&&typeof u.url==='string'){var nu=add(u.url);if(nu!==u.url)u=new Request(nu,u)}}catch(e){}return of.call(this,u,o)}}if(window.XMLHttpRequest){var oo=window.XMLHttpRequest.prototype.open;window.XMLHttpRequest.prototype.open=function(m,u){try{arguments[1]=add(u)}catch(e){}return oo.apply(this,arguments)}}if(window.EventSource){var OE=window.EventSource;window.EventSource=function(u,c){try{u=add(u)}catch(e){}return new OE(u,c)};window.EventSource.prototype=OE.prototype}try{fetch('/__shim_diag?u=1&p=1',{method:'GET',keepalive:true}).catch(function(){})}catch(e){}try{if(navigator.serviceWorker){navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister()})}).catch(function(){})}}catch(e){}}catch(e){}})();</script>`;
+export function webAuthShimJs(cookieName = COOKIE_NAME, ttlSec = 900) {
+  return `<script>(function(){try{var k=${JSON.stringify(WEB_AUTH_STORAGE_KEY)};var cn=${JSON.stringify(cookieName)};var q;try{q=new URLSearchParams(location.search).get('token')||''}catch(e){q=''}if(q){try{sessionStorage.setItem(k,q)}catch(e){}try{document.cookie=cn+'='+encodeURIComponent(q)+'; Secure; Path=/; SameSite=Strict; Max-Age=${ttlSec}'}catch(e){}}var t=q;if(!t){try{t=sessionStorage.getItem(k)||''}catch(e){t=''}}try{fetch('/__shim_diag?u='+(q?1:0)+'&s='+((t&&!q)?1:0),{method:'GET',keepalive:true}).catch(function(){})}catch(e){}if(!t)return;function add(u){try{var a=new URL(u,location.href);if(a.origin!==location.origin)return u;if(a.searchParams.get('token'))return u;a.searchParams.append('token',t);return a.pathname+a.search+a.hash}catch(e){return u}}if(window.fetch){var of=window.fetch;window.fetch=function(u,o){try{if(typeof u==='string'){u=add(u)}else if(u&&typeof u.url==='string'){var nu=add(u.url);if(nu!==u.url)u=new Request(nu,u)}}catch(e){}return of.call(this,u,o)}}if(window.XMLHttpRequest){var oo=window.XMLHttpRequest.prototype.open;window.XMLHttpRequest.prototype.open=function(m,u){try{arguments[1]=add(u)}catch(e){}return oo.apply(this,arguments)}}if(window.EventSource){var OE=window.EventSource;window.EventSource=function(u,c){try{u=add(u)}catch(e){}return new OE(u,c)};window.EventSource.prototype=OE.prototype}try{fetch('/__shim_diag?u=1&p=1',{method:'GET',keepalive:true}).catch(function(){})}catch(e){}try{var rn=function(){try{var u='/web/token'+(t?('?token='+encodeURIComponent(t)):'');fetch(u,{method:'GET',keepalive:true}).then(function(r){if(!r||!r.ok)return null;return r.json().catch(function(){return null})}).then(function(d){try{if(d&&d.token){t=d.token;sessionStorage.setItem(k,t);document.cookie=cn+'='+encodeURIComponent(t)+'; Secure; Path=/; SameSite=Strict; Max-Age=${ttlSec}'}}catch(e){}}).catch(function(){})}catch(e){}};setTimeout(rn,30000);setInterval(rn,600000)}catch(e){}try{if(navigator.serviceWorker){navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister()})}).catch(function(){})}}catch(e){}}catch(e){}})();</script>`;
 }
 
 /** Splice the auth shim into serve's HTML so it runs before the SPA bundle. */
-export function injectWebAuthShim(html, cookieName = COOKIE_NAME) {
-  const shim = webAuthShimJs(cookieName);
+export function injectWebAuthShim(html, cookieName = COOKIE_NAME, ttlSec = 900) {
+  const shim = webAuthShimJs(cookieName, ttlSec);
   if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => `${m}${shim}`);
   if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${shim}</head>`);
   return `${shim}${html}`;
@@ -569,7 +569,7 @@ async function proxyWebUi(req, res, url, env, { ttlSec = 900 } = {}) {
     if (setCookie) outHeaders['set-cookie'] = setCookie;
     if (/text\/html/i.test(ct)) {
       const raw = Buffer.from(await up.arrayBuffer()).toString('utf8');
-      const injected = injectWebAuthShim(raw);
+      const injected = injectWebAuthShim(raw, COOKIE_NAME, ttlSec);
       outHeaders['clear-site-data'] = '"cache"';
       res.writeHead(up.status, outHeaders);
       return res.end(injected);
@@ -1161,6 +1161,27 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         log(`shim-diag u=${flag('u')} s=${flag('s')} p=${flag('p')} ${describeWebRefusal(req, url)}`);
         res.writeHead(204, { 'cache-control': 'no-store' });
         return res.end();
+      }
+      // Proactive session renewal for the open web UI. Unlike ttyd's page —
+      // which only fetches `./token` on a reconnect — the SPA has no retry
+      // driven path, so the shim pings this on a timer. A live token is
+      // re-issued on every call; an expired-but-in-grace one is renewed too
+      // (same grace as `./token`). Idle apps die at TTL + grace; an open tab
+      // rides forward.
+      if (url.pathname === '/web/token') {
+        const verdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace });
+        if (!verdict.ok) {
+          log(`web/token refused (${verdict.reason})`);
+          res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+          return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+        }
+        const fresh = issueToken({ botId: verdict.botId, chatId: verdict.chatId, secret, ttlSec: ttl });
+        res.writeHead(200, {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+          'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(fresh)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+        });
+        return res.end(JSON.stringify({ ok: true, token: fresh }));
       }
       let webVerdict = verifyAnyToken(req, url, secret);
       if (!webVerdict.ok) {
