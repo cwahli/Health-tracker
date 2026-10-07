@@ -482,11 +482,16 @@ try {
   // The character is pinned, not left to taste. U+200B looked like the answer and
   // was not: Telegram strips it and answers "text must be non-empty", which took
   // /freemodel down entirely. U+2060 survives the check and draws nothing.
+  // One exception, added 2026-10-07, and it is not a summary of the keyboard: when a
+  // provider's lanes cannot run on this host they are not in the keyboard at all, so
+  // the body is the only place that can say so. Everything the keyboard DOES show is
+  // still unsaid above it, and with nothing blocked the body is still exactly U+2060.
   check('the body is nothing at all — the keyboard is the whole message',
     /export const FREEMODEL_EMPTY_BODY = '\\u2060';/.test(botSrc)
-    && /return \{ text: FREEMODEL_EMPTY_BODY, buttons, rows, usable, unusable \};/.test(botSrc)
+    && /text: setupNote\.length \? setupNote\.join\('\\n'\) : FREEMODEL_EMPTY_BODY,/.test(botSrc)
+    && /const setupNote = blockedProviderLines\(blocked\);/.test(botSrc)
     && !/const lines = \[/.test(fmBody),
-    'the formatter must not build body lines');
+    'the formatter carries the setup note and nothing else');
   // And it must be one the API has been shown to ACCEPT, because reading as blank
   // and counting as text are different questions to Telegram. These are the ones
   // measured rejected on 2026-10-02 (each sent to the live API and the reply

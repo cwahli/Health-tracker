@@ -115,6 +115,8 @@ import {
   sweepOrphanedLeases,
   selectTurnLanes,
   formatFreemodelWithDepletion,
+  blockedProviderLines,
+  FREEMODEL_EMPTY_BODY,
   getContextLimit,
   laneContextLimits,
   resetInBit,
@@ -2634,6 +2636,86 @@ describe('BOT-9 live failover wiring', () => {
     }
   });
 
+  // VM4 2026-10-07: a twelve-hop cascade in which three Cline lanes rendered as
+  // bare names (`glm-5.3-flash`, `deepseek-v4.1-flash`, `solar-pro4`) and four
+  // differently-caused quota failures all read `free limit hit`. The reader
+  // concluded Cline was never tried and that Space Bunny still had allowance;
+  // Cline had been tried three times, and one of the four was not a free-tier
+  // limit at all. The line is the only evidence a human has, so it has to name
+  // the surface and the cause.
+  it('names the lane surface on a switch line', async () => {
+    const { laneSwitchLabel } = await import('../scripts/bot-host.mjs');
+    expect(laneSwitchLabel('cline:cline-free/glm-5.3-flash')).toBe('CL glm-5.3-flash');
+    expect(laneSwitchLabel('cline:cline-free/solar-pro4')).toBe('CL solar-pro4');
+    expect(laneSwitchLabel('opencode/space-bunny-free')).toBe('OC space-bunny-free');
+    expect(laneSwitchLabel('opencode-go/space-bunny-free')).toBe('OG space-bunny-free');
+    expect(laneSwitchLabel('tokenharbor/mimo-v2.6-flash:free')).toBe('TH tokenharbor/mimo-v2.6-flash');
+    expect(laneSwitchLabel('gemini:gemini/gemini-3.8-flash')).toBe('GM gemini-3.8-flash');
+    // The two Space Bunny pools are separate quota and must stay tellable
+    // apart — that is the whole reason the prefix existed.
+    expect(laneSwitchLabel('opencode/space-bunny-free'))
+      .not.toBe(laneSwitchLabel('opencode-go/space-bunny-free'));
+  });
+
+  it('says which limit was hit instead of calling every quota error a free limit', async () => {
+    const { quotaVerdictShort } = await import('../scripts/bot-host.mjs');
+    // A real free-allowance exhaustion keeps its wording — the QS-2 gate asserts it.
+    expect(quotaVerdictShort('Error: INFERENCE_CAP_ERROR {"code":429,"message":"Daily free limit reached. Try again in 11h 35m."}'))
+      .toBe('free limit hit (Retry in ~11h 35m.)');
+    // An unfunded account, a transient throttle and a capacity 5xx are three
+    // different decisions for the reader, so they stop reading the same.
+    expect(quotaVerdictShort('AI_APICallError: Insufficient account funds')).toBe('account unfunded');
+    expect(quotaVerdictShort('Provider rate limit hit — this model is throttled right now.')).toBe('rate limited');
+    expect(quotaVerdictShort('AI_APICallError: Provider is over capacity')).toBe('provider at capacity');
+    expect(quotaVerdictShort('')).toBe('');
+  });
+
+  it('the switch line carries both the surface and the real reason', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
+    const oldLog = process.env.BOT_FAILURE_LOG;
+    process.env.BOT_FAILURE_LOG = '0';
+    try {
+      let first = true;
+      const spawnImpl = () => {
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => child.emit('close', 1);
+        queueMicrotask(() => {
+          if (first) {
+            first = false;
+            child.stderr.emit('data', Buffer.from('level=ERROR msg="run failed" error.error="AI_APICallError: Insufficient account funds"\n'));
+            child.emit('close', 1);
+          } else {
+            child.stdout.emit('data', Buffer.from('{"type":"text","part":{"text":"done"}}\n'));
+            child.emit('close', 0);
+          }
+        });
+        return child;
+      };
+      const sent: string[] = [];
+      const result = await runOpencodeWithFailover({
+        api: { sendMessage: async (_chatId: number, text: string) => { sent.push(text); return {}; } },
+        chatId: 7,
+        prompt: 'x',
+        models: ['cline:cline-free/glm-5.3-flash', 'opencode/space-bunny-free'],
+        workspace: '/tmp',
+        timeoutMs: 5000,
+        spawnImpl,
+      });
+      expect(result.finalText).toBe('done');
+      expect(sent.length).toBe(1);
+      expect(sent[0]).toMatch(/\*CL glm-5\.3-flash\* failed \(account unfunded\)/);
+      expect(sent[0]).toMatch(/switching to \*OC space-bunny-free\*/);
+      // An unfunded account is not a spent free allowance, and the line must not say it is.
+      expect(sent[0]).not.toMatch(/free limit hit/);
+    } finally {
+      if (oldLog === undefined) delete process.env.BOT_FAILURE_LOG;
+      else process.env.BOT_FAILURE_LOG = oldLog;
+    }
+  });
+
   it('attaches model and attempt context to every failover run', async () => {
     const { EventEmitter } = await import('node:events');
     const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
@@ -4399,5 +4481,61 @@ describe('B2B-2 peer envelope send', () => {
     const led = JSON.parse(fs.readFileSync(path.join(stateRoot, 'vm4', 'handoff.json'), 'utf8'));
     expect(led.chains['gp-letter-r1'].ourAgree).toBe(1);
     expect(led.chains['gp-letter-r1'].terminal).toBe(true);
+  });
+});
+
+/**
+ * A provider this host cannot run used to leave /freemodel without a trace.
+ *
+ * The operator's report on 2026-10-07 was "I still can't see muse from Cline",
+ * while Cline's own recommended-models catalog lists
+ * `cline-free/muse-spark-1.3-contributor` as free. The row was not missing: the
+ * projection marked every Cline lane `needsSetup` on a host with no signed-in
+ * Cline CLI, `canonicalAllowanceLanes` skips those verdicts, and the formatter
+ * filtered them out of the rows AND the keyboard — so the reader could not tell
+ * "this model does not exist" from "this host cannot run it", while /allowance
+ * has always named the missing variable under its table.
+ */
+describe('/freemodel names the provider a host cannot run', () => {
+  it('says which provider, how many lanes, and what is missing', () => {
+    expect(blockedProviderLines([
+      { ref: 'cline:cline-free/muse-spark-1.3-contributor', provider: 'cline', selectable: false, reason: 'needs a signed-in Cline CLI on this host' },
+      { ref: 'cline:cline-free/deepseek-v4.1-flash', provider: 'cline', selectable: false, reason: 'needs a signed-in Cline CLI on this host' },
+      { ref: 'tokenharbor/deepseek-v4.1-flash:free', provider: 'tokenharbor', selectable: false, reason: 'needs TOKEN_HARBOR_API_KEY' },
+    ])).toEqual([
+      'Cline: 2 free lanes not on this host — needs a signed-in Cline CLI on this host',
+      'Token Harbor: 1 free lane not on this host — needs TOKEN_HARBOR_API_KEY',
+    ]);
+  });
+
+  it('counts one lane once, and says so in the singular', () => {
+    expect(blockedProviderLines([{ ref: 'a', provider: 'cline', selectable: false, reason: 'no CLI' }]))
+      .toEqual(['Cline: 1 free lane not on this host — no CLI']);
+    expect(blockedProviderLines([])).toEqual([]);
+    expect(blockedProviderLines(undefined)).toEqual([]);
+  });
+
+  it('the note reaches the message for a blocked row, and never for a depleted one', () => {
+    const blocked = formatFreemodelWithDepletion([], [
+      { ref: 'cline:cline-free/muse-spark-1.3-contributor', provider: 'cline', selectable: false, depleted: false, ended: false, terminalOnly: false, reason: 'needs a signed-in Cline CLI on this host' },
+      { ref: 'opencode/muse-spark-1.3-contributor-free', provider: 'opencode', selectable: true, depleted: false, ended: false, terminalOnly: false, reason: 'available' },
+    ], { current: '', location: 'test', canonical: [], tableLanes: [] });
+    expect(blocked.text).toContain('Cline: 1 free lane not on this host — needs a signed-in Cline CLI on this host');
+    expect(blocked.blocked).toHaveLength(1);
+
+    // A depleted lane is unusable for a different reason, and the note must not
+    // claim its provider is absent from this host — that is the whole distinction.
+    const spent = formatFreemodelWithDepletion([], [
+      { ref: 'opencode/muse-spark-1.3-contributor-free', provider: 'opencode', selectable: false, depleted: true, ended: false, terminalOnly: false, reason: 'depleted until 3h' },
+    ], { current: '', location: 'test', canonical: [], tableLanes: [] });
+    expect(spent.text).not.toContain('not on this host');
+    expect(spent.blocked).toEqual([]);
+  });
+
+  it('so an empty body still means exactly that', () => {
+    const body = formatFreemodelWithDepletion([], [
+      { ref: 'opencode/muse-spark-1.3-contributor-free', provider: 'opencode', selectable: true, depleted: false, ended: false, terminalOnly: false, reason: 'available' },
+    ], { current: '', location: 'test', canonical: [], tableLanes: [] });
+    expect(body.text).toBe(FREEMODEL_EMPTY_BODY);
   });
 });
