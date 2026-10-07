@@ -50,6 +50,7 @@ AGENTS + docs/agent = process (protected to EDIT)
 | Biomarkers | `docs/agent/domains/biomarkers.md` + ROADMAP Track B |
 | Which tests | `docs/agent/DOMAIN_REGRESSION_MAP.md` **matching row** |
 | What to implement | `plan/ROADMAP.md` **Current work** |
+| Meal/food bug fix proof | `specs/learnings/meal-live-proof-20261007.md` — the 6-step live meal run + screenshot. No meal ticket is solved without it. |
 | Master scorecard | `golden/scorecard/instruction/README.md` then `WORKFLOW.md`. Run `npm run scorecard:debug`. Never `npm test`. Never edit `current/` or `result_summary/`. |
 | `work bug` / `next bug` / `work 11` | **L15** below. Not a bare `continue`. |
 

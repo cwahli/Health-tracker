@@ -185,9 +185,9 @@ test('the read range is exact — header + rows, never a guessed T57', () => {
   assert.equal(colLetter(19), 'T', '20 columns ends at T');
   assert.equal(colLetter(26), 'AA');
   assert.equal(CURRENT_COLUMNS.length, 20);
-  assert.equal(currentReadRange(0), 'current!A1:T1');
-  assert.equal(currentReadRange(1), 'current!A1:T2');
-  assert.equal(currentReadRange(55), 'current!A1:T56', '55 rows + header = 56, not T57');
+  assert.equal(currentReadRange(0), 'fleet!A1:T1');
+  assert.equal(currentReadRange(1), 'fleet!A1:T2');
+  assert.equal(currentReadRange(55), 'fleet!A1:T56', '55 rows + header = 56, not T57');
 });
 
 test('markdown tables render pipes, never text blocks', () => {

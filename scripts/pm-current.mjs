@@ -3,7 +3,7 @@
  * pm-current.mjs — the readable face of the PM sheet.
  *
  * `ongoing_projects` is an append-only log (669 rows for 28 live keys): correct
- * as history, unreadable as a board. This script rebuilds the `current` tab —
+ * as history, unreadable as a board. This script rebuilds the `fleet` tab (NEVER `current`: that is the human PM board) —
  * one row per live key — from live sources at build time, so every cell is
  * today's truth, not the last sweep's:
  *
@@ -50,7 +50,7 @@ import {
 import { attemptFor, ladderFile, readLadder } from './lib/pm-ladder.mjs';
 import { USER_AGENT } from './lib/google-store.mjs';
 
-export const CURRENT_TAB = 'current';
+export const CURRENT_TAB = 'fleet';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 
@@ -91,7 +91,7 @@ export function colLetter(index) {
 }
 
 /**
- * Exact A1 range for the `current` tab given a row count (header + rows).
+ * Exact A1 range for the `fleet` tab given a row count (header + rows).
  * The tab is always CURRENT_COLUMNS wide, so 20 columns × (rows + 1).
  * Bots must read this range verbatim — never guess `T57` vs `T56`.
  */
