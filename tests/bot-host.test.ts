@@ -120,7 +120,7 @@ import {
   resetInBit,
   depletedLaneProse,
 } from '../scripts/bot-host.mjs';
-import { isHardModelFailure, ensureBotLedger, withCatalogLanes, stampCooldown, CONNECTION_FAILED_COOLDOWN_MS, HARD_MODEL_FAILURE_COOLDOWN_MS, canonicalAllowanceLanes, planCodeForLane } from '../scripts/lib/free-lanes.mjs';
+import { isHardModelFailure, ensureBotLedger, withCatalogLanes, stampCooldown, CONNECTION_FAILED_COOLDOWN_MS, HARD_MODEL_FAILURE_COOLDOWN_MS, canonicalAllowanceLanes, planCodeForLane, bucketKeyFor, stampDepleted, liveRecForLane } from '../scripts/lib/free-lanes.mjs';
 import { projectLanes, nextUsableLane, formatCompactAllowanceChat, annotateFreemodelEntries } from '../scripts/lib/free-lanes.mjs';
 import { laneWalkRef } from '../scripts/lib/free-lanes.mjs';
 import {
@@ -1475,6 +1475,87 @@ describe('vm5 failover refs (live 2026-10-03)', () => {
     expect(planCodeForLane({ provider: 'opencode-go', model: 'space-bunny-free' })).toBe('OG');
     expect(planCodeForLane({ provider: 'opencode', model: 'opencode/space-bunny-free' })).toBe('OC');
     expect(planCodeForLane({ provider: 'opencode', model: 'tokenharbor/x:free' })).toBe('TH');
+  });
+
+  // VM4 2026-10-07: a twelve-hop cascade whose ledger carried ONE Space Bunny.
+  // The second pool was only ever sourced from the host's opencode CATALOG, so a
+  // box whose catalog did not list `opencode-go/space-bunny-free` showed a single
+  // bunny — which is why the reader asked "doesn't it have 2 bunny models?". Both
+  // pools are authored in the canonical preference doc now, and that doc is what
+  // seeds a bot ledger, so the pair no longer depends on catalog discovery.
+  it('captures both Space Bunny pools in the canonical preference doc', () => {
+    const pref = JSON.parse(fs.readFileSync(
+      new URL('../tools/telegram-provider-router/docs/free-lane-preference.json', import.meta.url),
+      'utf8',
+    ));
+    const bunnies = pref.lanes.filter((l: { model?: string }) => /space-bunny/i.test(String(l.model)));
+    expect(bunnies.map((l: { provider: string }) => l.provider).sort()).toEqual(['opencode', 'opencode-go']);
+    // Same family, so an empty pool hops to its sibling rather than across tiers.
+    expect(bunnies.every((l: { family: string }) => l.family === 'space-bunny')).toBe(true);
+    const zen = bunnies.find((l: { provider: string }) => l.provider === 'opencode');
+    const go = bunnies.find((l: { provider: string }) => l.provider === 'opencode-go');
+    // Separate free pools: sharing the zen bucket would empty both bunnies together,
+    // and the pair exists precisely so one can take over from the other.
+    expect(zen.bucket).toBe('opencode-zen-free');
+    expect(go.bucket).not.toBe(zen.bucket);
+    expect(bucketKeyFor(go)).toBe(null);
+  });
+
+  it('fails an empty zen bunny over to the go bunny, and saves the stamp until the reset', () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bunny-home-'));
+    const lanesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bunny-lanes-'));
+    const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bunny-shared-'));
+    const routerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bunny-router-'));
+    const old = { HOME: process.env.HOME, FREE_LANES_DIR: process.env.FREE_LANES_DIR, FREE_LANES_SHARED_DIR: process.env.FREE_LANES_SHARED_DIR, TG_ROUTER_STATE_DIR: process.env.TG_ROUTER_STATE_DIR };
+    process.env.HOME = homeDir;
+    process.env.FREE_LANES_DIR = lanesDir;
+    process.env.FREE_LANES_SHARED_DIR = sharedDir;
+    process.env.TG_ROUTER_STATE_DIR = routerDir;
+    try {
+      // A fresh host seeds its ledger from the canonical doc, and the host-wide read
+      // is handed the same rows, so both bunnies are present with no catalog at all.
+      const { dir } = ensureBotLedger('vmbunny');
+      fs.copyFileSync(path.join(dir, 'free-lane-table.json'), path.join(routerDir, 'free-lane-table.json'));
+      fs.writeFileSync(path.join(routerDir, 'session.json'), JSON.stringify({ quota: {} }));
+      const walk = (now?: number) => selectTurnLanes({
+        botId: 'vmbunny', model: 'opencode/space-bunny-free',
+        fallback: 'opencode/mimo-v2.6-flash-free', catalogEntries: [], ...(now ? { now } : {}),
+      }).models;
+
+      const before: string[] = walk();
+      expect(before).toContain('opencode/space-bunny-free');
+      expect(before).toContain('opencode-go/space-bunny-free');
+
+      // The zen bar goes empty (VM4's "free limit hit" on space-bunny-free).
+      const stamp = stampDepleted({
+        stateDir: routerDir, provider: 'opencode', model: 'opencode/space-bunny-free',
+        errText: 'Rate limit exceeded on the OpenCode Zen free pool', countdownHint: '',
+      });
+      expect(stamp.stamped).toBe(true);
+
+      const after: string[] = walk();
+      expect(after).not.toContain('opencode/space-bunny-free');
+      expect(after).toContain('opencode-go/space-bunny-free');
+
+      // Saved: the stamp is on disk with a reset clock, so it survives a restart.
+      const session = JSON.parse(fs.readFileSync(path.join(routerDir, 'session.json'), 'utf8'));
+      const rec = session.quota['opencode/opencode/space-bunny-free'];
+      expect(rec).toBeTruthy();
+      expect(rec.depletedUntil).toBeGreaterThan(Date.now());
+      expect(liveRecForLane({ provider: 'opencode', model: 'opencode/space-bunny-free' }, session)).not.toBe(null);
+
+      // Expired until the next renewal, then back — the clock is the only thing
+      // that has to change, and the go bunny kept working the whole time.
+      const restored: string[] = walk(rec.depletedUntil + 1000);
+      expect(restored).toContain('opencode/space-bunny-free');
+      expect(restored).toContain('opencode-go/space-bunny-free');
+    } finally {
+      for (const [k, v] of Object.entries(old)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      for (const d of [homeDir, lanesDir, sharedDir, routerDir]) fs.rmSync(d, { recursive: true, force: true });
+    }
   });
 
   it('lists go-plan in /freemodel and parks keyed gemini last', () => {

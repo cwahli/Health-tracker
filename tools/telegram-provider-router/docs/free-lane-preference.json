@@ -52,6 +52,17 @@
       "notes": "capable free - Zen bucket; expose on /freemodel when server lists it; not on running OpenCode /provider yet; keep in preference for when it appears"
     },
     {
+      "pref": 4.5,
+      "family": "space-bunny",
+      "provider": "opencode-go",
+      "model": "opencode-go/space-bunny-free",
+      "label": "OpenCode Go Space Bunny free",
+      "bucket": "opencode-go-per-model",
+      "tg": true,
+      "resetRule": "go-plan pool, separate quota from the OpenCode Zen free pool",
+      "notes": "the SECOND Space Bunny pool (live 2026-10-03: one depleted while the other answered). It must not share `opencode-zen-free`, or one spent bar empties both bunnies and there is no failover left; `opencode-go-per-model` keeps it per-model on purpose (bucketKeyFor treats it so), since nothing else is known to share the go bar. Pref 4.5 puts it directly after the zen bunny so an empty zen pool hops straight here. Authored rather than left to catalog discovery — that is why one VM showed a single bunny (VM4 2026-10-07)"
+    },
+    {
       "pref": 5,
       "family": "deepseek-v4.1-flash",
       "provider": "opencode",
