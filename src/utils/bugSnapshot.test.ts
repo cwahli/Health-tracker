@@ -252,6 +252,29 @@ describe('bugSnapshot', () => {
     expect(originFromHeaders(null, 'https')).toBeNull();
   });
 
+  it('names a png shot with its stored filename — a guessed .jpg 404s on the artifacts route', () => {
+    // Live shape: a phone .png uploads as shot-01.png, but the evidence line
+    // guessed shot-01.jpg — the exact URL the text packet printed 404d while
+    // the stored file served fine. The board already prefers r2_shots keys.
+    const text = buildBugEvidenceText({
+      tagId: 'tag-1',
+      reports: [{
+        id: 'iss-9',
+        reportId: 'iss-9',
+        shot_count: 1,
+        r2_shots: [{ key: 'bugs/foodcart/tag-1/reports/iss-9/shot-01.png' }],
+      }],
+    });
+    expect(text).toContain('shot-01.png');
+    expect(text).not.toContain('shot-01.jpg');
+    // Rows that predate stored keys keep the old guess, not a blank.
+    const legacy = buildBugEvidenceText({
+      tagId: 'tag-1',
+      reports: [{ id: 'iss-9', reportId: 'iss-9', shot_count: 1 }],
+    });
+    expect(legacy).toContain('shot-01.jpg');
+  });
+
   it('the text evidence block still reports a failed upload instead of hiding it', () => {
     const text = buildBugEvidenceText({
       tagId: 'tag-1',

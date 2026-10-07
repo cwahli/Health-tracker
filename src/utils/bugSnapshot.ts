@@ -170,7 +170,7 @@ export function originFromHeaders(
 export interface BugEvidenceTextInput {
   tagId: string;
   currentEvidence?: Record<string, any> | null;
-  /** Rows from the reports query: { id, reportId, shot_count, shot_upload_error }. */
+  /** Rows from the reports query: { id, reportId, shot_count, shot_upload_error, r2_shots? }. */
   reports?: Array<Record<string, any>>;
   /**
    * Absolute origin to prefix artifact URLs with, e.g.
@@ -214,9 +214,17 @@ export function buildBugEvidenceText(input: BugEvidenceTextInput): string {
       continue;
     }
     totalShots += count;
+    // Name the file R2 actually holds. Stored keys keep their real extension
+    // (png-or-jpg per bugShotExt), and the artifacts route 404s on a guessed
+    // name — the board (useBugBoard reportShots) already prefers r2_shots, so
+    // this surface must too. The .jpg guess stays only for rows that predate
+    // stored keys.
+    const stored: any[] = Array.isArray(rep?.r2_shots) ? rep.r2_shots : [];
     for (let i = 1; i <= count; i++) {
       const reportId = rep.reportId || rep.id || '';
-      shotLines.push(`- report ${rep.id} shot ${i}: ${shotUrl(reportId, `shot-0${i}.jpg`)}`);
+      const key = stored[i - 1]?.key;
+      const name = key ? bugShotName(key) : `shot-0${i}.jpg`;
+      shotLines.push(`- report ${rep.id} shot ${i}: ${shotUrl(reportId, name)}`);
     }
   }
   const anyEvidence = photos.length || shotLines.length || ev.debug_url || ev.scout_url || ev.job_id;
