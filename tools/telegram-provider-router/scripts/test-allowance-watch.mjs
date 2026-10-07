@@ -12,6 +12,7 @@
  */
 import { createRequire } from "module";
 import fs from "fs";
+import os from "os";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
@@ -493,6 +494,70 @@ t("C15 prompt-file sidecar naming (ht-run ↔ ht-watch handshake, no inline long
   eq(contFile, "/workspace/logs/ht-fbac-a.cont", "cont sidecar path");
   const meta = JSON.parse(fs.readFileSync(join(TOOL_DIR, "package.json"), "utf8"));
   eq(meta.name, "tg-provider-router", "meta sanity (tool still parses JSON)");
+});
+
+// ------------------------------------ C16 an uncertain probe must not deplete a lane
+// The wrapper's third branch used to re-stamp a lane depleted with the default TTL
+// whenever the probe came back uncertain (hang, timeout, binary missing, no key).
+// The sweep only probes lanes that are ALREADY dark, so that reset the clock on
+// lanes whose darkness had expired, for as long as the probe stayed uncertain — a
+// lane nobody could reach, kept unreachable by a probe that learned nothing. Live
+// on the VM 2026-10-07 this was the operator's "I still can't see muse from Cline":
+// `cline-free/muse-spark-1.3-contributor` had a real 429 on 2026-09-26, then eleven
+// days of `uncertain → default TTL` re-stamps, while Cline's own catalog listed the
+// model as free. The rule is the Cline enrollment's own: uncertain changes nothing.
+// The probe here cannot succeed — PATH points at an empty directory, so the `cline`
+// binary does not exist — which is exactly the uncertain case.
+t("C16 an uncertain probe writes nothing to the ledger (no false depletion)", () => {
+  const tmp = fs.mkdtempSync(join(os.tmpdir(), "ht-ac-uncertain-"));
+  fs.mkdirSync(join(tmp, "state"), { recursive: true });
+  fs.mkdirSync(join(tmp, "empty-bin"), { recursive: true });
+  const past = new Date(Date.now() - 11 * 24 * 3600 * 1000).toISOString();
+  const table = {
+    version: 3,
+    updatedAt: null,
+    buckets: { "cline-per-model": { resetRule: "per-model daily (Cline UI)", nextResetAt: null } },
+    lanes: [{
+      pref: 2, provider: "cline", model: "cline-free/muse-spark-1.3-contributor",
+      bucket: "cline-per-model", label: "Cline Muse Spark 1.3 contributor free", tg: true,
+      status: "depleted", nextReset: past, nextResetAt: past, cooldownUntil: past,
+      depletedObservedAt: past, lastPingNote: "a real 429 from eleven days ago",
+    }],
+  };
+  const tablePath = join(tmp, "state", "free-lane-table.json");
+  fs.writeFileSync(tablePath, JSON.stringify(table, null, 2));
+  fs.writeFileSync(join(tmp, "state", "session.json"), JSON.stringify({ quota: {} }, null, 2));
+
+  // `process.execPath`, not "node": the child's PATH is the empty directory below,
+  // and a literal "node" would then not resolve on a host that has no shell on that
+  // PATH. The wrapper needs no PATH to start; its `cline` lookup does, and finds
+  // nothing there — which is the uncertain probe under test.
+  const r = spawnSync(process.execPath, [join(TOOL_DIR, "bin", "ht-allowance-watch"), "--once"], {
+    encoding: "utf8",
+    timeout: 60000,
+    env: {
+      ...process.env,
+      PATH: join(tmp, "empty-bin"),
+      HT_ROUTER_DIR: tmp,
+      HT_CORE_PATH: join(TOOL_DIR, "src", "allowance-watch-core.cjs"),
+      HT_WORKSPACE: TOOL_DIR,
+      HT_LOG_DIR: tmp,
+    },
+  });
+  eq(r.status, 0, `wrapper --once exits 0 (stderr: ${String(r.stderr || "").trim().split("\n")[0] || "none"})`);
+  // The LANE, not the file: the sweep stamps its own `updatedAt` heartbeat either
+  // way, and that timestamp is not a claim about the model.
+  const after = JSON.parse(fs.readFileSync(tablePath, "utf8"));
+  eq(JSON.stringify(after.lanes), JSON.stringify(table.lanes),
+    "an uncertain probe must not rewrite a lane (status, cooldown and note all survive)");
+  const session = JSON.parse(fs.readFileSync(join(tmp, "state", "session.json"), "utf8"));
+  eq(Object.keys(session.quota || {}).length, 0, "and must not stamp a quota record for the lane");
+  // The fact that the probe learned nothing is kept — in the ping record, which is
+  // where a fact about a probe belongs, not in a depletion it did not measure.
+  const pings = JSON.parse(fs.readFileSync(join(tmp, "state", "allowance-watch-pings.json"), "utf8"));
+  const rec = (pings.probes || {})["cline/cline-free/muse-spark-1.3-contributor"];
+  ok(rec && rec.result === "uncertain", `the uncertainty is recorded as uncertain: ${JSON.stringify(rec)}`);
+  fs.rmSync(tmp, { recursive: true, force: true });
 });
 
 // ---- summary ----

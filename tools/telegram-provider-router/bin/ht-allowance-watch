@@ -77,7 +77,6 @@ const SESSION_PATH = path.join(ROUTER_DIR, "state", "session.json");
 const PING_PATH = path.join(ROUTER_DIR, "state", "allowance-watch-pings.json");
 const LOG_PATH = path.join(process.env.HT_LOG_DIR || process.env.HT_AC_LOGS_DIR || "/workspace/logs", "ht-allowance-watch.log");
 
-const RATE_LIMIT_TTL_MS = Number(process.env.QUOTA_RATE_LIMIT_TTL_MS || core.RATE_LIMIT_TTL_MS);
 const QUOTA_TTL_MS = Number(process.env.QUOTA_DEPLETED_TTL_MS || core.QUOTA_TTL_MS);
 const NO_KNOWN_RESET_POLL_MS = 30 * 60 * 1000; // "If none known, re-check every 30 min"
 const AFTER_RESET_GRACE_MS = 60 * 1000;        // sleep until soonest reset (+60s)
@@ -243,7 +242,7 @@ async function sweep(env, { doWrite = true } = {}) {
   const pings = readJson(PING_PATH) || {};
   const plan = core.computeSweepPlan(tbl);
   const lines = [];
-  let probed = 0, flips = 0, restamps = 0;
+  let probed = 0, flips = 0, restamps = 0, uncertainProbes = 0;
   const probedBuckets = new Set();
 
   // Probe budget order: due lanes by pref. Shared buckets: first due member only.
@@ -299,17 +298,24 @@ async function sweep(env, { doWrite = true } = {}) {
       outcome = `still DEPLETED, re-stamped until ${st.untilIso}${cfDaily ? " (CF 4006 daily neurons → next 00:00 UTC)" : cd.hint ? ` (hint: ${cd.hint.slice(0, 40)})` : " (default TTL)"}`;
       lines.push(`  #${lane.pref} ${laneKey}: ${outcome} [probe ${res.kind}]`);
     } else {
-      // Uncertain (hang/timeout/no key): treat as still limited with no vendor
-      // time — re-stamp with the existing default TTL and go back to sleep (2).
-      const until = Date.now() + RATE_LIMIT_TTL_MS;
-      const lanesOfBucket = bid ? plan.lanes.filter((l) => core.sharedBucketIdFor(l) === bid) : [lane];
-      const st = core.stampDepleted(tbl, session, lanesOfBucket, bid, {
-        until, hint: "", kind: "unknown",
-        lastError: `probe uncertain: ${String(res.output).slice(0, 200)}`,
-        source: `ht-allowance-watch probe (${res.kind}): uncertain → default TTL`,
-      });
-      restamps++;
-      outcome = `uncertain → re-stamped default TTL until ${st.untilIso} (${String(res.output).slice(0, 60)})`;
+      // Uncertain (hang/timeout/no key) is NOT evidence of a limit, so it does not
+      // write one. This branch used to re-stamp the lane depleted with the default
+      // TTL, "still limited" as an assumption — but the sweep only ever probes lanes
+      // that are already dark, so an uncertain probe reset the clock on a lane whose
+      // darkness had expired, for as long as the probe stayed uncertain. That is a
+      // lane nobody can reach being kept unreachable by a probe that learned nothing,
+      // and it is the rule the Cline enrollment already states: "uncertain probes
+      // change nothing (no false depletion, no false revival)".
+      //
+      // Live on the VM 2026-10-07, this is why the operator could not see Muse from
+      // Cline: `cline-free/muse-spark-1.3-contributor` carried a real 429 from
+      // 2026-09-26, every sweep since re-stamped it as
+      // "ht-allowance-watch probe (cline): uncertain → default TTL", and the row read
+      // ❌ for eleven days while Cline's own catalog listed the model as free. The
+      // lane keeps whatever it had; the fact that the probe was uncertain is recorded
+      // in the ping record below, which is where a fact about a probe belongs.
+      uncertainProbes++;
+      outcome = `uncertain → ledger left alone (${String(res.output).slice(0, 60)})`;
       lines.push(`  #${lane.pref} ${laneKey}: ${outcome}`);
     }
     if (bid) probedBuckets.add(bid);
@@ -333,11 +339,12 @@ async function sweep(env, { doWrite = true } = {}) {
     probed,
     flips,
     restamps,
+    uncertainProbes,
     openedLane: plan.openedLane || null,
     soonestResetAt: Number.isFinite(plan.soonest) ? core.isoZ(plan.soonest) : null,
     lines,
   };
-  log(`sweep: ${plan.due.length} due / ${plan.depleted.length} depleted / ${plan.lanes.length} lanes — probed ${probed}, flips ${flips}, re-stamps ${restamps}${plan.openedLane ? ` — OPENED: ${plan.openedLane}` : ""}`);
+  log(`sweep: ${plan.due.length} due / ${plan.depleted.length} depleted / ${plan.lanes.length} lanes — probed ${probed}, flips ${flips}, re-stamps ${restamps}, uncertain ${uncertainProbes}${plan.openedLane ? ` — OPENED: ${plan.openedLane}` : ""}`);
   for (const l of lines) log(l);
   return summary;
 }
