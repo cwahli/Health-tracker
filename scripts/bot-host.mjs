@@ -4936,6 +4936,87 @@ export function midstreamFlagText({ partialText = '', deadLanes = [], continuedO
   return `${head}${head ? '\n\n' : ''}⚠️ \`${dead}\` hit the free limit mid-answer — ${tail}.`;
 }
 
+/**
+ * The short verdict a failover switch line carries.
+ *
+ * Every quota-class failure used to print the same two words — `free limit
+ * hit` — because the only classification available was `isQuotaOrLimitError`,
+ * whose vocabulary deliberately spans the whole billing surface (free-tier
+ * allowance, an unfunded account, `capacity`, `throttled`, a bare 402). Live on
+ * VM4 2026-10-07 that line read `free limit hit` for four hops in one cascade,
+ * including lanes the user knew still had allowance, and the question it
+ * produced was "is the quota really gone?" — which the line itself could not
+ * answer. A wrong cause in a user-visible line is worse than no cause: it is the
+ * line the person reasons from.
+ *
+ * So the wording names the failure the provider actually reported, and keeps the
+ * exact phrase `free limit hit` for a genuine free-allowance exhaustion (the
+ * common case, and the wording the QS-2 specimen asserts). The vendor's own
+ * retry countdown rides along when it published one — that is what tells a
+ * 40-minute throttle apart from a 22-hour daily cap.
+ *
+ * A transport failure and a hard model failure never reach here: the caller
+ * only asks for this wording when `isQuotaOrLimitError` matched, so the two
+ * other classifiers keep their own collapsed line.
+ */
+export function quotaVerdictShort(raw) {
+  const text = String(raw || '');
+  if (!text.trim()) return '';
+  const hint = parseRetryAfter(text);
+  const tail = hint ? ` (${hint})` : '';
+  // Order matters: a free-tier cap can also carry a 429, and calling that a
+  // throttle would understate a limit that will not lift for hours.
+  if (/free[_\s-]?(tier|usage|limit)|daily free|free limit reached|subscribe to go|freebucks|free plan/i.test(text)) {
+    return `free limit hit${tail}`;
+  }
+  if (/insufficient|out of credits|no credits|credit.?balance|payment required|no payment method|unfunded/i.test(text)) {
+    return `account unfunded${tail}`;
+  }
+  if (/capacity|overloaded|over capacity|temporarily unavailable/i.test(text)) {
+    return `provider at capacity${tail}`;
+  }
+  if (/throttl|rate.?limit|too many requests|\b429\b/i.test(text)) {
+    return `rate limited${tail}`;
+  }
+  return `quota/limit hit${tail}`;
+}
+
+/**
+ * The lane's plan code for a chat line: OC / CL / TH / CF / GM / OG / FB.
+ * `planCodeForLane` reads a lane shape, so the ref is resolved back to its
+ * provider + model first — the same resolution the `/allowance` rows use, which
+ * keeps a chat line and the table from disagreeing about which lane ran.
+ */
+export function lanePlanCode(ref) {
+  const { provider, model } = freemodelRefToRoute(String(ref || ''));
+  if (!provider || !model) return '';
+  return planCodeForLane({ provider, model });
+}
+
+/**
+ * A switch-line lane name: the surface code, then `chatLaneName`.
+ *
+ * The code is what makes a Cline hop tellable from an OpenCode one at a glance.
+ * `chatLaneName` strips the surface on purpose (there is no room for it in the
+ * name column), so live on VM4 2026-10-07 the chain showed `glm-5.3-flash`,
+ * `deepseek-v4.1-flash` and `solar-pro4` as bare names while all three were
+ * Cline lanes, and the reasonable reading was "Cline was never tried". It had
+ * been tried three times. The R16-QS2 capture of 2026-09-26 recorded those same
+ * hops with the surface (`cline:cline-free/…`), so this restores that fact in a
+ * shorter form rather than inventing a new one.
+ *
+ * The code also replaces the single prefix `chatLaneName` keeps: `OG
+ * space-bunny-free` names the go-plan pool, which is separate quota from
+ * `opencode/space-bunny-free` (OC), without the doubled
+ * `opencode-go/space-bunny-free`.
+ */
+export function laneSwitchLabel(ref) {
+  const code = lanePlanCode(ref);
+  let name = chatLaneName(ref);
+  if (code === 'OG') name = name.replace(/^opencode-go\//i, '');
+  return code ? `${code} ${name}` : name;
+}
+
 export async function runOpencodeWithFailover({ api, config, chatId, prompt, models, runModel = null, onSwitchNotify, onAttemptStart, onAttemptComplete, isAborted = () => false, onCooldown = null, ...runArgs }) {
   let attempt = 0;
   // QS-11: partial answers from lanes that die mid-stream, in order. The chain
@@ -5059,10 +5140,16 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
       // ledger/observer log; the chat line carries the short verdict only.
       // Non-quota failures are one collapsed line, capped — never the raw
       // multi-line error with its model-id echo.
+      //
+      // The verdict names the failure the provider reported rather than calling
+      // every quota-class error a free limit (`quotaVerdictShort`), and each
+      // lane carries its surface code (`laneSwitchLabel`), so a Cline, Token
+      // Harbor, Cloudflare or Gemini hop is tellable from the line itself.
+      // Both are display-only: routing still uses the full ref.
       const short = isQuotaOrLimitError(raw)
-        ? `free limit hit${parseRetryAfter(raw) ? ` (${parseRetryAfter(raw)})` : ''}`
+        ? (quotaVerdictShort(raw) || 'quota/limit hit')
         : raw.split('\n')[0].replace(/\s+/g, ' ').trim().slice(0, 120) || 'error';
-      const line = `🔀 *${chatLaneName(from)}* failed (${short.slice(0, 200)}) — switching to *${chatLaneName(to)}*…`;
+      const line = `🔀 *${laneSwitchLabel(from)}* failed (${short.slice(0, 200)}) — switching to *${laneSwitchLabel(to)}*…`;
       try {
         if (typeof onSwitchNotify === 'function') {
           onSwitchNotify(line);

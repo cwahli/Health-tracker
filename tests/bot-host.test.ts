@@ -2631,6 +2631,86 @@ describe('BOT-9 live failover wiring', () => {
     }
   });
 
+  // VM4 2026-10-07: a twelve-hop cascade in which three Cline lanes rendered as
+  // bare names (`glm-5.3-flash`, `deepseek-v4.1-flash`, `solar-pro4`) and four
+  // differently-caused quota failures all read `free limit hit`. The reader
+  // concluded Cline was never tried and that Space Bunny still had allowance;
+  // Cline had been tried three times, and one of the four was not a free-tier
+  // limit at all. The line is the only evidence a human has, so it has to name
+  // the surface and the cause.
+  it('names the lane surface on a switch line', async () => {
+    const { laneSwitchLabel } = await import('../scripts/bot-host.mjs');
+    expect(laneSwitchLabel('cline:cline-free/glm-5.3-flash')).toBe('CL glm-5.3-flash');
+    expect(laneSwitchLabel('cline:cline-free/solar-pro4')).toBe('CL solar-pro4');
+    expect(laneSwitchLabel('opencode/space-bunny-free')).toBe('OC space-bunny-free');
+    expect(laneSwitchLabel('opencode-go/space-bunny-free')).toBe('OG space-bunny-free');
+    expect(laneSwitchLabel('tokenharbor/mimo-v2.6-flash:free')).toBe('TH tokenharbor/mimo-v2.6-flash');
+    expect(laneSwitchLabel('gemini:gemini/gemini-3.8-flash')).toBe('GM gemini-3.8-flash');
+    // The two Space Bunny pools are separate quota and must stay tellable
+    // apart — that is the whole reason the prefix existed.
+    expect(laneSwitchLabel('opencode/space-bunny-free'))
+      .not.toBe(laneSwitchLabel('opencode-go/space-bunny-free'));
+  });
+
+  it('says which limit was hit instead of calling every quota error a free limit', async () => {
+    const { quotaVerdictShort } = await import('../scripts/bot-host.mjs');
+    // A real free-allowance exhaustion keeps its wording — the QS-2 gate asserts it.
+    expect(quotaVerdictShort('Error: INFERENCE_CAP_ERROR {"code":429,"message":"Daily free limit reached. Try again in 11h 35m."}'))
+      .toBe('free limit hit (Retry in ~11h 35m.)');
+    // An unfunded account, a transient throttle and a capacity 5xx are three
+    // different decisions for the reader, so they stop reading the same.
+    expect(quotaVerdictShort('AI_APICallError: Insufficient account funds')).toBe('account unfunded');
+    expect(quotaVerdictShort('Provider rate limit hit — this model is throttled right now.')).toBe('rate limited');
+    expect(quotaVerdictShort('AI_APICallError: Provider is over capacity')).toBe('provider at capacity');
+    expect(quotaVerdictShort('')).toBe('');
+  });
+
+  it('the switch line carries both the surface and the real reason', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
+    const oldLog = process.env.BOT_FAILURE_LOG;
+    process.env.BOT_FAILURE_LOG = '0';
+    try {
+      let first = true;
+      const spawnImpl = () => {
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => child.emit('close', 1);
+        queueMicrotask(() => {
+          if (first) {
+            first = false;
+            child.stderr.emit('data', Buffer.from('level=ERROR msg="run failed" error.error="AI_APICallError: Insufficient account funds"\n'));
+            child.emit('close', 1);
+          } else {
+            child.stdout.emit('data', Buffer.from('{"type":"text","part":{"text":"done"}}\n'));
+            child.emit('close', 0);
+          }
+        });
+        return child;
+      };
+      const sent: string[] = [];
+      const result = await runOpencodeWithFailover({
+        api: { sendMessage: async (_chatId: number, text: string) => { sent.push(text); return {}; } },
+        chatId: 7,
+        prompt: 'x',
+        models: ['cline:cline-free/glm-5.3-flash', 'opencode/space-bunny-free'],
+        workspace: '/tmp',
+        timeoutMs: 5000,
+        spawnImpl,
+      });
+      expect(result.finalText).toBe('done');
+      expect(sent.length).toBe(1);
+      expect(sent[0]).toMatch(/\*CL glm-5\.3-flash\* failed \(account unfunded\)/);
+      expect(sent[0]).toMatch(/switching to \*OC space-bunny-free\*/);
+      // An unfunded account is not a spent free allowance, and the line must not say it is.
+      expect(sent[0]).not.toMatch(/free limit hit/);
+    } finally {
+      if (oldLog === undefined) delete process.env.BOT_FAILURE_LOG;
+      else process.env.BOT_FAILURE_LOG = oldLog;
+    }
+  });
+
   it('attaches model and attempt context to every failover run', async () => {
     const { EventEmitter } = await import('node:events');
     const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
