@@ -197,8 +197,8 @@ export interface BugEvidenceTextInput {
 export function buildBugEvidenceText(input: BugEvidenceTextInput): string {
   const { tagId, currentEvidence, reports = [], origin } = input;
   const base = String(origin || '').replace(/\/+$/, '');
-  const shotUrl = (reportId: string, name: string) => {
-    const rel = bugArtifactUrl(tagId, reportId, name);
+  const shotUrl = (reportId: string, name: string, key?: string | null) => {
+    const rel = bugArtifactUrl(tagId, reportId, name, key);
     return base ? `${base}${rel}` : rel;
   };
   const ev = currentEvidence || {};
@@ -214,9 +214,21 @@ export function buildBugEvidenceText(input: BugEvidenceTextInput): string {
       continue;
     }
     totalShots += count;
+    const storedShots: any[] = Array.isArray(rep?.r2_shots) ? rep.r2_shots : [];
     for (let i = 1; i <= count; i++) {
       const reportId = rep.reportId || rep.id || '';
-      shotLines.push(`- report ${rep.id} shot ${i}: ${shotUrl(reportId, `shot-0${i}.jpg`)}`);
+      // The stored key is truth: uploads keep their real extension (png or
+      // jpg), so guessing `shot-0i.jpg` 404s on every PNG. Prefer the exact
+      // stored key (passed as ?key=, which the artifacts route honours) and
+      // only fall back to the .jpg guess for old rows that carry a count but
+      // no stored keys.
+      const storedKey = (() => {
+        const s = storedShots[i - 1];
+        const k = s && typeof s.key === 'string' ? s.key : '';
+        return k.startsWith('bugs/') ? k : null;
+      })();
+      const name = storedKey ? bugShotName(storedKey) : `shot-0${i}.jpg`;
+      shotLines.push(`- report ${rep.id} shot ${i}: ${shotUrl(reportId, name, storedKey)}`);
     }
   }
   const anyEvidence = photos.length || shotLines.length || ev.debug_url || ev.scout_url || ev.job_id;
