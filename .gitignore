@@ -37,7 +37,7 @@ scripts/_qwen_ping.txt
 # Antigravity & mobile symlinks
 .antigravity/
 settings.json
-agent
+/agent
 download
 screenshots
 
