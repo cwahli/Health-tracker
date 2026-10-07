@@ -7,8 +7,10 @@
 # which does not contain ~/.npm-global/bin — where the Cline CLI is installed.
 # Every Cline probe therefore answered "not installed" -> uncertain, and the
 # watcher re-stamped that lane depleted on the default TTL every ~46 minutes
-# (27 times in one day) long after the real 429 behind it had expired. The
-# operator's row read ❌ for eleven days while Cline listed the model as free.
+# (27 times in one day) on evidence that had lapsed on 2026-09-26 — eleven days
+# before the last renewal, while Cline listed the model as free. That the row read
+# ❌ for those eleven days is not established; that the hold outlived its evidence
+# by eleven days is.
 #
 # Two things below are the fix:
 #   * ExecStart points at the DEPLOY clone, which the webhook resets to main —
@@ -32,8 +34,16 @@
 # Install — run as root; this is the one step that cannot be done from a checkout:
 #   install -m 644 systemd/ht-allowance-watch.service /etc/systemd/system/
 #   systemctl daemon-reload && systemctl restart ht-allowance-watch
-# Afterwards remove the temporary shim at ~/.local/bin/cline: it existed only
-# because this unit's PATH could not see the real binary.
+# A temporary shim at ~/.local/bin/cline was created on the box for the same
+# reason, and has been removed; it existed only because this unit's PATH could not
+# see the real binary.
+#
+# Verify the install rather than trusting it — the checker reads this unit, its
+# ExecStart, the running wrapper and core, the last sweeps and the shared ledger off
+# the box and compares them with the repo (exit 1 with the reasons when they differ,
+# 3 when there is no route). It fails until this unit is installed, which is the
+# point, and it passes only once the box runs what the repo ships:
+#   node tools/telegram-provider-router/scripts/assert-allowance-watch-deployed.mjs
 
 [Unit]
 Description=Free-Lane Allowance Watcher Daemon
