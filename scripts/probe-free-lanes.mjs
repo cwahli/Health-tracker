@@ -12,8 +12,12 @@
  *   node scripts/probe-free-lanes.mjs --burn-ping --lane 3
  *   node scripts/probe-free-lanes.mjs --burn-ping --first-available
  * Never loops all lanes with burns — pass --all-burn explicitly to do so.
- * Cline burn pings are off by default (daily caps are precious); add
- * --include-cline to allow them.
+ *
+ * Every lane in the table is checked, Cline included: a lane is pinged by the
+ * CLI that runs it (opencode for most, `cline` for Cline lanes), so a Cline lane
+ * answers as itself instead of being skipped. Cline's free cap is per model per
+ * day, so a run that must not spend a unit can hold it out with --skip-cline;
+ * --include-cline is accepted and now only restates the default.
  *
  * Stamping: on quota proof the router state (session.quota +
  * free-lane-table.json) is updated via the shared sync helper, unless
@@ -25,6 +29,13 @@
  *   node scripts/probe-free-lanes.mjs --burn-ping --lane 3  # one minimal ping
  *   node scripts/probe-free-lanes.mjs --burn-ping --first-available
  *   node scripts/probe-free-lanes.mjs --new-candidates      # catalog vs pref drift
+ *   node scripts/probe-free-lanes.mjs --recheck-depleted   # falsify unproven holds
+ *
+ * A hold with no vendor proof (kind `limit-unknown`, no countdown) is a guess,
+ * not a measurement: --recheck-depleted re-pings exactly those lanes and CLEARS
+ * the hold when one answers, so "this lane is empty" can be falsified instead of
+ * believed. --recheck-proven widens it to every hold; --all-burn lifts the
+ * single-ping limit.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -34,6 +45,7 @@ import {
   loadFreeLaneLedger,
   withCatalogLanes,
   annotateFreemodelEntries,
+  clearLaneHold,
   laneMatchesRoute,
   liveRecForLane,
   freemodelRefToRoute,
@@ -41,6 +53,8 @@ import {
 } from './lib/free-lanes.mjs';
 import { buildFreeModelList } from './lib/freemodels.mjs';
 import { isQuotaOrLimitError, parseRetryAfter, runOpencode, extractLogError } from './lib/agent-opencode.mjs';
+import { runCline } from './lib/agent-cline.mjs';
+import { holdEvidence, holdStampFromError, probeKindForLane, probeModelForLane, recheckTargets, selectBurnTargets } from './lib/free-lane-probe.mjs';
 
 const args = new Set(process.argv.slice(2));
 function argVal(name) {
@@ -53,10 +67,14 @@ const LOCATION = argVal('--location') || 'vps';
 const BOT_ID = argVal('--bot') || process.env.HTBOT_ID || 'vm2';
 const DRY = args.has('--dry-run');
 const LANE = argVal('lane');
-const BURN = args.has('--burn-ping');
+// A recheck IS a ping: the only way to falsify an unproven hold is to ask the lane.
+const RECHECK = args.has('--recheck-depleted');
+const BURN = args.has('--burn-ping') || RECHECK;
 const FIRST = args.has('--first-available');
 const ALL_BURN = args.has('--all-burn');
-const WITH_CLINE = args.has('--include-cline');
+// Cline lanes are part of the check like every other free lane (see the helper
+// for why). `--skip-cline` restores the old cap protection for one run.
+const WITH_CLINE = !args.has('--skip-cline');
 const TIMEOUT = Number(argVal('timeout') || 90000);
 
 const now = Date.now();
@@ -90,10 +108,24 @@ if (args.has('--new-candidates') || (!BURN && !LANE)) {
   console.log(`ledger source: ${source} (${tablePath})`);
   console.log(`location: ${entries[0]?.location || 'unknown'}`);
   console.log(`freemodel today: ${entries.length} (cline ${entries.filter((e) => e.provider === 'cline' && e.selectable !== false).length}, tokenharbor ${entries.filter((e) => e.provider === 'tokenharbor' && e.selectable !== false).length}, gemini-through-opencode ${entries.filter((e) => /^(?:opencode|google)\/gemini-/i.test(e.ref)).length}, opencode ${entries.filter((e) => e.tool === 'opencode' && e.provider !== 'tokenharbor' && !/^(?:opencode|google)\/gemini-/i.test(e.ref) && e.selectable !== false).length}, pending ${entries.filter((e) => e.status === 'pending-signin').length}, terminal-only ${entries.filter((e) => e.selectable === false && e.status !== 'pending-signin').length})`);
-  console.log(`pref lanes: ${(table.lanes || []).length}, depleted now: ${annotated.filter((a) => a.depleted).length}`);
-  for (const a of annotated.filter((x) => x.depleted)) {
-    console.log(`  ❌ ${a.ref} — reset in ${a.resetIn}`);
+  const heldLanes = (table.lanes || [])
+    .map((l) => ({ lane: l, evidence: holdEvidence(l, session, { now }) }))
+    .filter((r) => r.evidence);
+  const unproven = heldLanes.filter((r) => !r.evidence.proven);
+  console.log(`pref lanes: ${(table.lanes || []).length}, held now: ${heldLanes.length} (${unproven.length} unproven)`);
+  for (const { lane: l, evidence } of heldLanes) {
+    // "Empty" has two very different meanings and a row has to say which: a vendor
+    // countdown is proof the bar is spent, a default-TTL stamp is our own guess —
+    // and naming the key explains why siblings went dark with this lane.
+    const proof = evidence.proven
+      ? `proven (${evidence.countdownParsed ? 'vendor countdown' : evidence.kind})`
+      : 'UNPROVEN (default-TTL stamp — re-ping to falsify)';
+    const who = evidence.shared
+      ? `${evidence.key}${evidence.heldBy ? `, stamped when ${evidence.heldBy} hit it` : ''}`
+      : evidence.key;
+    console.log(`  ❌ ${l.model} — ${proof}; held by ${who}; reset in ${evidence.until ? formatResetIn(evidence.until, now) : 'unknown'}`);
   }
+  if (unproven.length) console.log('  → unproven holds can be falsified: node scripts/probe-free-lanes.mjs --recheck-depleted');
   console.log(`catalog-vs-pref: ${fresh.length} opencode free(s) not in pref (tap-into candidates):`);
   for (const r of fresh.slice(0, 30)) console.log(`  + ${r}`);
   if (!BURN && !LANE) {
@@ -105,31 +137,36 @@ if (args.has('--new-candidates') || (!BURN && !LANE)) {
   if (!BURN || args.has('--new-candidates')) process.exit(0);
 }
 
-// Resolve burn targets: one lane, or first-available walk, or explicit all-burn.
-function laneByPref(n) {
-  return (table.lanes || []).find((l) => Number(l.pref) === Number(n)) || null;
-}
+// Resolve burn targets: a recheck of the unproven holds, or one lane / the
+// first-available walk / explicit all-burn. The decisions live in the shared
+// helper so they have a sensor (free-lane-probe).
 let targets = [];
-if (LANE) {
-  const lane = laneByPref(LANE);
-  if (!lane) { console.error(`no pref lane ${LANE}`); process.exit(2); }
-  targets = [lane];
-} else if (FIRST) {
-  const ordered = [...(table.lanes || [])].sort((a, b) => (a.pref || 0) - (b.pref || 0));
-  const next = ordered.find((l) => {
-    if (l.tg === false) return false;
-    if (String(l.status || '').toLowerCase() === 'depleted' && l.nextResetAt && Date.parse(l.nextResetAt) > now) return false;
-    if (liveRecForLane(l, session, now)) return false;
-    if (!WITH_CLINE && String(l.provider || '').toLowerCase() === 'cline') return false;
-    return true;
-  });
-  if (!next) { console.log('no burn target: every TG lane is marked depleted (nothing to ping — saves quota)'); process.exit(0); }
-  targets = [next];
-} else if (ALL_BURN) {
-  targets = (table.lanes || []).filter((l) => l.tg !== false && (WITH_CLINE || String(l.provider || '').toLowerCase() !== 'cline'));
+if (RECHECK) {
+  const held = recheckTargets(table.lanes || [], session, { now, includeProven: args.has('--recheck-proven') });
+  if (!held.length) {
+    console.log('no unproven holds: every lane the ledger holds was held with vendor proof — nothing to falsify');
+    process.exit(0);
+  }
+  // The single-ping policy still applies: one lane per run unless --all-burn.
+  const take = ALL_BURN ? held : held.slice(0, 1);
+  targets = take.map((h) => h.lane);
+  console.log(`recheck: ${held.length} unproven hold(s)`);
+  for (const { lane: l, evidence } of take) {
+    console.log(`  pref ${l.pref} ${l.model} — ${evidence.key}${evidence.heldBy ? ` (stamped when ${evidence.heldBy} hit it)` : ''}, kind ${evidence.kind}, no countdown`);
+  }
+  if (take.length < held.length) console.log(`  pinging the first only — pass --all-burn to re-ping all ${held.length}`);
 } else {
-  console.error('burn mode needs --lane N, --first-available, or --all-burn');
-  process.exit(2);
+  const selection = selectBurnTargets(table.lanes || [], {
+    lane: LANE,
+    first: FIRST,
+    all: ALL_BURN,
+    now,
+    isDepleted: (l) => Boolean(liveRecForLane(l, session, now)),
+    skipCline: !WITH_CLINE,
+  });
+  if (selection.error) { console.error(selection.error); process.exit(2); }
+  targets = selection.targets;
+  if (FIRST && !targets.length) { console.log('no burn target: every TG lane is marked depleted (nothing to ping — saves quota)'); process.exit(0); }
 }
 if (!BURN) {
   for (const l of targets) {
@@ -145,41 +182,62 @@ if (targets.length > 1 && !ALL_BURN) {
   process.exit(2);
 }
 
+/** The live ledger's two files, or null on a box that only has the pref fallback. */
+function liveLedgerPaths() {
+  if (!tablePath || tablePath.includes('free-lane-preference')) return null;
+  return { tablePath, sessionPath: path.join(path.dirname(tablePath), 'session.json') };
+}
+
 const workspace = process.cwd();
 for (const lane of targets) {
   const provider = String(lane.provider || 'opencode');
   const model = String(lane.model || '');
+  // The decision comes first, so --dry-run reports what the run would really do —
+  // including a lane it would hold out — instead of a ping it would never send.
+  const kind = probeKindForLane(lane);
+  if (kind === 'skip') {
+    console.log(`  skip pref ${lane.pref} ${provider}/${model}: freebuff is terminal-only (no chat burn path)`);
+    continue;
+  }
+  if (kind === 'cline' && !WITH_CLINE) {
+    console.log(`  skip pref ${lane.pref} ${provider}/${model}: cline burn ping held out by --skip-cline (daily cap protection) — drop that flag to check the lane`);
+    continue;
+  }
+  const runner = kind === 'cline' ? 'the Cline CLI' : 'OpenCode';
+  // Print the ref the ping will actually send, not the ledger's spelling of it.
+  const pingRef = probeModelForLane(lane);
   if (DRY) {
-    console.log(`dry-run: would ping pref ${lane.pref} ${provider}/${model} once ("Reply with exactly: ok", timeout ${TIMEOUT}ms) — no quota burned, ledger untouched`);
+    console.log(`dry-run: would ping pref ${lane.pref} ${pingRef} via ${runner} once ("Reply with exactly: ok", timeout ${TIMEOUT}ms) — no quota burned, ledger untouched`);
     continue;
   }
-  console.log(`ping pref ${lane.pref} ${provider}/${model} (timeout ${TIMEOUT}ms)…`);
-  if (provider === 'cline' && !WITH_CLINE) {
-    console.log('  skip: cline burn ping needs --include-cline (daily cap protection)');
-    continue;
-  }
-  if (provider === 'freebuff') {
-    console.log('  skip: freebuff is terminal-only (no chat burn path)');
-    continue;
-  }
+  console.log(`ping pref ${lane.pref} ${pingRef} via ${runner} (timeout ${TIMEOUT}ms)…`);
   let result;
   try {
     let child = null;
-    result = await runOpencode({
-      prompt: 'Reply with exactly: ok',
-      model: `${provider}/${model}`.replace(/^opencode\/opencode\//, 'opencode/'),
-      workspace,
-      thinking: false,
-      timeoutMs: TIMEOUT,
-      onSpawn: (c) => { child = c; },
-      onEvent: (ev) => {
-        // True early-kill on first text: lane is alive, stop the run now
-        // instead of burning the full agent turn.
-        if (child && ev && ev.kind === 'text' && String(ev.text || '').trim()) {
-          try { child.kill('SIGKILL'); } catch {}
-        }
-      },
-    });
+    // One early-kill hook shape for both runners: stop at the first sign of life
+    // instead of burning the rest of the agent turn. OpenCode streams text, so a
+    // working lane kills the ping the moment it answers; the Cline CLI reports its
+    // answer as a run result, so a Cline ping is bounded by TIMEOUT instead.
+    const onSpawn = (c) => { child = c; };
+    const onEvent = (ev) => {
+      if (child && ev && ev.kind === 'text' && String(ev.text || '').trim()) {
+        try { child.kill('SIGKILL'); } catch {}
+      }
+    };
+    result = kind === 'cline'
+      // A Cline lane is pinged BY CLINE. Through `runOpencode` the ref
+      // (`cline/cline-free/…`) is not a model OpenCode has, so a working lane
+      // reported "model not found" and nothing ever checked it.
+      ? await runCline({ prompt: 'Reply with exactly: ok', model: pingRef, workspace, timeoutMs: TIMEOUT, onSpawn, onEvent })
+      : await runOpencode({
+          prompt: 'Reply with exactly: ok',
+          model: pingRef,
+          workspace,
+          thinking: false,
+          timeoutMs: TIMEOUT,
+          onSpawn,
+          onEvent,
+        });
   } catch (e) {
     result = { code: -1, finalText: '', lastError: String(e?.message || e) };
   }
@@ -191,6 +249,19 @@ for (const lane of targets) {
   const err = filtered;
   if (text && !isQuotaOrLimitError(err)) {
     console.log(`  ✅ alive — first text: ${JSON.stringify(text.slice(0, 80))} (early-kill, minimal burn)`);
+    // A lane that answers has just falsified the hold on it (and, when the hold was
+    // the shared bar, on the siblings that bar covers) — so put the ledger back.
+    if (RECHECK) {
+      const paths = liveLedgerPaths();
+      if (!paths) {
+        console.log('  clear: pref fallback — this box has no live ledger to clear; run on the host that owns it');
+      } else {
+        const info = clearLaneHold({ ...paths, lane, source: 'probe-free-lanes --recheck-depleted: the lane answered' });
+        console.log(info.cleared
+          ? `  clear: ${info.clearedKeys.join(', ') || '(no session key)'} removed — ${info.resetLanes.length} lane(s) back to available (pref ${info.resetLanes.map((r) => r.pref).join(', ')})`
+          : `  clear failed: ${info.reason}`);
+      }
+    }
     continue;
   }
   if (isQuotaOrLimitError(err)) {
@@ -205,22 +276,29 @@ for (const lane of targets) {
       continue;
     }
     try {
-      const until = Date.now() + 6 * 3600 * 1000; // default TTL when vendor gives no countdown
+      // What the vendor's own text proves — not a blanket guess. A countdown in
+      // that text ("Try again in 23h 15m") is the vendor measuring the bar, and a
+      // measured hold must be stamped as one: stamped as a guess it would be
+      // re-pinged by `--recheck-depleted` (spending the allowance this check is
+      // here to guard) and, on the default 6h TTL, would read `available` up to
+      // 17h before the vendor answers again.
+      const stamp = holdStampFromError(err);
       const sess = JSON.parse(fs.readFileSync(sPath, 'utf8'));
       sess.quota = sess.quota || {};
       for (const key of quotaKeysForLane(lane)) {
         sess.quota[key] = {
-          depletedUntil: until,
+          depletedUntil: stamp.until,
           lastError: err.slice(0, 300),
           scope: key.startsWith('bucket:') ? 'shared' : 'per-model',
           depletedObservedAt: new Date().toISOString(),
-          countdownParsed: false,
-          kind: 'limit-unknown',
+          countdownParsed: stamp.countdownParsed,
+          kind: stamp.kind,
+          ...(stamp.countdownHint ? { countdownHint: stamp.countdownHint } : {}),
         };
       }
       fs.writeFileSync(sPath, JSON.stringify(sess, null, 2));
       const sync = syncFreeLaneTableFromSession({ tablePath, session: sess });
-      console.log(`  stamped ${sPath} (${quotaKeysForLane(lane).join(', ')}) + table sync: ${sync.updated ? `${(sync.changes || []).length} lane change(s)` : sync.reason}`);
+      console.log(`  stamped ${sPath} (${quotaKeysForLane(lane).join(', ')}) as ${stamp.kind}${stamp.countdownParsed ? ' from the vendor countdown' : ' (unproven default TTL)'} — held ${Math.round(stamp.ttlMs / 60000)}m; table sync: ${sync.updated ? `${(sync.changes || []).length} lane change(s)` : sync.reason}`);
     } catch (e) {
       console.log(`  stamp failed: ${String(e?.message || e).slice(0, 160)} — ledger untouched`);
     }
