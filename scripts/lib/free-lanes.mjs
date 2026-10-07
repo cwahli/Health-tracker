@@ -849,9 +849,10 @@ export function planCodeForLane(lane) {
   if (provider === "cloudflare" || model.includes("cloudflare/") || bucket.includes("cloudflare")) return "CF";
   if (provider === "cline" || model.startsWith("cline")) return "CL";
   if (provider === "freebuff" || bucket.includes("freebuff")) return "FB";
-  // The go-plan pool is separate quota from the zen pool: it gets its own code
-  // so the two space-bunny rows survive the canonical dedupe as two rows and
-  // read as two pools (live VM5 2026-10-03).
+  // The go-plan pool is separate quota from the zen pool: it keeps its own code
+  // so such a row can never be deduped onto the zen free row and read as the same
+  // bar (live VM5 2026-10-03). It does not make the go lane free — the go plan is
+  // paid, and freemodels.mjs refuses to source it for the free inventory.
   if (provider === "opencode-go" || model.startsWith("opencode-go/")) return "OG";
   // Token Harbor free bar = TH for both paths: the OpenCode `tokenharbor/…`
   // tools lane and the chat-only `provider: tokenharbor` lane are the same
@@ -1911,9 +1912,13 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
   // row for it and the table showed the same model twice under two plan codes, so
   // the model id is compared with the vendor prefix and the surface stripped —
   // but qualified by the EFFECTIVE provider: `opencode/space-bunny-free` and
-  // `opencode-go/space-bunny-free` are different free pools (both cost-0, live
-  // 2026-10-03) and each deserves its own row and quota, while the
-  // `opencode/tokenharbor/x` + `tokenharbor/x` twins share one bar and stay one.
+  // `opencode-go/space-bunny-free` are different POOLS — a row that exists under
+  // the go plan must never share the zen free row's quota (live 2026-10-03) —
+  // while the `opencode/tokenharbor/x` + `tokenharbor/x` twins share one bar and
+  // stay one. "Different pool" is a quota claim, NOT a freeness claim: the go
+  // plan is paid, so its Space Bunny is excluded from the free inventory
+  // (`FREE_NAME_DENYLIST` in freemodels.mjs) and is never offered as a second
+  // free bunny. Only the effective provider decides the fold.
   const foldKey = (provider, model) => {
     const k = modelKey(model);
     if (!k) return '';

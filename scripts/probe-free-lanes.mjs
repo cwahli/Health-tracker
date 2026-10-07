@@ -12,8 +12,12 @@
  *   node scripts/probe-free-lanes.mjs --burn-ping --lane 3
  *   node scripts/probe-free-lanes.mjs --burn-ping --first-available
  * Never loops all lanes with burns — pass --all-burn explicitly to do so.
- * Cline burn pings are off by default (daily caps are precious); add
- * --include-cline to allow them.
+ *
+ * Every lane in the table is checked, Cline included: a lane is pinged by the
+ * CLI that runs it (opencode for most, `cline` for Cline lanes), so a Cline lane
+ * answers as itself instead of being skipped. Cline's free cap is per model per
+ * day, so a run that must not spend a unit can hold it out with --skip-cline;
+ * --include-cline is accepted and now only restates the default.
  *
  * Stamping: on quota proof the router state (session.quota +
  * free-lane-table.json) is updated via the shared sync helper, unless
@@ -41,6 +45,8 @@ import {
 } from './lib/free-lanes.mjs';
 import { buildFreeModelList } from './lib/freemodels.mjs';
 import { isQuotaOrLimitError, parseRetryAfter, runOpencode, extractLogError } from './lib/agent-opencode.mjs';
+import { runCline } from './lib/agent-cline.mjs';
+import { probeKindForLane, probeModelForLane, selectBurnTargets } from './lib/free-lane-probe.mjs';
 
 const args = new Set(process.argv.slice(2));
 function argVal(name) {
@@ -56,7 +62,9 @@ const LANE = argVal('lane');
 const BURN = args.has('--burn-ping');
 const FIRST = args.has('--first-available');
 const ALL_BURN = args.has('--all-burn');
-const WITH_CLINE = args.has('--include-cline');
+// Cline lanes are part of the check like every other free lane (see the helper
+// for why). `--skip-cline` restores the old cap protection for one run.
+const WITH_CLINE = !args.has('--skip-cline');
 const TIMEOUT = Number(argVal('timeout') || 90000);
 
 const now = Date.now();
@@ -106,31 +114,18 @@ if (args.has('--new-candidates') || (!BURN && !LANE)) {
 }
 
 // Resolve burn targets: one lane, or first-available walk, or explicit all-burn.
-function laneByPref(n) {
-  return (table.lanes || []).find((l) => Number(l.pref) === Number(n)) || null;
-}
-let targets = [];
-if (LANE) {
-  const lane = laneByPref(LANE);
-  if (!lane) { console.error(`no pref lane ${LANE}`); process.exit(2); }
-  targets = [lane];
-} else if (FIRST) {
-  const ordered = [...(table.lanes || [])].sort((a, b) => (a.pref || 0) - (b.pref || 0));
-  const next = ordered.find((l) => {
-    if (l.tg === false) return false;
-    if (String(l.status || '').toLowerCase() === 'depleted' && l.nextResetAt && Date.parse(l.nextResetAt) > now) return false;
-    if (liveRecForLane(l, session, now)) return false;
-    if (!WITH_CLINE && String(l.provider || '').toLowerCase() === 'cline') return false;
-    return true;
-  });
-  if (!next) { console.log('no burn target: every TG lane is marked depleted (nothing to ping — saves quota)'); process.exit(0); }
-  targets = [next];
-} else if (ALL_BURN) {
-  targets = (table.lanes || []).filter((l) => l.tg !== false && (WITH_CLINE || String(l.provider || '').toLowerCase() !== 'cline'));
-} else {
-  console.error('burn mode needs --lane N, --first-available, or --all-burn');
-  process.exit(2);
-}
+// The decision lives in the shared helper so it has a sensor (free-lane-probe).
+const selection = selectBurnTargets(table.lanes || [], {
+  lane: LANE,
+  first: FIRST,
+  all: ALL_BURN,
+  now,
+  isDepleted: (l) => Boolean(liveRecForLane(l, session, now)),
+  skipCline: !WITH_CLINE,
+});
+if (selection.error) { console.error(selection.error); process.exit(2); }
+const targets = selection.targets;
+if (FIRST && !targets.length) { console.log('no burn target: every TG lane is marked depleted (nothing to ping — saves quota)'); process.exit(0); }
 if (!BURN) {
   for (const l of targets) {
     const dep = liveRecForLane(l, session, now);
@@ -149,37 +144,51 @@ const workspace = process.cwd();
 for (const lane of targets) {
   const provider = String(lane.provider || 'opencode');
   const model = String(lane.model || '');
+  // The decision comes first, so --dry-run reports what the run would really do —
+  // including a lane it would hold out — instead of a ping it would never send.
+  const kind = probeKindForLane(lane);
+  if (kind === 'skip') {
+    console.log(`  skip pref ${lane.pref} ${provider}/${model}: freebuff is terminal-only (no chat burn path)`);
+    continue;
+  }
+  if (kind === 'cline' && !WITH_CLINE) {
+    console.log(`  skip pref ${lane.pref} ${provider}/${model}: cline burn ping held out by --skip-cline (daily cap protection) — drop that flag to check the lane`);
+    continue;
+  }
+  const runner = kind === 'cline' ? 'the Cline CLI' : 'OpenCode';
   if (DRY) {
-    console.log(`dry-run: would ping pref ${lane.pref} ${provider}/${model} once ("Reply with exactly: ok", timeout ${TIMEOUT}ms) — no quota burned, ledger untouched`);
+    console.log(`dry-run: would ping pref ${lane.pref} ${provider}/${model} via ${runner} once ("Reply with exactly: ok", timeout ${TIMEOUT}ms) — no quota burned, ledger untouched`);
     continue;
   }
-  console.log(`ping pref ${lane.pref} ${provider}/${model} (timeout ${TIMEOUT}ms)…`);
-  if (provider === 'cline' && !WITH_CLINE) {
-    console.log('  skip: cline burn ping needs --include-cline (daily cap protection)');
-    continue;
-  }
-  if (provider === 'freebuff') {
-    console.log('  skip: freebuff is terminal-only (no chat burn path)');
-    continue;
-  }
+  console.log(`ping pref ${lane.pref} ${provider}/${model} via ${runner} (timeout ${TIMEOUT}ms)…`);
   let result;
   try {
     let child = null;
-    result = await runOpencode({
-      prompt: 'Reply with exactly: ok',
-      model: `${provider}/${model}`.replace(/^opencode\/opencode\//, 'opencode/'),
-      workspace,
-      thinking: false,
-      timeoutMs: TIMEOUT,
-      onSpawn: (c) => { child = c; },
-      onEvent: (ev) => {
-        // True early-kill on first text: lane is alive, stop the run now
-        // instead of burning the full agent turn.
-        if (child && ev && ev.kind === 'text' && String(ev.text || '').trim()) {
-          try { child.kill('SIGKILL'); } catch {}
-        }
-      },
-    });
+    // One early-kill hook shape for both runners: stop at the first sign of life
+    // instead of burning the rest of the agent turn. OpenCode streams text, so a
+    // working lane kills the ping the moment it answers; the Cline CLI reports its
+    // answer as a run result, so a Cline ping is bounded by TIMEOUT instead.
+    const onSpawn = (c) => { child = c; };
+    const onEvent = (ev) => {
+      if (child && ev && ev.kind === 'text' && String(ev.text || '').trim()) {
+        try { child.kill('SIGKILL'); } catch {}
+      }
+    };
+    const model = probeModelForLane(lane);
+    result = kind === 'cline'
+      // A Cline lane is pinged BY CLINE. Through `runOpencode` the ref
+      // (`cline/cline-free/…`) is not a model OpenCode has, so a working lane
+      // reported "model not found" and nothing ever checked it.
+      ? await runCline({ prompt: 'Reply with exactly: ok', model, workspace, timeoutMs: TIMEOUT, onSpawn, onEvent })
+      : await runOpencode({
+          prompt: 'Reply with exactly: ok',
+          model,
+          workspace,
+          thinking: false,
+          timeoutMs: TIMEOUT,
+          onSpawn,
+          onEvent,
+        });
   } catch (e) {
     result = { code: -1, finalText: '', lastError: String(e?.message || e) };
   }
