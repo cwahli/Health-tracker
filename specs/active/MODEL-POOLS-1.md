@@ -26,6 +26,11 @@ allowed_files:
   - scripts/assert-allowance-walk.test.mjs
   - scripts/assert-setup-gaps.test.mjs
   - scripts/assert-turn-store.test.mjs
+  # discovered by CI on the first push: this sensor pins the DECLARED ALIAS SET
+  # exactly (`['think']`) plus an order-sensitive compare of handled-but-unpublished
+  # against it. `/freemodel` joining `aliases` (the router still handles the old
+  # name; it answers a pointer) moves both pins with the mechanism they pin.
+  - scripts/assert-command-scope.test.mjs
   - tools/telegram-provider-router/scripts/test-freemodel-buttons.mjs
   - tools/telegram-provider-router/scripts/test-sticky-failover.mjs
   - scripts/prove-tg-surface.mjs
