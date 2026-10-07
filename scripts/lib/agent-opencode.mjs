@@ -222,7 +222,7 @@ export function buildOpencodeArgs({ prompt, model, variant, thinking = true, ses
 const FATAL_LOG_ERRORS = [
   {
     pattern: /model not found/i,
-    reason: 'Model not found on this provider — the model list may be stale, pick again from /freemodel.',
+    reason: 'Model not found on this provider — the model list may be stale, pick again from /model_free.',
   },
   {
     pattern: /free_tier_limit|free usage exceeded|free limit reached|subscribe to go/i,

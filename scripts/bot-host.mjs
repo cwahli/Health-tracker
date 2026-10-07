@@ -133,6 +133,13 @@ import {
   freemodelDisplayTier,
   sortFreemodelTierRows,
   freemodelRatingOf,
+  poolCommand,
+  poolForCommand,
+  poolOfLane,
+  poolOfRef,
+  poolOfRow,
+  poolRows,
+  poolDisplayName,
 } from './lib/free-lanes.mjs';
 import { recordTurn, storeStatus, flushTurns } from './lib/turn-store.mjs';
 import { ensureTurnLog, makeSends, writerFor } from './lib/google-writer.mjs';
@@ -541,6 +548,10 @@ function effective(config, prefs, chatId) {
     model: legacyGemini || storedModel,
     agent: p.agent || config.agent.defaultAgent,
     variant: p.variant || config.agent.variant,
+    // The pool a pool command put this chat in, or null for the unconstrained
+    // default. It rides on `eff` rather than a second lookup, because the walk,
+    // the picker body and the tap notices must all read the one value.
+    pool: p.pool || null,
   };
 }
 
@@ -648,7 +659,7 @@ export function formatProviderFailure({ surface, model, lastError, stderr } = {}
       ? `${provider} daily free limit reached for ${shortProviderModel(model)}`
       : `${provider} quota/rate limit hit for ${shortProviderModel(model)}`;
     return {
-      message: `${head}.${hint ? ` ${hint}` : ''} Pick another lane from /freemodel or wait for reset.`,
+      message: `${head}.${hint ? ` ${hint}` : ''} Pick another lane from /model_free or wait for reset.`,
       stderr: '',
     };
   }
@@ -1321,7 +1332,50 @@ export function depletedLaneProse({ label = '', resetIn = '', next = null } = {}
   return `${name ? `${name} is` : 'That lane is'} depleted (${resetInBit(resetIn)}).\n${nextBit}`;
 }
 
-export function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [] } = {}) {
+/**
+ * The one honest line a pool keyboard carries in its body.
+ *
+ * A keyboard cannot show a heading when it has a single group, and with one pool
+ * it usually has one, so without this the reader cannot tell which list they are
+ * looking at or what a quota hit will do to the chat. It names the pool, what is
+ * on this host, what is usable, and the way out — which is what decision D2 costs
+ * the reader who only wanted to look. The no-pool path never calls this: the body
+ * is the keyboard alone, exactly as before.
+ */
+function poolNoteLines({ pool, location, total, usable, soonest = '' } = {}) {
+  const loc = String(location || 'vps');
+  const name = poolDisplayName(pool, loc);
+  const move = pool === 'go'
+    ? 'the Go plan is paid, so this lane never moves on its own'
+    : 'a quota hit moves inside this pool only';
+  if (!total) {
+    return [`${name} — no lane of this pool is on ${loc} right now${soonest ? `; soonest reset in ${soonest}` : ''}. ${move}. /model clears the pool.`];
+  }
+  const out = [`${name} · ${total} lane${total === 1 ? '' : 's'} on ${loc} · ${usable} usable — ${move}. /model clears the pool.`];
+  if (!usable) out.push(`Nothing in this pool is usable right now${soonest ? ` — soonest reset in ${soonest}` : ''}.`);
+  return out;
+}
+
+/**
+ * The soonest reset held by one pool's own rows, as a countdown.
+ *
+ * An exhausted pool has to name ITS next lane, never the other pool's — a global
+ * "soonest" would offer a coding reset to a chat that asked to stay on light, and
+ * that is the substitution the pools exist to remove. Read off the rows the
+ * caller already built; nothing is fetched here.
+ */
+function soonestPoolReset(rows, pool, now = Date.now()) {
+  let best = null;
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || poolOfRow(r) !== pool) continue;
+    const at = Number(r.resetAt) || Date.parse(String(r.resetIn || '')) || null;
+    if (!Number.isFinite(at) || at === null) continue;
+    if (best === null || at < best) best = at;
+  }
+  return best === null ? '' : formatResetIn(best, now);
+}
+
+export function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [], pool = null } = {}) {
   const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
   const verdictOf = (e) => {
     const a = byRef.get(e?.ref);
@@ -1336,7 +1390,12 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   // usable first by rating (benchmark AA desc, catalog rank asc, pref asc),
   // then unusable by earliest reset. The turn's same-tier failover walks this
   // same order, so the list and the failover cannot disagree.
-  const tierGroups = groupRowsByTier(canonical || []).map((g) => ({ ...g, rows: sortFreemodelTierRows(g.rows) }));
+  // Three commands, three FILTERS of the one list: the pool narrows the canonical
+  // rows before they are grouped, so the keyboard, the counts and the walk read the
+  // same subset of the same projection. A pool never gets a row list of its own —
+  // that is the QS-8 failure with a second name.
+  const canonicalRows = pool ? poolRows(canonical || [], pool) : (canonical || []);
+  const tierGroups = groupRowsByTier(canonicalRows).map((g) => ({ ...g, rows: sortFreemodelTierRows(g.rows) }));
   const rows = tierGroups.flatMap((g) => g.rows);
   // A catalogued model with no lane row AT ALL is still reported, never dropped.
   // The test is against the TABLE, not against the canonical list: a superseded
@@ -1351,6 +1410,10 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     // model, and the header already counts those. Anything else that shows up here
     // means the fold missed a model, and it is reported rather than dropped.
     if (String(v.ref || '').startsWith('pending:')) continue;
+    // The same pool test the canonical rows took: a catalog-only row the fold
+    // missed is still a row of one pool, and letting it through unfiltered is how
+    // a keyboard grows a second membership in the one list.
+    if (pool && poolOfRow(v) !== pool) continue;
     const m = String(v.lane?.model || v.ref || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
     if (m && !inTable.has(m)) rows.push(v);
   }
@@ -1373,6 +1436,7 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   for (const r of [...(annotated || []), ...rows]) {
     if (!setupBlocked(r)) continue;
     if (String(r.ref || '').startsWith('pending:')) continue;
+    if (pool && poolOfRow(r) !== pool) continue;
     const key = String(r.ref || r.lane?.model || r.model || '');
     if (key && !blockedByRef.has(key)) blockedByRef.set(key, r);
   }
@@ -1471,14 +1535,30 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   // lanes are not on this host is not a row it could show, so the note goes above
   // the buttons. Everything the keyboard does show is still unsaid above it.
   const setupNote = blockedProviderLines(blocked);
+  // With a pool the body has one job the keyboard cannot do: say which pool this
+  // is and what happens when it runs dry. Without one it is still exactly
+  // FREEMODEL_EMPTY_BODY — the keyboard is the whole message.
+  const bodyLines = pool
+    ? [
+      ...poolNoteLines({
+        pool,
+        location,
+        total: listed.length,
+        usable: usable.length,
+        soonest: soonestPoolReset([...(annotated || []), ...rows], pool, now),
+      }),
+      ...setupNote,
+    ]
+    : setupNote;
   return {
-    text: setupNote.length ? setupNote.join('\n') : FREEMODEL_EMPTY_BODY,
+    text: bodyLines.length ? bodyLines.join('\n') : FREEMODEL_EMPTY_BODY,
     buttons,
     rows,
     usable,
     unusable,
     blocked,
     setupNote,
+    pool,
   };
 }
 
@@ -2815,6 +2895,50 @@ export function listTypedSkills(config) {
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId = 0, kind = 'direct' }) {
   const eff = effective(config, prefs, chatId);
 
+  /**
+   * The one picker body: the three pool commands render this, each filter of the
+   * one canonical list and nothing else. Three copies of this body is exactly how
+   * the three lists would drift apart from each other and from /allowance.
+   */
+  const sendFreeModelPicker = async ({ pool = null } = {}) => {
+    // The union, not the raw catalog: getAnnotatedFreeModels folds the ledger's
+    // own rows in, and those are the Token Harbor / Cloudflare / Freebuff models.
+    // Rendering the catalog alone listed 42 models and none of them were the ones
+    // /allowance was showing for those providers.
+    const { entries, annotated, table: fmTable, session: fmSession } = getAnnotatedFreeModels(caches, config.id);
+    if (!entries.length) {
+      await api.sendMessage(chatId, 'No free models found (opencode cache unreadable).');
+      return;
+    }
+    // Every row is a button, including the ones that cannot be used right now:
+    // the router keeps a depleted lane tappable so the tap can answer with what
+    // to use instead. Filtering them out of the keyboard is what made the two
+    // commands list different things.
+    // The table getAnnotatedFreeModels already folded the catalog into — the same
+    // one the annotation was computed against and the same one /allowance renders.
+    // Folding the union again here produced a different table (46 lanes against
+    // 48) and six models came back that the real list has dropped.
+    const body = formatFreemodelWithDepletion(entries, annotated, {
+      current: eff.model,
+      location: workLocation(),
+      pool,
+      canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation() }),
+      tableLanes: (fmTable && fmTable.lanes) || [],
+    });
+    // One keyboard with every model, no paging, and the router's cancel row.
+    await api.sendMessage(chatId, body.text, {
+      // HTML, not Markdown: the table is a <code> block, which is the only
+      // left-aligned column-true rendering Telegram has, and Markdown has no
+      // equivalent that keeps columns.
+      parse_mode: 'HTML',
+      reply_markup: modelKeyboard(body.buttons, {
+        kind: 'fm',
+        all: true,
+        footer: { text: headingWidth('Cancel — keep current model'), callback_data: 'noop' },
+      }),
+    });
+  };
+
   // Deep links (`t.me/<bot>?start=<payload>`) arrive as `/start <payload>`.
   const route = resolveCommandName(cmd);
   switch (route) {
@@ -3049,7 +3173,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           await api.sendMessage(chatId, 'Could not read the model list from opencode.');
           return;
         }
-        await api.sendMessage(chatId, `Select a model (current: ${eff.model}):\nTip: /freemodel lists this host's locally available free models.`, {
+        await api.sendMessage(chatId, `Select a model (current: ${eff.model}):\nTip: /model_free lists this host's locally available free models.`, {
           reply_markup: modelKeyboard(models),
         });
         return;
@@ -3058,6 +3182,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         const current = prefFor(prefs, chatId);
         delete current.model;
         delete current.variant;
+        delete current.pool;
         setPref(prefs, chatId, current);
         if (Object.keys(prefFor(prefs, chatId)).length === 0) prefs.delete(chatId);
         savePrefs(config.id, prefs);
@@ -3067,11 +3192,11 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const ref = parseModelRef(cmd.args);
       if (ref.surface === 'cline') {
         if (!CLINE_FREE_MODELS.includes(ref.id)) {
-          await api.sendMessage(chatId, `Unknown cline model: ${ref.id}\nUse /freemodel to pick from the free list.`);
+          await api.sendMessage(chatId, `Unknown cline model: ${ref.id}\nUse /model_free to pick from the free list.`);
           return;
         }
         const stored = toModelRef('cline', ref.id);
-        setPref(prefs, chatId, { model: stored });
+        setPref(prefs, chatId, { model: stored, pool: null });
         savePrefs(config.id, prefs);
         await api.sendMessage(chatId, `Model set to ${formatFreeLabel(stored)} for this chat.`);
         return;
@@ -3079,10 +3204,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       if (ref.surface === 'gemini') {
         const migrated = GEMINI_TO_OPENCODE[ref.id];
         if (!GEMINI_MODELS.includes(ref.id) || !migrated) {
-          await api.sendMessage(chatId, `Unknown gemini model: ${ref.id}\nUse /freemodel to pick a locally available model.`);
+          await api.sendMessage(chatId, `Unknown gemini model: ${ref.id}\nUse /model_free to pick a locally available model.`);
           return;
         }
-        setPref(prefs, chatId, { model: migrated });
+        setPref(prefs, chatId, { model: migrated, pool: null });
         savePrefs(config.id, prefs);
         await api.sendMessage(chatId, `Model set to ${formatFreeLabel(migrated)} for this chat.`);
         return;
@@ -3094,10 +3219,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         if (hit) target = hit;
       }
       if (models.length && !models.includes(target)) {
-        await api.sendMessage(chatId, `Unknown model: ${cmd.args}\nUse /model to pick from the list or /freemodel for free models.`);
+        await api.sendMessage(chatId, `Unknown model: ${cmd.args}\nUse /model to pick from the list or /model_free for free models.`);
         return;
       }
-      setPref(prefs, chatId, { model: target });
+      // /model stays the unconstrained setter: naming a model here clears any
+      // pool a pool command set, which restores the inferred-from-the-model
+      // behaviour exactly. Strictly additive intent, never a second walk.
+      setPref(prefs, chatId, { model: target, pool: null });
       savePrefs(config.id, prefs);
       await api.sendMessage(chatId, `Model set to ${target} for this chat.`);
       return;
@@ -3156,42 +3284,35 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       await api.sendMessage(chatId, lines.join('\n'), { parse_mode: 'HTML' });
       return;
     }
-    case 'freemodel': {
-      // The union, not the raw catalog: getAnnotatedFreeModels folds the ledger's
-      // own rows in, and those are the Token Harbor / Cloudflare / Freebuff models.
-      // Rendering the catalog alone listed 42 models and none of them were the ones
-      // /allowance was showing for those providers.
-      const { entries, annotated, table: fmTable, session: fmSession } = getAnnotatedFreeModels(caches, config.id);
-      if (!entries.length) {
-        await api.sendMessage(chatId, 'No free models found (opencode cache unreadable).');
-        return;
-      }
-      // Every row is a button, including the ones that cannot be used right now:
-      // the router keeps a depleted lane tappable so the tap can answer with what
-      // to use instead. Filtering them out of the keyboard is what made /freemodel
-      // and /allowance list different things.
-      // The table getAnnotatedFreeModels already folded the catalog into — the same
-      // one the annotation was computed against and the same one /allowance renders.
-      // Folding the union again here produced a different table (46 lanes against
-      // 48) and six models came back that the real list has dropped.
-      const body = formatFreemodelWithDepletion(entries, annotated, {
-        current: eff.model,
-        location: workLocation(),
-        canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation() }),
-        tableLanes: (fmTable && fmTable.lanes) || [],
-      });
-      // One keyboard with every model, no paging, and the router's cancel row.
-      await api.sendMessage(chatId, body.text, {
-        // HTML, not Markdown: the table is a <code> block, which is the only
-        // left-aligned column-true rendering Telegram has, and Markdown has no
-        // equivalent that keeps columns.
-        parse_mode: 'HTML',
-        reply_markup: modelKeyboard(body.buttons, {
-          kind: 'fm',
-          all: true,
-          footer: { text: headingWidth('Cancel — keep current model'), callback_data: 'noop' },
-        }),
-      });
+    case 'freemodel':
+    case 'freemodels': {
+      // The old name still answers, and it answers with a POINTER. Deleting it
+      // outright would make isKnownCommand() false, so a typed `/freemodel` would
+      // fall through to the tool as a prompt — the opposite of helpful — and a host
+      // still on the previous build during a roll keeps reaching a real answer.
+      // One line, no list, no keyboard, nothing billed.
+      await api.sendMessage(chatId, [
+        'The free-model picker is now three pools — pick the one this chat should stay in:',
+        '`/model_light_free` — light lanes only; a quota hit moves inside light',
+        '`/model_free` — coding-capable lanes only (rating 35 and above)',
+        '`/model_go` — the paid Go plan; it never moves on its own',
+        '`/model` clears the pool and goes back to the plain setter.',
+      ].join('\n'));
+      return;
+    }
+
+    case 'model_light_free':
+    case 'model_free':
+    case 'model_go': {
+      // Set the pool BEFORE showing it: the constraint has to hold for the very
+      // next message a reader sends, not only once they tap a lane (decision D2),
+      // or a chat that ran /model_light_free would still spend a coding lane on
+      // the next quota hit.
+      const pool = poolForCommand(route);
+      if (!pool) return;
+      setPref(prefs, chatId, { pool });
+      savePrefs(config.id, prefs);
+      await sendFreeModelPicker({ pool });
       return;
     }
 
@@ -3202,7 +3323,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         try {
           const { tablePath, sessionPath, table, dir } = getLedger(config.id);
           if (!table) {
-            await api.sendMessage(chatId, 'Allowance: no free-lane ledger found. Use /freemodel to list free models.');
+            await api.sendMessage(chatId, 'Allowance: no free-lane ledger found. Use /model_free to list free models.');
             return;
           }
           const outDir = path.join(os.tmpdir(), `bot-host-allowance-${config.id}`);
@@ -3254,7 +3375,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         if (g.note) lines.push(`  (${g.note})`);
         lines.push('');
       }
-      lines.push('Lanes for these providers are shown as ⏸ in /allowance and are not offered in /freemodel until the credential is present.');
+      lines.push('Lanes for these providers are shown as ⏸ in /allowance and are not offered in the picker (/model_free) until the credential is present.');
       await api.sendMessage(chatId, lines.join('\n'));
       return;
     }
@@ -3507,7 +3628,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         // would be a scraped badge, not a terminal.
         await api.sendMessage(chatId, [
           `⌨️ No terminal for this chat — it is on \`${tuiSurface.tool}\`, which answers in one shot and has no session to attach to.`,
-          '`/tx on` still gives you the live tool feed here, and `/freemodel` moves the chat to a lane with a real terminal if you want one.',
+          '`/tx on` still gives you the live tool feed here, and `/model_free` moves the chat to a lane with a real terminal if you want one.',
         ].join('\n'));
         return;
       }
@@ -4584,7 +4705,9 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /model again' });
         return;
       }
-      setPref(prefs, chatId, { model });
+      // This is /model's own keyboard, i.e. the unconstrained path, so it clears
+      // any pool a pool command set — the same thing typing /model <name> does.
+      setPref(prefs, chatId, { model, pool: null });
       savePrefs(config.id, prefs);
       const variants = await getVariants(config, caches, model);
       if (variants.length) {
@@ -4646,7 +4769,11 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
         ? entries.find((e) => e.ref === hit.ref) || hit
         : entries.find((e) => e.label === wanted || e.ref === value) || entries[Number(value)];
       if (!entry) {
-        await api.answerCallbackQuery(query.id, { text: 'Expired, run /freemodel again' });
+        // Name a command that still exists AND opens the pool this chat is in: the
+        // old name answers a pointer now, so telling a reader to run it would send
+        // them to a menu they did not ask for.
+        const expiredPool = effective(config, prefs, chatId).pool;
+        await api.answerCallbackQuery(query.id, { text: `Expired, run /${poolCommand(expiredPool) || 'model_free'} again` });
         return;
       }
       const { table, session, dir } = getLedger(config.id);
@@ -4687,7 +4814,10 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
           return;
         }
       }
-      setPref(prefs, chatId, { model: entry.ref });
+      // The constraint follows the last explicit action: a tap sets the model AND
+      // re-derives the pool from the lane that was tapped, so a stale keyboard
+      // cannot leave the chat's model and its pool disagreeing.
+      setPref(prefs, chatId, { model: entry.ref, pool: poolOfRef(entry.ref) });
       savePrefs(config.id, prefs);
       if (entry.surface === 'opencode') {
         const variants = await getVariants(config, caches, entry.ref);
@@ -4878,7 +5008,7 @@ export function pingOnlyModels({ isPingTurn, model, fallback } = {}) {
  * the old one was skipped. A host with no ledger yet keeps the old two-entry
  * chain, so a fresh install behaves exactly as before.
  */
-export function selectTurnLanes({ botId, model, fallback, now = Date.now(), readiness = null, catalogEntries = null } = {}) {
+export function selectTurnLanes({ botId, model, fallback, now = Date.now(), readiness = null, catalogEntries = null, pool = null } = {}) {
   const legacy = failoverModels(model, fallback);
   let ledger;
   try {
@@ -4941,13 +5071,53 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   const keyedRank = (l) => (l?.plan === 'GM' ? 1 : 0);
   const byTierThenRating = (a, b) => (keyedRank(a) - keyedRank(b)) || (walkTierRank(a.model) - walkTierRank(b.model)) || byRating(a, b);
   const bySameTier = (a, b) => (keyedRank(a) - keyedRank(b)) || byRating(a, b);
-  const orderedLanes = model
-    ? [...fallbackLanes].filter((l) => tierOf(l) === currentGroup).sort(bySameTier)
-      .concat([...fallbackLanes].filter((l) => tierOf(l) !== currentGroup).sort(byTierThenRating))
-    : [...fallbackLanes].sort(byTierThenRating);
+  // A chat that ran one of the three pool commands is CONSTRAINED to that pool
+  // (decision D2): running the command sets the pool, not only the tap — a chat
+  // that ran /model_light_free and then sent a message would otherwise still spend
+  // a coding lane on the next quota hit. With no pool set this is byte-for-byte the
+  // walk this function had before, so every /model user and every walk sensor keeps
+  // passing unchanged.
+  const poolOfRoute = (l) => poolOfLane({ provider: l?.provider, model: l?.model });
+  const currentInPool = Boolean(pool) && Boolean(current.provider || current.model)
+    && poolOfRoute({ provider: current.provider, model: current.model }) === pool;
+  const poolLanes = pool
+    ? [...fallbackLanes].filter((l) => poolOfRoute(l) === pool).sort(bySameTier)
+    : [];
+  let orderedLanes;
+  if (pool === 'go') {
+    // A paid lane never moves on its own: the chat's own Go lane when it has a
+    // usable one, otherwise the pool's own first lane — and never a second entry.
+    orderedLanes = currentInPool && !currentSkipped ? [] : poolLanes.slice(0, 1);
+  } else if (pool) {
+    // Inside the pool, only the list's own order: the cross-tier concat is gone,
+    // because the other pool is no longer a fallback.
+    orderedLanes = poolLanes;
+  } else {
+    orderedLanes = model
+      ? [...fallbackLanes].filter((l) => tierOf(l) === currentGroup).sort(bySameTier)
+        .concat([...fallbackLanes].filter((l) => tierOf(l) !== currentGroup).sort(byTierThenRating))
+      : [...fallbackLanes].sort(byTierThenRating);
+  }
   const codingLeft = orderedLanes.filter((l) => tierOf(l) === 'high').length;
   const lightLeft = orderedLanes.filter((l) => tierOf(l) === 'light').length;
 
+  // An exhausted pool refuses the turn and names its OWN soonest reset (decision
+  // D3): answering on the other pool and labelling it is exactly the across-pool
+  // movement these pools exist to remove.
+  if (pool && !orderedLanes.length && !(currentInPool && !currentSkipped)) {
+    const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now, pool })
+      || soonestResetAmongDepleted(table, ledger.session || {}, { now });
+    return {
+      models: [],
+      skipped,
+      fromLedger: true,
+      exhausted: true,
+      displaced: currentInPool ? (currentSkipped || null) : null,
+      chose: null,
+      pool,
+      soonest,
+    };
+  }
   if (!model && !orderedLanes.length) {
     const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
     return { models: [], skipped, fromLedger: true, exhausted: true, displaced: null, chose: null, soonest };
@@ -4969,7 +5139,7 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   // The first entry executes, so it takes the execution ref: a raw `google/`
   // id would burn the turn on an unwired provider. Ledger identity above
   // (currentSkipped, groups) stays on the configured ref.
-  if (model && !currentSkipped) models.push(execModelRef(model));
+  if (model && !currentSkipped && (!pool || currentInPool)) models.push(execModelRef(model));
   for (const lane of orderedLanes) models.push(toModelRef(lane.provider, lane.model));
   if (!models.length) models.push(fallback);
   const unique = [...new Set(models.filter(Boolean))];
@@ -4980,11 +5150,13 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
     exhausted: false,
     displaced: currentSkipped || null,
     chose: models[0] || null,
+    pool,
     // A coding turn that can only be served by a light lane, and the chat's own
     // group, so the failover notice can say what happened instead of the reader
-    // wondering why the answer got worse.
+    // wondering why the answer got worse. A set pool has no such case: the chat
+    // asked for that pool, so falling inside it is not a degradation to announce.
     currentGroup,
-    degradedToLight: currentGroup === 'high' && codingLeft === 0 && unique.length > 1,
+    degradedToLight: !pool && currentGroup === 'high' && codingLeft === 0 && unique.length > 1,
     codingAvailable: codingLeft,
     lightAvailable: lightLeft,
   };
@@ -6431,7 +6603,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const lane = laneRef.surface === 'cline' ? 'cline' : laneRef.surface === 'gemini' ? 'gemini' : 'opencode';
     if (/^freebuff\//i.test(String(laneEff.model || ''))) {
       try { releaseFiles(claimed, claimId); } catch {}
-      await api.sendMessage(chatId, 'Freebuff runs in the terminal — it cannot take a headless turn from chat. No session was started and nothing was spent. Pick another lane with /freemodel.');
+      await api.sendMessage(chatId, 'Freebuff runs in the terminal — it cannot take a headless turn from chat. No session was started and nothing was spent. Pick another lane with /model_free.');
       return;
     }
     if (lane === 'cline' && /^\/do[-_][a-z]/i.test(String(text || '').trim())) {
@@ -6893,7 +7065,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           const pack = await resolvePackPath({
             manifest: handed.packManifest,
             failedLane: handed.model || '',
-            lanesFn: async () => (selectTurnLanes({ botId: config.id, model: eff.model, fallback: config.agent.model, readiness: hostReadiness(caches, config.id), catalogEntries: await getFreeModels(caches, config) }).models || []),
+            lanesFn: async () => (selectTurnLanes({ botId: config.id, model: eff.model, fallback: config.agent.model, pool: eff.pool, readiness: hostReadiness(caches, config.id), catalogEntries: await getFreeModels(caches, config) }).models || []),
             summarizeFn: async ({ model: lane, manifest: man }) => (await runOpencode({
               prompt: `Summarize this handoff pack in 10 lines or less (files changed, what the next turn needs):\n${(man.files || []).map((f) => `- ${f.path} (${f.bytes} bytes)`).join('\n')}`,
               model: lane,
@@ -6933,6 +7105,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       botId: config.id,
       model: eff.model,
       fallback: config.agent.model,
+      pool: eff.pool,
       readiness: hostReadiness(caches, config.id),
       catalogEntries: await getFreeModels(caches, config),
     });
@@ -6955,9 +7128,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       if (cont.ok) return;
       const when = laneChoice.soonest?.label ? ` Soonest reset: ${laneChoice.soonest.label}.` : '';
       const tried = cont.hops.length ? ` Tried ${cont.hops.map((h) => `\`${h.host}\` (${h.ok ? 'answered' : h.reason || 'dry'})`).join(', ')} — no location has quota.` : '';
+      // A constrained chat is refused, not moved: the pool is the reader's own
+      // instruction, so the refusal names that pool's reset and the way out of it
+      // rather than quietly answering on the other one (decision D3).
+      const poolBit = laneChoice.pool
+        ? ` ${poolDisplayName(laneChoice.pool, location)} is the pool this chat asked to stay in, so no other pool was tried — \`/model\` clears it.`
+        : '';
       await api.sendMessage(
         chatId,
-        `🛑 No lane on ${location} has allowance right now.${when}${tried}\nNothing further was run and nothing was spent. Send \`/allowance\` for the ledger.`
+        `🛑 No lane on ${location} has allowance right now.${when}${tried}${poolBit}\nNothing further was run and nothing was spent. Send \`/allowance\` for the ledger.`
       ).catch(() => {});
       return;
     }

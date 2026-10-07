@@ -182,7 +182,9 @@
         "new": true,
         "compact": true,
         "model": true,
-        "freemodel": true,
+        "model_light_free": true,
+        "model_free": true,
+        "model_go": true,
         "allowance": true,
         "thinking": true,
         "models": false,
@@ -211,7 +213,7 @@
         "review": false,
         "skills": false,
         "routerOnly": ["switch", "unlock"],
-        "aliases": ["think"]
+        "aliases": ["think", "freemodel"]
       }
     },
     {

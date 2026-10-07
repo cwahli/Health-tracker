@@ -342,7 +342,7 @@ fi
 if [ "${#LAUNCH_ARGV[@]}" -eq 0 ]; then
   if [ -n "$LAUNCH_REASON" ]; then
     echo "No terminal for this chat — ${LAUNCH_REASON}."
-    echo "Move the chat to a lane with a real terminal with /freemodel, or use"
+    echo "Move the chat to a lane with a real terminal with /model_free, or use"
     echo "/tx on for the live tool feed here."
   else
     echo "Could not work out which terminal this chat needs, so nothing was"

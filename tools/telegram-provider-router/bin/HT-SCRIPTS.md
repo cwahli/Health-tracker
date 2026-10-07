@@ -35,7 +35,7 @@ ht-allowance-watch --daemon --exit-on-available   # exit 0 printing "AVAILABLE: 
   from router `.env` keys — keys are never printed). Freebuff is terminal-only:
   skipped.
 - Re-stamps the ledger in the router's own JSON shape (`session.json` quota +
-  `free-lane-table.json` lanes/buckets) so `/allowance` and `/freemodel` stay
+  `free-lane-table.json` lanes/buckets) so `/allowance` and `/model_free` stay
   honest. One re-stamp policy via the shared core (`depletionUntilFromText`):
   Cloudflare 4006 ("used up your daily free allocation of 10,000 neurons") →
   **next 00:00 UTC** (not the old 45 m re-stamp — fixed 2026-09-25); vendor
