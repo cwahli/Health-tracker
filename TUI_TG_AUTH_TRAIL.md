@@ -515,3 +515,40 @@ Two user-facing defects, one branch:
      cline's opentui build swallows them, go lane-aware (gap 1).
   4. Confirm the `assert-tui-chat-select` CI job runs on the PR — the new
      10b–10d cases only gate if the script runs.
+
+## 2026-10-07: `origin/agent/status-all` was superseded, not stranded — deleted
+
+The unlanded-fix ratchet flagged this branch (`0c07f6ff`, 25h old) and it blocked
+**every** agent PR: `tsc + named gates` fails on the base, so `merge-agent-pr`
+refuses each one. Someone had to judge it. Measured, rather than assumed:
+
+- **The branch's namesake work is on main verbatim.** `d87805dc` (autocomplete +
+  parsing) and `9dd90299` (the scope-matrix row) added `status_all` in three
+  places; main carries all three byte-for-byte — `scripts/lib/commands.mjs`
+  `BOT_COMMANDS`, `HELP_USAGE` and the `parseCommand` special case, plus
+  `bots/capabilities.json` — and `scripts/bot-host.mjs` has the `case
+  'status_all'` arm those commits shaded in.
+- **Its other half was re-derived, not lost.** `662b36ce` fixed the /freemodel
+  depleted-tap reply (one verdict, one "Next up"): the same defect #587 landed a
+  day later by another route, where the reply calls the table's own picker
+  (`nextUsableLane`) — that is *why* the two agree. Main carries it.
+- **What was left, and why it was dropped.** `meta.nextUp` (redundant with
+  `nextUsableLane`), `let resetIn = null` (main's `resetInBit` already words an
+  unknown reset), the Freebuff line's copy, and 60 test lines covering the meta
+  channel. One deserves naming: the union verdict
+  `Boolean(verdict?.depleted) || isFreemodelEntryDepleted(...)` marks a lane
+  depleted when a stamp exists under **another spelling of the route** — and two
+  spellings of one model are not always one pool (the paid Go plan's bunny vs the
+  free one). Projection-first is the deliberate choice on main; re-litigating it
+  here would re-open a class that was closed the same day.
+- **Reverse-apply check:** `git diff origin/main...origin/agent/status-all |
+  git apply --check --reverse` does **not** apply, so the branch's diff is not
+  simply main's — the difference is the four items above, each either already on
+  main by another route or a competing implementation, not missing behaviour.
+
+Deleted 2026-10-07 (tip `0c07f6ff`; commits `d87805dc`, `9dd90299`, `662b36ce`,
+`0e21a30d`). No waiver line was added, deliberately: `scripts/tui-stranded-
+exceptions.txt` says a branch that no longer exists cannot strand work and a
+waiver for it is just debt. If the Freebuff wording is wanted back, it belongs in
+`formatCompactAllowanceChat` as a fresh change driven by the projection's
+`terminalOnly` verdict, not by a hardcoded promo duration.
