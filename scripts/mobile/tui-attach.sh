@@ -306,9 +306,9 @@ fi
 # first message resolves fresh and reaps correctly. Cline keeps its
 # fresh-thread path: its terminal never shares the turn thread by design.
 if [ -z "$SID" ] && [ "$SURFACE" = "opencode" ]; then
-  echo "[tui] refused: this chat has no session recorded yet."
-  echo "Nothing is shared to attach to, so opening a terminal here would be"
-  echo "blank and the bot would never join it."
+  echo "[tui] refused: nothing shared to attach to. This chat has no session"
+  echo "recorded yet, so opening a terminal here would be blank and the bot"
+  echo "would never join it."
   echo "Fix: send the bot a message first, then reopen this — the next attach"
   echo "lands on that conversation."
   sleep "$REFUSAL_SECONDS"
