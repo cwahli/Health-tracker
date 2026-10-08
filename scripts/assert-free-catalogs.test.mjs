@@ -23,9 +23,11 @@
  * numeric score that is not in the ledger, no tier that is not in the catalog.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bakeoffVerdict, benchmarkFor, benchmarkLabel, catalogFacts, demonstratedModels, HIGH_TIER_MIN_AA, modelIdOf, OWNER_PLACEMENT, scoreLabelFor, tierForModel, walkTierRank, CATALOG_FILES } from './lib/free-catalogs.mjs';
+import { resolveOpencodeBin } from './lib/agent-opencode.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -215,6 +217,28 @@ check('and a model on two tools is one group, not two', (() => {
   const oc = tierForModel('mimo-v2.6-flash-free');
   const th = tierForModel('mimo-v2.6-flash');
   return oc.tier === 'high' && th.tier === 'high';
+})());
+
+// 13. Where the catalog's own bin comes from. The registry's mobile entry is
+// authored for the phone (`/root/.opencode/bin/opencode`, runtime "device") and
+// the same entry is started as a VPS seat under `bot-host@mobile`; an explicit
+// path that is not on THIS host must fall back to the host's own search rather
+// than answering "no opencode", which drops every OpenCode row — and with them
+// the whole paid Go plan — out of the picker. Live G4 proof (2026-10-08): the
+// mobile seat served 14 ledger-only rows while vm served 31, and `/model_go`
+// answered "no lane of this pool is on vps" on a box that has two `opencode-go`
+// catalog rows. The fallback must not eat a real path: on the phone the same
+// entry must keep its own binary byte-for-byte.
+console.log('  -- the catalog bin resolves on the host that runs the seat --');
+check('a foreign explicit bin is resolved exactly like an absent one',
+  resolveOpencodeBin('/definitely-not-here/opencode') === resolveOpencodeBin(undefined)
+    && resolveOpencodeBin('/definitely-not-here/opencode') !== '/definitely-not-here/opencode');
+check('a real explicit bin is honoured byte-for-byte', (() => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-bin-'));
+  const fake = path.join(dir, 'opencode');
+  fs.writeFileSync(fake, '#!/bin/sh\nexit 0\n');
+  fs.chmodSync(fake, 0o755);
+  return resolveOpencodeBin(fake) === fake;
 })());
 
 console.log(`\n${passed} pass, ${failed} fail`);
