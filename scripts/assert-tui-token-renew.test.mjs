@@ -213,6 +213,64 @@ await checkAsync('a LIVE token on /authz still passes, and gets no renewal cooki
   });
 });
 
+await checkAsync('a foreign bot cookie no longer locks a page out of its OWN terminal', async () => {
+  // The live defect. One host-wide cookie is shared by every bot behind this
+  // gateway, so opening a second bot's terminal evicts the first one's cookie,
+  // and the older tab then presents a token that VERIFIES but belongs to the
+  // wrong bot. Before this fix that ended the search and answered 401 to the
+  // only credential the tab held; it must fall through to the token this path
+  // actually owns, here the one in the query.
+  await withGateway(ENV, async (base) => {
+    const foreign = issueToken({ botId: 'vm', chatId: '9', secret: SECRET, ttlSec: TTL, now: Date.now() });
+    const mine = issueToken({ botId: 'vm2', chatId: '42', secret: SECRET, ttlSec: TTL, now: Date.now() });
+    const res = await fetch(`${base}/tty2/token?token=${encodeURIComponent(mine)}`, {
+      headers: { cookie: `__Host-tui_session=${encodeURIComponent(foreign)}` },
+    });
+    assert.equal(res.status, 200, `the path's own token must win (got ${res.status})`);
+    const body = await res.json();
+    assert.equal(body.token, CRED, 'ttyd credential is still what the page gets');
+  });
+});
+
+await checkAsync('a session past its absolute maximum is refused even while its token is live', async () => {
+  // renewGraceSec bounds one token's slide past its own expiry. It must not add
+  // up to a session that never ends, which is what a renewal resetting the
+  // clock would do. The cliff is the SESSION's age, so a live token whose
+  // session started too long ago is refused too.
+  const MAX = 12 * 3600;
+  await withGateway({ ...ENV, TUI_SESSION_MAX_SEC: String(MAX) }, async (base) => {
+    const old = issueToken({
+      botId: 'vm2', chatId: '42', secret: SECRET, ttlSec: TTL,
+      now: Date.now(), issuedAt: Date.now() - (MAX + 60) * 1000,
+    });
+    const res = await fetch(`${base}/tty2/token`, { headers: { cookie: `__Host-tui_session=${encodeURIComponent(old)}` } });
+    assert.equal(res.status, 401, 'an over-age session must re-authenticate');
+  });
+});
+
+await checkAsync('a renewal carries the session start forward, so renewing cannot reset the cliff', async () => {
+  const MAX = 12 * 3600;
+  const started = Date.now() - 3600 * 1000; // one hour into a twelve-hour session
+  await withGateway({ ...ENV, TUI_SESSION_MAX_SEC: String(MAX) }, async (base) => {
+    const minted = issueToken({
+      botId: 'vm2', chatId: '42', secret: SECRET, ttlSec: TTL,
+      now: Date.now() - (TTL + 60) * 1000, issuedAt: started,
+    });
+    const res = await fetch(`${base}/tty2/token`, { headers: { cookie: `__Host-tui_session=${encodeURIComponent(minted)}` } });
+    assert.equal(res.status, 200, `expected a renewal (got ${res.status})`);
+    const cookie = res.headers.get('set-cookie');
+    assert.ok(cookie, 'a renewal sets a replacement cookie');
+    const fresh = decodeURIComponent(/__Host-tui_session=([^;]+)/.exec(cookie)[1]);
+    const v = verifyToken(fresh, SECRET, { now: Date.now(), maxAgeSec: MAX });
+    assert.equal(v.ok, true, 'the replacement must verify as live');
+    assert.ok(v.iat > 0, 'the replacement must carry a session start');
+    assert.ok(
+      Math.abs(v.iat - started) < 5000,
+      `the session start must be carried forward, not reset (got ${new Date(v.iat).toISOString()})`,
+    );
+  });
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 console.log(failed === 0 ? 'assert-tui-token-renew: PASS' : 'assert-tui-token-renew: FAIL');
 process.exitCode = failed === 0 ? 0 : 1;

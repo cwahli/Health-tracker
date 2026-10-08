@@ -116,16 +116,21 @@ export function validateInitData(initData, botToken, { now = Date.now(), maxAgeS
 }
 
 /** Sign a session token bound to (botId, chatId). */
-export function issueToken({ botId, chatId, secret, ttlSec = 900, now = Date.now() }) {
+export function issueToken({ botId, chatId, secret, ttlSec = 900, now = Date.now(), issuedAt = 0 }) {
   const exp = now + ttlSec * 1000;
+  // `iat` is when the SESSION began, carried forward unchanged across every
+  // renewal. Without it a sliding session has no cliff: each renewal would mint
+  // a fresh expiry, so a page that keeps re-fetching ./token could renew
+  // forever. It rides in the signed body rather than a second signature.
+  const iat = Number(issuedAt) > 0 ? Number(issuedAt) : now;
   const nonce = crypto.randomBytes(9).toString('base64url');
-  const body = `${botId}|${chatId}|${exp}|${nonce}`;
+  const body = `${botId}|${chatId}|${exp}|${iat}|${nonce}`;
   const mac = crypto.createHmac('sha256', secret).update(body).digest('base64url');
   return `${Buffer.from(body).toString('base64url')}.${mac}`;
 }
 
 /** Verify a session token: signature, then expiry. Returns the binding. */
-export function verifyToken(token, secret, { now = Date.now(), renewGraceSec = 0 } = {}) {
+export function verifyToken(token, secret, { now = Date.now(), renewGraceSec = 0, maxAgeSec = 0 } = {}) {
   const bad = { ok: false, reason: 'bad token' };
   if (!token || !secret || typeof token !== 'string') return bad;
   const dot = token.lastIndexOf('.');
@@ -141,8 +146,20 @@ export function verifyToken(token, secret, { now = Date.now(), renewGraceSec = 0
   const a = Buffer.from(expect);
   const b = Buffer.from(mac);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return bad;
-  const [botId, chatId, exp] = body.split('|');
+  // The body is `botId|chatId|exp|iat|nonce`. A token minted before `iat`
+  // existed carries no issue time; it verifies and renews exactly as it did
+  // until it expires, and `iat: 0` tells the caller there is no session start
+  // to bound.
+  const parts = body.split('|');
+  const [botId, chatId, exp] = parts;
+  const iat = Number(parts[3]) || 0;
   if (!botId || !chatId || !Number(exp)) return bad;
+  // The absolute cliff. `renewGraceSec` bounds one token's slide past its own
+  // expiry; `maxAgeSec` bounds the SESSION however many times it renews, so the
+  // cliff cannot be reset by renewing. Refused even for a live token.
+  if (maxAgeSec > 0 && iat > 0 && now - iat > maxAgeSec * 1000) {
+    return { ok: false, reason: 'session expired' };
+  }
   if (Number(exp) <= now) {
     // RENEWAL, NOT RE-ADMISSION. A correctly-signed token that is past its
     // expiry is normally refused, and stays refused everywhere except the one
@@ -156,11 +173,11 @@ export function verifyToken(token, secret, { now = Date.now(), renewGraceSec = 0
     // reported on 2026-10-05.
     const graceSec = Number(renewGraceSec) > 0 ? Number(renewGraceSec) : 0;
     if (graceSec > 0 && now - Number(exp) <= graceSec * 1000) {
-      return { ok: true, renew: true, botId, chatId, exp: Number(exp) };
+      return { ok: true, renew: true, botId, chatId, exp: Number(exp), iat };
     }
     return { ok: false, reason: 'token expired' };
   }
-  return { ok: true, botId, chatId, exp: Number(exp) };
+  return { ok: true, botId, chatId, exp: Number(exp), iat };
 }
 
 /** Escape text interpolated into the refusal page. */
@@ -918,30 +935,64 @@ function presentedTokens(req, url) {
  * code needing to run. Same bearer, same short-lived chat-bound token — no
  * weaker door, just one more channel. Exported for the sensor.
  */
-export function verifyWithRefererFallback(req, url, secret, { renewGraceSec = 0 } = {}) {
-  const direct = verifyAnyToken(req, url, secret, { renewGraceSec });
+export function verifyWithRefererFallback(req, url, secret, { renewGraceSec = 0, botId = '', maxAgeSec = 0 } = {}) {
+  const direct = verifyAnyToken(req, url, secret, { renewGraceSec, botId, maxAgeSec });
   if (direct.ok && !direct.renew) return direct;
-  // A live token presented as Referer beats a renewal anywhere else.
+  // A live token presented as Referer beats a renewal anywhere else, and — like
+  // the query token — it is still subject to the path's bot.
   const rt = refererToken(req);
   if (rt) {
-    const via = verifyToken(rt, secret, { renewGraceSec });
-    if (via.ok && !via.renew) return via;
-    if (via.ok) return via;
+    const via = verifyToken(rt, secret, { renewGraceSec, maxAgeSec });
+    if (via.ok && botMatches(via, botId)) return via;
   }
   return direct;
 }
 
-/** Accept when ANY presented token verifies: a stale cookie must not shadow a fresh query token. */
-function verifyAnyToken(req, url, secret, { renewGraceSec = 0 } = {}) {
+/**
+ * Does this verdict's bot own the terminal the path names?
+ *
+ * The historical carve-out is preserved: the `vm` path also accepts any token
+ * that is not `vm2`'s, which is how the default bot's terminal stayed usable
+ * while a second bot was added. Everything else must match exactly.
+ */
+function botMatches(verdict, botId) {
+  if (!botId) return true;
+  if (verdict.botId === botId) return true;
+  return botId === 'vm' && verdict.botId !== 'vm2';
+}
+
+/**
+ * Accept when ANY presented token verifies: a stale cookie must not shadow a
+ * fresh query token.
+ *
+ * When `botId` is given, only a token for THAT bot counts — and a valid token
+ * for a DIFFERENT bot must not end the search. That second half fixes a live
+ * defect: one host-wide cookie is shared by every bot behind this gateway, so
+ * opening a second bot's terminal evicts the first one's cookie, and the first
+ * tab then presents a token that verifies but belongs to the wrong bot. It used
+ * to answer 401 to the only credential that tab held; falling through to the
+ * caller's own query/Referer token keeps the page working instead.
+ */
+function verifyAnyToken(req, url, secret, { renewGraceSec = 0, botId = '', maxAgeSec = 0 } = {}) {
   let verdict = { ok: false, reason: 'bad token' };
+  let foreignBot = '';
   for (const t of presentedTokens(req, url)) {
-    const got = verifyToken(t, secret, { renewGraceSec });
+    const got = verifyToken(t, secret, { renewGraceSec, maxAgeSec });
+    if (!got.ok) continue;
+    if (!botMatches(got, botId)) {
+      // Remember it for the refusal log, but keep looking: a later token may be
+      // the one this path actually owns.
+      foreignBot = foreignBot || got.botId;
+      continue;
+    }
     // A renewal-admitted token must not shadow a live one presented later, so
     // the first LIVE match still wins: keep looking, and only remember a
     // renewal as the fallback.
-    if (got.ok && !got.renew) return got;
-    if (got.ok) verdict = got;
+    if (!got.renew) return got;
+    verdict = got;
   }
+  if (verdict.ok) return verdict;
+  if (foreignBot) return { ok: false, reason: `token is for bot=${foreignBot} — this path is another bot's terminal` };
   return verdict;
 }
 
@@ -1012,6 +1063,12 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
   // How long past its own expiry a correctly-signed token may still be RENEWED.
   // 0 disables renewal entirely, which restores the old hard cliff.
   const renewGrace = Number(env.TUI_TOKEN_RENEW_GRACE_SEC || 3600);
+  // The ABSOLUTE cliff: how long a session may live however often it renews.
+  // `renewGrace` bounds one token's slide past its own expiry; this bounds the
+  // slide itself, so a page left open cannot renew into a permanent credential.
+  // 0 disables it. Default 12h — well past a working day, short enough that an
+  // abandoned tab dies on its own.
+  const sessionMax = Number(env.TUI_SESSION_MAX_SEC || 43200);
   // ttyd's own credential, base64 of user:password. It is substituted for the
   // caller's session token on the way upstream and is never sent to a browser.
   const ttydCredential = String(env.TUI_TTYD_CREDENTIAL || '').trim();
@@ -1169,13 +1226,13 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       // (same grace as `./token`). Idle apps die at TTL + grace; an open tab
       // rides forward.
       if (url.pathname === '/web/token') {
-        const verdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace });
+        const verdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace, maxAgeSec: sessionMax });
         if (!verdict.ok) {
           log(`web/token refused (${verdict.reason})`);
           res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
           return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
         }
-        const fresh = issueToken({ botId: verdict.botId, chatId: verdict.chatId, secret, ttlSec: ttl });
+        const fresh = issueToken({ botId: verdict.botId, chatId: verdict.chatId, secret, ttlSec: ttl, issuedAt: verdict.iat });
         res.writeHead(200, {
           'content-type': 'application/json',
           'cache-control': 'no-store',
@@ -1199,7 +1256,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // Caddy calls this before proxying the websocket. Answering 204 lets the
     // upgrade through; anything else stops it before a socket exists.
     if (url.pathname === '/authz') {
-      const verdict = verifyAnyToken(req, url, secret);
+      const verdict = verifyAnyToken(req, url, secret, { maxAgeSec: sessionMax });
       if (!verdict.ok) {
         log(`authz refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
@@ -1221,19 +1278,22 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       // auth_request instead, which is why /authz is left strict. The referer
       // channel joins here too (same grace): parser-fired and worker clients
       // that never see a cookie still repair through it.
-      const verdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace });
+      const verdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace, botId: tokenBot, maxAgeSec: sessionMax });
       if (!verdict.ok) {
         log(`token refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
       }
-      // The grace never widens WHICH bot may open WHICH terminal — the check
-      // below still owns that, and runs unchanged.
+      // The grace never widens WHICH bot may open WHICH terminal. The selection
+      // above already skipped a token for another bot, so the check below is
+      // now a backstop rather than the path a shared cookie used to fail on.
       const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
       if (verdict.renew) {
-        const fresh = issueToken({ botId: verdict.botId, chatId: verdict.chatId, secret, ttlSec: ttl });
+        // A renewal keeps the session's ORIGINAL start, so the absolute cliff
+        // measures how long the session has lived, not how new this token is.
+        const fresh = issueToken({ botId: verdict.botId, chatId: verdict.chatId, secret, ttlSec: ttl, issuedAt: verdict.iat });
         headers['set-cookie'] = `${COOKIE_NAME}=${encodeURIComponent(fresh)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`;
-        log(`token renewed bot=${verdict.botId} chat=${verdict.chatId} (expired ${Math.round((Date.now() - verdict.exp) / 1000)}s ago, grace ${renewGrace}s)`);
+        log(`token renewed bot=${verdict.botId} chat=${verdict.chatId} (expired ${Math.round((Date.now() - verdict.exp) / 1000)}s ago, grace ${renewGrace}s, session age ${Math.round(verdict.iat ? (Date.now() - verdict.iat) / 1000 : 0)}s)`);
       }
       if (verdict.botId !== tokenBot && !(tokenBot === 'vm' && verdict.botId !== 'vm2')) {
         log(`token refused (token is for bot=${verdict.botId}, path is for bot=${tokenBot})`);
@@ -1254,7 +1314,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // the vm2 terminal and land in another bot's conversation map.
     const route = ttydRoutes(env)[url.pathname];
     if (route) {
-      const verdict = verifyWithRefererFallback(req, url, secret);
+      const verdict = verifyWithRefererFallback(req, url, secret, { botId: route.bot, maxAgeSec: sessionMax });
       if (!verdict.ok) {
         log(`page refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
