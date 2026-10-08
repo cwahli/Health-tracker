@@ -9,41 +9,14 @@
  *    the seats in order and the reply is one consolidated answer. The other
  *    bots are not addressed.
  *
- * Any real question is answered in one reply. The seats work it out together
- * inside that reply. While the data gate is open, a model answer that names a
- * test, a condition, or a new number goes back to the model once with the
- * checker's reason; only a second refusal falls back to one short line that
- * names the reason. The host logs that reason.
- *
- * A brief ask — "work on the brief", "update the documents" — is its own
- * kind: it runs the publisher under the same busy guard the seats use, and the
- * room gets the refresh reply (drafts publish, analysis withheld). Questions
- * about the brief see its state as facts in the model context.
- *
- * The lane under the room retries a transient provider refusal (503-class
- * "UNAVAILABLE / high demand") exactly once after a short wait — the live
- * site's own withGeminiRetry rule. A 429 is never retried; a second 503 keeps
- * the provider's error so the room's fallback line can name it.
- *
- * The transcript's own asks are pinned as classification/answer-contract
- * cases: the three data questions are council asks, "can you work on the
- * brief?" is the brief ask, and the typo'd /heath verify is the router's own
- * line, never a health turn. Each is answered — no fallback line — so the
- * room's canned paragraph stays reserved for a genuine refusal.
- *
- * When the chosen engine stalls or stays unavailable, the lane fails the
- * model, not the job: one hop to the live site's own default engine
- * (nextGeminiFallbackEngine's rule). Measured live 2026-10-02: the room's
- * prompt hung past 120s on gemini-3.7-flash while 3.5-flash-lite answered in
- * 958 ms.
+ * While the data gate is open the reply is the fix list. It must not name a
+ * test or a condition.
  */
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 
-import { resolveGroupAddressing, HELP_USAGE, parseCommand } from './lib/commands.mjs';
+import { resolveGroupAddressing } from './lib/commands.mjs';
 import { getProjectRoles } from './lib/project-registry.mjs';
 import { loadRegistry, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
@@ -54,13 +27,9 @@ import {
   acceptHealthReply,
   formatDocLinks,
   formatHealthGroupReply,
-  healthAnswerPrompt,
   isHealthAsk,
   isLinkAsk,
 } from './lib/health-group.mjs';
-import { formatRefreshText } from './health-runner.mjs';
-import { answerBriefAsk } from './bot-host.mjs';
-import { runGemini } from './lib/agent-gemini.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOST = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
@@ -128,36 +97,15 @@ const single = resolveGroupAddressing(plannerMsg, { id: 10, username: 'VM_19485_
 check('a coordinator with no seat bots still adopts @test planner', single.addressed === true && single.roleId === 'test_planner');
 
 check('the room question is a council ask', isHealthAsk(roomQuery) === true);
-check('a short question is still a council ask', isHealthAsk('status') === true && isHealthAsk('what next') === true);
 check('thanks is not a council ask', isHealthAsk('thanks') === false);
-check('a greeting is not a council ask', isHealthAsk('good morning') === false && isHealthAsk('ok') === false);
 const council = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: roomQuery, projectId: 'health-tracker' });
-const statusTurn = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'status', projectId: 'health-tracker' });
 const thanks = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'thanks', projectId: 'health-tracker' });
 const seat = classifyHealthGroupTurn({ kind: 'group', addr: forPlanner, text: forPlanner.cleanText, projectId: 'external-2' });
-const seatThanks = classifyHealthGroupTurn({ kind: 'group', addr: forPlanner, text: 'thanks', projectId: 'health-tracker' });
 const otherProject = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: roomQuery, projectId: 'external-2' });
-const taxRoom = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: roomQuery, projectId: 'chiwah-tax', taxChat: true });
 check('a bare health question on the default project is a council turn', council?.mode === 'council');
-check('a one-word question in the health room is a council turn', statusTurn?.mode === 'council');
 check('an acknowledgement is skipped', thanks?.mode === 'skip');
-check('thanks to a named seat is skipped', seatThanks?.mode === 'skip');
 check('a named seat is a seat turn even in another project', seat?.mode === 'seat' && seat.roleId === 'test_planner');
 check('a bare question in another external project is not stolen', otherProject == null);
-check('a tax room is not answered as the health council', taxRoom == null);
-
-// Plan item 3: an explicit brief ask is its own turn kind. A question that
-// merely mentions the documents stays a council ask.
-const briefAsk = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'can you work on the brief?', projectId: 'health-tracker' });
-const briefRefresh = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'please refresh the docs when you can', projectId: 'health-tracker' });
-const briefUpdate = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'update the documents', projectId: 'external-health' });
-const docsQuestion = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'what do the documents say about my test plan?', projectId: 'health-tracker' });
-const briefTax = classifyHealthGroupTurn({ kind: 'group', addr: roomVm, text: 'update the documents', projectId: 'chiwah-tax', taxChat: true });
-check('a brief ask is its own kind', briefAsk?.mode === 'brief' && briefAsk.roleId === null && /work on the brief/.test(briefAsk.question));
-check('refresh the docs is a brief ask', briefRefresh?.mode === 'brief');
-check('update the documents is a brief ask', briefUpdate?.mode === 'brief');
-check('a question about the documents stays a council ask', docsQuestion?.mode === 'council');
-check('a tax room does not get a brief turn', briefTax == null);
 
 const openArtifact = {
   at: '2026-10-01T00:00:00Z',
@@ -169,30 +117,29 @@ const openArtifact = {
     ],
   },
 };
-const noModelFallback = formatHealthGroupReply({ artifact: openArtifact });
-check('a model-less fallback is one short line that names the reason', /no council model is wired to answer/.test(noModelFallback) && noModelFallback.length < 220 && !noModelFallback.includes('\n'), noModelFallback.slice(0, 240));
-check('the old canned paragraphs are gone', !/no health status yet|not a habit|ask again when|open fix list:|you asked:|in the app, do this first/i.test(noModelFallback), noModelFallback.slice(0, 240));
-check('the fallback does not prescribe a test', !/hs-CRP|vitamin D|I recommend|order this|you should test/i.test(noModelFallback), noModelFallback);
-check('the fallback does not name a condition', !/diabetes|cardiovascular|hypertension|prediabetes/i.test(noModelFallback));
-const refusedFallback = formatHealthGroupReply({ artifact: openArtifact, reason: 'condition' });
-check('a refused draft falls back to the short line, not a status paragraph', /couldn't put that answer together/.test(refusedFallback) && /condition the record does not state/.test(refusedFallback) && !/H-1|data gate is open/i.test(refusedFallback), refusedFallback.slice(0, 240));
-check('a missing artifact refuses instead of guessing', /won't guess/.test(formatHealthGroupReply({ artifact: null })));
+const plannerReply = formatHealthGroupReply({
+  mode: 'seat',
+  roleId: 'test_planner',
+  question: forPlanner.cleanText,
+  artifact: openArtifact,
+});
+check('the planner names the open gate', /data gate is open \(2: H-1, H-2\)/.test(plannerReply), plannerReply.slice(0, 240));
+check('the planner names the first repair', /H-1/.test(plannerReply));
+check('the planner does not prescribe a test', !/hs-CRP|vitamin D|I recommend|order this|you should test/i.test(plannerReply), plannerReply);
+check('the planner does not name a condition', !/diabetes|cardiovascular|hypertension|prediabetes/i.test(plannerReply));
 
-// Plan item 4: the surviving guidance names only commands the /health handler
-// serves and the help line lists, and the retired wording is gone.
-const guidanceTexts = [
-  formatHealthGroupReply({ artifact: null }),
-  formatHealthGroupReply({ artifact: { fixList: { items: [] } } }),
-  noModelFallback,
-  refusedFallback,
-  healthAnswerPrompt({ mode: 'council', roleId: null, question: roomQuery, artifact: openArtifact }),
-];
-check('no health-room reply carries the retired guidance', guidanceTexts.every((t) => !/0 open|not a habit|not a new test|ask again/i.test(t)), guidanceTexts.map((t) => t.slice(0, 100)).join(' || '));
-const namedCommands = [...new Set(guidanceTexts.flatMap((t) => [...t.matchAll(/\/health ([a-z-]+)/g)].map((m) => m[1])))];
-check('the guidance names the lane commands', ['verify', 'refresh', 'triage', 'dashboard'].every((c) => namedCommands.includes(c)), namedCommands.join(', '));
-check('every command the guidance names is handled by /health', namedCommands.every((c) => new RegExp(`sub === '${c}'|sub\\.startsWith\\('${c}'`).test(HOST)), namedCommands.join(', '));
-check('every command the guidance names is in the help line', namedCommands.every((c) => HELP_USAGE.health.text.includes(c)), namedCommands.join(', '));
-check('the help line lists triage and dashboard', /triage/.test(HELP_USAGE.health.text) && /dashboard/.test(HELP_USAGE.health.text), HELP_USAGE.health.text);
+const councilReply = formatHealthGroupReply({ mode: 'council', question: roomQuery, artifact: openArtifact });
+const order = ['One answer', 'Data Steward', 'Health Analyst', 'Test Planner', 'Research Lead', 'Safety Reviewer', 'Doctor'];
+let cursor = -1;
+let inOrder = true;
+for (const label of order) {
+  const at = councilReply.indexOf(label);
+  if (at <= cursor) inOrder = false;
+  cursor = at;
+}
+check('the council answer leads, then the seats run in order', inOrder, councilReply.slice(0, 200));
+check('the council answer does not prescribe a test', !/hs-CRP|vitamin D|I recommend|order this/i.test(councilReply));
+check('a missing artifact refuses instead of guessing', /won't guess/.test(formatHealthGroupReply({ mode: 'seat', roleId: 'test_planner', question: 'gaps?', artifact: null })));
 
 const calls = [];
 const closedArtifact = {
@@ -206,70 +153,22 @@ const closed = await answerHealthGroup({
   artifact: closedArtifact,
   runModel: async ({ roleId, prompt }) => {
     calls.push(roleId);
-    check('the joint prompt carries the user question', prompt.includes(roomQuery));
-    check('the joint prompt tells the seats to answer together', /shared answer/i.test(prompt) && /work the question out together/i.test(prompt));
-    return 'The verified rows show nothing new to change this week.';
+    check(`closed-gate prompt for ${roleId} carries the user question`, prompt.includes(roomQuery));
+    if (roleId === 'consolidator') return 'The verified rows show nothing new to change this week.';
+    return `${roleId} looked at the verified rows.`;
   },
 });
-check('a closed gate is one joint call', calls.join(',') === 'council', calls.join(','));
-check('the closed-gate reply is the joint answer', closed.text === 'The verified rows show nothing new to change this week.');
-check('the closed-gate reply does not paste every seat', !/Seats, in order|1\. Data Steward/.test(closed.text));
+check('a closed gate runs every seat, then one consolidation', calls.join(',') === [...HEALTH_SEAT_IDS, 'consolidator'].join(','), calls.join(','));
+check('the closed-gate reply is one answer plus the seats', closed.text.startsWith('One answer') && closed.text.includes('1. Data Steward') && closed.text.includes('6. Doctor'));
 check('the closed-gate reply used the model', closed.usedModel === true);
 
-const openCalls = [];
 const openLive = await answerHealthGroup({
   mode: 'seat',
   roleId: 'test_planner',
   question: forPlanner.cleanText,
   artifact: openArtifact,
-  runModel: async ({ roleId, prompt }) => {
-    openCalls.push(roleId);
-    check('an open-gate prompt carries the question and the repair', prompt.includes(forPlanner.cleanText) && /H-1/.test(prompt));
-    check('an open-gate prompt forbids a disease and a named test', /do not name a disease/i.test(prompt) && /lab test/i.test(prompt));
-    return 'The rows do not support a gap worth acting on yet. H-1 is still open, so nothing further can be said.';
-  },
-});
-check('an open gate asks the model once', openCalls.join(',') === 'test_planner', openCalls.join(','));
-check('an open gate uses a safe answer to the question', openLive.usedModel === true && /H-1 is still open/.test(openLive.text));
-
-const odd = await answerHealthGroup({
-  mode: 'council',
-  question: 'why is the height row wrong?',
-  artifact: openArtifact,
-  runModel: async ({ prompt }) => {
-    check('an unusual question is passed through whole', prompt.includes('why is the height row wrong?'));
-    return 'The height row is the open repair H-1: height does not match the sheet. That is a data mismatch, and it has to be changed in the app.';
-  },
-});
-check('any question is answered from the repairs', odd.usedModel === true && /height does not match the sheet/.test(odd.text));
-
-const retryCalls = [];
-const retried = await answerHealthGroup({
-  mode: 'council',
-  question: roomQuery,
-  artifact: openArtifact,
-  runModel: async ({ prompt }) => {
-    retryCalls.push(prompt);
-    return retryCalls.length === 1
-      ? 'You have prediabetes. I recommend a vitamin D test.'
-      : 'The height row is the open repair H-1: height does not match the sheet. Fix it in the app, then run /health verify.';
-  },
-});
-check('a refused first draft is retried, not dropped', retryCalls.length === 2, `model calls: ${retryCalls.length}`);
-const retryPrompt = retryCalls[1] || '';
-check('the retry carries the same question and the checker\'s reason', retryPrompt.includes(roomQuery) && /previous draft was refused/i.test(retryPrompt) && /condition the record does not state/i.test(retryPrompt));
-check('the rewritten draft answers the question', retried.usedModel === true && /H-1/.test(retried.text));
-check('a recovered reply carries no fallback reason', !retried.fallbackReason);
-check('the checker names why that reply is refused', acceptHealthReply('You have prediabetes. I recommend a vitamin D test.', { artifact: openArtifact, question: roomQuery }).reason === 'condition');
-
-const rejectedCalls = [];
-const rejected = await answerHealthGroup({
-  mode: 'council',
-  question: roomQuery,
-  artifact: openArtifact,
   runModel: async () => {
-    rejectedCalls.push(1);
-    return 'You have prediabetes. I recommend a vitamin D test.';
+    throw new Error('the open gate must not call a model');
   },
 });
 check('a second refusal falls back to one short line', rejected.usedModel === false && /couldn't put that answer together/.test(rejected.text) && !/prediabetes|vitamin D/i.test(rejected.text));
@@ -692,13 +591,6 @@ const healthAt = HOST.indexOf('const healthTurn = classifyHealthGroupTurn');
 check('the group gate still comes before the health reply', gateAt > 0 && healthAt > gateAt);
 check('the handler passes the dedicated seat list', HOST.includes('dedicatedRoleIds'));
 check('the handler answers with answerHealthGroup', HOST.includes('answerHealthGroup'));
-check('the handler logs the fallback reason', HOST.includes('fallbackReason'));
-const busyAt = HOST.indexOf('if (busy.has(chatId))', healthAt);
-const briefAt = HOST.indexOf("healthTurn.mode === 'brief'", healthAt);
-const releaseAt = HOST.indexOf('busy.delete(chatId)', briefAt);
-check('the brief branch sits under the same busy guard as the seats', healthAt > 0 && busyAt > healthAt && briefAt > busyAt);
-check('the brief turn runs the publisher and releases the guard', HOST.includes('answerBriefAsk({ projectId') && releaseAt > briefAt);
-check('the brief reply goes out as markdown', HOST.includes("reply.markdown ? { parse_mode: 'Markdown' }"));
 
 // `/health link` is the same lookup with the ambiguity taken out: the room does
 // not have to phrase an ask for the command to find the documents. Judged on

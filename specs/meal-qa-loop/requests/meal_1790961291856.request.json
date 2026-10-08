@@ -1,0 +1,21 @@
+{
+  "schema": "meal-audit-request/1",
+  "mealId": "meal_1790961291856",
+  "name": "Chicken and Rice Meal Box, Waffle Fries, and Seeded Slaw Salad",
+  "provenance": "photo_only",
+  "photos": [
+    "http://127.0.0.1:3000/photos/sha256_d7ca0a4ca038f40e3fd7eaa1fe5df60d0d525fd29a9eb3be2a0fd6fab3b2601f.jpg"
+  ],
+  "skeleton": "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1790961291856/chicken-and-rice-meal-box-waffle-fries-and-seede-meal_1790961291856/flow_skeleton.json",
+  "requestedAt": "2026-10-02T17:17:02.758Z",
+  "requestedBy": "meal-audit-loop",
+  "status": "pending",
+  "instructions": [
+    "Audit this meal and produce a ground-truth bundle.",
+    "For each dish: dishName, weightGrams, boundingBox2D (0-1000, required because photos exist), and all 32 nutrient keys.",
+    "Weight must come from the catalog (scripts/meal-audit-assist.mjs api:<query>) or a scale, never an eyeball estimate.",
+    "Run scripts/generate-meal-result.mjs to write meal_result.json, then report the bundle path with `complete`.",
+    "If the catalog cannot source a nutrient, the audit is INCOMPLETE: say so rather than filling zeros.",
+    "PHOTO_ONLY: there is no edit history for this meal. Do NOT file turn_mismatch or edit_not_applied."
+  ]
+}

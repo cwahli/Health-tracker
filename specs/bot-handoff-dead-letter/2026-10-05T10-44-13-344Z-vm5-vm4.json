@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-05T10:44:13.344Z",
+  "code": "DUPLICATE",
+  "reason": "duplicate message id already seen",
+  "envelope": {
+    "v": 1,
+    "kind": "answer",
+    "ref": "spec:group-demo",
+    "depth": 2,
+    "from": "vm5",
+    "to": "vm4",
+    "expires": 1791198853000,
+    "id": "g2bbbb",
+    "reply_to": "g1aaaa",
+    "body": "vm5 answering: stale by one sweep, rerun pm-current."
+  }
+}

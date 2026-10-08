@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-05T06:33:04.655Z",
+  "code": "TARGET_UNKNOWN",
+  "reason": "envelope is addressed to @ht_vm3_bot",
+  "envelope": {
+    "v": 1,
+    "kind": "answer",
+    "ref": "spec:demo-1",
+    "depth": 2,
+    "from": "vm",
+    "to": "@ht_vm3_bot",
+    "expires": 1791183784000,
+    "id": "hop2bbb",
+    "reply_to": "hop1aaa",
+    "body": "Answer from vm: the queue is stale by one sweep; rerun pm-current."
+  }
+}

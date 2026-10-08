@@ -338,6 +338,25 @@ export function specFileFor(specsDir, id, { read = (f) => fs.readFileSync(f, 'ut
   return '';
 }
 
+/** Owner is the hand doing the work, never the assigner.
+ *
+ * The fleet projection carries the assigner (`orchestrator` dispatches the
+ * ticket; the store assignee is whoever was handed it). The `current` tab
+ * must show who actually did / is doing the work — the commit-trailer agent
+ * (specs), the PR-body agent or last curator (cards), the last runner
+ * (lanes). So: a real worker name in `author` wins; the bare assigner
+ * `orchestrator` is not an owner and becomes blank; anything else keeps the
+ * projection's owner (a genuine worker assignee like `qa_meal` survives).
+ * Placeholders and git failures stay blank, never guessed.
+ */
+export function ownerFor(item, author) {
+  const a = String(author || '').trim();
+  const o = String(item?.owner || '').trim();
+  if (a && !/^orchestrator\b/i.test(a) && !/^your name\b/i.test(a)) return a;
+  if (/^orchestrator\b/i.test(o)) return '';
+  return o;
+}
+
 /** Open + merged PRs, best-effort: a failed list means blank github cells. */
 export function listPrs({ exec = nodeExecFileSync } = {}) {
   try {
@@ -354,6 +373,7 @@ export function currentRow(item, {
   at = new Date().toISOString(),
   rung = '',
   attempts = 0,
+  owner = null,
   author = '',
   github = '',
   goal = '',
@@ -371,7 +391,7 @@ export function currentRow(item, {
     cell(item.stallReason),
     cell(rung),
     String(Number(attempts) || 0),
-    cell(item.owner),
+    cell(owner === null ? item.owner : owner),
     cell(item.source),
     cell(item.branch),
     cell(item.note),
@@ -453,6 +473,7 @@ async function main() {
         at: now,
         rung: att.rung || '',
         attempts: att.attempts || 0,
+        owner: ownerFor(item, author),
         author,
         github: gh,
         goal: goalFor(item, { specBody }),

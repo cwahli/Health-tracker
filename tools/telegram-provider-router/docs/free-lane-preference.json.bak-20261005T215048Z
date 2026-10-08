@@ -1,0 +1,198 @@
+{
+  "version": 3,
+  "failover": "same-family-then-pref",
+  "updatedAt": "2026-09-23T23:23:46.308164+00:00",
+  "capableHighlights": [
+    "mimo-v2.6-flash",
+    "space-bunny"
+  ],
+  "lanes": [
+    {
+      "pref": 1,
+      "family": "muse-spark-1.3",
+      "provider": "opencode",
+      "model": "opencode/muse-spark-1.3-contributor-free",
+      "label": "OpenCode Muse Spark 1.3 free",
+      "bucket": "opencode-zen-free",
+      "tg": true,
+      "resetRule": "rolling / rate-limit (OpenCode Zen free shared pool)",
+      "notes": ""
+    },
+    {
+      "pref": 2,
+      "family": "muse-spark-1.3",
+      "provider": "cline",
+      "model": "cline-free/muse-spark-1.3-contributor",
+      "label": "Cline Muse Spark 1.3 contributor free",
+      "bucket": "cline-per-model",
+      "tg": true,
+      "resetRule": "per-model daily (Cline UI)",
+      "notes": ""
+    },
+    {
+      "pref": 3,
+      "family": "mimo-v2.6-flash",
+      "provider": "opencode",
+      "model": "opencode/mimo-v2.6-flash-free",
+      "label": "OpenCode MiMo V2.6 Flash free",
+      "bucket": "opencode-zen-free",
+      "tg": true,
+      "resetRule": "rolling / rate-limit (OpenCode Zen free shared pool)",
+      "notes": "capable free - keep in failover"
+    },
+    {
+      "pref": 4,
+      "family": "space-bunny",
+      "provider": "opencode",
+      "model": "opencode/space-bunny-free",
+      "label": "OpenCode Space Bunny free",
+      "bucket": "opencode-zen-free",
+      "tg": true,
+      "resetRule": "rolling / rate-limit (OpenCode Zen free shared pool)",
+      "notes": "capable free - Zen bucket; expose on /freemodel when server lists it; not on running OpenCode /provider yet; keep in preference for when it appears"
+    },
+    {
+      "pref": 5,
+      "family": "deepseek-v4.1-flash",
+      "provider": "opencode",
+      "model": "tokenharbor/deepseek-v4.1-flash:free",
+      "label": "OpenCode Token Harbor DeepSeek V4.1 Flash free",
+      "bucket": "tokenharbor-free",
+      "tg": true,
+      "resetRule": "rolling ~7-day value bar (shared Token Harbor free)",
+      "notes": ""
+    },
+    {
+      "pref": 6,
+      "family": "deepseek-v4.1-flash",
+      "provider": "cline",
+      "model": "cline-free/deepseek-v4.1-flash",
+      "label": "Cline DeepSeek V4.1 Flash free",
+      "bucket": "cline-per-model",
+      "tg": true,
+      "resetRule": "per-model daily (Cline UI)",
+      "notes": ""
+    },
+    {
+      "pref": 7,
+      "family": "deepseek-v4.1-flash",
+      "provider": "tokenharbor",
+      "model": "deepseek-v4.1-flash:free",
+      "label": "Token Harbor chat DeepSeek V4.1 Flash free",
+      "bucket": "tokenharbor-free",
+      "tg": true,
+      "resetRule": "rolling ~7-day value bar (shared Token Harbor free)",
+      "notes": ""
+    },
+    {
+      "pref": 8,
+      "family": "mimo-v2.6-flash",
+      "provider": "opencode",
+      "model": "tokenharbor/mimo-v2.6-flash:free",
+      "label": "OpenCode Token Harbor MiMo V2.6 Flash free",
+      "bucket": "tokenharbor-free",
+      "tg": true,
+      "resetRule": "rolling ~7-day value bar (shared Token Harbor free)",
+      "notes": "capable free"
+    },
+    {
+      "pref": 9,
+      "family": "mimo-v2.6-flash",
+      "provider": "tokenharbor",
+      "model": "mimo-v2.6-flash:free",
+      "label": "Token Harbor chat MiMo V2.6 Flash free",
+      "bucket": "tokenharbor-free",
+      "tg": true,
+      "resetRule": "rolling ~7-day value bar (shared Token Harbor free)",
+      "notes": "capable free"
+    },
+    {
+      "pref": 10,
+      "family": "qwen3.8-27b",
+      "provider": "opencode",
+      "model": "cloudflare/@cf/qwen/qwen3.8-27b",
+      "label": "Cloudflare Qwen3.8 27B",
+      "bucket": "cloudflare-neurons",
+      "tg": true,
+      "resetRule": "10k neurons/day shared, 00:00 UTC",
+      "notes": "CF neurons ~42417/10000"
+    },
+    {
+      "pref": 11,
+      "family": "glm-4.7-flash",
+      "provider": "opencode",
+      "model": "cloudflare/@cf/zai-org/glm-4.7-flash",
+      "label": "Cloudflare GLM 4.7 Flash",
+      "bucket": "cloudflare-neurons",
+      "tg": true,
+      "resetRule": "10k neurons/day shared, 00:00 UTC",
+      "notes": "CF neurons ~42417/10000"
+    },
+    {
+      "pref": 12,
+      "family": "muse-spark-1.2",
+      "provider": "opencode",
+      "model": "opencode/muse-spark-1.2-contributor-free",
+      "label": "OpenCode Muse Spark 1.2 free",
+      "bucket": "opencode-zen-free",
+      "tg": true,
+      "resetRule": "rolling / rate-limit (OpenCode Zen free shared pool)",
+      "notes": ""
+    },
+    {
+      "pref": 13,
+      "family": "mimo-v2.5",
+      "provider": "opencode",
+      "model": "tokenharbor/mimo-v2.5:free",
+      "label": "OpenCode Token Harbor MiMo V2.5 free",
+      "bucket": "tokenharbor-free",
+      "tg": true,
+      "resetRule": "rolling ~7-day value bar (shared Token Harbor free)",
+      "notes": ""
+    },
+    {
+      "pref": 14,
+      "family": "qwen3.8-flash",
+      "provider": "opencode",
+      "model": "tokenharbor/qwen3.8-flash:free",
+      "label": "OpenCode Token Harbor Qwen3.8 Flash free",
+      "bucket": "tokenharbor-free",
+      "tg": true,
+      "resetRule": "rolling ~7-day value bar (shared Token Harbor free)",
+      "notes": ""
+    },
+    {
+      "pref": 15,
+      "family": "glm-5.3-flash",
+      "provider": "cline",
+      "model": "cline-free/glm-5.3-flash",
+      "label": "Cline GLM 5.3 Flash free",
+      "bucket": "cline-per-model",
+      "tg": true,
+      "resetRule": "per-model daily (Cline UI)",
+      "notes": ""
+    },
+    {
+      "pref": 16,
+      "family": "deepseek-v4-flash",
+      "provider": "opencode",
+      "model": "tokenharbor/deepseek-v4-flash:free",
+      "label": "OpenCode Token Harbor DeepSeek V4 Flash free",
+      "bucket": "tokenharbor-free",
+      "tg": true,
+      "resetRule": "rolling ~7-day value bar (shared Token Harbor free)",
+      "notes": ""
+    },
+    {
+      "pref": 17,
+      "family": "deepseek-v4.1-flash",
+      "provider": "freebuff",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "label": "Freebuff DeepSeek V4.1 Flash",
+      "bucket": "freebuff-freebucks",
+      "tg": false,
+      "resetRule": "shared daily Freebucks (Freebuff UI)",
+      "notes": "terminal-only"
+    }
+  ]
+}

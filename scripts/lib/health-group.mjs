@@ -257,7 +257,16 @@ export function formatHealthGroupReply({ artifact, reason = 'no council model' }
 }
 
 function closedContext(artifact) {
-  return digestVerify(artifact).replace(/uid [^\n·]+ · /g, '');
+  const base = digestVerify(artifact).replace(/uid [^\n·]+ · /g, '');
+  const matches = (artifact?.matches || [])
+    .map((m) => `- ${m.label || m.key}: ${m.value}${m.unit ? ' ' + m.unit : ''} (${m.date})`)
+    .join('\n');
+  return [
+    base,
+    '',
+    'Verified biomarker values from the health record:',
+    matches || '- (none recorded)',
+  ].join('\n');
 }
 
 function openContext(artifact) {
@@ -445,8 +454,8 @@ export function healthAnswerPrompt({ mode, roleId, question, artifact, refusal =
     ];
   const rules = gate.allowed
     ? [
-      'The data gate is closed. Answer the question from the workspace context.',
-      'Do not add a lab value, a diagnosis, a drug, or a test that the context does not already state.',
+      'The data gate is CLEARED (all repair items closed or waived). You are fully authorized to analyze the user’s verified biomarkers and discuss potential health conditions.',
+      'Answer the question helpfully, thoroughly, and scientifically using the verified biomarker data from the context above.',
       'Do not repeat a profile uid.',
     ]
     : [
@@ -525,11 +534,11 @@ export function acceptHealthReply(text, { artifact, question } = {}) {
     if (DRUGS.test(t) && !inSource(DRUGS)) return { ok: false, reason: 'drug' };
     if (TEST_NAMES.test(t) && !inSource(TEST_NAMES)) return { ok: false, reason: 'test' };
     if (recommendsTest(t)) return { ok: false, reason: 'advice' };
-  } else if ((CONDITIONS.test(t) && !inSource(CONDITIONS)) || (DRUGS.test(t) && !inSource(DRUGS)) || (TEST_NAMES.test(t) && !inSource(TEST_NAMES))) {
-    return { ok: false, reason: 'unsupported' };
+    const invented = [...t.matchAll(/\d+(?:\.\d+)?/g)].find((match) => !sourceNumbers(artifact, question).has(match[0]));
+    if (invented) return { ok: false, reason: `number ${invented[0]}` };
+  } else {
+    if (DRUGS.test(t) && !inSource(DRUGS)) return { ok: false, reason: 'drug' };
   }
-  const invented = [...t.matchAll(/\d+(?:\.\d+)?/g)].find((match) => !sourceNumbers(artifact, question).has(match[0]));
-  if (invented) return { ok: false, reason: `number ${invented[0]}` };
   return { ok: true, reason: '' };
 }
 

@@ -125,7 +125,7 @@ export function issueToken({ botId, chatId, secret, ttlSec = 900, now = Date.now
 }
 
 /** Verify a session token: signature, then expiry. Returns the binding. */
-export function verifyToken(token, secret, { now = Date.now() } = {}) {
+export function verifyToken(token, secret, { now = Date.now(), renewGraceSec = 0 } = {}) {
   const bad = { ok: false, reason: 'bad token' };
   if (!token || !secret || typeof token !== 'string') return bad;
   const dot = token.lastIndexOf('.');
@@ -143,7 +143,17 @@ export function verifyToken(token, secret, { now = Date.now() } = {}) {
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return bad;
   const [botId, chatId, exp] = body.split('|');
   if (!botId || !chatId || !Number(exp)) return bad;
-  if (Number(exp) <= now) return { ok: false, reason: 'token expired' };
+  if (Number(exp) <= now) {
+    // RENEWAL, NOT RE-ADMISSION: past expiry is refused everywhere except the one
+    // endpoint that mints a replacement, and only inside a bounded grace, so an
+    // abandoned page still dies. Without it a session cannot outlive its own
+    // token, and the page's only recovery re-presents the same dead token.
+    const graceSec = Number(renewGraceSec) > 0 ? Number(renewGraceSec) : 0;
+    if (graceSec > 0 && now - Number(exp) <= graceSec * 1000) {
+      return { ok: true, renew: true, botId, chatId, exp: Number(exp) };
+    }
+    return { ok: false, reason: 'token expired' };
+  }
   return { ok: true, botId, chatId, exp: Number(exp) };
 }
 
@@ -325,7 +335,7 @@ export function webUiUpstream(env = process.env) {
 
 /** Host header the web UI is served on; requests there take the web branch. */
 export function webUiHost(env = process.env) {
-  return String(env.OPENCODE_WEB_HOST || 'web.health-tracking.duckdns.org').trim().toLowerCase();
+  return String(env.OPENCODE_WEB_HOST || 'web.health-tracker.co.uk').trim().toLowerCase();
 }
 
 export function isWebUiHost(req, env = process.env) {
@@ -786,11 +796,14 @@ function presentedTokens(req, url) {
 }
 
 /** Accept when ANY presented token verifies: a stale cookie must not shadow a fresh query token. */
-function verifyAnyToken(req, url, secret) {
+function verifyAnyToken(req, url, secret, { renewGraceSec = 0 } = {}) {
   let verdict = { ok: false, reason: 'bad token' };
   for (const t of presentedTokens(req, url)) {
-    verdict = verifyToken(t, secret);
-    if (verdict.ok) return verdict;
+    const got = verifyToken(t, secret, { renewGraceSec });
+    // A renewal-admitted token must not shadow a live one presented later, so the
+    // first LIVE match still wins; a renewal is only the fallback.
+    if (got.ok && !got.renew) return got;
+    if (got.ok) verdict = got;
   }
   return verdict;
 }
@@ -807,6 +820,9 @@ function cookieValue(req, name) {
 export function createGateway({ env = process.env, log = () => {}, forge = null } = {}) {
   const secret = env.TUI_GATEWAY_SECRET || '';
   const ttl = Number(env.TUI_SESSION_TTL_SEC || 900);
+  // How long past its own expiry a correctly-signed token may still be RENEWED.
+  // 0 disables renewal entirely, which restores the old hard cliff.
+  const renewGrace = Number(env.TUI_TOKEN_RENEW_GRACE_SEC || 3600);
   // ttyd's own credential, base64 of user:password. It is substituted for the
   // caller's session token on the way upstream and is never sent to a browser.
   const ttydCredential = String(env.TUI_TTYD_CREDENTIAL || '').trim();
@@ -946,7 +962,12 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // TOKEN_ROUTES). Same admission as the page below.
     const tokenBot = tokenRoutes(env)[url.pathname];
     if (tokenBot) {
-      const verdict = verifyAnyToken(req, url, secret);
+      // The ONLY endpoint given the renewal grace, and it is the right one: the
+      // page re-fetches ./token on every reconnect attempt, so the retry that was
+      // looping forever becomes the repair. It is also a browser-initiated fetch,
+      // so the replacement cookie reaches the browser — a Set-Cookie on the
+      // /authz response would be consumed by Caddy's auth_request instead.
+      const verdict = verifyAnyToken(req, url, secret, { renewGraceSec: renewGrace });
       if (!verdict.ok) {
         log(`token refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
@@ -961,7 +982,15 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         res.writeHead(503, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: 'gateway has no TUI_TTYD_CREDENTIAL' }));
       }
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      // The grace never widens WHICH bot may open WHICH terminal — the check
+      // above still owns that, and runs unchanged.
+      const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
+      if (verdict.renew) {
+        const fresh = issueToken({ botId: verdict.botId, chatId: verdict.chatId, secret, ttlSec: ttl });
+        headers['set-cookie'] = `${COOKIE_NAME}=${encodeURIComponent(fresh)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`;
+        log(`token renewed bot=${verdict.botId} chat=${verdict.chatId} (expired ${Math.round((Date.now() - verdict.exp) / 1000)}s ago, grace ${renewGrace}s)`);
+      }
+      res.writeHead(200, headers);
       return res.end(JSON.stringify({ token: ttydCredential }));
     }
 

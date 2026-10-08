@@ -1,0 +1,6 @@
+{
+  "at": "2026-10-05T16:21:12.296Z",
+  "code": "BAD_HEADER",
+  "reason": "not a b2b envelope header",
+  "envelope": null
+}

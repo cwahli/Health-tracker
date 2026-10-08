@@ -58,6 +58,7 @@ import {
   failoverModels,
   listModels,
   listAgents,
+  listModelsVerbose,
   buildOpencodeEnv,
   humanizeRunError,
   isTimeoutError,
@@ -66,7 +67,7 @@ import {
   parseRetryAfter,
 } from './lib/agent-opencode.mjs';
 import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from './lib/opencode-tui.mjs';
-import { listModelCatalog } from './lib/opencode-api.mjs';
+import { issueToken } from './tui-gateway.mjs';
 import { KNOWN_HOSTS, workerStatus, isLocalHost, machineLabel } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
@@ -143,6 +144,7 @@ import {
 } from './lib/bot-roles.mjs';
 import {
   parseCommand,
+  isFleetReadCommand,
   resolveCommandName,
   isKnownCommand,
   greetingReply,
@@ -156,6 +158,7 @@ import {
   toTelegramCommands,
   assertValidCommands,
   parseAgentList,
+  parseModelsVerbose,
   modelKeyboard,
   sortModelsFreeFirst,
   agentKeyboard,
@@ -179,6 +182,8 @@ import {
 } from './lib/compact-session.mjs';
 import {
   fleetChatStatus,
+  chatRoster,
+  noteChatPresence,
   formatFleetStatusTable,
 } from './lib/fleet-status.mjs';
 import {
@@ -361,7 +366,33 @@ function readJson(file, fallback) {
 }
 
 function writeJson(file, value) {
-  fs.writeFileSync(file, JSON.stringify(value, null, 2));
+  // JSON.stringify(undefined) is undefined, and writeFileSync(undefined) throws
+  // "The 'data' argument must be of type string ...". A refusal path that never
+  // built a ledger therefore crashed the handler instead of recording the
+  // refusal. Absent state is an empty document, not a crash.
+  const body = value === undefined ? '{}' : JSON.stringify(value, null, 2);
+  fs.writeFileSync(file, body === undefined ? '{}' : body);
+}
+
+/**
+ * Which seat renders a bare fleet-wide READ command in a group.
+ *
+ * The group gate answers only when a bot is addressed, and a bare command is
+ * addressed to the master. A group can hold only dedicated seats: Bot chat has
+ * vm4 and vm5 and no vm, so `/status_all` was addressed to nobody, every seat
+ * returned at the gate, and the room got silence — a command that reads as
+ * broken. Electing every seat would give five copies of one table.
+ *
+ * So: the master keeps it when it is present, and otherwise exactly one
+ * dedicated seat takes it. The election reads per-chat totals already on disk
+ * (no Telegram call, no shared mutable state) and breaks ties on registry
+ * order, so every seat computes the same winner and only that one answers.
+ * Returns '' when this bot is not the winner.
+ */
+function fleetReadRendererId({ fleetBots, chatId, self, home }) {
+  const roster = chatRoster({ fleetBots, chatId, home });
+  if (!roster || !roster.length) return '';
+  return roster[0] === self ? roster[0] : '';
 }
 
 function loadMap(id, file) {
@@ -692,36 +723,13 @@ async function getModels(config, caches) {
   return caches.models;
 }
 
-/**
- * The model catalog for this host, cached for the life of the process.
- *
- * `opencode models --verbose` was removed from the CLI — it now exits with
- * "Unrecognized flag", so this used to throw on every `/thinking`, `/model` and
- * `/status` that needed a context limit. `opencode api model.list` is the
- * supported surface. A host that cannot answer yields an empty list rather than
- * an exception: the commands then say what they cannot determine instead of
- * dying silently.
- */
-async function modelCatalog(config, caches) {
-  if (!caches.verbose) {
-    const rows = await listModelCatalog({
-      opencodeBin: config.agent.opencodeBin,
-      env: opencodeEnv(config),
-      workspace: config.agent.workspace,
-    });
-    caches.verbose = rows || [];
-    if (!rows) caches.catalogUnavailable = true;
-  }
-  return caches.verbose;
-}
-
 async function getVariants(config, caches, modelId) {
-  const catalog = await modelCatalog(config, caches);
-  // A stored model may name a provider the catalog spells differently, so fall
-  // back to the bare model id before concluding there are no levels.
-  const bare = String(modelId || '').split('/').slice(1).join('/');
-  const entry = catalog.find((m) => m.id === modelId)
-    || catalog.find((m) => m.id.split('/').slice(1).join('/') === bare);
+  if (!caches.verbose) {
+    caches.verbose = parseModelsVerbose(
+      await listModelsVerbose({ opencodeBin: config.agent.opencodeBin, env: opencodeEnv(config) }),
+    );
+  }
+  const entry = caches.verbose.find((m) => m.id === modelId);
   return entry?.variants || [];
 }
 
@@ -740,10 +748,12 @@ export function pickOfferedVariant(variant, offered) {
 }
 
 async function getContextLimit(config, caches, modelId) {
-  const catalog = await modelCatalog(config, caches);
-  const bare = String(modelId || '').split('/').slice(1).join('/');
-  const entry = catalog.find((m) => m.id === modelId)
-    || catalog.find((m) => m.id.split('/').slice(1).join('/') === bare);
+  if (!caches.verbose) {
+    caches.verbose = parseModelsVerbose(
+      await listModelsVerbose({ opencodeBin: config.agent.opencodeBin, env: opencodeEnv(config) }),
+    );
+  }
+  const entry = caches.verbose.find((m) => m.id === modelId);
   return entry?.context || 0;
 }
 
@@ -792,15 +802,17 @@ export async function warmTurnCaches(config, caches) {
   } catch {
     /* the turn path rebuilds this */
   }
-  // The variant gate on the turn path (pickOfferedVariant) reads the catalog:
-  // warm it here so the first turn after boot does not pay a `model.list` spawn
-  // inside the send→session-row budget.
-  if (!caches.verbose) {
-    caches.verbose = await listModelCatalog({
-      opencodeBin: config?.agent?.opencodeBin,
-      env: opencodeEnv(config),
-      workspace: config?.agent?.workspace,
-    }) || [];
+  // The variant gate on the turn path (pickOfferedVariant) reads the verbose
+  // catalog: warm it here so the first turn after boot does not pay a
+  // `models --verbose` spawn inside the send→session-row budget.
+  try {
+    if (!caches.verbose) {
+      caches.verbose = parseModelsVerbose(
+        await listModelsVerbose({ opencodeBin: config?.agent?.opencodeBin, env: opencodeEnv(config) }),
+      );
+    }
+  } catch {
+    /* getVariants rebuilds this */
   }
   return caches;
 }
@@ -1485,9 +1497,37 @@ export function readTuiUrl(env = process.env, file = miniappUrlFile()) {
  * would apply, so callers can hide the button instead of handing out a dead one.
  */
 export function readWebUiUrl(env = process.env) {
-  const raw = String(env.OPENCODE_WEB_URL ?? 'https://web.health-tracking.duckdns.org').trim().replace(/\/+$/, '');
+  const raw = String(env.OPENCODE_WEB_URL ?? 'https://web.health-tracker.co.uk').trim().replace(/\/+$/, '');
   if (/^https:\/\/[A-Za-z0-9.-]+$/.test(raw)) return raw;
   return '';
+}
+
+/** Short-lived personal web UI links minted per tap (never a fixed URL). */
+export const WEB_LINK_TTL_SEC = 900;
+
+/**
+ * The gateway signing secret, read at call time from the host's own env
+ * file (host files, never the repo). Empty when absent.
+ */
+export function gatewaySecretFromHostEnv({ readFile = fs.readFileSync, home = os.homedir() } = {}) {
+  try {
+    for (const line of String(readFile(path.join(home, '.config', 'bot-host', 'tui-gateway.env'), 'utf8')).split('\n')) {
+      const m = line.match(/^TUI_GATEWAY_SECRET=(.+)$/);
+      if (m) return m[1].trim().replace(/^["']|["']$/g, '');
+    }
+  } catch { /* host may not have this file */ }
+  return String(process.env.TUI_GATEWAY_SECRET || '').trim();
+}
+
+/**
+ * A personal web UI login link: a freshly minted ?token= URL no cache or
+ * snapshot has ever seen, so it always loads live. Same short-lived
+ * chat-bound bearer the gateway accepts on query. '' when anything is missing.
+ */
+export function personalWebUiLink({ webUrl, botId, chatId, secret, ttlSec = WEB_LINK_TTL_SEC, now = Date.now() } = {}) {
+  if (!webUrl || !botId || chatId === undefined || chatId === null || String(chatId) === '' || !secret) return '';
+  const token = issueToken({ botId: String(botId), chatId: String(chatId), secret, ttlSec, now });
+  return `${String(webUrl).replace(/\/+$/, '')}/?token=${encodeURIComponent(token)}`;
 }
 
 export class ProgressRenderer {
@@ -2022,6 +2062,11 @@ export async function noteUsage({ chatId, result, eff, config, caches, totals, l
     cost: Number(result.usage?.cost) || 0,
     contextLimit,
     agent: eff.agent,
+    // The lane that actually answered. `eff.model` is the answering model, not
+    // the configured one — the seat path passes seat-model's `answeredBy` here
+    // — and without persisting it /status_all could only ever show the registry
+    // default, which is wrong the moment a lane fails over.
+    model: eff.model || '',
   };
   lastUsage.set(chatId, raw);
   const prev = totals.get(chatId) || { runs: 0, tokens: 0, cost: 0 };
@@ -2046,6 +2091,33 @@ export async function noteUsage({ chatId, result, eff, config, caches, totals, l
 export function workLocation() {
   if (process.env.BOT_LOCATION) return process.env.BOT_LOCATION;
   return os.homedir() === '/root' ? 'mobile' : 'vps';
+}
+
+/**
+ * The name of THIS machine, which is not the same question as workLocation().
+ *
+ * workLocation() answers "which compute pool should this turn run on" and
+ * answers `vps` on this box. The nudge inbox is keyed by the machine's own
+ * identity: every sweep (pending_sweep, session_link, watch_activity,
+ * proof_linker) reads `~/.agents/location`, and the duty tells agents to read
+ * `~/.agents/nudges/inbox-<location>.md`. Writing proposals to
+ * `inbox-vps.md` when the duty says `inbox-vps-france.md` files them where
+ * nobody looks — a proposal no agent will ever read is the same as no proposal.
+ *
+ * `BOT_MACHINE` overrides for tests and for a box with no location file.
+ */
+export function machineLocation() {
+  const override = String(process.env.BOT_MACHINE || '').trim();
+  if (override) return override;
+  try {
+    const declared = fs.readFileSync(path.join(os.homedir(), '.agents', 'location'), 'utf8')
+      .trim()
+      .split(/\s+/)[0];
+    if (declared) return declared;
+  } catch {
+    /* no location file: fall through to the pool name */
+  }
+  return workLocation();
 }
 
 /**
@@ -2608,6 +2680,24 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const statusAllProject = getChatProject(chatId);
       const statusAllWorkspace = statusAllProject.type === 'external' ? statusAllProject.workspace : config.agent.workspace;
       const statusAllTax = statusAllProject.id === TAX_PROJECT_ID;
+      // Scope the table to the seats that are actually in THIS chat. A group
+      // holding two seats used to report the whole council, so three rows were
+      // agents that had never spoken there and the model column showed lanes
+      // belonging to other rooms. Explicit role bindings win; otherwise the
+      // seats with a per-chat record here; otherwise the full council, because
+      // "nobody here" and "nothing known" are not the same answer.
+      let statusAllBots = [];
+      try {
+        statusAllBots = loadRegistry(registryFileInUse()).bots;
+      } catch {
+        statusAllBots = [];
+      }
+      const contextualSeats = chatRoster({
+        fleetBots: statusAllBots,
+        chatId: String(chatId),
+        home: HOME,
+      });
+      const scopeNote = contextualSeats ? 'in this chat' : 'council (no presence here)';
       const fleetRows = fleetChatStatus({
         chatId: String(chatId),
         workspace: statusAllWorkspace,
@@ -2615,8 +2705,9 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         home: HOME,
         seats: statusAllTax ? TAX_SEAT_IDS : HEALTH_SEAT_IDS,
         roleOf: statusAllTax ? taxRoleOf : healthRoleOf,
+        onlySeats: contextualSeats,
       });
-      const statusAllCaption = `Fleet status · chat ${String(chatId)} · ${fleetRows.length} agent${fleetRows.length === 1 ? '' : 's'} (via ${config.id})`;
+      const statusAllCaption = `Fleet status · chat ${String(chatId)} · ${fleetRows.length} agent${fleetRows.length === 1 ? '' : 's'} ${scopeNote} (via ${config.id})`;
       // The readable table ships as the telegram-tables skill grid
       // (JSON -> qa-evidence/build-table.py -> HTML document, the /allowance
       // table pattern): Telegram text has no grid rendering. Anything failing
@@ -3058,51 +3149,32 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'thinking': {
       const ref = parseModelRef(eff.model);
-      // Gemini is single-shot: no variants, no catalog lookup needed.
+      // Gemini is single-shot: no variants, no opencode verbose lookup.
       // One refusal, no turn, no stored level (plan/TG_TOOL_SURFACE.md M4).
       if (ref.surface === 'gemini') {
         await api.sendMessage(chatId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.');
         return;
       }
-      let variants = [];
-      try {
-        variants = ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
-      } catch (err) {
-        // A read failure must not read as "this model has no levels". Say which
-        // it was, so the answer is actionable.
-        await api.sendMessage(chatId, `Could not read this host's model catalog, so I cannot list the thinking levels for ${eff.model}.\n(${err.message})`);
-        return;
-      }
-      const levels = [...new Set(variants.filter(Boolean))];
+      const variants =
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
       if (!cmd.args) {
-        if (!levels.length) {
-          // Distinguish "the catalog is unreachable" from "this model is
-          // single-shot". They used to look identical, which is how a dead
-          // catalog read as a working answer.
-          await api.sendMessage(
-            chatId,
-            caches.catalogUnavailable
-              ? `This host cannot read its model catalog, so the levels for ${eff.model} are unknown.`
-              : `${eff.model} exposes no thinking levels — it runs at its default.`,
-          );
+        if (!variants.length) {
+          await api.sendMessage(chatId, `No thinking levels exposed for ${eff.model}.`);
           return;
         }
-        // Name the level in force so the reply answers "what am I on" without
-        // a second command, and mark it on the keyboard.
-        const current = eff.variant && levels.includes(eff.variant) ? eff.variant : null;
-        await api.sendMessage(chatId, `Thinking levels for ${eff.model} — current: ${current || 'default'}:`, {
-          reply_markup: variantKeyboard(levels, { selected: current }),
+        await api.sendMessage(chatId, `Thinking level for ${eff.model} (current: ${eff.variant || 'default'}):`, {
+          reply_markup: variantKeyboard(variants),
         });
         return;
       }
-      const target = cmd.args.trim().toLowerCase();
-      if (levels.length && !levels.includes(target)) {
-        await api.sendMessage(chatId, `Unknown level: ${cmd.args}\n${eff.model} offers: ${levels.join(', ')}.`);
+      const target = cmd.args;
+      if (variants.length && !variants.includes(target)) {
+        await api.sendMessage(chatId, `Unknown level: ${target}\nUse /thinking to pick from the list.`);
         return;
       }
       setPref(prefs, chatId, { variant: target });
       savePrefs(config.id, prefs);
-      await api.sendMessage(chatId, `Thinking level set to ${target} for this chat.`);
+      await api.sendMessage(chatId, `Thinking level set to ${target}.`);
       return;
     }
 
@@ -3355,8 +3427,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // terminal as fallback; every other lane keeps the TUI button only —
       // cline/grok/freebuff have no web UI to point at.
       const webUiUrl = tuiSurface.sharedSession ? readWebUiUrl() : '';
+      const freshWebLink = webUiUrl
+        ? personalWebUiLink({ webUrl: webUiUrl, botId: config.id, chatId, secret: gatewaySecretFromHostEnv() })
+        : '';
       const openButtons = [
-        ...(webUiUrl ? [{ text: '🌐 Open web UI', web_app: { url: `${webUiUrl}/?bot=${config.id}` } }] : []),
+        ...(freshWebLink
+          ? [{ text: '🌐 Open web UI', url: freshWebLink }]
+          : webUiUrl
+            ? [{ text: '🌐 Open web UI', web_app: { url: `${webUiUrl}/?bot=${config.id}` } }]
+            : []),
         { text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } },
       ];
       await api.sendMessage(chatId, [
@@ -3372,7 +3451,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           ? 'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.'
           : 'It runs under tmux, so closing the Mini App keeps your place, and you can reopen the same thread whenever you want.',
         'We both keep working with it open. The terminal waits for a turn I am running, and I wait for a turn you started — one at a time, never two writers at once. Opening it proves you are the Telegram user this chat belongs to, so there is no password to remember.',
-        ...(webUiUrl ? ['🌐 Prefer reading over typing? The *web UI* shows this same conversation as a normal page — scrolls natively, no terminal frames.'] : []),
+        ...(webUiUrl ? [`🌐 Prefer reading over typing? The *web UI* shows this same conversation as a normal page — scrolls natively, no terminal frames.${freshWebLink ? ' The button above is minted fresh for this tap and lasts 15 minutes.' : ''}`] : []),
       ].filter(Boolean).join('\n'), {
         reply_markup: { inline_keyboard: [openButtons] },
       });
@@ -3527,6 +3606,31 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'tx': {
       await handleTxCommand({ api, config, chatId, arg: cmd.args, lane: parseModelRef(eff.model).surface });
+      return;
+    }
+
+    // TEMP-TEST 2026-10-05: /notify port of main@3d0a631 (lands via that
+    // commit; do not commit here). Same prefs file finish-watch.mjs reads.
+    case 'notify': {
+      const sub = String(cmd.args || '').trim().toLowerCase();
+      const kept = prefFor(prefs, chatId);
+      if (sub === 'off') {
+        setPref(prefs, chatId, { ...kept, notify: false });
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, '🔕 Finish alerts off for this chat — runs you start elsewhere stay there.');
+        return;
+      }
+      if (sub === 'on') {
+        const { notify: _dropped, ...rest } = kept;
+        setPref(prefs, chatId, rest);
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, '🔔 Finish alerts on for this chat — when a run you start in the web UI or TUI finishes, its answer lands here and the thread continues on either surface.');
+        return;
+      }
+      const on = kept?.notify !== false;
+      await api.sendMessage(chatId, on
+        ? '🔔 Finish alerts are on for this chat. `/notify off` silences them.'
+        : '🔕 Finish alerts are off for this chat. `/notify on` brings them back.');
       return;
     }
 
@@ -4480,18 +4584,8 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
         await api.editMessageText(chatId, messageId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.').catch(() => {});
         return;
       }
-      let variants = [];
-      try {
-        variants = ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
-      } catch (err) {
-        // Never leave a tap unanswered: the keyboard would sit there looking
-        // live. Say what happened and clear it.
-        await api.answerCallbackQuery(query.id, { text: 'Catalog unavailable' });
-        await api.editMessageText(chatId, messageId, `Could not read this host's model catalog, so ${eff.model}'s thinking levels are unknown.\n(${err.message})`, {
-          reply_markup: CLEAR_KEYBOARD,
-        }).catch(() => {});
-        return;
-      }
+      let variants =
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
       // New buttons carry the name (`v:high`); old keyboards carry an index
       // (`v:0`). Support both so already-shown keyboards keep working.
       let variant = variants.includes(value) ? value : variants[Number(value)];
@@ -5144,19 +5238,34 @@ export async function sendPeerHandoff({ config, args = '', api = null, stateDirP
     return refuse('LEDGER_WRITE', `could not record the send: ${err.message}`);
   }
 
+  // Where the bytes land. A private bot-to-bot chat has exactly two members —
+  // the two bots — so a handoff sent there is invisible to the operator, which
+  // is what "I didn't see anything on tg" turned out to mean. When
+  // TG_B2B_GROUP_ID is set, the human's group is the transport instead; the
+  // envelope still names the SEAT, so the receiving half is unchanged and a
+  // group message and a private one are the same message.
+  const groupId = String(process.env.TG_B2B_GROUP_ID || '').trim();
+  const wireTo = groupId || named.username;
+  const where = groupId ? `group ${groupId}` : `dm ${named.username}`;
+
   const telegram = api || new TelegramApi(resolveToken(config));
   try {
     const res = await telegram.call('sendMessage', {
-      chat_id: named.username,
+      chat_id: wireTo,
       text: built.text,
-      disable_notification: 'true',
+      // LOUD by default. The send shipped silent, and a silent channel is
+      // indistinguishable from a broken one — the operator asked to see the
+      // traffic. The bounds are what stop this being spam, not the mute:
+      // 60s per-pair cooldown, plus the global send budget.
+      // TG_B2B_NOTIFY=0 puts it back to silent without a deploy.
+      disable_notification: String(process.env.TG_B2B_NOTIFY ?? '1') === '0' ? 'true' : 'false',
     });
     return {
       ok: true,
       code: 'SENT',
       envelope: bounded.envelope,
       messageId: res?.message_id ?? null,
-      text: `📨 handed to ${named.username} — ${ref} (depth ${bounded.envelope.depth}, id ${bounded.envelope.id})`,
+      text: `📨 handed to ${wireTo} — ${ref} (depth ${bounded.envelope.depth}, id ${bounded.envelope.id}, via ${where})`,
     };
   } catch (err) {
     return refuse('SEND_FAILED', `${named.username}: ${err.message}`);
@@ -5281,12 +5390,12 @@ function handlePeerHandoff({ config, message, verdict }) {
   }
 
   // A proposal, not a turn. The owning seat decides; this process does not act.
-  const inbox = path.join(os.homedir(), '.agents', 'nudges', `inbox-${workLocation()}.md`);
+  const inbox = path.join(os.homedir(), '.agents', 'nudges', `inbox-${machineLocation()}.md`);
   const line = proposalLine(verdict.envelope, { self: config.id });
   try {
     fs.mkdirSync(path.dirname(inbox), { recursive: true });
     fs.appendFileSync(inbox, `${line}\n`, 'utf8');
-    console.log(`[${config.id}] b2b proposal from ${verdict.seat} ref ${verdict.envelope.ref} -> ${inbox}`);
+    console.log(`[${config.id}] b2b proposal from ${verdict.seat} ref ${verdict.envelope.ref} in chat ${message?.chat?.id ?? '?'} -> ${inbox}`);
   } catch (err) {
     console.error(`[${config.id}] b2b proposal could not be filed: ${err.message} (envelope ${verdict.envelope.id})`);
   }
@@ -5336,11 +5445,29 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   // the coordinator for the health seats. Both can be admins of one group;
   // the chat binding decides which council a bare question belongs to.
   const isMasterBot = config.id === 'vm' || Boolean(config.isMaster) || isTaxDesk;
+  // Presence, then the fleet-read election. A bot only receives updates for
+  // chats it belongs to, so recording that this message was seen makes "who is
+  // in this room" a fact instead of a guess — which is what lets a fleet-wide
+  // read work in any group, including a brand-new one.
+  if (chatKind(message) === 'group') {
+    noteChatPresence(config.id, chatId, { home: HOME });
+  }
+  // A bare fleet-wide READ belongs to the room, not to one bot, and the group
+  // gate hands a bare command to the master alone. On a group with no master
+  // that means nobody answers. Elect one renderer from the agents present here,
+  // keyed off the command's declared `fleetRead` flag — so marking a command in
+  // commands.mjs is the only step needed to make it work anywhere.
+  const fleetReadBare =
+    chatKind(message) === 'group' &&
+    !isMasterBot &&
+    isFleetReadCommand(parseCommand(message.text || message.caption || '')?.name)
+      ? fleetReadRendererId({ fleetBots, chatId, self: config.id, home: HOME })
+      : '';
   const addr = resolveGroupAddressing(message, config.me, {
     role: myRoles[0] || config.role || config.agent?.role || null,
     roles: myRoles,
     name: config.name,
-    isMaster: isMasterBot,
+    isMaster: isMasterBot || Boolean(fleetReadBare),
     allowGroupBroadcast: true,
     hasDedicatedRoleBots: dedicatedRoleIds.length > 0,
     dedicatedRoleIds,
@@ -5471,7 +5598,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
               prompt,
               chatModel: eff.model,
               botModel: config.agent.model,
-              timeoutMs: 120000,
+              // A seat turn that reads files and drafts a document cannot finish
+              // in two minutes: it died at "model failed: timed out after
+              // 120000ms" on every real group task. The bot's own
+              // agent.timeoutMs (900s) is the right budget for the same work, so
+              // default to that and let a host lower it without a deploy.
+              timeoutMs: Number(process.env.SEAT_MODEL_TIMEOUT_MS || 900000),
             });
             try {
               const t = Number(res?.usage?.tokens?.total ?? res?.usage?.tokens) || 0;
@@ -6428,6 +6560,20 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
             deadLanes: result._midstreamQuota || [],
             continuedOn: result._continuedOn || '',
           }) + (String(displayResult?.finalText || '').trim() ? `\n\n${displayResult.finalText}` : ''),
+        };
+      }
+      // TEMP-TEST 2026-10-05: a bare PONG reads as an artefact in chat (and
+      // the throwaway ping session now surfaces in the web UI list). The
+      // exact echo still proves the chain — it is checked here, not shown:
+      // the chat gets one human line naming the lane that answered. A
+      // non-echo answer (lane backed down, model chatty) passes through
+      // untouched so a failure stays visible.
+      if (isPingTurn && /^pong[!.\s]*$/i.test(String(displayResult?.finalText || '').trim())) {
+        const laneName = (() => { try { return chatLaneName(lastAttemptModel); } catch { return ''; } })();
+        const secs = (() => { try { return Math.max(0, Math.round((Date.now() - turnStartedAt) / 1000)); } catch { return 0; } })();
+        displayResult = {
+          ...displayResult,
+          finalText: `Alive ✓ — answered in ${secs}s on \`${laneName || lastAttemptModel || 'current lane'}\`. What can I do for you?`,
         };
       }
       await renderer.finish(displayResult, { footer: usageText });
