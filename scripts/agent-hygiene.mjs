@@ -39,6 +39,16 @@ export const OPEN_GRACE_H = 48;
 export const PR_AGE_DAYS = 7;
 export const BRANCH_GRACE_DAYS = 7;
 const PROTECTED = new Set(['main', 'master', 'HEAD']);
+// `lock/*` branches are live mutual-exclusion locks (scripts/lock.sh): deleting
+// one silently releases someone's edit lock and lets two agents write the same
+// area. They are never work and never residue, so the cleaner never names them.
+const PROTECTED_PREFIXES = ['lock/'];
+
+export function isProtectedBranch(branch) {
+  const name = String(branch || '');
+  if (!name || PROTECTED.has(name)) return true;
+  return PROTECTED_PREFIXES.some((p) => name.startsWith(p));
+}
 
 const arg = (name, fallback = '') => {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -196,7 +206,7 @@ async function main() {
   // which moves on comments and label changes — activity theatre, not work).
   for (const pr of (Array.isArray(prs) ? prs : [])) {
     const branch = pr.headRefName || '';
-    if (!branch || PROTECTED.has(branch)) {
+    if (!branch || isProtectedBranch(branch)) {
       report.skipped.push({ pr: pr.number, reason: 'protected or missing branch' });
       continue;
     }
@@ -260,7 +270,7 @@ async function main() {
   for (const line of remote) {
     const m = line.match(/refs\/heads\/(.+)$/);
     const branch = m ? m[1] : '';
-    if (!branch || PROTECTED.has(branch) || openHeads.has(branch)) continue;
+    if (!branch || isProtectedBranch(branch) || openHeads.has(branch)) continue;
     const tip = git(['rev-parse', `origin/${branch}`]) || '';
     if (!tip) continue;
     const tipInMain = !!execOk(['merge-base', '--is-ancestor', tip, 'origin/main']);

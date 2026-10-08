@@ -1063,7 +1063,7 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
 
   // The real command surface: exit 3 when a seat could not run, 0 when it could.
   const runner = path.join(ROOT, 'scripts', 'health-runner.mjs');
-  const noKeyEnv = { ...process.env, HEALTH_WORKSPACE: dir, GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '' };
+  const noKeyEnv = { ...process.env, HEALTH_WORKSPACE: dir, GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '', HEALTH_SEAT_MODEL_CATALOG: '' };
   let noKeyCode = 0;
   let noKeyOut = '';
   try {

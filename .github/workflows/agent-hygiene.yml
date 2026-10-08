@@ -1,0 +1,46 @@
+name: agent-hygiene
+
+# The retirement step for agent branches (plan/AGENT_HYGIENE.md). Runs without
+# a human on a timer; the audit is the accountability, not an approval click.
+#
+# Scope is full `--apply`: Tier 1 (provably-safe deletes) plus Tiers 2/3, held
+# back by four independent vetoes — a fresh heartbeat, a live process in a
+# worktree, an open PR on the branch, and the grace windows (48h head age for
+# PRs, 7d branch age plus the closed-PR grace for branches). The cross-machine
+# caveat stands: unpushed work is invisible off-box, so the finish-the-turn
+# rule (AGENTS.md L19: push + PR-or-delete every turn) is what keeps "no
+# signal" meaning "nobody home". Narrowing back to `--tier=1` is one flag.
+#
+# Manual: workflow_dispatch, or `node scripts/agent-hygiene.mjs` (dry run)
+# / `--apply` from any checkout. Never touches `main`.
+
+on:
+  schedule:
+    - cron: '23 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: agent-hygiene
+  cancel-in-progress: false
+
+jobs:
+  clean:
+    name: retire-landed-branches
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # fetch-depth 0, not the default 1: Tier 1 judges ancestry
+          # (merge-base --is-ancestor), which a shallow clone cannot answer.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Retire landed branches, report the rest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/agent-hygiene.mjs --apply

@@ -3,8 +3,30 @@ import { describe, it, expect } from 'vitest';
 import {
   formatTokenCount,
   ctxLimitFor,
+  formatUsageSuffix,
   formatWorkingHeadline,
 } from './tg-progress.mjs';
+
+describe('formatUsageSuffix', () => {
+  it('shows tokens, the window and the share when the limit is known', () => {
+    const { suffix, pct } = formatUsageSuffix({ used: 31900, ctxLimit: 200000 });
+    expect(suffix).toBe(' - 31.9K/200.0K (16%)');
+    expect(pct).toBeCloseTo(15.95, 6);
+  });
+
+  it('keeps the bare count, and no percent, when the limit is unknown', () => {
+    expect(formatUsageSuffix({ used: 539 })).toEqual({ suffix: ' - 539', pct: null });
+  });
+
+  it('takes a live pct without inventing a window', () => {
+    expect(formatUsageSuffix({ used: 150000, pct: 62.4 })).toEqual({ suffix: ' - 150.0K (62%)', pct: 62.4 });
+  });
+
+  it('emits nothing — not a zero — when no token count is known', () => {
+    expect(formatUsageSuffix({})).toEqual({ suffix: '', pct: null });
+    expect(formatUsageSuffix({ used: null, ctxLimit: 200000, pct: 40 })).toEqual({ suffix: '', pct: null });
+  });
+});
 
 describe('formatTokenCount', () => {
   it('compacts thousands and millions like the router', () => {
@@ -46,6 +68,19 @@ describe('formatWorkingHeadline', () => {
       pct: 62.4,
     });
     expect(line).toBe('⏳ OpenCode muse spark working… 184s - 150.0K (62%)\n💡 Context warming up — /compact when you want a fresh window');
+  });
+
+  it('renders the same usage block the settled bubble does (one builder)', () => {
+    const { suffix } = formatUsageSuffix({ used: 39321, ctxLimit: ctxLimitFor('glm-4.7-free') });
+    expect(
+      formatWorkingHeadline({
+        providerLabel: 'Cline',
+        modelLabel: 'glm-4.7-free',
+        elapsedSec: 50,
+        used: 39321,
+        ctxLimit: ctxLimitFor('glm-4.7-free'),
+      }),
+    ).toContain(suffix);
   });
 
   it('warns as context fills', () => {

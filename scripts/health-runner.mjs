@@ -1354,7 +1354,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (mode === 'readiness') {
       // Exit 3 when a seat could not run — the same "refused on purpose" code
       // --analyze uses, so a caller can tell "not ready" from "crashed".
-      const res = checkHealthReadiness({ projectId: args.project, paths: healthPaths(args.project) });
+      // The model probe is awaited here, not inside the check, so the check
+      // stays synchronous for its 15 other call sites. This is the surface the
+      // operator reads, so it gets the honest answer: what the host can run.
+      //
+      // `HEALTH_SEAT_MODEL_CATALOG=''` makes the probe resolve to "no lanes"
+      // without asking anything, which is how the sensor drives the refusing
+      // case without depending on whether the machine running the suite has an
+      // OpenCode CLI. Unset means the real host, which is the point.
+      const { seatModelReach } = await import('./lib/health/seat-model.mjs');
+      const forcedCatalog = Object.prototype.hasOwnProperty.call(process.env, 'HEALTH_SEAT_MODEL_CATALOG')
+        ? String(process.env.HEALTH_SEAT_MODEL_CATALOG || '').split(',').map((s) => s.trim()).filter(Boolean)
+        : null;
+      const modelReach = await seatModelReach({ models: forcedCatalog });
+      const res = checkHealthReadiness({ projectId: args.project, paths: healthPaths(args.project), modelReach });
       console.log(args.json ? JSON.stringify(res, null, 1) : formatReadinessText(res));
       process.exit(res.exit);
     }

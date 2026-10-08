@@ -48,3 +48,15 @@ e0859056  origin/agent/tui-s1: its chatId normalisation is on main via the one-s
 #   # landed-by-another-route check compared blobs and could not see that, so the
 #   # commit was condemned from the moment it crossed 24h — which is what
 #   # happened on 2026-10-01, twice, to two different agents.
+
+# origin/journey/fleet-miniapp — the fleet mini-app packet landed as #482 (squash
+# 073cdc29) and #484, both ancestors of origin/main, so the branch's commits are
+# unreachable by sha but their work is on main. git cherry reports "+" because the
+# squashed patch was re-derived rather than applied verbatim, which is the case the
+# squash-merge hole was meant to cover; the branch's TUI surface is on main and has
+# since moved past it. Verified 2026-10-03: fleet-status.mjs on main carries
+# FLEET_CACHE_TTL_MS, matchesLocation, getFleetBots and FLEET_STALE_TTL_MS;
+# tui-gateway.mjs on main ends with the same tail; assert-fleet-miniapp passes 15/15
+# against main. The branch also has no open PR, so nothing is being worked on it.
+5a035efd  origin/journey/fleet-miniapp: landed as the #482 squash 073cdc29 (ancestor of origin/main); the packet's TUI surface is on main and has advanced past this commit, so only the pre-squash sha is stranded, waived 2026-10-03
+41e4d07c  origin/journey/fleet-miniapp: landed as the #482 squash 073cdc29 with 5a035ef; its fleet-status extraction is on main and grown since, waived 2026-10-03

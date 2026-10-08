@@ -42,7 +42,7 @@ const args = Object.fromEntries(
   })
 );
 
-const baseUrl = (args.url || 'https://health-tracking.duckdns.org').replace(/\/$/, '');
+const baseUrl = (args.url || 'https://health-tracker.co.uk').replace(/\/$/, '');
 const outDir = path.resolve(REPO_ROOT, args.out || 'qa-evidence/phone');
 const wantJson = args.json === 'true';
 const DEFAULT_N = 5;

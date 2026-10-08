@@ -138,7 +138,7 @@ export async function negotiateBotToken({ send, name, candidates = usernameCandi
 }
 
 /** Load the saved session and build a client. Lazy, so a host without the library still runs. */
-async function connect({ env = process.env } = {}) {
+export async function connect({ env = process.env } = {}) {
   const { apiId, apiHash } = apiCredentials(env);
   const file = sessionPath(env);
   let TelegramClient;

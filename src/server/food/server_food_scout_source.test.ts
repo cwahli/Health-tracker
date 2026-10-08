@@ -10,6 +10,7 @@ import {
   buildScoutFailureError,
   applyScoutResultState,
   mergeScoutIntoActiveMeal,
+  preserveLabelTruth,
   logScoutItemSummaries,
   summarizeScoutImageInventory,
   logScoutImageInventory,
@@ -762,5 +763,61 @@ describe('Turn 2 Portion Selection — multi-dish preservation', () => {
       onStream: () => {},
     });
     expect(out.visionScoutItems.length).toBe(1);
+  });
+});
+
+/**
+ * Live regression: job_1791044439374_4x4srekyi turn 2. The edit instruction asks
+ * the model to preserve the printed label, but the re-read emitted the same dish
+ * with no rawNutritionLabel, silently downgrading a label-locked 440 ml beer to a
+ * bare estimate. TS restores it rather than trusting the instruction.
+ */
+describe('preserveLabelTruth', () => {
+  const LABEL = { servingSize: '100ml', calories: '54 kcal', totalCarbohydrate: '5.0g', protein: '0.0g' };
+
+  it('restores a label the re-read dropped', () => {
+    const next: any[] = [{ dishName: 'Desperados Original Beer', estimatedWeightGrams: 440 }];
+    const out = preserveLabelTruth({
+      priorItems: [{ dishName: 'Desperados Original Beer', rawNutritionLabel: LABEL, packGrams: 440 }],
+      nextItems: next,
+    });
+    expect(out.restored).toEqual(['desperados original beer']);
+    expect(next[0].rawNutritionLabel).toEqual(LABEL);
+    expect(next[0].packGrams).toBe(440);
+  });
+
+  it('does not overwrite a label the model deliberately re-read', () => {
+    const fresh = { servingSize: '100ml', calories: '60 kcal' };
+    const next: any[] = [{ dishName: 'Desperados Original Beer', rawNutritionLabel: fresh }];
+    preserveLabelTruth({
+      priorItems: [{ dishName: 'Desperados Original Beer', rawNutritionLabel: LABEL }],
+      nextItems: next,
+    });
+    expect(next[0].rawNutritionLabel).toEqual(fresh);
+  });
+
+  it('leaves a genuinely new dish alone', () => {
+    const next: any[] = [{ dishName: 'Roast Chicken Drumsticks' }];
+    const out = preserveLabelTruth({
+      priorItems: [{ dishName: 'Desperados Original Beer', rawNutritionLabel: LABEL }],
+      nextItems: next,
+    });
+    expect(out.restored).toEqual([]);
+    expect(next[0].rawNutritionLabel).toBeUndefined();
+  });
+
+  it('does nothing when the prior item had no usable label', () => {
+    const next: any[] = [{ dishName: 'Desperados Original Beer' }];
+    const out = preserveLabelTruth({
+      priorItems: [{ dishName: 'Desperados Original Beer', rawNutritionLabel: { servingSize: '100ml', calories: '-' } }],
+      nextItems: next,
+    });
+    expect(out.restored).toEqual([]);
+    expect(next[0].rawNutritionLabel).toBeUndefined();
+  });
+
+  it('is a no-op on empty inputs', () => {
+    expect(preserveLabelTruth({}).restored).toEqual([]);
+    expect(preserveLabelTruth({ priorItems: [{ dishName: 'X', rawNutritionLabel: LABEL }], nextItems: [] }).restored).toEqual([]);
   });
 });

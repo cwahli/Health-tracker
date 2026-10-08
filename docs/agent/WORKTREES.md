@@ -5,6 +5,55 @@
 split, the deploy reset the **dev checkout**, silently destroying uncommitted
 work mid-task. Now the deploy resets only a **dedicated clone**.
 
+## Reaching the box (from the Mac)
+
+An agent working on the Mac is **not** on this box, so none of the paths above
+exist locally. Reach it first:
+
+```bash
+ssh -o BatchMode=yes ubuntu@51.254.217.163
+```
+
+- Host `vps-0a61fae6`, user `ubuntu`, default key (`~/.ssh/id_ed25519`). No
+  `~/.ssh/config` entry, no password, no sudo.
+- `-o BatchMode=yes` fails fast instead of hanging on a key or host prompt, so
+  testing the route costs about a second.
+- One command on the box, through the same door (heredocs work too):
+
+  ```bash
+  ssh -o BatchMode=yes ubuntu@51.254.217.163 'uname -n; systemctl list-units "bot-host@*" --no-legend --state=running | wc -l'
+  ```
+
+- The helper `~/dev/new-worktree.sh` is **on the box**, not on the Mac; run it
+  over ssh. The same is true of every `/home/ubuntu/...` path on this page.
+- Some tools are missing on the box (there is no `timeout`); prefer plain
+  commands.
+
+**Never report the host as unreachable without running that command.** "No
+route" is a claim about this machine's keys, and it has been made wrongly: on
+2026-10-07 an agent told the user it had no route to the VM while the route had
+been working all along, which turned a live defect that is only visible on the
+box into "cannot be seen". A memory note does not hold — that is the lesson
+`assert-bugctl-is-reachable.mjs` already records — so the mechanism is a check:
+
+```bash
+node scripts/assert-vm-route.mjs          # the record is still wired (offline)
+node scripts/assert-vm-route.mjs --live   # the route answers, today
+```
+
+What is on the other side, when you are diagnosing the fleet:
+
+| Read | Command |
+|------|---------|
+| Running bots | `systemctl list-units 'bot-host@*'` (9 running on 2026-10-07) |
+| One bot's log | `journalctl -u bot-host@<id> -n 200 --no-pager` |
+| A watcher's log | `journalctl -u ht-allowance-watch -n 50 --no-pager` |
+| Per-bot state | `~/.local/state/bot-host/<bot>/...` |
+| Shared watcher state | `~/.local/state/shared-free-lanes/` (state + `ht-allowance-watch.log`) |
+
+Full host inventory: `plan/VPS2_MOBILE_DEV.md`.
+
+
 ## Layout
 
 | Path | Role | Safe to edit? |

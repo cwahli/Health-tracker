@@ -32,7 +32,27 @@ cd "$REPO_DIR"
 
 HERMES_DIR="${HERMES_DIR:-${HOME}/.hermes}"
 AUDIT_LOG="${HERMES_DIR}/dispatch_audit.log"
-TELEGRAM_SCRIPT="${REPO_DIR}/scripts/telegram-send.sh"
+# Two seams, in order: TELEGRAM_SCRIPT_OVERRIDE (this change; a sensor points
+# it at a stub) and an inherited TELEGRAM_SCRIPT (scripts/assert-dispatch-
+# lifecycle.sh exports one to count the typing pings). The default is last.
+TELEGRAM_SCRIPT="${TELEGRAM_SCRIPT_OVERRIDE:-${TELEGRAM_SCRIPT:-${REPO_DIR}/scripts/telegram-send.sh}}"
+
+# Every notice this script sends goes through tg_send() below, and every tg_send
+# goes through this switch. `--no-notify` (or DISPATCH_NOTIFY=0) is how a caller
+# that is not a real dispatch — a test driving this script to prove its refusals,
+# a dry run, a batch replay — stops posting to the operator's chat.
+#
+# The tests in src/utils/bugPackFixtures.test.ts shell out to THIS script with a
+# deliberately vague `--task` to prove packCheck rejects it. Before the switch
+# existed, each run of that file posted real "[Orchestrator] Dispatch rejected
+# for BUG-TEST" messages to the live chat, which is what that chat was showing.
+DISPATCH_NOTIFY="${DISPATCH_NOTIFY:-1}"
+
+# The single sender. Every telegram-send.sh call in this file is routed here.
+tg_send() {
+  [ "${DISPATCH_NOTIFY:-1}" = "1" ] || return 0
+  bash "$TELEGRAM_SCRIPT" "$@" 2>/dev/null || true
+}
 DISPATCH_LOCK_DIR="${HERMES_DIR}/dispatch_locks"
 DISPATCH_ACTIVE_DIR="${HERMES_DIR}/dispatch_active"
 # Legacy single-file lock (pre-parallel). Kept as read-only fallback so an
@@ -222,7 +242,7 @@ except Exception: print("")' 2>/dev/null || true)
       fi
     fi
     if [ -n "$tool" ] && [ -n "$bug_id" ]; then
-      bash "$TELEGRAM_SCRIPT" --profile="${HERMES_PROFILE:-orchestrator}" \
+      tg_send --profile="${HERMES_PROFILE:-orchestrator}" \
         --text="🛑 *[Orchestrator]* Stopped agent '*$tool*' on \`$bug_id\`.
 • Process terminated (PID ${pid:-?}).
 • That run's worktree reverted; other agents keep working.
@@ -306,7 +326,7 @@ TICKET_ATTEMPT_OPEN=0
 for arg in "$@"; do
   case $arg in
     --help|-h)
-      echo "Usage: $0 [--work-item=JSON|FILE] [--ticket=#n] [--page=...] [--observed=...] [--expected=...] [--screenshot=...] [--criteria=...] [--bug-id='...'] [--category='...'] [--tool=auto|opencode|cline|grok|agy] [--model=...] [--thinking=high|low|none|auto] [--cascade] [--verify=true|false|auto] [--profile=orchestrator] [--area=name] [--files=a,b] [--foreground] [--print-plan]"
+      echo "Usage: $0 [--no-notify] [--work-item=JSON|FILE] [--ticket=#n] [--page=...] [--observed=...] [--expected=...] [--screenshot=...] [--criteria=...] [--bug-id='...'] [--category='...'] [--tool=auto|opencode|cline|grok|agy] [--model=...] [--thinking=high|low|none|auto] [--cascade] [--verify=true|false|auto] [--profile=orchestrator] [--area=name] [--files=a,b] [--foreground] [--print-plan]"
       echo ""
       echo "  --ticket=#n   V-30.4 packet-driven dispatch: the packed card packet is the"
       echo "                prompt source (plan posted first, attempt rows at start/end,"
@@ -343,6 +363,7 @@ for arg in "$@"; do
     --worktree=*)                DISPATCH_WORKTREE="${arg#*=}" ;; # advanced: reuse an existing checkout
     --foreground)                FOREGROUND=1 ;;
     --print-plan)                PRINT_PLAN=1 ;;
+    --no-notify)                 DISPATCH_NOTIFY=0 ;;
     *)
       if [ -z "$TASK" ]; then TASK="$arg"; fi
       ;;
@@ -382,7 +403,7 @@ PACK_RAW=$(node "$PACK_HELPER" dispatch "$@" 2>&1) || {
   echo "[Dispatcher] Rejected: inbound defect report failed packCheck:" >&2
   echo "$PACK_RAW" >&2
   if [ -f "$TELEGRAM_SCRIPT" ]; then
-    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" \
+    tg_send --profile="$DISPATCH_PROFILE" \
       --text="❌ *[Orchestrator]* Dispatch rejected for \`$BUG_ID\`: payload failed packCheck:
 \`\`\`
 $(echo "$PACK_RAW" | head -n 6)
@@ -437,7 +458,7 @@ else
   # it is the same run (lock check below also refuses an alive duplicate PID).
   if ! GUARD_OUT=$(node "$DISPATCH_HELPER" guard --packet-file="$PACKET_FILE" --self-pid="$$" 2>&1); then
     echo "[Dispatcher] Dispatch refused for ticket #$TICKET: $GUARD_OUT" >&2
-    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="🚫 *[Orchestrator]* Dispatch refused for \`#$TICKET\`: ${GUARD_OUT#refused: }" 2>/dev/null || true
+    tg_send --profile="$DISPATCH_PROFILE" --text="🚫 *[Orchestrator]* Dispatch refused for \`#$TICKET\`: ${GUARD_OUT#refused: }" 2>/dev/null || true
     rm -f "$PACKET_FILE"
     exit 3
   fi
@@ -685,6 +706,34 @@ stop_heartbeat() {
     wait "$HEARTBEAT_PID" 2>/dev/null || true
     HEARTBEAT_PID=""
   fi
+  # Reap the typing loop DIRECTLY. It is a separate background process, so
+  # killing the heartbeat subshell never touches it, and the subshell's own
+  # `trap ... EXIT` cannot be relied on: the heartbeat is asleep in
+  # `sleep $interval_secs` (120s) when TERM arrives, bash defers the trap until
+  # that returns, and the SIGKILL above lands first. SIGKILL runs no traps.
+  #
+  # Measured before this fix: one orphaned `while true; telegram-send; sleep 4`
+  # loop per dispatch, reparented to init, still running 29 hours later and
+  # costing ~21,600 Telegram calls a day each.
+  if [ -n "${TYPING_PID_FILE:-}" ] && [ -f "$TYPING_PID_FILE" ]; then
+    local typing_pid
+    typing_pid=$(cat "$TYPING_PID_FILE" 2>/dev/null || true)
+    if [ -n "$typing_pid" ] && kill -0 "$typing_pid" 2>/dev/null; then
+      # Its own children (the in-flight `telegram-send` / `sleep 4`) go first:
+      # killing only the loop would leave one more short-lived orphan per cycle.
+      pkill -TERM -P "$typing_pid" 2>/dev/null || true
+      kill -TERM "$typing_pid" 2>/dev/null || true
+      local tp_i=0
+      while kill -0 "$typing_pid" 2>/dev/null && [ "$tp_i" -lt 4 ]; do
+        sleep 0.25
+        tp_i=$((tp_i + 1))
+      done
+      pkill -KILL -P "$typing_pid" 2>/dev/null || true
+      kill -KILL "$typing_pid" 2>/dev/null || true
+    fi
+    rm -f "$TYPING_PID_FILE"
+    TYPING_PID_FILE=""
+  fi
   # The PM-sheet liveness companion dies with the run (same bounded pattern —
   # a stuck beat must never stall attempt close).
   if [ -n "${AGENT_BEAT_PID:-}" ]; then
@@ -726,7 +775,7 @@ if [ -f "$RUN_LOCK_FILE" ]; then
   dup_pid=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("pid",""))' "$RUN_LOCK_FILE" 2>/dev/null || true)
   if [ -n "$dup_pid" ] && kill -0 "$dup_pid" 2>/dev/null; then
     echo "[Dispatcher] $BUG_ID is already running (PID $dup_pid). Use a new --bug-id for parallel work."
-    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="ℹ️ *[Orchestrator]* \`$BUG_ID\` is already running (PID \`$dup_pid\`). Send a new bug id to run in parallel." 2>/dev/null || true
+    tg_send --profile="$DISPATCH_PROFILE" --text="ℹ️ *[Orchestrator]* \`$BUG_ID\` is already running (PID \`$dup_pid\`). Send a new bug id to run in parallel." 2>/dev/null || true
     exit 1
   fi
   rm -f "$RUN_LOCK_FILE" "$RUN_ACTIVE_FILE" 2>/dev/null || true
@@ -827,7 +876,7 @@ if [ -n "$TICKET" ]; then
   TICKET_ATTEMPT_OPEN=1
 fi
 if [ -n "$LOCK_CONFLICTS" ]; then
-  bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* \`$BUG_ID\` starts in parallel — routing around live file claims:
+  tg_send --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* \`$BUG_ID\` starts in parallel — routing around live file claims:
 $(printf '%s' "$LOCK_CONFLICTS" | head -n 8)" 2>/dev/null || true
 fi
 
@@ -844,9 +893,9 @@ tg_msg() {
   local text="$1"
   local photo="${2:-}"
   if [ -n "$photo" ] && [ -f "$photo" ]; then
-    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --photo="$photo" --caption="$text" 2>/dev/null || true
+    tg_send --profile="$DISPATCH_PROFILE" --photo="$photo" --caption="$text" 2>/dev/null || true
   else
-    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="$text" 2>/dev/null || true
+    tg_send --profile="$DISPATCH_PROFILE" --text="$text" 2>/dev/null || true
   fi
 }
 
@@ -856,9 +905,9 @@ tg_qa() {
   local prof
   prof=$(qa_profile_for_category)
   if [ -n "$photo" ] && [ -f "$photo" ]; then
-    bash "$TELEGRAM_SCRIPT" --profile="$prof" --photo="$photo" --caption="$text" 2>/dev/null || true
+    tg_send --profile="$prof" --photo="$photo" --caption="$text" 2>/dev/null || true
   else
-    bash "$TELEGRAM_SCRIPT" --profile="$prof" --text="$text" 2>/dev/null || true
+    tg_send --profile="$prof" --text="$text" 2>/dev/null || true
   fi
 }
 
@@ -916,22 +965,36 @@ run_with_timeout() {
 # ---------------------------------------------------------------
 # Heartbeat — sends a Telegram ping every N minutes while running
 # ---------------------------------------------------------------
+# The typing loop's pid, handed from start_heartbeat to stop_heartbeat through a
+# file. See the note at the loop itself: an EXIT trap alone cannot reap it, and a
+# leaked loop sends a Telegram API call every 4s forever.
+TYPING_PID_FILE=""
 start_heartbeat() {
   local tool_name="$1"
   local log_file="${2:-}"
   local interval_secs="${3:-120}"   # 2 min default
+  TYPING_PID_FILE="$(mktemp "${TMPDIR:-/tmp}/dispatch_typing_$$.XXXXXX")"
   (
     # Continuous typing action loop in background to display 3 loading dots in Telegram chat header
     (
       while true; do
-        bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
+        [ "${DISPATCH_NOTIFY:-1}" = "1" ] && bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
         sleep 4
       done
     ) &
       local TYPING_PID=$!
-      # EXIT cleans the typing loop; INT/TERM must EXIT this subshell — the
-      # old handler only killed typing and kept looping, so stop_heartbeat's
-      # `wait` never returned and the dispatch stalled after every run.
+      # The EXIT trap is NOT sufficient to reap this loop, and relying on it alone
+      # leaked one loop per dispatch. Bash defers a trap until the running
+      # foreground command returns, and this subshell's next command is
+      # `sleep $interval_secs` (120s by default). stop_heartbeat waits 3s and then
+      # SIGKILLs, so the trap never ran — and SIGKILL cannot run traps at all.
+      # The typing loop therefore survived, reparented to init, and kept hitting
+      # Telegram every 4s: measured orphans aged 6.8 days and 29 hours, each
+      # pinning the chat header on "working" long after the dispatch finished.
+      #
+      # So the pid is also published where stop_heartbeat can kill it directly.
+      # The trap stays as a second line of defence for the graceful path.
+      printf '%s\n' "$TYPING_PID" > "$TYPING_PID_FILE" 2>/dev/null || true
       trap "kill $TYPING_PID 2>/dev/null || true" EXIT
       trap "exit 0" INT TERM
 
@@ -1390,6 +1453,42 @@ run_opencode_agent() {
   fi
 }
 
+# Is the card still worth dispatching to?
+#
+# The guard at launch reads a snapshot taken once, before any agent runs. Nothing
+# re-checks it afterwards, so a card that gets closed while an attempt is in
+# flight keeps being retried — a nudge burns an agent, then reports the card as
+# unresolved and charges a tool-allowance failure for work nobody wanted. Card #19
+# sat `packed` for 29 hours that way.
+#
+# This re-reads the card live and asks the same guard, so one rule decides both
+# "may I start" and "may I continue".
+#
+# Returns 0 to proceed. On a READ failure it also returns 0: a transient API blip
+# must never be turned into a refusal, and inventing a refusal from a failed read
+# is exactly the fabrication this repo refuses elsewhere.
+card_still_dispatchable() {
+  [ -n "${TICKET:-}" ] || return 0            # legacy --task path: no card to re-read
+  local fresh out rc
+  fresh=$(mktemp "${TMPDIR:-/tmp}/dispatch_recheck_XXXXXX") || return 0
+  if ! node "$BUGCTL" packet --id "$TICKET" --json >"$fresh" 2>/dev/null; then
+    rm -f "$fresh"
+    echo "[Dispatcher] re-check: could not re-read #$TICKET; continuing."
+    return 0
+  fi
+  out=$(node "$DISPATCH_HELPER" guard --packet-file="$fresh" 2>&1)
+  rc=$?
+  rm -f "$fresh"
+  if [ "$rc" -ne 0 ]; then
+    # Latched so the tool loop can stop instead of falling through to the next
+    # tool, and so the escalation block below stays quiet: the card is closed, not
+    # unresolved, and saying otherwise is what charged the allowance for #19.
+    CARD_CLOSED=1
+    echo "$out" >&2
+  fi
+  return "$rc"
+}
+
 try_opencode() {
   local model="${1:-$PREFERRED_MODEL}"
   echo "[Dispatcher] --> OpenCode (Model: $model)"
@@ -1427,6 +1526,11 @@ $prompt_preview
   if echo "$output" | grep -qiE "insufficient account funds|insufficient funds|out of credits"; then
     clean_workspace
     if [ "$model" != "$FREE_FALLBACK_MODEL" ]; then
+      # Sibling of the nudge re-check: this is a second agent on the same card, so
+      # it needs the same guard against a card that closed while the first ran.
+      local fb_recheck=0
+      card_still_dispatchable || fb_recheck=$?
+      if [ "$fb_recheck" -ne 0 ]; then return 4; fi
       tg_msg "⚠️ *[Orchestrator]* OpenCode model \`$model\` has no funds. Retrying once with free model \`opencode/$FREE_FALLBACK_MODEL\`..."
       local alt_model="$FREE_FALLBACK_MODEL"
       record_coordination_tax "opencode" "model=$alt_model"
@@ -1465,7 +1569,19 @@ $prompt_preview
   if [ "$gate_rc" -eq 0 ]; then return 0; fi
   if [ "$gate_rc" -eq 3 ]; then return 3; fi
 
-  # One nudge attempt
+  # One nudge attempt — but only if the card still wants one. The launch guard read
+  # a snapshot taken before the first agent ran; if the card was closed or blocked
+  # in the meantime, a nudge spends another agent on it, then reports it unresolved
+  # and charges a tool-allowance failure for work nobody asked for. Exit 4 stops the
+  # whole tool loop without that charge.
+  local recheck_rc=0
+  card_still_dispatchable || recheck_rc=$?
+  if [ "$recheck_rc" -ne 0 ]; then
+    stop_heartbeat
+    clean_workspace
+    return 4
+  fi
+
   tg_msg "🔄 *[Orchestrator]* OpenCode nudged to retry \`$BUG_ID\`..."
   record_coordination_tax "opencode_nudge" "model=$model"
   local nudge_log="${log_dir}/dispatch_${BUG_ID}_opencode_nudge.log"
@@ -1753,7 +1869,7 @@ Fix pushed to main. Awaiting CI/CD deploy (~45s)."
     # Pulse Telegram typing indicator during deploy wait so 3 dots are shown
     (
       for i in $(seq 1 11); do
-        bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
+        [ "${DISPATCH_NOTIFY:-1}" = "1" ] && bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
         sleep 4
       done
     ) &
@@ -1809,6 +1925,16 @@ QA validation failed after deploy. Remaining failure: ${failure_text}. Fix that 
 }
 
 for tool in "${TOOL_SEQUENCE[@]}"; do
+  # The card was closed or blocked while this run was in flight (see
+  # card_still_dispatchable). Stop here: trying the next tool, or reporting
+  # "could not resolve", would both be false — nothing failed, the work is no
+  # longer wanted.
+  if [ "${CARD_CLOSED:-0}" = "1" ]; then
+    stop_heartbeat
+    clean_workspace
+    echo "[Dispatcher] $BUG_ID is no longer dispatchable — stopping without charging the allowance."
+    exit 0
+  fi
   case $tool in
     opencode)
       if try_opencode "$PREFERRED_MODEL"; then

@@ -15,6 +15,7 @@ import {
   journeyToOutcomes,
   scoreboardSummary,
   scoreGoldenRun,
+  effectiveAllGreen,
   type GoldenAttempt,
   type GoldenMealLine,
   type GoldenOutcome,
@@ -1000,6 +1001,20 @@ export function registerGoldenRoutes(app: Express, deps: GoldenRouteDeps = {}) {
       }
       res.json({
         ...data,
+        // `data.all_green` is a cached column, written only by the create/replay/
+        // analyze routes and never recomputed on read. On case 329881c4 it said
+        // true while the same case's outcomes included an enabled pass=false —
+        // the user's own "Sainsbury oat is about 370 cal" complaint, recorded as
+        // FAILING on a case the board showed as GREEN. Nothing noticed, because
+        // every reader trusted the cache. Reconcile it here, where the board is
+        // actually loaded, and say so when the two disagree so a human can see
+        // which one to trust.
+        ...(() => {
+          const eff = effectiveAllGreen(data.all_green, board?.outcomes);
+          return eff.contradictedCache
+            ? { all_green: eff.allGreen, green_conflict: true }
+            : { all_green: eff.allGreen };
+        })(),
         iteration: Math.max(Number(data.iteration || 0), (attempts || []).length || 1),
         board,
         attempts,

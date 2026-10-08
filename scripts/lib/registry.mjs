@@ -214,12 +214,22 @@ export function normalizeConfig(bot, { defaultWorkspace = process.cwd() } = {}) 
       sharedSkills: Array.isArray(bot.agent?.sharedSkills) ? bot.agent.sharedSkills : [],
       playwrightOutputDir: bot.agent?.playwrightOutputDir || '',
       smallModel: bot.agent?.smallModel,
+      healthRole: bot.agent?.healthRole || '',
+      taxRole: bot.agent?.taxRole || '',
+      homeProject: bot.agent?.homeProject || '',
     },
     progress: {
       mode: bot.progress?.mode || 'concise',
       editIntervalMs: bot.progress?.editIntervalMs ?? 2500,
-      maxEdits: bot.progress?.maxEdits ?? 40,
+      maxEdits: bot.progress?.maxEdits ?? 120,
       maxChars: bot.progress?.maxChars ?? 220,
+      heartbeatMs: bot.progress?.heartbeatMs ?? 12000,
+      // 'gist' keeps today's headline (a reasoning summary). 'phase' swaps that
+      // for a label derived from the real tool lifecycle — truthful by
+      // construction, and it cannot contradict the answer the way a paraphrased
+      // chain-of-thought can. Ships defaulting to 'gist' because it is a
+      // product decision, not a bug fix.
+      progressMode: bot.progress?.progressMode ?? 'gist',
     },
     session: { mode: bot.session?.mode || 'per-chat' },
     ...(bot.hermes ? { hermes: bot.hermes } : {}),

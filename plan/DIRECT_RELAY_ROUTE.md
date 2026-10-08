@@ -11,7 +11,7 @@ Workers dial out, so every host uses the same URL shape and the VM opens
 nothing inbound to any device:
 
 ```
-https://health-tracking.duckdns.org/relay/*  →  Caddy  →  127.0.0.1:8890
+https://health-tracker.co.uk/relay/*  →  Caddy  →  127.0.0.1:8890
 ```
 
 SSH can be public because it has key auth. The relay has no auth of its own,
@@ -45,7 +45,7 @@ to end, for devices to onboard against today:
   loopback-bound, `WORKER_RELAY_TOKEN` from `~/.config/bot-host/relay.env`
   (0600). Own store (`/tmp/relay-staging-home`) — shares nothing with the
   production relay on 8890.
-- Public route: `https://health-tracking.duckdns.org/relay-staging/*` → Caddy
+- Public route: `https://health-tracker.co.uk/relay-staging/*` → Caddy
   → 127.0.0.1:8891 (Caddyfile validated + reloaded; main site verified 200).
 - Proven 2026-09-26: anonymous → 401 on every guarded route; health → 200;
   a worker over **public HTTPS + token** registered with real machine identity;
@@ -53,7 +53,7 @@ to end, for devices to onboard against today:
   removed afterwards; presence clean.
 - Device start lines (token handed out of band, never in chat):
   `node <repo>/scripts/worker-agent.mjs --host=<mobile|collab|grok>
-  --relay=https://health-tracking.duckdns.org/relay-staging
+  --relay=https://health-tracker.co.uk/relay-staging
   --relay-token=$WORKER_RELAY_TOKEN`
   (branch `agent/relay-auth` — main's worker has no token headers yet).
 
@@ -67,7 +67,7 @@ stand-ins. Do all of these in one window, announced:
    `~/.config/bot-host/relay.env`, mode 600. Never paste it anywhere else.
 2. Add to the `bot-host@vm`/`vm2`/`collab`/`mobile`/`grok` service envs (or
    export before manual runs) on every machine that calls the relay.
-3. Caddy (`/etc/caddy/Caddyfile`, inside the duckdns site block; backup first,
+3. Caddy (`/etc/caddy/Caddyfile`, inside the `health-tracker.co.uk` site block — live since 2026-10-06; backup first,
    `caddy validate`, then `caddy reload`):
    ```
        handle /relay/* {
@@ -93,7 +93,7 @@ stand-ins. Do all of these in one window, announced:
   session, or the worker dies quietly (presence TTL + claim lease already
   cover this; flaky-network retries are in `tg-api.mjs` and the agent loop).
   Start: `node ~/Health-tracker/scripts/worker-agent.mjs --host=mobile
-  --relay=https://health-tracking.duckdns.org/relay
+  --relay=https://health-tracker.co.uk/relay
   --relay-token=$WORKER_RELAY_TOKEN` (token via env file, never chat).
 - **collab (notebook):** ephemeral runtime — every start needs install node,
   clone branch, creds, start worker; dies on idle (~12h). Keep secrets in
@@ -117,7 +117,7 @@ stand-ins. Do all of these in one window, announced:
   from google.colab import userdata
   import os, subprocess, time, urllib.request, json
   os.environ['WORKER_RELAY_TOKEN'] = userdata.get('WORKER_RELAY_TOKEN')
-  relay = 'https://health-tracking.duckdns.org/relay'
+  relay = 'https://health-tracker.co.uk/relay'
   log = open('/tmp/worker-collab.log', 'ab', buffering=0)
   p = subprocess.Popen(['node', os.path.expanduser('~/Health-tracker/scripts/worker-agent.mjs'),
                         '--host=collab', f'--relay={relay}'],
@@ -128,7 +128,7 @@ stand-ins. Do all of these in one window, announced:
   ```python
   # cell 3 — verify (presence must show collab fresh, machine = the Colab box)
   import urllib.request, json
-  h = json.load(urllib.request.urlopen('https://health-tracking.duckdns.org/relay/health', timeout=20))
+  h = json.load(urllib.request.urlopen('https://health-tracker.co.uk/relay/health', timeout=20))
   print([(w['host'], w['reachable']) for w in h['workers'] if w['host'] in ('collab',)])
   ```
   Notes: model turns need the same opencode auth the notebook already uses for

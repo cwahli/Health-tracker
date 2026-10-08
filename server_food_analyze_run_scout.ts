@@ -1,5 +1,5 @@
 import { AnalyzeRunContext } from './server_food_analyze_run_types.js';
-import { runScoutRetryLoop, applyScoutResultState, mergeScoutIntoActiveMeal, logScoutItemSummaries, logScoutImageInventory, applyWeightModShortcut, applySkipScoutShortcut, buildScoutFailureError, mapCompareItemsToScoutItems, countCompareExtracted } from './src/server/food/server_food_scout_source.js';
+import { runScoutRetryLoop, applyScoutResultState, mergeScoutIntoActiveMeal, logScoutItemSummaries, logScoutImageInventory, applyWeightModShortcut, applySkipScoutShortcut, buildScoutFailureError, mapCompareItemsToScoutItems, countCompareExtracted, preserveLabelTruth } from './src/server/food/server_food_scout_source.js';
 import { scoutSystemInstruction, buildVisualScoutPrompt, buildScoutPersonalizationBlock } from './agents/scoutInstructions.js';
 import { scoutOnlyCompareSystemInstruction, buildScoutComparePrompt } from './prototype/meallog/compare/scout_only_compare_instructions.js';
 import { withScoutLanguage } from './src/utils/i18n.js';
@@ -43,11 +43,15 @@ export async function executeScoutPhase(ctx: AnalyzeRunContext): Promise<void> {
     }
     if (!skipScoutApplied) {
       const hasImage = ctx.imagePayloads && ctx.imagePayloads.length > 0;
-      const isEditOrText = Boolean(ctx.message || ctx.isModifySession || ctx.hasActiveMealDocument);
-      if (hasImage || isEditOrText) {
-        ctx.sendStreamEvent({ type: 'status', stage: 'scout', status: 'started', message: ctx.isModifySession ? 'Refining meal with Scout agent...' : 'Reading your photos...' });
-        const imageCount = ctx.imagePayloads?.length || 0; let scoutPromptText = '';
-        if (ctx.isModifySession && (ctx.activeMeal || (ctx.req.body.activeScoutItems && ctx.req.body.activeScoutItems.length > 0))) {
+        const isEditOrText = Boolean(ctx.message || ctx.isModifySession || ctx.hasActiveMealDocument);
+        if (hasImage || isEditOrText) {
+          // A recheck turn is a full read, not a targeted edit: withhold the
+          // replace|add|delete instruction so the model cannot "fix" a meal it
+          // has been told is wrong by deleting from it.
+          const useEditInstruction = ctx.isModifySession && !ctx.isRecheckRequest;
+          ctx.sendStreamEvent({ type: 'status', stage: 'scout', status: 'started', message: useEditInstruction ? 'Refining meal with Scout agent...' : 'Reading your photos...' });
+          const imageCount = ctx.imagePayloads?.length || 0; let scoutPromptText = '';
+          if (useEditInstruction && (ctx.activeMeal || (ctx.req.body.activeScoutItems && ctx.req.body.activeScoutItems.length > 0))) {
           const priorMealItems = ctx.activeMeal?.itemsBreakdown || ctx.activeMeal?.items || ctx.req.body.activeScoutItems || [];
           const priorSummary = priorMealItems.map((it: any, idx: number) => {
             const photoLabel = it.sourceImageIndex != null ? ` [Photo #${it.sourceImageIndex}]` : '';
@@ -153,11 +157,32 @@ export async function executeScoutPhase(ctx: AnalyzeRunContext): Promise<void> {
           }
           ctx.addDebugLog(`[Vision Scout Empty Compare] Retry recovered ${countCompareExtracted(ctx.rawScoutData, ctx.visionScoutItems)} extracted evidence item(s).`);
         }
-        if (ctx.hasActiveMealDocument && Array.isArray(ctx.activeMeal.itemsBreakdown) && ctx.activeMeal.itemsBreakdown.length > 0) {
+        // A recheck replaces the meal's dish list with what this read found —
+        // merging would keep items the re-read no longer sees. Explicit
+        // "remove X" edits keep the merge path.
+        if (!ctx.isRecheckRequest && ctx.hasActiveMealDocument && Array.isArray(ctx.activeMeal.itemsBreakdown) && ctx.activeMeal.itemsBreakdown.length > 0) {
           ctx.visionScoutItems = mergeScoutIntoActiveMeal({ activeMealItemsBreakdown: ctx.activeMeal.itemsBreakdown, visionScoutItems: ctx.visionScoutItems, onLog: ctx.addDebugLog, isModify: ctx.isModifySession, userLockedSlots: ctx.activeMeal?.userLockedSlots, userMessage: ctx.message });
         }
+        if (ctx.hasActiveMealDocument) {
+          const priorDishes = ctx.activeMeal?.itemsBreakdown || ctx.activeMeal?.items || [];
+          const { restored } = preserveLabelTruth({ priorItems: priorDishes, nextItems: ctx.visionScoutItems });
+          if (restored.length > 0) {
+            ctx.addDebugLog(`[LabelTruth] Restored printed nutrition label for ${restored.length} re-read dish(es): ${restored.join(', ')}.`);
+          }
+        }
         logScoutItemSummaries(ctx.visionScoutItems, ctx.addDebugLog);
-        logScoutImageInventory({ perImage: (ctx.rawScoutData as any)?.perImage, imageCount: ctx.imagePayloads?.length || 0, items: ctx.visionScoutItems, onLog: ctx.addDebugLog });
+        const inventory = logScoutImageInventory({ perImage: (ctx.rawScoutData as any)?.perImage, imageCount: ctx.imagePayloads?.length || 0, items: ctx.visionScoutItems, onLog: ctx.addDebugLog });
+        // Every attached photo must be grounded. An edit/recheck turn that reads
+        // fewer images than were sent is a degraded read, not a clean one — it
+        // must not be reported as a happy-path stage completion.
+        if (inventory.uncovered.length > 0 && ctx.imagePayloads?.length > 0) {
+          ctx.addDebugLog(
+            `[ScoutInventory] Marking run degraded: 0 dishes grounded on image(s) ${inventory.uncovered.join(', ')} of ${ctx.imagePayloads.length} attached.`
+          );
+          if (!(ctx.scoutDegradedReasons || []).includes('scout_partial_read')) {
+            ctx.scoutDegradedReasons = [...(ctx.scoutDegradedReasons || []), 'scout_partial_read'];
+          }
+        }
         // S-10: record the scout leg in the run tree (system instruction as
         // dispatched, model, latency, output). Scout is the sole Meal Agent
         // dispatch and carries rawEmission (dishes, verdict, clinicalAdvice).

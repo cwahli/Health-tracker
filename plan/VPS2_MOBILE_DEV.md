@@ -171,7 +171,7 @@ Measured on 2026-09-21, re-check before changing anything:
 |---|---|
 | Phone | Pixel 9 Pro XL, tailnet `pixel-9-pro-xl`, `100.83.130.60`, account `chiwah.liu@` |
 | VM Tailscale | `vps-0a61fae6`, `100.118.148.32`, Tailscale 1.102.4, `RunSSH true` |
-| Public address | `51.254.217.163`, name `health-tracking.duckdns.org` |
+| Public address | `51.254.217.163`, name `health-tracker.co.uk` (moved off `health-tracking.duckdns.org` in the Domain-01 migration, 2026-10-06) |
 | Firewall | `ufw` default deny. Allowed: anything on `tailscale0`, `80/tcp`, `443/tcp`. **Public :22 is closed.** sshd still listens on `0.0.0.0:22`. |
 | sshd | `PasswordAuthentication yes`, `PubkeyAuthentication yes`, `KbdInteractiveAuthentication no`, `PermitRootLogin prohibit-password` |
 | Mosh | **Not installed.** |
@@ -187,12 +187,12 @@ Tailscale SSH is why the reconnect shows an authentication error rather than a t
 2. `sudo apt-get install -y mosh fail2ban`. Enable the sshd jail. `ignoreip` must include `127.0.0.1/8` and the tailnet `100.64.0.0/10` so a Tailscale reconnect cannot ban the phone. Start fail2ban.
 3. Open the public door: `ufw allow 22/tcp` and `ufw allow 60000:61000/udp` (mosh). Leave the existing tailscale0 / 80 / 443 rules. Do this only after step 1 has reloaded sshd with passwords off. `sshd -T` must still show `passwordauthentication no`.
 4. Create tmux session `health` with working directory `/home/ubuntu/src/Health-tracker`: `tmux new-session -d -s health -c /home/ubuntu/src/Health-tracker`. Add a **user** systemd unit so that session is recreated on boot if it is missing (`Type=forking`, `ExecStart=/usr/bin/tmux new-session -d -s health -c /home/ubuntu/src/Health-tracker`, do not kill an existing session). `loginctl enable-linger ubuntu` only if linger is not already on for Hermes. Do **not** put `tmux attach` in `.bashrc` — that breaks `scp`, `rsync`, and deploy SSH.
-5. After a key login to `ubuntu@health-tracking.duckdns.org` works from off the tailnet (the phone, or any host that is not using Tailscale), run `tailscale set --ssh=false`. Until that off-tailnet login works, leave Tailscale SSH on. Do not uninstall Tailscale.
+5. After a key login to `ubuntu@health-tracker.co.uk` works from off the tailnet (the phone, or any host that is not using Tailscale), run `tailscale set --ssh=false`. Until that off-tailnet login works, leave Tailscale SSH on. Do not uninstall Tailscale.
 6. Update the Runbook in this file to the commands that are actually true. Fill the Termius block below into the Runbook. Do not mark V-27 COMPLETE until the human phone check passes.
 
 **Human, once, on the phone.** The agent cannot do this.
 
-- Termius host: `health-tracking.duckdns.org` (not `100.118.148.32`). Protocol **Mosh**. User `ubuntu`. Key auth. Startup command: `tmux new -A -s health`.
+- Termius host: `health-tracker.co.uk` (not `100.118.148.32`). Protocol **Mosh**. User `ubuntu`. Key auth. Startup command: `tmux new -A -s health`.
 - Forget the old Tailscale SSH host for daily use, or leave it unused.
 - Do not force-stop Tailscale or clear its cache. Tailscale may stay installed. If it wedges, airplane mode for about ten seconds, or toggle the Tailscale switch. Cache clear forces a full login.
 
@@ -225,14 +225,14 @@ SSH / Mosh:    Public :22 key-only (PasswordAuthentication no, fail2ban active o
                Mosh UDP ports 60000:61000 open in ufw.
 tmux session:  tmux session 'health' active (cwd /home/ubuntu/src/Health-tracker).
                Autostarted via systemd user unit: tmux-health.service (linger enabled).
-tmux command:  Termius / Moshi → Mosh ubuntu@health-tracking.duckdns.org → tmux new -A -s health
+tmux command:  Termius / Moshi → Mosh ubuntu@health-tracker.co.uk → tmux new -A -s health
                (Server configuration COMPLETE. Awaiting human phone Wi-Fi ↔ cellular verification.)
 Telegram:      @Health-tracker-bot (Hermes Telegram Gateway with Profile Multiplexer)
 Repo on VM:    /home/ubuntu/src/Health-tracker
-Prod URL:      https://health-tracking.duckdns.org (Caddy :443 -> 127.0.0.1:3000)
+Prod URL:      https://health-tracker.co.uk (Caddy :443 -> 127.0.0.1:3000)
 systemd:       health-tracker.service (node dist/server.cjs)
 Deploy:        GitHub Webhook -> Caddy (/webhook/*) -> 127.0.0.1:9000 -> /home/ubuntu/deploy.sh
-Firebase host: health-tracking.duckdns.org (Authorized Domain in Firebase Console)
+Firebase host: health-tracker.co.uk (Authorized Domain in Firebase Console)
 Database:      Cloudflare D1 + Supabase + Cloudflare R2 (photos)
 Watchdog:      /home/ubuntu/scripts/watchdog.sh (every 10 hours via cron)
 QA Runner:     node scripts/qa-runner.mjs --journey={meal|biomarker|onboarding}

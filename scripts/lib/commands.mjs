@@ -12,19 +12,24 @@ export const BOT_COMMANDS = [
   { command: 'start', description: 'Start the bot and show help' },
   { command: 'help', description: 'Show available commands' },
   { command: 'status', description: 'Show session, model, agent, usage' },
+  { command: 'status_all', description: 'Show fleet-wide status across agents in this chat' },
   { command: 'new', description: 'Start a fresh session' },
-  { command: 'compact', description: 'Summarize session and start fresh' },
+  { command: 'compact', description: "Compact this chat's session in place (stays on it)" },
   { command: 'model', description: 'Pick a model (or set it directly)' },
   { command: 'models', description: 'List available models' },
-  { command: 'free', description: 'List free models only' },
-  { command: 'freemodel', description: "List this host's available free models" },
+  { command: 'model_light_free', description: 'Pick a free model from the light pool (a quota hit moves inside light only)' },
+  { command: 'model_free', description: 'Pick a free model: coding-capable lanes only (rating at or above 35)' },
+  { command: 'model_go', description: 'Pick a lane on the paid Go plan (never moves on its own)' },
   { command: 'allowance', description: 'Show free-lane allowance (shared ledger)' },
   { command: 'agent', description: 'Pick an agent' },
   { command: 'build', description: 'Switch to the build agent' },
   { command: 'plan', description: 'Switch to the plan agent' },
   { command: 'thinking', description: 'Pick the thinking level (variant)' },
+  { command: 'skills', description: 'List /do-* skills you can type here' },
   { command: 'tui', description: 'Open the opencode TUI for this conversation (Mini App)' },
   { command: 'bugs', description: 'Open the shared bug board (Mini App)' },
+  { command: 'fleet', description: 'Open the live fleet dashboard (Mini App)' },
+  { command: 'review', description: 'Review finished work: proof screenshots, approve or comment (Mini App)' },
   { command: 'forge', description: 'Create a new bot, one click (Mini App)' },
   { command: 'debug', description: 'Show the active work-session debug view' },
   { command: 'handoff', description: 'Checkpoint this work session for continuation' },
@@ -33,9 +38,11 @@ export const BOT_COMMANDS = [
   { command: 'project', description: 'View or switch project (e.g. /project external 1)' },
   { command: 'council', description: 'Run a council stage by name or number (/council <stage>, /council all, /council status)' },
   { command: 'role', description: 'Switch active agent role (/role legal, /role sim, etc.)' },
-  { command: 'health', description: 'Personal Health Coach: /health status | verify | ingest | refresh | analyze | readiness | research "<what to look up>" | doctor' },
+  { command: 'health', description: 'Personal Health Coach: /health status | verify | ingest | refresh | analyze | readiness | link ["which document"] | research "<what to look up>" | doctor' },
   { command: 'tax', description: 'Chiwah LTD tax: /tax snapshot | sweep | status | deadlines | saving | doc' },
   { command: 'location', description: 'Show or switch active compute location / pool' },
+  { command: 'tell', description: 'Send one bounded message to another seat (/tell <bot> <text> --ref <ticket>)' },
+  { command: 'notify', description: 'Finish alerts for runs started elsewhere on|off|status (web UI, TUI)' },
 ];
 
 /** Names handled by bot-host.mjs handleCommand (kept in sync). */
@@ -49,6 +56,12 @@ export const COMMAND_NAMES = BOT_COMMANDS.map((c) => c.command);
  * enforces: every handled command is either published or listed here.
  */
 export const HIDDEN_COMMANDS = {
+  // The one free list became three pools (2026-10-07). Both old spellings stay
+  // handled so muscle memory reaches the pointer instead of falling through to
+  // the tool as a prompt — `isKnownCommand` is what decides that, and an
+  // unpublish alone would have made `/freemodel` a model question.
+  freemodel: 'moved: the one free list became /model_light_free, /model_free and /model_go — answers as a pointer',
+  freemodels: 'moved: plural of the old /freemodel; answers the same pointer',
   store: 'ops: store queue status/flush is a background concern, typed on demand',
   setup: 'ops: provider readiness gaps, surfaced via /allowance and typed to fix',
 };
@@ -64,20 +77,32 @@ export const HIDDEN_COMMANDS = {
  * until a proper usage line is written.
  */
 export const HELP_USAGE = {
+  tell: {
+    args: '<bot> <text> --ref <key>',
+    text: [
+      'send ONE bounded message to another seat (bot-to-bot, Telegram 10.0+)',
+      '  /tell pm "the current tab has no card rows" --ref spec:fleet-current-tab',
+      '  the target must be a seat this bot may address; --ref is required',
+      '  the receiver files a proposal for its owner — it does not act on it',
+    ].join('\n'),
+  },
   start: { args: '', text: 'start the bot and show help' },
   help: { args: '', text: 'show available commands' },
   status: { args: '', text: 'show session, model, agent, workspace, usage' },
+  status_all: { args: '', text: 'fleet-wide status table across agents in this chat' },
   new: { args: '', text: 'start a fresh session' },
-  compact: { args: '', text: 'summarize session and start fresh' },
+  compact: { args: '', text: "compact this chat's session in place (stays on it)" },
   model: { args: '[name]', text: 'pick a model (or set it directly)' },
   models: { args: '', text: 'list available models' },
-  free: { args: '', text: 'list free models only' },
-  freemodel: { args: '', text: "list free models available on this host" },
+  model_light_free: { args: '', text: 'pick from the light pool — a quota hit moves inside light only' },
+  model_free: { args: '', text: 'pick from the coding pool (rating at or above 35) — a quota hit moves inside coding only' },
+  model_go: { args: '', text: 'pick a lane on the paid Go plan — it never moves on its own' },
   allowance: { args: '[table]', text: 'shared free-lane allowance (same ledger as router)' },
   agent: { args: '[name]', text: 'pick an agent' },
   build: { args: '', text: 'switch to the build agent' },
   plan: { args: '', text: 'switch to the plan agent' },
   thinking: { args: '[level]', text: 'pick the thinking level (variant)' },
+  skills: { args: '', text: 'list /do-* skills you can type here (typed, not buttons)' },
   tui: {
     args: '', text: 'open this conversation in a real terminal (Mini App button)',
     extra: [
@@ -86,6 +111,8 @@ export const HELP_USAGE = {
     ],
   },
   bugs: { args: '', text: 'open the shared bug board (Mini App button)' },
+  fleet: { args: '', text: 'open the live fleet dashboard across all machines (Mini App button)' },
+  review: { args: '', text: 'review finished work: proof screenshots, approve with 👍 or comment back (Mini App button)' },
   forge: { args: '', text: 'create a new bot in one click (Mini App forge)' },
   debug: { args: '', text: 'show the active work-session debug view' },
   handoff: { args: '', text: 'checkpoint this work session for continuation' },
@@ -94,14 +121,43 @@ export const HELP_USAGE = {
   project: { args: '[name]', text: 'view or switch project (/project external 1)' },
   council: { args: '[stage]', text: 'run a council stage by name or number (all | run | status)' },
   role: { args: '[name]', text: 'switch bot role (/role accountant) or project persona (/role legal)' },
-  health: { args: '[sub]', text: 'health coach: verify · ingest · refresh · analyze · readiness · research · doctor · status' },
+  health: { args: '[sub]', text: 'health coach: verify · ingest · refresh · analyze · readiness · research · doctor · status · triage · dashboard' },
   tax: { args: '[sub]', text: 'Chiwah LTD tax: snapshot · sweep · status · deadlines · saving · doc' },
   location: { args: '[name]', text: 'show or switch compute location / quota pool' },
+  notify: { args: '[on|off|status]', text: 'finish alerts for runs started outside Telegram (web UI, TUI)' },
 };
 
 /** Payload for Telegram `setMyCommands` (strips nothing — already valid). */
+/**
+ * Menu-only skill entries. Telegram commands allow [a-z0-9_] (no hyphens),
+ * so the shared skills (do-github-sync, …) cannot appear verbatim: they are
+ * published in underscore form purely so they autocomplete. They are NOT bot
+ * commands — COMMAND_NAMES is untouched, so a tapped entry still falls
+ * through to the turn path as a prompt (M3), and normalizeSkillCommand below
+ * restores the hyphen form the skill library expects. Static on purpose: the
+ * menu must be identical on every host, not host-dependent.
+ */
+export const SKILL_MENU_COMMANDS = [
+  { command: 'do_check_source', description: 'check a plan against literature and best practice' },
+  { command: 'do_github_sync', description: 'sync checkouts with GitHub, signed and recorded' },
+  { command: 'do_plan_handoff', description: 'pack a plan for another agent and push to GitHub' },
+  { command: 'do_verify', description: 'verify actions before mutating commands and commits' },
+];
+
+/**
+ * `/do_github_sync …` -> `/do-github-sync …`: restore the hyphen form of a
+ * menu-tapped skill line. Only the command word is touched; the rest of the
+ * line (arguments, prose) passes through byte-identical.
+ */
+export function normalizeSkillCommand(text) {
+  const m = /^\/do_([A-Za-z0-9_]+)/.exec(String(text || ''));
+  if (!m) return text;
+  return `/do-${m[1].replace(/_/g, '-')}${String(text).slice(m[0].length)}`;
+}
+
 export function toTelegramCommands() {
-  return BOT_COMMANDS.map(({ command, description }) => ({ command, description }));
+  return BOT_COMMANDS.map(({ command, description }) => ({ command, description }))
+    .concat(SKILL_MENU_COMMANDS.map(({ command, description }) => ({ command, description })));
 }
 
 /**
@@ -110,12 +166,63 @@ export function toTelegramCommands() {
  * lands on the button. Pure (tested in tests/bot-host.test.ts); add new
  * payloads here, not as `case` branches in bot-host.mjs.
  */
+/**
+ * Spellings that route to a published command without being one.
+ *
+ * Kept out of BOT_COMMANDS on purpose: the popup and /help list what this bot
+ * does, and two names for one screen is one too many there. A reader who types
+ * the near-miss gets the screen, not a menu telling them they got it wrong.
+ *
+ * Currently empty, and the reason is worth keeping: the only alias was
+ * `freemodels → freemodel`, and an alias target must be a PUBLISHED command.
+ * The picker is three pool commands now and `/freemodel` is deliberately not
+ * published, so both old spellings are declared in HIDDEN_COMMANDS and answer
+ * as pointers (same outcome, and `isKnownCommand` still finds them).
+ */
+export const COMMAND_ALIASES = {};
+
 export function resolveCommandName(cmd) {
-  if (String(cmd?.name || '').toLowerCase() === 'start'
+  const name = String(cmd?.name || '').toLowerCase();
+  if (name === 'start'
     && String(cmd?.args || '').trim().toLowerCase() === 'bugs') {
     return 'bugs';
   }
+  // The plural is the spelling a reader actually types. `/freemodels` reached the
+  // switch as its own name, matched no case, and came back "Unknown command" with
+  // the whole menu — a wall of text instead of the one screen they asked for.
+  // An alias makes the near-miss land on the same handler rather than as a second
+  // `case`, so the command-parity gate still sees one command and not two. Empty
+  // today (see COMMAND_ALIASES): a moved name is declared hidden instead, because
+  // an alias target has to be published and `/freemodel` is not any more.
+  if (COMMAND_ALIASES[name]) return COMMAND_ALIASES[name];
   return cmd?.name;
+}
+
+/**
+ * The chat-answer contract used to live here: one bracketed line appended to
+ * every turn prompt (`opencode run` has no --system flag, so per-turn text was
+ * the only channel). Removed 2026-10-04 at the operator's call: it rendered
+ * verbatim in the shared session the TUI shows, same as the ping scaffolding
+ * before it. Spread the risk knowingly — without it, open answers may drift
+ * back toward status narrative and "want me to…" solicitations; if that
+ * regresses, the fix must be a channel that never lands in the transcript,
+ * not another per-turn suffix.
+ */
+
+/**
+ * True when the name is a bot command (published, hidden, or alias target).
+ * A leading `/` that is NOT known here is forwarded to the tool as the user
+ * prompt (plan/TG_TOOL_SURFACE.md M3) — that is how typed `/do-*` skills
+ * reach the tool instead of dying as "Unknown command". Bot commands win.
+ */
+export function isKnownCommand(name) {
+  const n = String(name || '').toLowerCase();
+  if (!n) return false;
+  if (COMMAND_NAMES.includes(n)) return true;
+  if (Object.hasOwn(HIDDEN_COMMANDS, n)) return true;
+  if (Object.hasOwn(COMMAND_ALIASES, n)) return true;
+  if (Object.values(COMMAND_ALIASES).includes(n)) return true;
+  return false;
 }
 
 /** Validate against Telegram Bot API limits; throws on violation. */
@@ -135,10 +242,37 @@ export function assertValidCommands(commands = BOT_COMMANDS) {
   return true;
 }
 
+/**
+ * Bare-greeting detector (plan: cleaner answers + connectivity checks).
+ *
+ * The operator uses "hi" to check the whole chain is alive, so a greeting
+ * must exercise the real turn path — it just does so cheaply (see the
+ * substitution in handleMessage). Only an exact bare greeting matches:
+ * anything with content ("hi, can you…") is untouched, and skill lines
+ * never match this map.
+ */
+const GREETING_RES = [
+  /^(hi|hello|hey|yo|hiya|howdy)$/,
+  /^(thanks|thank you|thx)$/,
+  /^(ok|okay|k|got it|noted)$/,
+];
+
+export function greetingReply(text) {
+  let t = String(text ?? '').trim().toLowerCase();
+  if (t.startsWith('/')) t = t.slice(1).trim();
+  t = t.replace(/[!?.,…]+$/, '').trim();
+  for (const re of GREETING_RES) {
+    if (re.test(t)) return t;
+  }
+  return null;
+}
+
   export function parseCommand(text) {
     const raw = String(text ?? '').trim();
     if (!raw.startsWith('/')) return null;
-    const [head, ...rest] = raw.split(/\s+/);
+    let normalized = raw;
+    if (/^\/status_all\s*$/i.test(raw)) return { name: 'status_all', args: 'all', raw };
+    const [head, ...rest] = normalized.split(/\s+/);
     const name = head.slice(1).toLowerCase().replace(/@[A-Za-z0-9_]+$/, '');
     return { name, args: rest.join(' ').trim(), raw };
   }
@@ -205,6 +339,16 @@ export const KNOWN_COUNCIL_ROLES = {
     id: 'doctor',
     name: 'Doctor',
     aliases: ['doctor', 'dr', 'doc', 'audit', 'auditor'],
+  },
+  tax_accountant: {
+    id: 'tax_accountant',
+    name: 'Tax Accountant',
+    aliases: ['tax accountant', 'tax_accountant', 'accountant', 'maker', 'companies house', 'company house'],
+  },
+  tax_verifier: {
+    id: 'tax_verifier',
+    name: 'Tax Verifier',
+    aliases: ['tax verifier', 'tax_verifier', 'verifier', 'checker'],
   },
   lifestyle: {
     id: 'health_analyst',
@@ -355,11 +499,30 @@ export function clearAllActiveThreads() {
   activeThreads.clear();
 }
 
+/**
+ * The coordinator adopts a named seat only when no enabled bot owns it.
+ *
+ * `dedicatedRoleIds` is the per-seat list (the live fleet). `hasDedicatedRoleBots:
+ * false` is the older single-bot switch: the coordinator adopts every seat.
+ * Passing neither leaves the coordinator quiet, which is what the bare addressing
+ * tests rely on.
+ */
+function masterAdoptsUnownedRole(roleId, isMaster, opts) {
+  if (!isMaster || !roleId || roleId === 'all') return false;
+  if (Array.isArray(opts.dedicatedRoleIds)) return !opts.dedicatedRoleIds.includes(roleId);
+  return opts.hasDedicatedRoleBots === false;
+}
+
 export function resolveGroupAddressing(message, self, opts = {}) {
   const rawText = String(message?.text || message?.caption || '').trim();
   const username = String(self?.username || '').replace(/^@/, '').toLowerCase();
   const id = Number(self?.id) || 0;
   const myRole = String(opts.role || self?.role || '').toLowerCase();
+  const myRoles = new Set(
+    [myRole, ...(Array.isArray(opts.roles) ? opts.roles : [])]
+      .map((role) => String(role || '').toLowerCase())
+      .filter(Boolean),
+  );
   const myName = String(opts.name || self?.name || '').toLowerCase();
   const isMaster = Boolean(opts.isMaster || self?.isMaster || self?.id === 'vm');
   const now = Number(opts.now) || Date.now();
@@ -414,10 +577,10 @@ export function resolveGroupAddressing(message, self, opts = {}) {
     const matchedIndex = extracted.roles.findIndex((r) => {
       const rId = r.roleId;
       const rName = r.roleName.toLowerCase();
-      return (myRole && myRole === rId) ||
+      return (myRoles.has(rId)) ||
         (myName && myName.includes(rName)) ||
         (username && username.includes(rId.replace(/_/g, ''))) ||
-        (isMaster && opts.hasDedicatedRoleBots === false);
+        masterAdoptsUnownedRole(rId, isMaster, opts);
     });
 
     if (matchedIndex !== -1) {
@@ -517,9 +680,10 @@ export function resolveGroupAddressing(message, self, opts = {}) {
           return { addressed: false, roleId: null, isBroadcast: false, cleanText: rawText, jointRoles: [], turnOrder: 0, delayMs: 0 };
         }
       } else {
-        const botMatchesThread = (thread.roleId && myRole && myRole === thread.roleId) ||
+        const botMatchesThread = (thread.roleId && myRoles.has(thread.roleId)) ||
           (thread.botId && (String(id) === String(thread.botId) || username === String(thread.botId).toLowerCase())) ||
-          (isMaster && opts.hasDedicatedRoleBots === false && (!thread.botId || String(thread.botId) === String(id)));
+          (opts.hasDedicatedRoleBots === false && isMaster && (!thread.botId || String(thread.botId) === String(id))) ||
+          (Array.isArray(opts.dedicatedRoleIds) && masterAdoptsUnownedRole(thread.roleId, isMaster, opts));
         if (botMatchesThread) {
           return {
             addressed: true,

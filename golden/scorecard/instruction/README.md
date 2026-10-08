@@ -19,7 +19,7 @@ npm run scorecard:debug
 
 Exit 0 = all green. Exit 1 = not all green. Cite **all green** only on exit 0 **and** Contract `overall_named_gates` PASS in `current/MASTER_SCORECARD_DEBUG.json`.
 
-Live origin is `https://health-tracker-backend-64gt.onrender.com/`. Local named-gate green is **not** a pass. `scorecard-live` must hit that host; Render spin-up is waited, then FAIL. Skip is FAIL in every area.
+Live origin is `https://health-tracker.co.uk/`. Local named-gate green is **not** a pass. `scorecard-live` must hit that host; cold start is waited, then FAIL. Skip is FAIL in every area.
 
 ## You must not
 

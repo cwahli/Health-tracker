@@ -76,7 +76,7 @@ try {
   ];
   const folded = withCatalogLanes(baseTable, foldCatalog, { now: Date.now() });
   check('a catalogued model with no lane row gets one', folded.added.length === 3, JSON.stringify(folded.added.map((l) => l.model)));
-  check('a gemini model reached through opencode gets a row', folded.table.lanes.some((l) => l.model === 'google/gemini-3.8-flash'));
+  check('a gemini model reached through opencode gets a row', folded.table.lanes.some((l) => l.model.endsWith('gemini-3.8-flash')));
   check('a gemini: ref gets a row too', folded.table.lanes.some((l) => l.model === 'gemini-3.7-flash'));
   check('a pending-signin placeholder is not turned into a lane', !folded.table.lanes.some((l) => String(l.model).includes('pending:')));
   check('an existing row is not duplicated', folded.table.lanes.filter((l) => l.model === 'opencode/muse-spark-1.3-contributor-free').length === 1);
@@ -91,9 +91,9 @@ try {
   check('a folded label keeps a real product name intact',
     withCatalogLanes({ version: 3, lanes: [] }, [{ ref: 'cline:cline-free/kat-coder-pro', label: 'cline:kat coder pro (free)' }]).added[0].label === 'kat coder pro');
   const foldedRows = projectLanes(folded.table, {});
-  check('a folded gemini row is selectable', foldedRows.find((r) => r.model === 'google/gemini-3.8-flash')?.selectable === true);
-  check('a folded gemini row is planned as GM', foldedRows.find((r) => r.model === 'google/gemini-3.8-flash')?.plan === 'GM');
-  check('a vendor-prefixed opencode lane is planned as OC', foldedRows.find((r) => /space-bunny-free$/.test(r.model))?.plan === 'OC');
+  check('a folded gemini row is selectable', foldedRows.find((r) => r.model.endsWith('gemini-3.8-flash'))?.selectable === true);
+  check('a folded gemini row is planned as GM', foldedRows.find((r) => r.model.endsWith('gemini-3.8-flash'))?.plan === 'GM');
+  check('a vendor-prefixed opencode lane is planned as OG', foldedRows.find((r) => /space-bunny-free$/.test(r.model))?.plan === 'OG');
   // A bullet naming a second vendor prefix for a model the table already carries
   // must resolve to that row, not claim the model has no ledger row.
   const twinTable = { version: 3, lanes: [
@@ -114,12 +114,12 @@ try {
   check('a tokenharbor row and an opencode row for the same base name both survive',
     twoProviders.table.lanes.length === 2 && twoProviders.added.length === 1,
     JSON.stringify(twoProviders.table.lanes.map((l) => l.model)));
-  // The same model under two vendor prefixes must not become two rows.
+  // Distinct provider pools (opencode vs opencode-go) each survive with their own quota.
   const twice = withCatalogLanes({ version: 3, lanes: [] }, [
     { ref: 'opencode/space-bunny-free' },
     { ref: 'opencode-go/space-bunny-free' },
   ]);
-  check('the same model under two vendor prefixes is one row', twice.added.length === 1, JSON.stringify(twice.added.map((l) => l.model)));
+  check('distinct provider pools for the same model both survive with their own quota', twice.added.length === 2, JSON.stringify(twice.added.map((l) => l.model)));
   // A provider with no credential here still gets a row, and the projection is what
   // refuses it — that is the "X at the bottom", not a missing row.
   const noKey = projectLanes(withCatalogLanes({ version: 3, lanes: [] }, [{ ref: 'cloudflare/@cf/qwen/qwen3.8-27b' }]).table, {},
@@ -295,6 +295,11 @@ try {
   check('/allowance does not tick a terminal-only lane green', !/✅[^\n]*Freebuff/.test(fbText), fbText.split('\n').filter((l) => /Freebuff/.test(l)).join(' | '));
   check('/allowance says why it is not usable', /terminal only/.test(fbText));
   check('/freemodel marks the same lane not usable', /❌/.test(fbText) && /Freebuff/.test(fbText));
+  // The prose beside a ❌ must not sell the lane: the ledger holds no Freebucks
+  // stamp, so "ready" and the literal "~1h" were claims without a source
+  // (live 2026-10-06, the vm3 reply the operator pasted twice).
+  check('/allowance does not sell the terminal-only row as ready',
+    !/Freebuff:[^\n]*(ready|~1h)/.test(fbText), fbText.split('\n').filter((l) => /Freebuff/.test(l)).join(' | '));
 
   // 6e. Parity, asserted over a table that mixes every awkward shape at once: a
   // plain opencode lane, a terminal-only Freebuff lane whose projection ref carries
@@ -350,8 +355,9 @@ try {
     planCodeForLane({ provider: 'google', model: 'google/gemini-3.8-flash' }) === 'GM'
     && planCodeForLane({ provider: 'gemini', model: 'gemini-3.8-flash' }) === 'GM',
     `${planCodeForLane({ provider: 'google', model: 'google/gemini-3.8-flash' })}/${planCodeForLane({ provider: 'gemini', model: 'gemini-3.8-flash' })}`);
-  check('and folds an opencode vendor twin onto the same code',
-    planCodeForLane({ provider: 'opencode-go', model: 'opencode-go/space-bunny-free' }) === planCodeForLane({ provider: 'opencode', model: 'opencode/space-bunny-free' }));
+  check('opencode-go has its own pool code OG distinct from OC',
+    planCodeForLane({ provider: 'opencode-go', model: 'opencode-go/space-bunny-free' }) === 'OG'
+    && planCodeForLane({ provider: 'opencode', model: 'opencode/space-bunny-free' }) === 'OC');
   const twinLanes = { version: 3, buckets: {}, lanes: [
     { pref: 5, provider: 'opencode', model: 'tokenharbor/deepseek-v4.1-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'OpenCode Token Harbor DeepSeek V4.1 Flash free' },
     { pref: 7, provider: 'tokenharbor', model: 'deepseek-v4.1-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'Token Harbor chat DeepSeek V4.1 Flash free' },
@@ -379,7 +385,7 @@ try {
   const canon = canonicalAllowanceLanes({ table: shared, session: {}, readiness: null });
   const canonKeys = canon.map((r) => `${r.plan}|${String(r.model).toLowerCase().split('/').filter(Boolean).pop()}`);
   check('the Token Harbor pair is one row', canonKeys.filter((k) => k.startsWith('TH|')).length === 1, JSON.stringify(canonKeys));
-  check('a vendor twin is one row', canonKeys.filter((k) => /space-bunny/.test(k)).length === 1, JSON.stringify(canonKeys));
+  check('distinct provider pools for space-bunny both survive', canonKeys.filter((k) => /space-bunny/.test(k)).length === 2, JSON.stringify(canonKeys));
   check('the google/gemini lane is one GM row', canonKeys.filter((k) => k.startsWith('GM|')).length === 1, JSON.stringify(canonKeys));
   check('every row is unique', new Set(canonKeys).size === canonKeys.length, JSON.stringify(canonKeys));
   check('and /allowance renders exactly that many rows', (() => {
@@ -448,28 +454,77 @@ try {
   check('and the supersession score has one home, in free-lanes, reading the catalog',
     /scoreOf = laneScoreFromCatalog/.test(lanesSrc) && /from '.\/free-catalogs.mjs'/.test(lanesSrc)
     && !/scoreOf: modelScore/.test(paritySrc) && !/function modelScore\(/.test(paritySrc));
-  check('and no-credential rows leave the count on both surfaces',
-    /const needsSetup = rows\.filter\(\(r\) => r\.needsSetup\)/.test(paritySrc) && /need setup/.test(paritySrc) && /needsSetup\.length \? ` · \$\{needsSetup\.length\} need setup`/.test(paritySrc));
+  // A row whose provider has no credential leaves the list. It used to also print a
+  // "needs setup:" footer line naming it; there is no body to print it in any more,
+  // so what has to hold is the exclusion itself, on both surfaces.
+  check('and no-credential rows leave the list on both surfaces',
+    /const listed = rows\.filter\(\(r\) => !r\.needsSetup\)/.test(paritySrc));
 
   // 7. /freemodel's body must not contradict /allowance.
   const read = (p) => fs.readFileSync(path.join(HERE, p), 'utf8');
   const botSrc = read('bot-host.mjs');
+  // Scoped to the /freemodel formatter: /setup legitimately prints a bullet per gap.
+  const fmBody = (botSrc.slice(botSrc.indexOf('function formatFreemodelWithDepletion'), botSrc.indexOf('/** Usable rows the ledger has no record for')) || '');
   // The rows are the canonical list in the canonical tier-group order — the same
-  // helper /allowance groups with — not a second ordering of the same models.
-  // The breakdown has to match, not just the order: the keyboard carries a heading
-  // row per group with the same label and count /allowance prints above the section,
-  // from the same groupRowsByTier() result.
-  check('/freemodel heads each tier group with the same label and count',
-    /buttons\.push\(\{ text: headingWidth\(`\$\{g\.label\} \(\$\{g\.rows\.length\}\)`\), data: 'noop', header: true \}\)/.test(botSrc));
+  // helper /allowance groups with — not a second membership of the same models.
+  // Within each group /freemodel sorts for use (usable by rating, unusable by
+  // reset); the keyboard carries a location-scoped Standard/Light heading row
+  // per group with the group's count, from the same groupRowsByTier() result.
+  check('/freemodel heads each tier group with a Standard/Light title and count',
+    /freemodelDisplayTier\(g\.tier, location \|\| 'vps'\)/.test(botSrc) && /data: 'noop', header: true/.test(botSrc));
   check('and a heading is a real noop, not a model named noop',
     /const payload = want === 'noop' \? 'noop' : `\$\{kind\}:\$\{want\}`/.test(read('lib/commands.mjs')));
-  check('the body carries the same breakdown as one line',
-    /function tierBreakdown\(groups, sep\)/.test(botSrc) && /tierBreakdown\(tierGroups, ' · '\)/.test(botSrc));
+  // The body is NOTHING. The titles, the totals and the "not usable" footer all
+  // used to sit above the keyboard as a prose summary of it — a second copy of
+  // the same list in a different vocabulary, and six lines of it on a phone
+  // before the first button. The keyboard is the message now, so the body is the
+  // one invisible character Telegram will accept as a non-empty send.
+  // The character is pinned, not left to taste. U+200B looked like the answer and
+  // was not: Telegram strips it and answers "text must be non-empty", which took
+  // /freemodel down entirely. U+2060 survives the check and draws nothing.
+  // One exception, added 2026-10-07, and it is not a summary of the keyboard: when a
+  // provider's lanes cannot run on this host they are not in the keyboard at all, so
+  // the body is the only place that can say so. Everything the keyboard DOES show is
+  // still unsaid above it, and with nothing blocked the body is still exactly U+2060.
+  // A second exception, added with the three model pools: a POOL keyboard carries one
+  // honest line naming the pool and what a quota hit does to the chat. That line is not
+  // a summary of the keyboard either — a keyboard cannot show a heading when it has one
+  // group, so the pool is the one fact the keyboard cannot carry, and it is also how a
+  // reader who only meant to look learns they are now constrained until /model.
+  check('the body is the keyboard alone — the pool line is the only other thing it carries',
+    /export const FREEMODEL_EMPTY_BODY = '\\u2060';/.test(botSrc)
+    && /text: bodyLines\.length \? bodyLines\.join\('\\n'\) : FREEMODEL_EMPTY_BODY,/.test(botSrc)
+    && /const setupNote = blockedProviderLines\(blocked\);/.test(botSrc)
+    && !/const lines = \[/.test(fmBody),
+    'the formatter falls back to the invisible body and carries the setup note, no list');
+  // And it must be one the API has been shown to ACCEPT, because reading as blank
+  // and counting as text are different questions to Telegram. These are the ones
+  // measured rejected on 2026-10-02 (each sent to the live API and the reply
+  // recorded); naming them is what stops the next person re-picking U+200B.
+  // If this fails, /freemodel is a silent 400 in every chat.
+  check('the body character is one Telegram accepts as non-empty',
+    (() => {
+      // Written as code points, not as literals: these characters are invisible
+      // in an editor and in a diff, which is exactly how U+200B got shipped.
+      const REJECTED = [0x20, 0x200b, 0xfeff, 0x2800, 0x3164]
+        .map((cp) => String.fromCodePoint(cp));
+      try {
+        const m = /export const FREEMODEL_EMPTY_BODY = '\\u([0-9A-Fa-f]{4})'/.exec(botSrc);
+        return Boolean(m) && !REJECTED.includes(String.fromCodePoint(parseInt(m[1], 16)));
+      } catch {
+        return false;
+      }
+    })(),
+    'REJECTED by the API: U+0020, U+200B, U+FEFF, U+2800, U+3164');
   check('and the per-button tier word is gone, now that the heading says it',
     !/tierWord/.test(botSrc));
 
   check('/freemodel renders the canonical list, not the raw catalog',
-    /const rows = tierGroups\.flatMap\(\(g\) => g\.rows\);/.test(botSrc) && /groupRowsByTier\(canonical \|\| \[\]\)/.test(botSrc) && /canonicalAllowanceLanes\(/.test(botSrc));
+    /const rows = tierGroups\.flatMap\(\(g\) => g\.rows\);/.test(botSrc)
+    && /const canonicalRows = pool \? poolRows\(canonical \|\| \[\], pool\) : \(canonical \|\| \[\]\);/.test(botSrc)
+    && /groupRowsByTier\(canonicalRows\)/.test(botSrc)
+    && /canonicalAllowanceLanes\(/.test(botSrc),
+    'the pool narrows the one list before it is grouped — never a second row list');
   check('/freemodel renders the union, not the raw catalog alone', /const \{ entries, annotated, table: fmTable, session: fmSession \} = getAnnotatedFreeModels\(caches, config\.id\)/.test(botSrc));
   check('a pending placeholder is dropped when the ledger has rows for that provider',
     /status !== 'pending-signin'\) return true;/.test(botSrc) && /effectiveProviderOf\(l\)/.test(botSrc));
@@ -484,12 +539,16 @@ try {
   check('/freemodel no longer claims everything is available', !/all selectable lanes look available/.test(codeOnly));
   check('/freemodel writes its own header, not the raw catalog count', /const header = formatFreeModelText/ .test(botSrc) === false);
   check('the header counts rows with no ledger row separately', /with no ledger row/.test(botSrc));
-  // The router's wording: a total, and how many are not usable.
-  check('/freemodel totals the rows the way the router does', /Total: \$\{listed\.length\}/.test(botSrc) && /not usable ❌/.test(botSrc));
-  // The reason is still shown, on one line, rather than as a second per-model list.
-  check('/freemodel still says why a row is unusable, on one line', /not usable: /.test(botSrc) && /\(reset in /.test(botSrc));
-  // Scoped to the /freemodel formatter: /setup legitimately prints a bullet per gap.
-  const fmBody = (botSrc.slice(botSrc.indexOf('function formatFreemodelWithDepletion'), botSrc.indexOf('/** Usable rows the ledger has no record for')) || '');
+  // The titles are keyboard heading rows now, not a line of body text, and the
+  // current lane is not printed at all — there is nowhere to print it.
+  check('/freemodel titles the Standard/Light groups as heading rows, not as a body line',
+    /buttons\.push\(\{\s*text:\s*headingWidth\(.*freemodelDisplayTier\(g\.tier/.test(botSrc) && !/current: \$\{current/.test(botSrc));
+  check('/freemodel never prints the old location brief', !/Free models\$\{location0\}/.test(botSrc));
+  // The reason a row cannot be used is on the row's own button — the ❌ mark and
+  // the compact reset countdown — rather than in a footer that listed the same
+  // models again. Nothing is lost; it just stops being said twice.
+  check('/freemodel says why a row is unusable on its own button, not in a footer list',
+    /resetIn: resetSource \? formatResetIn\(resetSource, now\)/.test(botSrc) && !/not usable: /.test(botSrc));
   check('and the /freemodel body carries no per-model bullet list', !/lines\.push\(`• /.test(fmBody) && !/Not selectable right now:/.test(fmBody));
   check('and it does not repeat the counts in a second footer', !/Allowance \(per-host ledger\)/.test(botSrc));
   // Depleted lanes stay tappable, exactly as the router does, so a tap can answer
@@ -556,7 +615,11 @@ try {
       && /lines\.push\(fitCells\(/.test(src)
       && /line: fitCells\(rowCopy\(\{ mark: ok \? "✅" : "❌"/.test(src);
   })());
-  check('and the message ends with the terminator', /lines\.push\('-'\)/.test(botSrc));
+  // /freemodel's body has no lines and therefore nothing to terminate: it never
+  // assembles a body at all. /allowance still has its own block, terminated by
+  // fitCopy's own dash.
+  check('and /freemodel has no lines to terminate, because it has no body',
+    !/lines\.push\('-'\)/.test(botSrc) && !/lines\.map\(/.test(botSrc));
 
   check('/freemodel sends its body as HTML, which is what makes it monospace', /parse_mode: 'HTML'/.test(botSrc));
   // One block for the whole message: the preamble is folded into the allowance text's

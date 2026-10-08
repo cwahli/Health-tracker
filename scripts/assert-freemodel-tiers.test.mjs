@@ -36,7 +36,7 @@ console.log('assert-freemodel-tiers (QS-6/QS-7)\n');
 
 const host = await import(path.join(__dirname, 'bot-host.mjs'));
 const { scoreLabelFor, tierForModel, benchmarkLabel } = await import(path.join(__dirname, 'lib', 'free-catalogs.mjs'));
-const { groupRowsByTier, headingWidth, widthUnits, COPY_UNITS, shortModelName } = await import(path.join(__dirname, 'lib', 'free-lanes.mjs'));
+const { groupRowsByTier, headingWidth, widthUnits, COPY_UNITS, shortModelName, freemodelDisplayTier, sortFreemodelTierRows, MODEL_POOLS, poolOfLane, poolRows, poolDisplayName } = await import(path.join(__dirname, 'lib', 'free-lanes.mjs'));
 const ADV_SPACE = widthUnits(' ');
 const { formatFreemodelWithDepletion } = host;
 check('the formatter is exported for the sensor', typeof formatFreemodelWithDepletion === 'function');
@@ -51,9 +51,16 @@ const rows = [
   { label: 'Freebuff lane', lane: { model: 'deepseek-v4-flash' }, model: 'freebuff/deepseek-v4-flash', ref: 'freebuff/deepseek-v4-flash', plan: 'FB', selectable: true, terminalOnly: true, inLedger: true },
 ];
 const out = formatFreemodelWithDepletion([], [], { current: 'x', location: 'vps', canonical: rows, tableLanes: [] });
+// The body is the keyboard and nothing else. It has to be non-empty (Telegram
+// rejects an empty sendMessage) and it has to be invisible, or the summary of the
+// keyboard is back above the keyboard as a second copy of the same list.
 const text = out.text;
-check('the header and total survive the tier projection',
-  text.includes('Free models at vps') && /Total: 5 · 3 usable/.test(text), text.split('\n')[4] || '');
+const INVISIBLE = new RegExp(host.FREEMODEL_EMPTY_BODY, 'g');
+check('the body is the keyboard alone — nothing but the invisible placeholder',
+  text === host.FREEMODEL_EMPTY_BODY
+  && text.replace(INVISIBLE, '') === ''
+  && !/Free models|Total:|not usable|current:|usable|depleted|reset in/.test(text),
+  JSON.stringify(text));
 
 const btns = out.buttons;
 const btnText = (b) => (typeof b === 'string' ? b : b.text);
@@ -64,8 +71,14 @@ const labelOf = (r) => r.laneLabel || r.label;
 const nameOf = (r) => shortModelName(r.lane || { label: labelOf(r) });
 
 // 2. order: the keyboard follows the catalogs' own grouping, one heading per
-// non-empty group with the same label and count /allowance prints above it.
-const groups = groupRowsByTier(rows);
+// non-empty group. The heading is the location-scoped TIER TITLE —
+// `VPS Standard model (10)` — not the internal group label, because that is what
+// the reader sees and the internal name ("coding-agent capable") is not copy.
+// Within a group the rows are ordered for USE (usable by rating first, then
+// unusable by earliest reset), because that is the order the formatter walks and
+// the same order the turn's failover takes. The sensor walks the formatter's own
+// order, or it would be asserting the catalog's storage order instead.
+const groups = groupRowsByTier(rows).map((g) => ({ ...g, rows: sortFreemodelTierRows(g.rows) }));
 check('the keyboard has one button per row plus the group headings',
   groups.length > 1 && btns.length === rows.length + groups.length,
   `${btns.length} buttons for ${rows.length} rows / ${groups.length} groups`);
@@ -75,7 +88,7 @@ const seenHeadings = [];
 for (const g of groups) {
   const heading = btnText(btns[cursor]);
   seenHeadings.push(heading);
-  if (heading !== headingWidth(`${g.label} (${g.rows.length})`)) orderOk = false;
+  if (heading !== headingWidth(`${freemodelDisplayTier(g.tier, 'vps')} (${g.rows.length})`)) orderOk = false;
   cursor += 1;
   for (const r of g.rows) {
     if (!btnText(btns[cursor]).includes(nameOf(r))) orderOk = false;
@@ -129,6 +142,60 @@ check('one button per row, route carried in data not in text',
   && rows.every((r) => { const b = buttonFor(r); return typeof b === 'object' && b.ref && b.data === b.ref && Boolean(b.text); })
   && btns.filter((b) => b.data === 'noop').every((b) => b.header === true),
   rows.map((r) => r.plan).join(','));
+
+// 7. The three pools: one list, three filters.
+//
+// Each pool picker is a FILTER of the same canonical list, so the three of them
+// must partition it — every row in exactly one pool, none lost, none counted
+// twice. That is the check that proves the rename drops nothing, and it is why
+// the rows the catalog refuses to place still have a home (they are not selectable
+// anywhere, but they are shown, marked ❌, on exactly one keyboard).
+const goRow = {
+  label: 'Space Bunny', laneLabel: 'Space Bunny',
+  lane: { provider: 'opencode-go', model: 'opencode-go/space-bunny-free' },
+  model: 'opencode-go/space-bunny-free', ref: 'opencode-go/space-bunny-free',
+  plan: 'OG', selectable: true, inLedger: true,
+};
+const poolFixture = [...rows, goRow];
+const poolIds = Object.keys(MODEL_POOLS);
+const pooled = poolIds.map((id) => poolRows(poolFixture, id));
+check('the three pools partition the one list — nothing lost, nothing counted twice',
+  pooled.reduce((n, r) => n + r.length, 0) === poolFixture.length
+  && poolFixture.every((r) => poolIds.filter((id) => poolRows(poolFixture, id).includes(r)).length === 1),
+  poolIds.map((id, i) => `${id}:${pooled[i].length}`).join(' '));
+check('the Go plan outranks the tier that lane also has',
+  poolOfLane(goRow.lane) === 'go'
+  && poolRows(poolFixture, 'coding').every((r) => r.plan !== 'OG')
+  && pooled[poolIds.indexOf('go')].length === 1,
+  String(poolOfLane(goRow.lane)));
+check('and the free pools follow the catalog cut, not a table in the bot',
+  poolRows(poolFixture, 'coding').every((r) => tierForModel(r.lane?.model || r.model || '').tier === 'high')
+  && poolRows(poolFixture, 'light').every((r) => tierForModel(r.lane?.model || r.model || '').tier !== 'high'));
+
+// Each pool's keyboard is that pool's rows and nothing else, and its body says
+// which pool it is: with one group a keyboard has no heading to say it, and the
+// reader also has to be told what a quota hit will do to the chat.
+const poolIssues = [];
+for (const id of poolIds) {
+  const out = formatFreemodelWithDepletion([], [], { current: 'x', location: 'vps', canonical: poolFixture, tableLanes: [], pool: id });
+  const shown = out.buttons.filter((b) => b.data !== 'noop').map((b) => b.ref);
+  const want = poolRows(poolFixture, id).map((r) => r.ref);
+  if (shown.length !== want.length || shown.some((r) => !want.includes(r))) poolIssues.push(`${id} rows ${shown.join('|')}`);
+  if (out.text === host.FREEMODEL_EMPTY_BODY || !out.text.includes(poolDisplayName(id, 'vps'))) poolIssues.push(`${id} body ${JSON.stringify(out.text)}`);
+  if (id === 'go' ? !/never moves on its own/.test(out.text) : !/moves inside this pool only/.test(out.text)) poolIssues.push(`${id} move ${out.text}`);
+}
+check('each pool renders its own rows and names itself in the body', poolIssues.length === 0, poolIssues.slice(0, 3).join(' | '));
+
+// An empty pool is answered as empty — never another pool's rows under this
+// pool's heading, which is the silent substitution this surface treats as the
+// worst kind.
+const emptyPool = formatFreemodelWithDepletion([], [], { current: 'x', location: 'vps', canonical: [], tableLanes: [], pool: 'go' });
+check('an empty pool is empty, and names itself',
+  emptyPool.rows.length === 0 && emptyPool.usable.length === 0
+  && emptyPool.text !== host.FREEMODEL_EMPTY_BODY
+  && emptyPool.text.includes(poolDisplayName('go', 'vps'))
+  && !emptyPool.text.includes(poolDisplayName('light', 'vps')),
+  JSON.stringify(emptyPool.text));
 
 console.log(`\n${pass} pass, ${fail} fail`);
 if (fail > 0) {

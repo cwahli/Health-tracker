@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Fleet Status</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { --gutter: clamp(12px, 3vw, 28px); }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 0 clamp(16px, 4vw, 40px) 0;
+    background: #0f172a; color: #e2e8f0;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%; line-height: 1.5;
+  }
+  .wrap { max-width: none; margin: 0; }
+  h1 { color: #f8fafc; font-size: clamp(18px, 3.5vw, 24px); margin: 0; }
+  h2 { color: #93c5fd; font-size: clamp(15px, 3vw, 19px); margin: 24px var(--gutter) 8px;
+       border-bottom: 1px solid #334155; padding-bottom: 4px; }
+  p { margin: 8px var(--gutter); font-size: 13px; color: #94a3b8; }
+  a { color: #7dd3fc; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { font-family: "SF Mono", Consolas, monospace; background: #1e293b;
+         color: #7dd3fc; padding: 2px 5px; border-radius: 4px; font-size: 12px;
+         overflow-wrap: anywhere; word-break: break-word; }
+
+  /* Sticky-header data grid: single table in scroll container */
+  .sticky-table { margin: 0; }
+  .st-scroll {
+    max-height: calc(100vh - 56px);
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain; /* Prevents Telegram swipe-down dismiss */
+    border-bottom: 1px solid #334155;
+  }
+  .st-table { width: 100%; border-collapse: separate; border-spacing: 0; background: #1e293b; }
+
+  th, td { padding: 9px 12px; text-align: left; font-size: 13px;
+           border-bottom: 1px solid #334155; vertical-align: top; overflow-wrap: break-word; }
+  thead th { position: sticky; top: 0; z-index: 6; background: #1d4ed8; color: #fff;
+             font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+             white-space: nowrap; border-bottom: 2px solid #1e40af;
+             cursor: pointer; user-select: none; }
+  thead th:hover { background: #2563eb; }
+  thead th[data-sort-dir="asc"]::after  { content: " \25B2"; font-size: 8px; }
+  thead th[data-sort-dir="desc"]::after { content: " \25BC"; font-size: 8px; }
+
+  /* Sticky first column */
+  th:first-child, td:first-child {
+    position: sticky; left: 0; z-index: 3;
+    width: 140px; min-width: 140px; max-width: 140px;
+    white-space: normal; overflow-wrap: anywhere; background: #1e293b;
+    box-shadow: 2px 0 0 0 #334155;
+  }
+  thead th:first-child { z-index: 7; background: #1d4ed8; }
+  tbody tr:nth-child(even) { background: #182234; }
+  tbody tr:nth-child(even) td:first-child { background: #182234; }
+  tbody tr.highlight { background: #1e3a8a !important; }
+  tbody tr.highlight td:first-child { background: #1e3a8a !important; }
+
+  /* Status Badges */
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 9999px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+  .badge-working { background: #065f46; color: #a7f3d0; border: 1px solid #059669; }
+  .badge-waiting { background: #854d0e; color: #fef08a; border: 1px solid #ca8a04; }
+  .badge-stale   { background: #451a03; color: #fdba74; border: 1px solid #c2410c; }
+  .badge-idle    { background: #334155; color: #cbd5e1; border: 1px solid #475569; }
+  .badge-offline { background: #450a0a; color: #fecaca; border: 1px solid #dc2626; }
+  .badge-active  { background: #1e40af; color: #bfdbfe; border: 1px solid #3b82f6; }
+  .badge-multi   { background: #581c87; color: #e9d5ff; border: 1px solid #9333ea; font-size: 10px; padding: 1px 5px; border-radius: 4px; margin-left: 6px; }
+  .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .badge-dot.pulse { animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.85); } }
+
+  /* Tab Navigation */
+  .tabbar > input { position: absolute; opacity: 0; pointer-events: none; }
+  .tabbar .masthead {
+    position: sticky; top: 0; z-index: 30;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: #0f172a; padding: 8px var(--gutter); margin: 0;
+    border-bottom: 1px solid #334155;
+  }
+  .tabbar .masthead .title-group { display: flex; align-items: center; gap: 8px; }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981; }
+  .btn-refresh {
+    background: #1e293b; border: 1px solid #334155; color: #93c5fd;
+    border-radius: 6px; padding: 2px 7px; font-size: 13px; cursor: pointer;
+    line-height: 1.2; display: inline-flex; align-items: center; justify-content: center;
+    transition: background 0.15s, transform 0.15s; user-select: none;
+  }
+  .btn-refresh:hover { background: #334155; }
+  .btn-refresh:active { transform: scale(0.92); }
+  .btn-refresh.spinning { animation: spin 0.8s linear infinite; pointer-events: none; opacity: 0.7; }
+  @keyframes spin { 100% { transform: rotate(360deg); } }
+  .tabbar .tabs { display: inline-flex; }
+  .tabbar .tabs label {
+    cursor: pointer; padding: 6px 12px; font-size: 12.5px; font-weight: 600;
+    color: #93c5fd; background: #1e293b; border: 1px solid #334155;
+    margin-left: -1px; white-space: nowrap; user-select: none;
+  }
+  .tabbar .tabs label:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+  .tabbar .tabs label:last-child { border-radius: 0 6px 6px 0; }
+  .tabbar .view { display: none; }
+
+  #btabs-vw-0:checked ~ .btabs-v-0 { display: block; }
+  #btabs-vw-0:checked ~ .masthead label[for="btabs-vw-0"] { background: #1d4ed8; color: #fff; border-color: #1e40af; }
+  #btabs-vw-1:checked ~ .btabs-v-1 { display: block; }
+  #btabs-vw-1:checked ~ .masthead label[for="btabs-vw-1"] { background: #1d4ed8; color: #fff; border-color: #1e40af; }
+  #btabs-vw-2:checked ~ .btabs-v-2 { display: block; }
+  #btabs-vw-2:checked ~ .masthead label[for="btabs-vw-2"] { background: #1d4ed8; color: #fff; border-color: #1e40af; }
+
+  .clickable-row { cursor: pointer; }
+  .clickable-row:hover td { background: #233554 !important; }
+  .empty-cell { color: #64748b; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="tabbar">
+    <input type="radio" name="btabs" id="btabs-vw-0" checked>
+    <input type="radio" name="btabs" id="btabs-vw-1">
+    <input type="radio" name="btabs" id="btabs-vw-2">
+
+    <div class="masthead">
+      <div class="title-group">
+        <span class="live-dot" id="live-indicator" title="Connected"></span>
+        <h1>Fleet</h1>
+        <button id="btn-refresh" class="btn-refresh" title="Refresh state" aria-label="Refresh state">🔄</button>
+      </div>
+      <div class="tabs">
+        <label for="btabs-vw-0" id="tab-label-tickets">Tickets (<span id="count-tickets">0</span>)</label>
+        <label for="btabs-vw-1" id="tab-label-terms">Term (<span id="count-terms">0</span>)</label>
+        <label for="btabs-vw-2" id="tab-label-bots">Bots (<span id="count-bots">0</span>)</label>
+      </div>
+    </div>
+
+    <!-- VIEW 0: TICKETS -->
+    <section class="view btabs-v-0">
+      <div class="sticky-table">
+        <div class="st-scroll">
+          <table class="st-table" id="table-tickets">
+            <thead>
+              <tr>
+                <th>Original request</th>
+                <th>Owner</th>
+                <th>Work done so far</th>
+                <th>What's left to do</th>
+                <th>Status</th>
+                <th>Completion proof</th>
+                <th>Completion gate</th>
+                <th>Last activity</th>
+              </tr>
+            </thead>
+            <tbody id="body-tickets">
+              <tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8">Loading tickets…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 1: TERMINALS / MULTI-LOCATION PANES -->
+    <section class="view btabs-v-1">
+      <div class="sticky-table">
+        <div class="st-scroll">
+          <table class="st-table" id="table-terms">
+            <thead>
+              <tr>
+                <th>Location</th>
+                <th>Agent / Model</th>
+                <th>Status</th>
+                <th>Current Task</th>
+                <th>Linked Ticket</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody id="body-terms">
+              <tr><td colspan="6" style="text-align:center;padding:24px;color:#94a3b8">Loading terminal panes…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: BOTS -->
+    <section class="view btabs-v-2">
+      <div class="sticky-table">
+        <div class="st-scroll">
+          <table class="st-table" id="table-bots">
+            <thead>
+              <tr>
+                <th>Bot</th>
+                <th>Model</th>
+                <th>Runtime</th>
+                <th>State</th>
+                <th>Notes / Progress</th>
+              </tr>
+            </thead>
+            <tbody id="body-bots">
+              <tr><td colspan="5" style="text-align:center;padding:24px;color:#94a3b8">Loading bots…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function () {
+  // 1. Telegram WebApp initialization
+  if (window.Telegram && window.Telegram.WebApp) {
+    try {
+      window.Telegram.WebApp.ready();
+      window.Telegram.WebApp.expand();
+    } catch (e) {}
+  }
+
+  var state = { tickets: [], terminals: [], bots: [] };
+
+  function renderStatusBadge(status) {
+    var s = (status || 'idle').toLowerCase();
+    if (s === 'working') return '<span class="badge badge-working"><span class="badge-dot pulse"></span>Working</span>';
+    if (s === 'waiting_prompt' || s === 'waiting') return '<span class="badge badge-waiting"><span class="badge-dot"></span>Waiting</span>';
+    if (s === 'stale') return '<span class="badge badge-stale"><span class="badge-dot"></span>Stale</span>';
+    if (s === 'offline') return '<span class="badge badge-offline"><span class="badge-dot"></span>Offline</span>';
+    return '<span class="badge badge-idle"><span class="badge-dot"></span>Idle</span>';
+  }
+
+  // Proof screenshots ride the same session the API calls already use: the
+  // page keeps the gateway token in its query string, so the image request
+  // carries it too rather than opening a second, unauthenticated door.
+  function proofSrc(fileId) {
+    return '/fleet/api/proof/' + encodeURIComponent(fileId) + (location.search || '');
+  }
+  function proofLink(fileId) {
+    return 'https://drive.google.com/file/d/' + encodeURIComponent(fileId) + '/view';
+  }
+
+  function esc(s) {
+    if (!s && s !== 0) return '<span class="empty-cell">—</span>';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function renderTickets() {
+    var tb = document.getElementById('body-tickets');
+    if (!tb) return;
+    if (!state.tickets || !state.tickets.length) {
+      tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8">No tickets found</td></tr>';
+      return;
+    }
+    var html = state.tickets.map(function (t) {
+      var idStr = String(t.id || '').replace(/^#/, '');
+      // A Drive file id in the proof cell means "this is a screenshot": show the
+      // picture, not the link. The gateway streams the bytes (a Drive file is
+      // private, the browser cannot fetch it itself). Everything else — a
+      // folder link, a key, prose — stays the text it always was.
+      var proofCell = t.proofFileId
+        ? '<a href="' + esc(proofLink(t.proofFileId)) + '" target="_blank" rel="noopener">' +
+            '<img src="' + esc(proofSrc(t.proofFileId)) + '" alt="completion proof screenshot" ' +
+            'loading="lazy" style="max-width:220px;max-height:150px;border-radius:6px;border:1px solid #334155;cursor:zoom-in" ' +
+            'onerror="this.closest(\'td\').textContent=\'image unavailable\'">' +
+          '</a>'
+        : esc(t.completionProof);
+      return '<tr id="ticket-row-' + esc(idStr) + '" data-ticket-id="' + esc(idStr) + '">' +
+        '<td>' + esc(t.originalRequest) + '</td>' +
+        '<td>' + esc(t.owner) + '</td>' +
+        '<td>' + esc(t.workDoneSoFar) + '</td>' +
+        '<td>' + esc(t.whatsLeftToDo) + '</td>' +
+        '<td>' + esc(t.status) + '</td>' +
+        '<td>' + proofCell + '</td>' +
+        '<td>' + esc(t.completionGate) + '</td>' +
+        '<td>' + esc(t.lastActivity) + '</td>' +
+        '</tr>';
+    }).join('');
+    tb.innerHTML = html;
+    document.getElementById('count-tickets').textContent = state.tickets.length;
+  }
+
+  function switchToTicket(ticketId) {
+    if (!ticketId) return;
+    var norm = String(ticketId).replace(/^#/, '').replace(/^card:/, '');
+    var radio = document.getElementById('btabs-vw-0');
+    if (radio) radio.checked = true;
+    setTimeout(function () {
+      var row = document.getElementById('ticket-row-' + norm);
+      if (row) {
+        document.querySelectorAll('#body-tickets tr').forEach(function (r) { r.classList.remove('highlight'); });
+        row.classList.add('highlight');
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 50);
+  }
+
+  function formatTimeAgo(isoString) {
+    if (!isoString) return '<span class="empty-cell">—</span>';
+    try {
+      var dt = new Date(isoString);
+      var now = new Date();
+      var diffMs = now - dt;
+      if (isNaN(diffMs) || diffMs < 0) diffMs = 0;
+      var mins = Math.floor(diffMs / 60000);
+      var timeStr = dt.toTimeString().slice(0, 5);
+      if (mins < 1) return timeStr + ' (now)';
+      if (mins < 60) return timeStr + ' (' + mins + 'm)';
+      var hrs = Math.floor(mins / 60);
+      return timeStr + ' (' + hrs + 'h)';
+    } catch (e) {
+      return esc(isoString.slice(11, 19));
+    }
+  }
+
+  function renderTerms() {
+    var tb = document.getElementById('body-terms');
+    if (!tb) return;
+    if (!state.terminals || !state.terminals.length) {
+      tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#94a3b8">No terminals found</td></tr>';
+      return;
+    }
+    var html = state.terminals.map(function (m) {
+      var tKey = m.ticketKey || '';
+      var firstKey = tKey.split(',')[0].trim();
+      var clickAttr = firstKey ? ' class="clickable-row" onclick="window._jumpTicket(\'' + esc(firstKey) + '\')"' : '';
+      var multiBadge = m.multiClaim ? ' <span class="badge-multi" title="Multiple tickets claim this pane">multi-claim</span>' : '';
+      var linkedLink = tKey
+        ? '<a href="javascript:void(0)" onclick="window._jumpTicket(\'' + esc(firstKey) + '\')">' + esc(tKey) + '</a>' + multiBadge
+        : '<span class="empty-cell">—</span>';
+      return '<tr' + clickAttr + '>' +
+        '<td><strong>' + esc(m.location) + '</strong></td>' +
+        '<td>' + esc(m.agent) + '</td>' +
+        '<td>' + renderStatusBadge(m.status) + '</td>' +
+        '<td>' + esc(m.task) + '</td>' +
+        '<td>' + linkedLink + '</td>' +
+        '<td>' + formatTimeAgo(m.updatedAt) + '</td>' +
+        '</tr>';
+    }).join('');
+    tb.innerHTML = html;
+    document.getElementById('count-terms').textContent = state.terminals.length;
+  }
+
+  function renderBots() {
+    var tb = document.getElementById('body-bots');
+    if (!tb) return;
+    if (!state.bots || !state.bots.length) {
+      tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#94a3b8">No bots found</td></tr>';
+      return;
+    }
+    var html = state.bots.map(function (b) {
+      var badge = b.enabled
+        ? '<span class="badge badge-active"><span class="badge-dot"></span>Enabled</span>'
+        : '<span class="badge badge-idle">Disabled</span>';
+      return '<tr>' +
+        '<td><strong>' + esc(b.name || b.id) + '</strong></td>' +
+        '<td><code>' + esc(b.model) + '</code></td>' +
+        '<td>' + esc(b.runtime) + '</td>' +
+        '<td>' + badge + '</td>' +
+        '<td>' + esc(b.progress) + '</td>' +
+        '</tr>';
+    }).join('');
+    tb.innerHTML = html;
+    document.getElementById('count-bots').textContent = state.bots.length;
+  }
+
+  window._jumpTicket = switchToTicket;
+
+  function applyState(data) {
+    if (!data) return;
+    if (data.tickets) state.tickets = data.tickets;
+    if (data.terminals) state.terminals = data.terminals;
+    if (data.bots) state.bots = data.bots;
+    renderTickets();
+    renderTerms();
+    renderBots();
+  }
+
+  function fetchState(cb, isRefresh) {
+    var query = location.search;
+    if (isRefresh) {
+      query = query ? (query + '&refresh=1') : '?refresh=1';
+    }
+    var url = '/fleet/api/state' + query;
+    fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (data.ok) {
+          applyState(data);
+          var ind = document.getElementById('live-indicator');
+          if (ind) ind.style.background = '#10b981';
+        }
+        if (typeof cb === 'function') cb();
+      })
+      .catch(function () {
+        var ind = document.getElementById('live-indicator');
+        if (ind) ind.style.background = '#ef4444';
+        if (typeof cb === 'function') cb();
+      });
+  }
+
+  // Hook manual refresh button
+  var btnRef = document.getElementById('btn-refresh');
+  if (btnRef) {
+    btnRef.addEventListener('click', function () {
+      btnRef.classList.add('spinning');
+      fetchState(function () {
+        setTimeout(function () {
+          btnRef.classList.remove('spinning');
+        }, 350);
+      }, true);
+    });
+  }
+
+  // Initial fetch
+  fetchState();
+
+  // SSE setup
+  if (typeof EventSource !== 'undefined') {
+    try {
+      var sse = new EventSource('/fleet/api/events' + location.search);
+      sse.addEventListener('state', function (e) {
+        try { applyState(JSON.parse(e.data)); } catch (err) {}
+      });
+      sse.addEventListener('heartbeat', function (e) {
+        try {
+          var beat = JSON.parse(e.data);
+          var hit = false;
+          for (var i = 0; i < state.terminals.length; i++) {
+            if (state.terminals[i].location === beat.location) {
+              state.terminals[i].agent = beat.agent;
+              state.terminals[i].status = beat.phase === 'working' ? 'working' : (beat.phase || 'working');
+              state.terminals[i].task = beat.task;
+              state.terminals[i].ticketKey = beat.ticketKey;
+              state.terminals[i].updatedAt = beat.updatedAt;
+              hit = true;
+              break;
+            }
+          }
+          if (!hit) {
+            state.terminals.push({
+              location: beat.location,
+              agent: beat.agent,
+              status: beat.phase || 'working',
+              task: beat.task,
+              ticketKey: beat.ticketKey,
+              updatedAt: beat.updatedAt,
+            });
+          }
+          renderTerms();
+        } catch (err) {}
+      });
+      sse.onerror = function () {
+        var ind = document.getElementById('live-indicator');
+        if (ind) ind.style.background = '#f59e0b';
+      };
+      sse.onopen = function () {
+        var ind = document.getElementById('live-indicator');
+        if (ind) ind.style.background = '#10b981';
+      };
+    } catch (e) {}
+  }
+
+  // Backup poll every 15s (only when page is visible)
+  setInterval(function () {
+    if (document.visibilityState === 'visible') fetchState();
+  }, 15000);
+})();
+</script>
+</body>
+</html>
