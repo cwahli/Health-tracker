@@ -192,6 +192,22 @@ export const FREE_NAME_DENYLIST = {
   'opencode-go/space-bunny-free': 'paid Go plan: not a free lane there (user, 2026-10-07)',
 };
 
+/** The one Go-plan model /model_go must show. Kept out of the free inventory above. */
+export const GO_SPACE_BUNNY_REF = 'opencode-go/space-bunny-free';
+
+function goSpaceBunnyEntry(location) {
+  return {
+    ref: GO_SPACE_BUNNY_REF,
+    label: 'Go Space Bunny',
+    surface: 'opencode',
+    tool: 'opencode',
+    provider: 'opencode-go',
+    selectable: true,
+    location,
+    note: 'paid Go plan, shown by /model_go; not a free lane and not a zen failover',
+  };
+}
+
 export function listFreeOpenCode({ modelsCachePath, authPath, readJson = defaultReadJson, home = os.homedir(), env = process.env, includeUnready = false } = {}) {
   const paths = defaultPaths(home);
   const cache = readJson(modelsCachePath || paths.modelsCachePath);
@@ -329,6 +345,13 @@ export function buildFreeModelList(opts = {}) {
           ? 'Cloudflare Workers AI is not configured on this host (/setup)'
           : '';
       entries.push(entry(ref, { surface: 'opencode', tool: 'opencode', location, selectable: !notReady, note: notReady }));
+    }
+    // The paid Go Space Bunny is denied from listFreeOpenCode on purpose. /model_go
+    // is a filter of this catalog, so the row has to be authored here or a host
+    // whose live ledger predates it shows an empty Go keyboard. It is not a free
+    // lane and it is not folded in when OpenCode itself is down.
+    if (!entries.some((e) => e && e.ref === GO_SPACE_BUNNY_REF)) {
+      entries.push(goSpaceBunnyEntry(location));
     }
     const geminiRefs = listGeminiOpenCode({ ...opts, env, home });
     for (const ref of geminiRefs) {

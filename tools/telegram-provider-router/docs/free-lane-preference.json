@@ -193,6 +193,17 @@
       "tg": false,
       "resetRule": "shared daily Freebucks (Freebuff UI)",
       "notes": "terminal-only"
+    },
+    {
+      "pref": 18,
+      "family": "go-space-bunny",
+      "provider": "opencode-go",
+      "model": "opencode-go/space-bunny-free",
+      "label": "OpenCode Go Space Bunny",
+      "bucket": "opencode-go-per-model",
+      "tg": true,
+      "resetRule": "go-plan pool, separate quota from the OpenCode Zen free pool",
+      "notes": "Paid OpenCode Go plan. Shown by /model_go. Not a free lane, and not a same-family failover from opencode/space-bunny-free: family is go-space-bunny and pref 18 keeps it after every free lane."
     }
   ]
 }

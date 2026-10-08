@@ -6,8 +6,9 @@
  *
  *   1. `opencode-go/space-bunny-free` is NOT a free lane. The Go plan is paid, so
  *      a zero price there means "not metered" — its OpenCode Zen twin is the free
- *      one. A preference-doc row authored off the "-free" suffix had offered it as
- *      a second free Space Bunny pool, and the pool doc must not carry it.
+ *      one. The preference doc carries the Go row on its own family so /model_go
+ *      can show it. Family is not `space-bunny` and the pref is last, so an empty
+ *      Zen pool does not hop onto the paid plan. The free inventory still drops it.
  *   2. Cline's Muse Spark free IS free and working (the operator checked on Cline
  *      while the check skipped Cline outright), so the check pings it — through
  *      the Cline CLI, which is the only runner that can answer for that lane.
@@ -19,8 +20,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
 
-import { CLINE_FREE_MODELS, FREE_NAME_DENYLIST, listFreeOpenCode } from './freemodels.mjs';
-import { clearHoldInPlace, clearLaneHold } from './free-lanes.mjs';
+import { CLINE_FREE_MODELS, FREE_NAME_DENYLIST, GO_SPACE_BUNNY_REF, buildFreeModelList, listFreeOpenCode } from './freemodels.mjs';
+import { canonicalAllowanceLanes, clearHoldInPlace, clearLaneHold, nextAvailableRoutes, poolOfLane, poolRows, tableFromPreferenceDoc } from './free-lanes.mjs';
 import { holdEvidence, holdStampFromError, probeKindForLane, probeModelForLane, recheckTargets, selectBurnTargets } from './free-lane-probe.mjs';
 
 const PREF_DOC = fileURLToPath(
@@ -60,9 +61,44 @@ describe('the free pool', () => {
     expect(FREE_NAME_DENYLIST[BUNNY_ZEN]).toBeUndefined();
   });
 
-  it('carries no Go-plate Space Bunny row in the preference doc the ledger seeds from', () => {
+  it('carries the Go Space Bunny on its own family so /model_go can show it', () => {
     const rows = prefDoc().lanes || [];
-    expect(rows.filter((l) => String(l.model || '') === BUNNY_GO)).toHaveLength(0);
+    const row = rows.find((l) => String(l.model || '') === BUNNY_GO);
+    expect(row).toBeTruthy();
+    expect(row.provider).toBe('opencode-go');
+    expect(row.family).toBe('go-space-bunny');
+    expect(row.family).not.toBe('space-bunny');
+    expect(row.bucket).toBe('opencode-go-per-model');
+    expect(row.pref).toBe(18);
+    expect(row.tg).not.toBe(false);
+    expect(poolOfLane(row)).toBe('go');
+    const zen = rows.find((l) => String(l.model || '') === BUNNY_ZEN);
+    expect(zen.family).toBe('space-bunny');
+    expect(zen.pref).toBeLessThan(row.pref);
+    const table = tableFromPreferenceDoc(prefDoc());
+    const canon = canonicalAllowanceLanes({ table });
+    expect(poolRows(canon, 'go').some((r) => String(r.model).includes('space-bunny-free') && r.plan === 'OG')).toBe(true);
+    expect(poolRows(canon, 'coding').some((r) => poolOfLane(r.lane || r) === 'go')).toBe(false);
+    expect(poolRows(canon, 'light').some((r) => poolOfLane(r.lane || r) === 'go')).toBe(false);
+    const next = nextAvailableRoutes(table, {}, { fromProvider: 'opencode', fromModel: BUNNY_ZEN });
+    expect(next[0] && next[0].model).not.toBe(BUNNY_GO);
+    expect(next.some((r) => r.family === 'space-bunny' && String(r.model).includes('opencode-go'))).toBe(false);
+  });
+
+  it('folds the Go Space Bunny into the catalog when OpenCode is up, and never calls it free', () => {
+    const list = buildFreeModelList({
+      opencodeBin: process.execPath,
+      location: 'vps',
+      home: '/tmp/no-such-home-go-bunny',
+      env: { PATH: '/usr/bin:/bin', HOME: '/tmp/no-such-home-go-bunny' },
+      readJson: () => null,
+    });
+    const go = list.find((e) => e && e.ref === GO_SPACE_BUNNY_REF);
+    expect(go).toBeTruthy();
+    expect(go.provider).toBe('opencode-go');
+    expect(go.label).toBe('Go Space Bunny');
+    expect(String(go.label)).not.toMatch(/\(free\)/i);
+    expect(listFreeOpenCode(cacheWithBothBunnies())).not.toContain(BUNNY_GO);
   });
 
   it('keeps Cline Muse Spark free in the free list, with a preference row the check can reach', () => {

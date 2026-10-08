@@ -2240,7 +2240,7 @@ function buildDispatchRoutes(start) {
     // announcing an auto-switch the reader did not ask for.
     if (pool) {
       throw new Error(
-        `No ${pool} lane can take this turn — this chat is pinned to the ${poolDisplayName(pool, "router")} and a quota hit does not cross pools. Send /model to clear the pool, or wait for a reset.`
+        `No ${pool} lane can take this turn — this chat is pinned to the ${poolDisplayName(pool, "router")} and a quota hit does not cross pools. Run another pool command to leave this one, or wait for a reset.`
       );
     }
     throw new Error(allFreeLanesDepletedMessage(start.provider, start.model));
@@ -2828,8 +2828,9 @@ async function probeOpenCodeFree() {
         });
       }
     }
-    out.sort((a, b) => a.label.localeCompare(b.label));
-    return { ok: true, items: out };
+    const withGo = appendGoSpaceBunny(out, providers);
+    withGo.sort((a, b) => a.label.localeCompare(b.label));
+    return { ok: true, items: withGo };
   } catch (e) {
     return { ok: false, reason: String(e.message || e).slice(0, 200), items: [] };
   }
@@ -3246,7 +3247,38 @@ function freemodelProviderTag(providerKey, item) {
   const mid = String(item?.id || "").toLowerCase();
   if (mid.startsWith("tokenharbor/")) return "TH tools";
   if (mid.startsWith("cloudflare/")) return "Cloudflare";
+  if (mid.startsWith("opencode-go/")) return "Go";
   return PROVIDERS[providerKey]?.label || providerKey;
+}
+
+/** The one paid Go model /model_go must show. Not a member of FREE_FAMILIES["space-bunny"]. */
+const GO_SPACE_BUNNY_ID = "opencode-go/space-bunny-free";
+
+/**
+ * Add the Go Space Bunny to a successful OpenCode probe.
+ *
+ * The probe only walks provider id `opencode`, so the Go plan never appeared
+ * on /model_go. A model under provider id `opencode-go` is included only when
+ * it is this bunny — the rest of the paid catalog stays off the free probe.
+ * The authored id is appended when the probe itself succeeded and the row is
+ * missing. Callers must not call this on a failed probe.
+ */
+function appendGoSpaceBunny(items, providers = []) {
+  const out = Array.isArray(items) ? items.map((item) => ({ ...item })) : [];
+  const go = (providers || []).find((p) => p && p.id === "opencode-go" && p.models);
+  if (go?.models) {
+    for (const [mid, meta] of Object.entries(go.models)) {
+      const idLow = String(mid).toLowerCase();
+      if (idLow !== "space-bunny-free" && idLow !== GO_SPACE_BUNNY_ID) continue;
+      if (out.some((x) => String(x.id).toLowerCase() === GO_SPACE_BUNNY_ID)) continue;
+      const name = (meta && meta.name) || "Space Bunny";
+      out.push({ id: GO_SPACE_BUNNY_ID, label: "Space Bunny", display: name });
+    }
+  }
+  if (!out.some((x) => String(x.id).toLowerCase() === GO_SPACE_BUNNY_ID)) {
+    out.push({ id: GO_SPACE_BUNNY_ID, label: "Space Bunny", display: "Space Bunny" });
+  }
+  return out;
 }
 
 /** Does this /freemodel result describe the shared Token Harbor free lane? */
@@ -3346,8 +3378,8 @@ function buildFreemodelReply(results, now = Date.now(), pool = null) {
     lines.unshift(
       `${poolDisplayName(pool, "router")} · ${total} lane${total === 1 ? "" : "s"} on this host — ` +
         (pool === "go"
-          ? "the Go plan is paid, so this lane never moves on its own. /model clears the pool."
-          : "a quota hit moves inside this pool only. /model clears the pool.")
+          ? "the Go plan is paid, so this lane never moves on its own. Pick another pool command to leave this one."
+          : "a quota hit moves inside this pool only. Pick another pool command to leave this one.")
     );
   }
   if (total) {
@@ -3641,8 +3673,9 @@ bot.command("start", async (ctx) => {
   await ctx.reply(
     "Unified coding router ready.\n\n" +
       "/switch — pick provider\n" +
-      "/model — list/set free model for active provider\n" +
-      "/freemodel — tap to select a free model\n" +
+      "/model_light_free — light pool\n" +
+      "/model_free — coding pool\n" +
+      "/model_go — paid Go plan\n" +
       "/status — live provider status (usage, thinking, …)\n" +
       "/thinking [level] — show/set thinking effort (cline)\n" +
       "/allowance — remaining free-lane allowance (best-effort)\n" +
@@ -3661,8 +3694,9 @@ bot.command("help", async (ctx) => {
     "Commands:\n" +
       "/switch [opencode|cline|tokenharbor|freebuff|commandcode]\n" +
       "/project [external N] — switch project workspace (e.g. /project external 4)\n" +
-      "/model [id] — list or set free model for active provider\n" +
-      "/freemodel [provider] — tap to select a free model\n" +
+      "/model_light_free — light pool; a quota hit stays inside light\n" +
+      "/model_free — coding pool; a quota hit stays inside coding\n" +
+      "/model_go — paid Go plan; it never moves on its own\n" +
       "/status — live usage/thinking (opencode) + Thinking level (cline)\n" +
       "/thinking [none|low|medium|high|xhigh] — show/set Cline thinking\n" +
       "/allowance — free-lane allowance snapshot\n" +
@@ -3898,26 +3932,14 @@ bot.command("project", async (ctx) => {
 
 bot.command("model", async (ctx) => {
   if (!gate(ctx)) return;
-  const parts = (ctx.message?.text || "").trim().split(/\s+/);
-  const arg = parts.slice(1).join(" ").trim();
-  const p = state.provider;
-  const list = PROVIDERS[p].freeModels;
-  if (!arg) {
-    await ctx.reply(
-      `Free models for ${PROVIDERS[p].label}:\n` +
-        list.map((m) => `• \`${m}\`${state.models[p] === m ? " ← selected" : ""}`).join("\n") +
-        `\n\nUsage: /model ${list[0]}`
-    );
-    return;
-  }
-  // Allow any id; warn if not in free list. /model stays the unconstrained setter:
-  // naming a model here clears any pool a picker set, which restores the
-  // infer-from-the-model behaviour exactly.
-  state.models[p] = arg;
-  state.pool = null;
-  saveState(state);
-  const note = list.includes(arg) ? "" : "\n(Not in the default free list — OK if you know the id.)";
-  await ctx.reply(`Model set to \`${arg}\` on ${PROVIDERS[p].label}.${note}`);
+  // Handled but unpublished. The setter that cleared state.pool is gone: a typed
+  // /model now points at the three pool commands and does not change the model.
+  await ctx.reply(
+    "The model picker is three pools — pick the one this chat should stay in:\n" +
+      "`/model_light_free` — light lanes only; a quota hit moves inside light\n" +
+      "`/model_free` — coding-capable lanes only (rating 35 and above)\n" +
+      "`/model_go` — the paid Go plan; it never moves on its own"
+  );
 });
 
 
@@ -3973,8 +3995,7 @@ bot.command("freemodel", async (ctx) => {
     "The free-model picker is now three pools — pick the one this chat should stay in:\n" +
       "`/model_light_free` — light lanes only; a quota hit moves inside light\n" +
       "`/model_free` — coding-capable lanes only (rating 35 and above)\n" +
-      "`/model_go` — the paid Go plan; it never moves on its own\n" +
-      "`/model` clears the pool and goes back to the plain setter."
+      "`/model_go` — the paid Go plan; it never moves on its own"
   );
 });
 
@@ -4416,7 +4437,6 @@ const BOT_COMMANDS = [
   { command: "compact", description: "Compact OpenCode session context" },
   { command: "switch", description: "Switch provider (opencode, cline, …)" },
   { command: "project", description: "Switch project workspace (e.g. /project external 4)" },
-  { command: "model", description: "List or set model for active provider" },
   { command: "model_light_free", description: "Pick a free model from the light pool (a quota hit moves inside light only)" },
   { command: "model_free", description: "Pick a free model: coding-capable lanes only (rating at or above 35)" },
   { command: "model_go", description: "Pick a lane on the paid Go plan (never moves on its own)" },
@@ -4597,6 +4617,8 @@ export {
   FREEMODEL_BUTTON_WIDTH,
   leftishButtonLabel,
   freemodelProviderTag,
+  appendGoSpaceBunny,
+  GO_SPACE_BUNNY_ID,
   dedupeFreemodelItems,
   FREEBUFF_GLM_MODEL,
   FREEBUFF_MIMO_MODEL,

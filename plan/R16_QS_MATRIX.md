@@ -29,7 +29,7 @@ Secrets are never pasted here; the probe prints credential *presence* only.
 | QS-2 | Quota-shaped error never surfaces raw JSON; next lane completes the prompt | 🟢 | Live: switch line names failed → next lane, answer completed, no raw JSON, ledger untouched. |
 | QS-3 | Exhausted host hands off project + context | 🔴 | Needs ≥2 connected workers with quota; only one host here. Code exists (`/location`, handoff pack), not proved live. |
 | QS-4 | Automated pack-up with three paths | 🔴 | Same blocker as QS-3. |
-| QS-5 | Every agent's `/model` + `/freemodel` + `/allowance` match that host's probe | 🟡 | vps host green (probe ↔ rows agree per provider). `collab`/`grok`/`mobile` probes not captured. |
+| QS-5 | Every agent's pool pickers + `/allowance` match that host's probe | 🟡 | vps host green (probe ↔ rows agree per provider). `collab`/`grok`/`mobile` probes not captured. `/model` and `/models` are pointers now; this row stays partial. |
 | QS-6 | Free list split high vs light, from the existing catalogs | 🟢 | Tiers read from `FREE_CODING_TOOLS_CATALOG.md`; the ratings table that forked them is deleted. |
 | QS-7 | Benchmark score on `/freemodel` from the bakeoff, "unranked" when absent | 🟢 | Button labels are bakeoff counts or "unranked"; no number exists that the ledger has no row for. |
 | QS-8 | `/freemodel` list == `/allowance` list | 🟢 | 30 == 30 on both bots, live, after the parity fixes. |

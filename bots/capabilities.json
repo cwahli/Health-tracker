@@ -181,7 +181,7 @@
         "status_all": true,
         "new": true,
         "compact": true,
-        "model": true,
+        "model": false,
         "model_light_free": true,
         "model_free": true,
         "model_go": true,
@@ -213,7 +213,7 @@
         "review": false,
         "skills": false,
         "routerOnly": ["switch", "unlock"],
-        "aliases": ["think", "freemodel"]
+        "aliases": ["think", "freemodel", "model"]
       }
     },
     {
@@ -486,7 +486,7 @@
       "test": "T5",
       "scope": "common",
       "status": "done",
-      "prove": "live smoke: /models + /freemodel list; mid-chat /model switch works",
+      "prove": "live smoke: /model_light_free, /model_free and /model_go list their pools; /model and /models answer a pointer",
       "expect": [
         "scripts/lib/freemodels.mjs",
         "scripts/lib/agent-cline.mjs",

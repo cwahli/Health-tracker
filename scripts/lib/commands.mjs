@@ -15,8 +15,6 @@ export const BOT_COMMANDS = [
   { command: 'status_all', description: 'Show fleet-wide status across agents in this chat' },
   { command: 'new', description: 'Start a fresh session' },
   { command: 'compact', description: "Compact this chat's session in place (stays on it)" },
-  { command: 'model', description: 'Pick a model (or set it directly)' },
-  { command: 'models', description: 'List available models' },
   { command: 'model_light_free', description: 'Pick a free model from the light pool (a quota hit moves inside light only)' },
   { command: 'model_free', description: 'Pick a free model: coding-capable lanes only (rating at or above 35)' },
   { command: 'model_go', description: 'Pick a lane on the paid Go plan (never moves on its own)' },
@@ -62,6 +60,10 @@ export const HIDDEN_COMMANDS = {
   // unpublish alone would have made `/freemodel` a model question.
   freemodel: 'moved: the one free list became /model_light_free, /model_free and /model_go — answers as a pointer',
   freemodels: 'moved: plural of the old /freemodel; answers the same pointer',
+  // The unconstrained setter and its list. Deleting the names would make
+  // isKnownCommand() false, so a typed /model would fall through as a prompt.
+  model: 'moved: the setter became /model_light_free, /model_free and /model_go — answers as a pointer and does not set or clear a model',
+  models: 'moved: the model list became the three pool pickers — answers the same pointer',
   store: 'ops: store queue status/flush is a background concern, typed on demand',
   setup: 'ops: provider readiness gaps, surfaced via /allowance and typed to fix',
 };
@@ -92,8 +94,6 @@ export const HELP_USAGE = {
   status_all: { args: '', text: 'fleet-wide status table across agents in this chat' },
   new: { args: '', text: 'start a fresh session' },
   compact: { args: '', text: "compact this chat's session in place (stays on it)" },
-  model: { args: '[name]', text: 'pick a model (or set it directly)' },
-  models: { args: '', text: 'list available models' },
   model_light_free: { args: '', text: 'pick from the light pool — a quota hit moves inside light only' },
   model_free: { args: '', text: 'pick from the coding pool (rating at or above 35) — a quota hit moves inside coding only' },
   model_go: { args: '', text: 'pick a lane on the paid Go plan — it never moves on its own' },
@@ -180,6 +180,18 @@ export function toTelegramCommands() {
  * as pointers (same outcome, and `isKnownCommand` still finds them).
  */
 export const COMMAND_ALIASES = {};
+
+/** One reply for every retired model-picker name. No keyboard, no setter. */
+export const POOL_POINTER_LINES = [
+  'The model picker is three pools — pick the one this chat should stay in:',
+  '`/model_light_free` — light lanes only; a quota hit moves inside light',
+  '`/model_free` — coding-capable lanes only (rating 35 and above)',
+  '`/model_go` — the paid Go plan; it never moves on its own',
+];
+export const POOL_POINTER = POOL_POINTER_LINES.join('\n');
+
+/** The way out of a pool, now that /model no longer clears one. */
+export const POOL_EXIT_NOTE = 'Pick another pool command to leave this one.';
 
 export function resolveCommandName(cmd) {
   const name = String(cmd?.name || '').toLowerCase();
