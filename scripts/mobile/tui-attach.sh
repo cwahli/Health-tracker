@@ -73,6 +73,20 @@ WAIT_SECONDS="${TUI_WAIT_SECONDS:-180}"
 # the message is the point, not the wait. Override with TUI_REFUSAL_SECONDS.
 REFUSAL_SECONDS="${TUI_REFUSAL_SECONDS:-5}"
 
+# --- how long the connect took, so "it is slow" is a number and not a
+# feeling. Read at four points the script already passes through: start,
+# resolved, waited-out, ready. Nothing here waits or retries, and the
+# numbers are reported once, before the pane takes the screen.
+now_ms() {
+  local ms
+  ms="$(date +%s%3N 2>/dev/null || true)"
+  case "$ms" in
+    ''|*[!0-9]*) ms="$(date +%s)000" ;;
+  esac
+  printf '%s' "$ms"
+}
+T_START="$(now_ms)"
+
 read_json() {
   node -e '
     const fs = require("fs");
@@ -295,6 +309,8 @@ if [ "${TUI_DRY_RUN:-0}" = "1" ]; then
   [ -n "$LAUNCH_REASON" ] && echo "REASON=$LAUNCH_REASON"
   exit 0
 fi
+# Resolution is done: everything below is the wait and the pane.
+T_RESOLVED="$(now_ms)"
 
 # --- refuse a shared-session attach with no session to share. An opencode
 # terminal with no SID launches a bare opencode whose session the bot never
@@ -340,6 +356,7 @@ if ! lease_held "$LEASES" 1800; then
   sleep "$REFUSAL_SECONDS"
   exit 0
 fi
+T_WAITED="$(now_ms)"
 
 # --- refuse rather than fall back. Two different refusals, and they must not be
 # confused: a lane with NO terminal is a policy answer the user can act on
@@ -534,4 +551,18 @@ trap cleanup EXIT INT TERM
 tmux new-session -d -A -s "$TMUX_NAME" "${LAUNCH_ARGV[@]}"
 tmux set-option -t "$TMUX_NAME" status off 2>/dev/null || true
 tmux set-window-option -t "$TMUX_NAME" aggressive-resize on 2>/dev/null || true
+
+# The pane exists, so the connect is over and this is the only place the
+# number can exist at all. The phases are reported separately because
+# "slow" has two very different causes here: resolution (reading this
+# chat's prefs and session) and a wait for the bot's turn to finish.
+# Appended to the same log as the decision line, as a second record.
+T_READY="$(now_ms)"
+READY_MS=$((T_READY - T_START))
+RESOLVE_MS=$((T_RESOLVED - T_START))
+WAIT_MS=$((T_WAITED - T_RESOLVED))
+attach_log "decision=$DECISION ready_ms=$READY_MS resolve_ms=$RESOLVE_MS wait_ms=$WAIT_MS"
+printf '[tui] connected in %ss (resolved %ss, waited %ss)\n' \
+  "$((READY_MS / 1000))" "$((RESOLVE_MS / 1000))" "$((WAIT_MS / 1000))"
+
 tmux attach-session -t "$TMUX_NAME"

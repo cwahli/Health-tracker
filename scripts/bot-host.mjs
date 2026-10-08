@@ -370,6 +370,21 @@ function stateDir(id) {
   return dir;
 }
 
+/**
+ * Where a refused handoff is written when it cannot be delivered.
+ *
+ * This used to default to `<cwd>/specs/bot-handoff-dead-letter`, which put the
+ * record of a refusal inside whichever tree the process happened to be started
+ * from: the live box's serving clone had accumulated 17 untracked files that
+ * way (measured 2026-10-08) and every deploy read as dirty for a reason that
+ * had nothing to do with the code. A dead letter is state, so it belongs under
+ * the state root beside the ledger — and the root stays the CALLER's, so a test
+ * still cannot write into a live seat's state dir.
+ */
+function deadLetterRoot(botDir) {
+  return process.env.TG_DEAD_LETTER_DIR || path.join(botDir, 'dead-letter');
+}
+
 function readJson(file, fallback) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -5689,7 +5704,7 @@ export async function sendPeerEnvelope({
     envelope: built.envelope,
   });
   if (!bounded.ok) {
-    const file = deadLetter(process.env.TG_DEAD_LETTER_DIR || path.join(process.cwd(), 'specs', 'bot-handoff-dead-letter'), {
+    const file = deadLetter(deadLetterRoot(path.join(stateRoot, config.id)), {
       envelope: built.envelope,
       code: bounded.code,
       reason: bounded.reason,
@@ -6131,8 +6146,7 @@ export async function fetchDelegationSource({ sheetId, tabs = '', cachePath = ''
  */
 async function handlePeerHandoff({ config, message, verdict, runDelegation = null } = {}) {
   const dir = stateDir(config.id);
-  const deadLetterDir = process.env.TG_DEAD_LETTER_DIR
-    || path.join(process.cwd(), 'specs', 'bot-handoff-dead-letter');
+  const deadLetterDir = deadLetterRoot(dir);
   try {
     writeJson(path.join(dir, 'handoff.json'), verdict.ledger);
   } catch (err) {
