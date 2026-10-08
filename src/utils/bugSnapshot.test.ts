@@ -228,6 +228,38 @@ describe('bugSnapshot', () => {
     expect(abs).toMatch(/shot 1: https:\/\/[^\s]+\/api\/bugs\//);
   });
 
+  it('uses the stored shot key instead of guessing .jpg — a PNG upload must resolve', () => {
+    // Live-caught 2026-10-07 on card #53: a PNG filed via `bugctl create
+    // --screenshot` stores bugs/.../shot-01.png, but the evidence block printed
+    // name=shot-01.jpg, so the artifacts route 404d on the exact URL the
+    // packet hands to every surface. An unopenable evidence URL is the #303
+    // defect class recurring: it looks like it worked.
+    const abs = buildBugEvidenceText({
+      tagId: 'tag-1',
+      reports: [{
+        id: 'iss-9',
+        reportId: 'iss-9',
+        shot_count: 1,
+        r2_shots: [{
+          key: 'bugs/foodcart/tag-1/reports/iss-9/shot-01.png',
+          url: 'https://pub.example/bugs/foodcart/tag-1/reports/iss-9/shot-01.png',
+          contentType: 'image/png',
+        }],
+      }],
+      origin: 'https://health-tracking.duckdns.org',
+    });
+    expect(abs).toContain('name=shot-01.png');
+    expect(abs).toContain('key=bugs%2Ffoodcart%2Ftag-1%2Freports%2Fiss-9%2Fshot-01.png');
+    expect(abs).not.toContain('shot-01.jpg');
+    // Old rows carry a count but no stored keys: the .jpg guess stays.
+    const legacy = buildBugEvidenceText({
+      tagId: 'tag-1',
+      reports: [{ id: 'iss-9', reportId: 'iss-9', shot_count: 1 }],
+    });
+    expect(legacy).toContain('shot-01.jpg');
+    expect(legacy).not.toContain('key=bugs');
+  });
+
   it('tolerates a trailing slash or blank origin without doubling it up', () => {
     for (const origin of ['https://h.example/', 'https://h.example', '', null, undefined]) {
       const t = buildBugEvidenceText({
