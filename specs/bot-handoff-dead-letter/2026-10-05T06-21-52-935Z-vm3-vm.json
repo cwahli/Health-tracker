@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-05T06:21:52.935Z",
+  "code": "DUPLICATE",
+  "reason": "duplicate message id already seen",
+  "envelope": {
+    "v": 1,
+    "kind": "ask",
+    "ref": "spec:b2b-live-proof",
+    "depth": 1,
+    "from": "vm3",
+    "to": "vm",
+    "expires": 1791183112000,
+    "id": "live003",
+    "reply_to": "-",
+    "body": "B2B-1 live proof, second attempt: this proposal must land in inbox-vps-france.md."
+  }
+}

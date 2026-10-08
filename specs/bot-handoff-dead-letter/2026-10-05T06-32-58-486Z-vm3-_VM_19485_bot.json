@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-05T06:32:58.486Z",
+  "code": "TARGET_UNKNOWN",
+  "reason": "envelope is addressed to @VM_19485_bot",
+  "envelope": {
+    "v": 1,
+    "kind": "ask",
+    "ref": "spec:demo-1",
+    "depth": 1,
+    "from": "vm3",
+    "to": "@VM_19485_bot",
+    "expires": 1791183778000,
+    "id": "hop1aaa",
+    "reply_to": "-",
+    "body": "Question from vm3: is the fleet view of the queue current?"
+  }
+}

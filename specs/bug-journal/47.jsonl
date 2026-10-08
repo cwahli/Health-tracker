@@ -1,0 +1,3 @@
+{"op":"attempt","tag_id":"tag_muwytod2_4itv1p","state":"in_fix","flags":{},"hyp":"Repro run locates the drop stage (scout/parse/save/render) with debug bundle attached","result":"start","at":"2026-10-06T18:32:39.650Z"}
+{"op":"attempt","tag_id":"tag_muwytod2_4itv1p","state":"in_fix","flags":{},"hyp":"Repro run locates the drop stage (scout/parse/save/render) with debug bundle attached","result":"failed: dispatch failed: opencode did not resolve (no fix committed)","at":"2026-10-06T18:40:43.376Z"}
+{"op":"block","tag_id":"tag_muwytod2_4itv1p","state":"packed","flags":{"blocked_reason":"dispatch failed: opencode did not resolve (no fix committed)"},"reason":"dispatch failed: opencode did not resolve (no fix committed)","at":"2026-10-06T18:40:44.063Z"}

@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-05T06:33:10.730Z",
+  "code": "TARGET_UNKNOWN",
+  "reason": "envelope is addressed to @VM_19485_bot",
+  "envelope": {
+    "v": 1,
+    "kind": "ack",
+    "ref": "spec:demo-1",
+    "depth": 3,
+    "from": "vm3",
+    "to": "@VM_19485_bot",
+    "expires": 1791183790000,
+    "id": "hop3ccc",
+    "reply_to": "hop2bbb",
+    "body": "Ack from vm3: chain closed."
+  }
+}
