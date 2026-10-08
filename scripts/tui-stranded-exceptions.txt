@@ -60,3 +60,11 @@ e0859056  origin/agent/tui-s1: its chatId normalisation is on main via the one-s
 # against main. The branch also has no open PR, so nothing is being worked on it.
 5a035efd  origin/journey/fleet-miniapp: landed as the #482 squash 073cdc29 (ancestor of origin/main); the packet's TUI surface is on main and has advanced past this commit, so only the pre-squash sha is stranded, waived 2026-10-03
 41e4d07c  origin/journey/fleet-miniapp: landed as the #482 squash 073cdc29 with 5a035ef; its fleet-status extraction is on main and grown since, waived 2026-10-03
+4284f30  plan/tg-tool-surface kept-pane fix: additive content upstream (lease->pane fallback on main); stale-branch landing would revert main, archived as archive/plan-tg-tool-surface-20261008; sessionless equivalent lands via #629, waived 2026-10-08
+c43100aa  plan/tg-tool-surface no-split-sessions fix: same as above, equivalent lands via #629, waived 2026-10-08
+5642645b  merge branch main into plan/tg-tool-surface: history-sync merge, unlandable by nature; branch archived and deleted, waived 2026-10-08
+d4219bd6  merge main into plan/tg-tool-surface: same as above, waived 2026-10-08
+32edf74a  r16-scorecard merge: tip tree byte-identical to stale main ancestor (merge is a no-op); freemodel surface superseded by BOT-26 pools; preserved in tag archive/r16-scorecard-20261008, waived 2026-10-08
+fddee60  agent/tg-tool-surface plumbing generator: blob-identical file already upstream via #581; remaining delta is branch-behind downgrades (pool pickers, web renewal); 0% new content verified, waived 2026-10-08
+e0443075  agent/tg-tool-surface gateway defaults: co.uk default already on main plus newer web-renewal work; landing reverts it, waived 2026-10-08
+befe83e9  tui-lifecycle session/workspace binding: fully upstream in evolved form (scoping core, attach settling, always-pass-session all on main); rebase emptied to zero residual, waived 2026-10-08
