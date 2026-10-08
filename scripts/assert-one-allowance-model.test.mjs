@@ -486,12 +486,17 @@ try {
   // provider's lanes cannot run on this host they are not in the keyboard at all, so
   // the body is the only place that can say so. Everything the keyboard DOES show is
   // still unsaid above it, and with nothing blocked the body is still exactly U+2060.
-  check('the body is nothing at all — the keyboard is the whole message',
+  // A second exception, added with the three model pools: a POOL keyboard carries one
+  // honest line naming the pool and what a quota hit does to the chat. That line is not
+  // a summary of the keyboard either — a keyboard cannot show a heading when it has one
+  // group, so the pool is the one fact the keyboard cannot carry, and it is also how a
+  // reader who only meant to look learns they are now constrained until /model.
+  check('the body is the keyboard alone — the pool line is the only other thing it carries',
     /export const FREEMODEL_EMPTY_BODY = '\\u2060';/.test(botSrc)
-    && /text: setupNote\.length \? setupNote\.join\('\\n'\) : FREEMODEL_EMPTY_BODY,/.test(botSrc)
+    && /text: bodyLines\.length \? bodyLines\.join\('\\n'\) : FREEMODEL_EMPTY_BODY,/.test(botSrc)
     && /const setupNote = blockedProviderLines\(blocked\);/.test(botSrc)
     && !/const lines = \[/.test(fmBody),
-    'the formatter carries the setup note and nothing else');
+    'the formatter falls back to the invisible body and carries the setup note, no list');
   // And it must be one the API has been shown to ACCEPT, because reading as blank
   // and counting as text are different questions to Telegram. These are the ones
   // measured rejected on 2026-10-02 (each sent to the live API and the reply
@@ -515,7 +520,11 @@ try {
     !/tierWord/.test(botSrc));
 
   check('/freemodel renders the canonical list, not the raw catalog',
-    /const rows = tierGroups\.flatMap\(\(g\) => g\.rows\);/.test(botSrc) && /groupRowsByTier\(canonical \|\| \[\]\)/.test(botSrc) && /canonicalAllowanceLanes\(/.test(botSrc));
+    /const rows = tierGroups\.flatMap\(\(g\) => g\.rows\);/.test(botSrc)
+    && /const canonicalRows = pool \? poolRows\(canonical \|\| \[\], pool\) : \(canonical \|\| \[\]\);/.test(botSrc)
+    && /groupRowsByTier\(canonicalRows\)/.test(botSrc)
+    && /canonicalAllowanceLanes\(/.test(botSrc),
+    'the pool narrows the one list before it is grouped — never a second row list');
   check('/freemodel renders the union, not the raw catalog alone', /const \{ entries, annotated, table: fmTable, session: fmSession \} = getAnnotatedFreeModels\(caches, config\.id\)/.test(botSrc));
   check('a pending placeholder is dropped when the ledger has rows for that provider',
     /status !== 'pending-signin'\) return true;/.test(botSrc) && /effectiveProviderOf\(l\)/.test(botSrc));

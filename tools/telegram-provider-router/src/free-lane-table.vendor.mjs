@@ -617,9 +617,12 @@ export function usableTurnLanes(table, session, { now = Date.now(), labelFn = de
 }
 
 /** Soonest Reset-in among depleted TG lanes (for all-depleted Stop message). */
-export function soonestResetAmongDepleted(table, session, { now = Date.now(), labelFn = defaultResetLabel } = {}) {
+export function soonestResetAmongDepleted(table, session, { now = Date.now(), labelFn = defaultResetLabel, pool = null } = {}) {
   const t = overlayLiveQuota(table, session, { now, labelFn });
-  const depleted = [...(t.lanes || [])].filter((l) => l && l.tg !== false && l.status === "depleted");
+  let depleted = [...(t.lanes || [])].filter((l) => l && l.tg !== false && l.status === "depleted");
+  // A pool asks about ITS OWN lanes: the point of the constraint is that an
+  // exhausted light chat hears when light comes back, not when coding does.
+  if (pool) depleted = depleted.filter((l) => poolOfLane(l) === pool);
   let best = null;
   for (const l of depleted) {
     const until = l.nextResetAt ? Date.parse(l.nextResetAt) : NaN;
@@ -1798,6 +1801,89 @@ export function groupRowsByTier(rows, { tierOf = null } = {}) {
 }
 
 /**
+ * The three pools a chat can choose between, in one home.
+ *
+ * `/freemodel` was one list, so a reader had no way to say "keep this chat on the
+ * light lanes" or "keep it on the paid Go plan" — the walk inferred a pool from
+ * the chat's current model and crossed to the other pool the moment its own ran
+ * dry. The three commands below are FILTERS of that one list, never three lists:
+ * `/model_light_free` shows the light rows, `/model_free` the coding-capable rows
+ * (AA >= 35, the catalog's own cut), `/model_go` the OpenCode Go plan's rows.
+ *
+ * Pool and tier are orthogonal axes — a Go lane also has a tier — so the pools
+ * partition the canonical list rather than each naming a tier. `go` is tested
+ * first for the reason `planCodeForLane` keeps its own `OG` code: the Go plan is
+ * separate quota and must never dedupe onto, or be walked to from, a free pool.
+ * The rest are split by the catalog tier (`high` is the coding pool, everything
+ * else is light) — including the rows the catalog refuses to place, so the three
+ * pools stay a partition: a locked or terminal-only row is selectable nowhere,
+ * but it still has exactly one keyboard to be shown (and marked ❌) on rather
+ * than vanishing in the rename.
+ */
+export const MODEL_POOLS = {
+  light: { id: 'light', command: 'model_light_free' },
+  coding: { id: 'coding', command: 'model_free' },
+  go: { id: 'go', command: 'model_go' },
+};
+
+/** The command that opens one pool, or '' for an unknown id. */
+export function poolCommand(poolId) {
+  return MODEL_POOLS[poolId]?.command || '';
+}
+
+/** The pool a command name opens, or null. */
+export function poolForCommand(name) {
+  const n = String(name || '').toLowerCase();
+  return Object.values(MODEL_POOLS).find((p) => p.command === n)?.id || null;
+}
+
+/**
+ * Which pool a lane belongs to: 'go' | 'coding' | 'light' | null.
+ *
+ * Go is answered before the tier, because it is a plan and not a tier: an
+ * `opencode-go/*` row can carry a benchmark figure like any other model, and
+ * asking the catalog first would file the paid lane under the free coding pool
+ * it is deliberately kept out of.
+ */
+export function poolOfLane(lane) {
+  if (!lane) return null;
+  if (planCodeForLane(lane) === 'OG') return 'go';
+  const model = String(lane.model || '');
+  if (!model) return null;
+  return tierForModel(model).tier === 'high' ? 'coding' : 'light';
+}
+
+/** The same pool test for a bare chat ref (`cline:cline-free/x`, `opencode-go/y`). */
+export function poolOfRef(ref) {
+  const s = String(ref || '');
+  if (!s) return null;
+  const route = freemodelRefToRoute(s);
+  return poolOfLane({ provider: route.provider, model: route.model || s });
+}
+
+/** A canonical row's pool: its own lane when it carries one, its ref otherwise. */
+export function poolOfRow(row) {
+  if (!row) return null;
+  const lane = row.lane || null;
+  if (lane && (lane.provider || lane.model)) return poolOfLane(lane);
+  return poolOfRef(row.ref || row.model || '');
+}
+
+/** One pool's rows from the canonical list, in the list's own order. */
+export function poolRows(rows, poolId) {
+  return (rows || []).filter((r) => poolOfRow(r) === poolId);
+}
+
+/** Display name for a pool: `VPS Light pool`, `VPS Coding pool`, `VPS Go plan`. */
+export function poolDisplayName(poolId, location = 'vps') {
+  const loc = String(location || 'vps').toUpperCase();
+  if (poolId === 'light') return `${loc} Light pool`;
+  if (poolId === 'coding') return `${loc} Coding pool`;
+  if (poolId === 'go') return `${loc} Go plan`;
+  return `${loc} model pool`;
+}
+
+/**
  * Display name for a tier group on the /freemodel keyboard: location-scoped,
  * Standard vs Light. `high` (coding-agent-capable) renders as
  * e.g. `VPS Standard model`, `light` as `VPS Light model`. /allowance keeps the
@@ -2205,7 +2291,7 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
 export function buildAllowanceTextForBots({ stateDir = null, provider = "", model = "", location = "", now = Date.now(), labelFn = defaultResetLabel, readiness = null, catalogEntries = null } = {}) {
   const { table, session, source } = loadFreeLaneLedger({ stateDir, catalogEntries });
   if (!table) {
-    return "Allowance: no shared free-lane ledger found (router state + pref doc missing). Use /freemodel to list free models.";
+    return "Allowance: no shared free-lane ledger found (router state + pref doc missing). Use /model_free to list free models.";
   }
   try {
     const sess = provider && model

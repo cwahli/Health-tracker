@@ -17,7 +17,9 @@ export const BOT_COMMANDS = [
   { command: 'compact', description: "Compact this chat's session in place (stays on it)" },
   { command: 'model', description: 'Pick a model (or set it directly)' },
   { command: 'models', description: 'List available models' },
-  { command: 'freemodel', description: "List this host's available free models" },
+  { command: 'model_light_free', description: 'Pick a free model from the light pool (a quota hit moves inside light only)' },
+  { command: 'model_free', description: 'Pick a free model: coding-capable lanes only (rating at or above 35)' },
+  { command: 'model_go', description: 'Pick a lane on the paid Go plan (never moves on its own)' },
   { command: 'allowance', description: 'Show free-lane allowance (shared ledger)' },
   { command: 'agent', description: 'Pick an agent' },
   { command: 'build', description: 'Switch to the build agent' },
@@ -54,6 +56,12 @@ export const COMMAND_NAMES = BOT_COMMANDS.map((c) => c.command);
  * enforces: every handled command is either published or listed here.
  */
 export const HIDDEN_COMMANDS = {
+  // The one free list became three pools (2026-10-07). Both old spellings stay
+  // handled so muscle memory reaches the pointer instead of falling through to
+  // the tool as a prompt — `isKnownCommand` is what decides that, and an
+  // unpublish alone would have made `/freemodel` a model question.
+  freemodel: 'moved: the one free list became /model_light_free, /model_free and /model_go — answers as a pointer',
+  freemodels: 'moved: plural of the old /freemodel; answers the same pointer',
   store: 'ops: store queue status/flush is a background concern, typed on demand',
   setup: 'ops: provider readiness gaps, surfaced via /allowance and typed to fix',
 };
@@ -86,7 +94,9 @@ export const HELP_USAGE = {
   compact: { args: '', text: "compact this chat's session in place (stays on it)" },
   model: { args: '[name]', text: 'pick a model (or set it directly)' },
   models: { args: '', text: 'list available models' },
-  freemodel: { args: '', text: "list free models available on this host" },
+  model_light_free: { args: '', text: 'pick from the light pool — a quota hit moves inside light only' },
+  model_free: { args: '', text: 'pick from the coding pool (rating at or above 35) — a quota hit moves inside coding only' },
+  model_go: { args: '', text: 'pick a lane on the paid Go plan — it never moves on its own' },
   allowance: { args: '[table]', text: 'shared free-lane allowance (same ledger as router)' },
   agent: { args: '[name]', text: 'pick an agent' },
   build: { args: '', text: 'switch to the build agent' },
@@ -162,10 +172,14 @@ export function toTelegramCommands() {
  * Kept out of BOT_COMMANDS on purpose: the popup and /help list what this bot
  * does, and two names for one screen is one too many there. A reader who types
  * the near-miss gets the screen, not a menu telling them they got it wrong.
+ *
+ * Currently empty, and the reason is worth keeping: the only alias was
+ * `freemodels → freemodel`, and an alias target must be a PUBLISHED command.
+ * The picker is three pool commands now and `/freemodel` is deliberately not
+ * published, so both old spellings are declared in HIDDEN_COMMANDS and answer
+ * as pointers (same outcome, and `isKnownCommand` still finds them).
  */
-export const COMMAND_ALIASES = {
-  freemodels: 'freemodel',
-};
+export const COMMAND_ALIASES = {};
 
 export function resolveCommandName(cmd) {
   const name = String(cmd?.name || '').toLowerCase();
@@ -175,11 +189,11 @@ export function resolveCommandName(cmd) {
   }
   // The plural is the spelling a reader actually types. `/freemodels` reached the
   // switch as its own name, matched no case, and came back "Unknown command" with
-  // the whole menu — a wall of text instead of the one screen they asked for. The
-  // singular stays the published name (it is the one in the popup and in /help);
-  // this only makes the near-miss land on the same handler. Aliases live here
-  // rather than as a second `case` so the command-parity gate still sees one
-  // command, not two.
+  // the whole menu — a wall of text instead of the one screen they asked for.
+  // An alias makes the near-miss land on the same handler rather than as a second
+  // `case`, so the command-parity gate still sees one command and not two. Empty
+  // today (see COMMAND_ALIASES): a moved name is declared hidden instead, because
+  // an alias target has to be published and `/freemodel` is not any more.
   if (COMMAND_ALIASES[name]) return COMMAND_ALIASES[name];
   return cmd?.name;
 }

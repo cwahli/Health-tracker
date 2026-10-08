@@ -730,7 +730,7 @@ describe('commands', () => {
       agent: { model: 'opencode-go/deepseek-v4.1-flash', variant: 'high' },
     };
     const text = helpText(config, { model: 'opencode-go/muse-spark-1.3' });
-    for (const cmd of ['/new', '/status', '/model', '/models', '/freemodel', '/help', '/resume']) {
+    for (const cmd of ['/new', '/status', '/model', '/models', '/model_light_free', '/model_free', '/model_go', '/help', '/resume']) {
       expect(text).toContain(cmd);
     }
     // Run controls are gone: no /abort or /watch anywhere on the surface.
@@ -1031,9 +1031,27 @@ describe('pickers', () => {
     expect(toTelegramCommands().find((c) => c.command === 'free')).toBeUndefined();
     expect(src).not.toContain("case 'free'");
     // The replacement is still there and still published — removing the old name
-    // must not have taken the surface the reader is meant to use instead.
-    expect(COMMAND_NAMES).toContain('freemodel');
-    expect(toTelegramCommands().find((c) => c.command === 'freemodel')?.description.length).toBeGreaterThan(0);
+    // must not have taken the surface the reader is meant to use instead. The one
+    // picker became three pools (2026-10-07), so the replacement is now three
+    // names, and the old one is a declared hidden pointer rather than a menu entry.
+    for (const pool of ['model_light_free', 'model_free', 'model_go']) {
+      expect(COMMAND_NAMES).toContain(pool);
+      expect(help).toContain(`/${pool}`);
+      expect(toTelegramCommands().find((c) => c.command === pool)?.description.length).toBeGreaterThan(0);
+    }
+    expect(COMMAND_NAMES).not.toContain('freemodel');
+    // Still handled, because deleting the name would turn a typed `/freemodel`
+    // into a model prompt — the exact opposite of helpful.
+    expect(src).toContain("case 'freemodel':");
+    // …and it answers a POINTER: no keyboard, no list, nothing billed. Sliced from
+    // its own case to the case that opens the first pool, so the pool handlers'
+    // keyboards — which are the point of the three new names — are not what this
+    // reads. A second list under the old name is the exact failure the one-list
+    // rule exists to prevent.
+    const oldNameCase = src.slice(src.indexOf("case 'freemodel':"), src.indexOf("case 'model_light_free':"));
+    expect(oldNameCase.length).toBeGreaterThan(0);
+    expect(oldNameCase).toContain('/model_light_free');
+    expect(oldNameCase).not.toMatch(/reply_markup|modelKeyboard|formatFreemodelWithDepletion|sendFreeModelPicker/);
     expect(BOT_COMMANDS.length).toBe(new Set(COMMAND_NAMES).size);
     const shim = await import('../scripts/lib/bot-commands.mjs');
     expect(shim.BOT_COMMANDS).toEqual(BOT_COMMANDS);
@@ -2234,7 +2252,7 @@ describe('VM2 transcript error shapes', () => {
   it('classifies ProviderModelNotFound with its suggestion, deduped', () => {
     const out = extractLogError(`${modelNotFoundLine}\n${modelNotFoundLine}`);
     expect(out).toContain('Model not found');
-    expect(out).toContain('/freemodel');
+    expect(out).toContain('/model_free');
     expect(out).toContain('glm-5');
     expect(out).not.toContain('timestamp=');
     expect(out.indexOf('glm-4.7-free')).toBe(out.lastIndexOf('glm-4.7-free'));
