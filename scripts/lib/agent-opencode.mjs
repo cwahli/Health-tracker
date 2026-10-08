@@ -68,7 +68,25 @@ export function buildOpencodeEnv({
 }
 
 export function resolveOpencodeBin(explicit) {
-  if (explicit) return explicit;
+  // An explicit bin is only this host's bin when it is actually here. The
+  // registry's mobile entry is authored for the phone (`/root/.opencode/bin/opencode`,
+  // runtime "device") and the same entry is started as a VPS seat under
+  // `bot-host@mobile`; trusting the path without checking it made
+  // `commandAvailable()` answer "no opencode on this host" on a box that has
+  // opencode on PATH, so `buildFreeModelList` dropped every OpenCode row of the
+  // catalog — the G4 live proof (2026-10-08) showed the mobile picker with 14
+  // ledger-only rows while vm served 31, and `/model_go` empty for want of the
+  // two `opencode-go` catalog rows. A path from another host is not a credential
+  // gap; the host's own opencode is the fallback, and on the phone the path does
+  // exist so the device keeps its own binary byte-for-byte.
+  if (explicit) {
+    try {
+      fs.accessSync(explicit, fs.constants.X_OK);
+      return explicit;
+    } catch {
+      // keep looking
+    }
+  }
   const candidates = [
     path.join(HOME, '.opencode', 'bin', 'opencode'),
     '/usr/local/bin/opencode',
