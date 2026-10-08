@@ -78,12 +78,18 @@ REFUSAL_SECONDS="${TUI_REFUSAL_SECONDS:-5}"
 # resolved, waited-out, ready. Nothing here waits or retries, and the
 # numbers are reported once, before the pane takes the screen.
 now_ms() {
-  local ms
-  ms="$(date +%s%3N 2>/dev/null || true)"
-  case "$ms" in
-    ''|*[!0-9]*) ms="$(date +%s)000" ;;
+  local raw
+  # Asking the formatter for milliseconds is not portable: on the live box the
+  # `%s%3N` form printed seconds followed by the FULL nanosecond field
+  # (1791499779774203295), so every duration became a nine-digit number and the
+  # report read "connected in 456481s". Measured on the box 2026-10-08 by
+  # running this script there. So take nanoseconds where they exist and divide,
+  # and fall back to whole seconds where they do not.
+  raw="$(date +%s%N 2>/dev/null || true)"
+  case "$raw" in
+    ''|*[!0-9]*) printf '%s000' "$(date +%s)" ;;
+    *) printf '%s' "$((raw / 1000000))" ;;
   esac
-  printf '%s' "$ms"
 }
 T_START="$(now_ms)"
 

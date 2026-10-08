@@ -3824,6 +3824,11 @@ describe('the serving tree stays clean, and the connect reports its cost', () =>
     // reads and one log record is what makes it measurable.
     const sh = fs.readFileSync(new URL('../scripts/mobile/tui-attach.sh', import.meta.url), 'utf8');
     expect(sh).toContain('now_ms() {');
+    // The duration must be derived by arithmetic, never by trusting a format
+    // modifier to mean milliseconds: `%s%3N` gave nanoseconds on the live box
+    // and reported a 6-minute connect as 456481s (caught live 2026-10-08).
+    expect(sh).toContain('$((raw / 1000000))');
+    expect(sh).not.toContain('date +%s%3N');
     expect(sh).toContain('T_START="$(now_ms)"');
     expect(sh).toContain('T_RESOLVED="$(now_ms)"');
     expect(sh).toContain('T_READY="$(now_ms)"');
