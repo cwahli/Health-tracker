@@ -246,7 +246,7 @@ describe('bugSnapshot', () => {
           contentType: 'image/png',
         }],
       }],
-      origin: 'https://health-tracking.duckdns.org',
+      origin: 'https://health-tracker.co.uk',
     });
     expect(abs).toContain('name=shot-01.png');
     expect(abs).toContain('key=bugs%2Ffoodcart%2Ftag-1%2Freports%2Fiss-9%2Fshot-01.png');
