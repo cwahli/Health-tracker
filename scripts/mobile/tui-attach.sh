@@ -68,6 +68,10 @@ OPENCODE_BIN="${OPENCODE_BIN:-/root/.opencode/bin/opencode}"
 # units set it explicitly for the same reason they set OPENCODE_BIN.
 CLINE_BIN="${CLINE_BIN:-$HOME/.npm-global/bin/cline}"
 WAIT_SECONDS="${TUI_WAIT_SECONDS:-180}"
+# How long a refusal message stays on screen before the shell exits. It was a
+# flat 20s, which is most of the perceived "it is slow to connect" on a refusal;
+# the message is the point, not the wait. Override with TUI_REFUSAL_SECONDS.
+REFUSAL_SECONDS="${TUI_REFUSAL_SECONDS:-5}"
 
 read_json() {
   node -e '
@@ -302,11 +306,12 @@ fi
 # first message resolves fresh and reaps correctly. Cline keeps its
 # fresh-thread path: its terminal never shares the turn thread by design.
 if [ -z "$SID" ] && [ "$SURFACE" = "opencode" ]; then
-  echo "No chat session recorded yet — nothing shared to attach to."
-  echo "Send the bot a message first, then reopen this: the next attach"
-  echo "lands on that conversation instead of a blank terminal the bot"
-  echo "never joins."
-  sleep 20
+  echo "[tui] refused: nothing shared to attach to. This chat has no session"
+  echo "recorded yet, so opening a terminal here would be blank and the bot"
+  echo "would never join it."
+  echo "Fix: send the bot a message first, then reopen this — the next attach"
+  echo "lands on that conversation."
+  sleep "$REFUSAL_SECONDS"
   exit 0
 fi
 
@@ -327,10 +332,12 @@ while ! lease_held "$LEASES" 1800 && [ "$WAITED" -lt "$WAIT_SECONDS" ]; do
   WAITED=$((WAITED + 3))
 done
 if ! lease_held "$LEASES" 1800; then
-  echo "Still waiting on the bot after ${WAIT_SECONDS}s — not attaching, two"
-  echo "writers would corrupt the conversation."
-  echo "Close this and try again, or send /abort in the chat to stop the turn."
-  sleep 20
+  echo "[tui] refused: a bot turn has been running in this chat for over ${WAIT_SECONDS}s."
+  echo "Two writers on one conversation is what corrupts it, so this does not"
+  echo "attach on top of the bot."
+  echo "Fix: send /abort in the chat to stop that turn, then reopen this."
+  echo "If no turn is actually running, that is a stuck lease — see [tui] above."
+  sleep "$REFUSAL_SECONDS"
   exit 0
 fi
 
@@ -345,13 +352,14 @@ if [ "${#LAUNCH_ARGV[@]}" -eq 0 ]; then
     echo "Move the chat to a lane with a real terminal with /model_free, or use"
     echo "/tx on for the live tool feed here."
   else
+    echo "[tui] refused: could not resolve this chat's terminal."
     echo "Could not work out which terminal this chat needs, so nothing was"
     echo "opened. A bare \`opencode\` here would be a guess, and a guess is how"
     echo "this ended up on the wrong tool in the first place."
-    echo "Send /tui again, or check that the unit sets CLINE_BIN and"
+    echo "Fix: send /tui again, or check that the unit sets CLINE_BIN and"
     echo "OPENCODE_BIN and that scripts/lib/tui-surface.mjs is present."
   fi
-  sleep 20
+  sleep "$REFUSAL_SECONDS"
   exit 0
 fi
 
