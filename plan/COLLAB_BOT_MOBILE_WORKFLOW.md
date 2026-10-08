@@ -188,20 +188,29 @@ You send from phone: "/fix BUG-20260923-01: Round Omega-3 to 1 decimal place on 
   4. Added on-screen interactive token prompt (`getpass`) so mobile users can paste their token without editing Python source code.
   5. Live-verified 20-minute idle watchdog auto-unassign (safely disconnected at 01:18 to protect 200 compute units).
 
-### Milestone CB-6: Live Mobile Dev Loop Verification (IN PROGRESS)
+### Milestone CB-6: Live Mobile Dev Loop Verification (SUPERSEDED 2026-09-25)
+
+Do not start. A push to `origin/main` is forbidden.
+
 - **Deliverables:**
   1. User enters bot token via on-screen prompt in Colab.
   2. Validate live conversational greeting (`Hi`) from mobile Telegram client.
   3. Execute first live end-to-end task from mobile phone (e.g. `/fix` or feature prompt).
   4. Verify clean Playwright E2E verification + git commit pushed to `origin/main`.
 
-### Milestone CB-7: Local Qwen 3.8 / vLLM GPU Inference Pipeline (NEXT)
+### Milestone CB-7: Local Qwen 3.8 / vLLM GPU Inference Pipeline (CLEARED 2026-10-09)
+
+Do not start. The deliverables below are history.
+
 - **Deliverables:**
   1. Embed local vLLM or llama-cpp-python in `colab_worker.py` for `/switch qwen-3.8`.
   2. Run 100% of code generation reasoning directly on Colab's Tesla T4/L4 GPU offline without external API dependency.
   3. Automatic VRAM memory management to prevent OOM errors on 16GB VRAM.
 
-### Milestone CB-8: Session Continuity & Multi-Turn Memory (NEXT)
+### Milestone CB-8: Session Continuity & Multi-Turn Memory (CLEARED 2026-10-09)
+
+Do not start. The deliverables below are history.
+
 - **Deliverables:**
   1. Connect OpenCode `--session` persistence across consecutive Telegram turns.
   2. Retain conversation context, file history, and previous test results across turns.

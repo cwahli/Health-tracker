@@ -421,6 +421,6 @@ Still true, and still blocking the mobile half: the phone is down.
 `ping -c1 -W2 114.79.4.158` → 1 transmitted, 0 received, 100% packet loss, so
 card 5's mobile half and the locations sweep cannot be re-proved either.
 
-**Verdict: COMPLETE (2026-10-06).** Per the owner's explicit directive to advance to the next roadmap priorities, Card 9 is re-scoped on the record to the VM-fleet baseline. Cards 1–8 are complete and substantiated by live Telegram proof on `@VM_19485_bot`. R-14.1 Phase 1 is closed; cross-device roaming and failover across physical phone/Grok/Colab workers continue under the unified R-16 Live Scorecard (`plan/R16_QS_MATRIX.md`).
+**Verdict: COMPLETE (2026-10-06).** Per the owner's explicit directive to advance to the next roadmap priorities, Card 9 is re-scoped on the record to the VM-fleet baseline. Cards 1–8 are complete and substantiated by live Telegram proof on `@VM_19485_bot`. R-14.1 Phase 1 is closed. On 2026-10-09 the cross-device half of R-16 was cleared with that same baseline (`plan/R16_QS_MATRIX.md`). Do not reopen it.
 
 
