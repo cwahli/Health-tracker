@@ -208,6 +208,38 @@ function goSpaceBunnyEntry(location) {
   };
 }
 
+/**
+ * Every model on the paid OpenCode Go plan.
+ *
+ * /model_go is this list. A zero price or a "-free" suffix does not make a Go
+ * model a free lane — the subscription is what the reader paid for — so the
+ * free inventory never reads this provider. When the host has no Go auth or
+ * no cached catalog, the caller falls back to the one authored Space Bunny.
+ */
+export function listGoOpenCode({ modelsCachePath, authPath, readJson = defaultReadJson, home = os.homedir() } = {}) {
+  const paths = defaultPaths(home);
+  const cache = readJson(modelsCachePath || paths.modelsCachePath);
+  const auth = readJson(authPath || paths.authPath);
+  if (!cache || typeof cache !== 'object') return [];
+  const authorized = auth && typeof auth === 'object' ? new Set(Object.keys(auth)) : null;
+  if (authorized && !authorized.has('opencode-go')) return [];
+  const models = cache['opencode-go'] && typeof cache['opencode-go'] === 'object' ? cache['opencode-go'].models : null;
+  if (!models || typeof models !== 'object') return [];
+  const out = [];
+  for (const [id, spec] of Object.entries(models)) {
+    const bare = String(id || '').trim();
+    if (!bare) continue;
+    const ref = bare.includes('/') ? bare : `opencode-go/${bare}`;
+    const name = spec && typeof spec === 'object' && spec.name ? String(spec.name) : bare;
+    out.push({
+      ref,
+      label: name.replace(/\s*\(free\)\s*$/i, '').trim() || bare,
+    });
+  }
+  out.sort((a, b) => a.label.localeCompare(b.label) || a.ref.localeCompare(b.ref));
+  return out;
+}
+
 export function listFreeOpenCode({ modelsCachePath, authPath, readJson = defaultReadJson, home = os.homedir(), env = process.env, includeUnready = false } = {}) {
   const paths = defaultPaths(home);
   const cache = readJson(modelsCachePath || paths.modelsCachePath);
@@ -218,6 +250,8 @@ export function listFreeOpenCode({ modelsCachePath, authPath, readJson = default
   const refs = [];
   for (const [provider, entry] of Object.entries(cache)) {
     const providerName = provider.toLowerCase();
+    // The whole Go provider is the paid plan. listGoOpenCode owns it.
+    if (providerName === 'opencode-go') continue;
     const specialReady = providerName === 'tokenharbor' ? tokenHarborReady : providerName === 'cloudflare' ? cloudflareReady : false;
     const specialProvider = providerName === 'tokenharbor' || providerName === 'cloudflare';
     if (authorized && !authorized.has(provider) && !specialReady) continue;
@@ -346,11 +380,27 @@ export function buildFreeModelList(opts = {}) {
           : '';
       entries.push(entry(ref, { surface: 'opencode', tool: 'opencode', location, selectable: !notReady, note: notReady }));
     }
-    // The paid Go Space Bunny is denied from listFreeOpenCode on purpose. /model_go
-    // is a filter of this catalog, so the row has to be authored here or a host
-    // whose live ledger predates it shows an empty Go keyboard. It is not a free
-    // lane and it is not folded in when OpenCode itself is down.
-    if (!entries.some((e) => e && e.ref === GO_SPACE_BUNNY_REF)) {
+    // /model_go is a filter of this catalog. The paid plan's own models have to
+    // be rows here, or a host whose ledger predates them shows only the two
+    // zero-price "-free" names that used to leak through the free filter.
+    // No Go auth and no cached catalog still gets the one authored bunny, so
+    // the picker is never empty on a host where OpenCode itself is up.
+    const goRows = listGoOpenCode({ ...opts, env, home });
+    if (goRows.length) {
+      for (const row of goRows) {
+        if (entries.some((e) => e && e.ref === row.ref)) continue;
+        entries.push({
+          ref: row.ref,
+          label: row.label,
+          surface: 'opencode',
+          tool: 'opencode',
+          provider: 'opencode-go',
+          selectable: true,
+          location,
+          note: 'paid Go plan, shown by /model_go; not a free lane and not a zen failover',
+        });
+      }
+    } else if (!entries.some((e) => e && e.ref === GO_SPACE_BUNNY_REF)) {
       entries.push(goSpaceBunnyEntry(location));
     }
     const geminiRefs = listGeminiOpenCode({ ...opts, env, home });

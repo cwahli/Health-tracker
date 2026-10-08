@@ -436,10 +436,12 @@ check("G9 a free pool says a quota hit stays inside it, and names the way out",
   /moves inside this pool only/.test(lightReply.text) && /Pick another pool command to leave this one/.test(lightReply.text) && !/\/model clears the pool/.test(lightReply.text), lightReply.text);
 check("G12 an opencode-go id is tagged Go, not OpenCode",
   freemodelProviderTag("opencode", { id: "opencode-go/space-bunny-free" }) === "Go");
-check("G13 the Go probe adds Space Bunny and not the rest of the paid catalog",
+check("G13 the Go probe adds every model on the paid provider",
   (() => {
     const added = appendGoSpaceBunny([], [{ id: "opencode-go", models: { "space-bunny-free": { name: "Space Bunny" }, "deepseek-v4": { name: "DeepSeek" } } }]);
-    return added.length === 1 && added[0].id === "opencode-go/space-bunny-free";
+    const ids = added.map((x) => x.id).sort();
+    return ids.length === 2 && ids[0] === "opencode-go/deepseek-v4" && ids[1] === "opencode-go/space-bunny-free"
+      && added.every((x) => !/\(free\)/i.test(x.label));
   })());
 check("G14 a successful probe still shows the Go bunny when the provider omits it, once",
   (() => {

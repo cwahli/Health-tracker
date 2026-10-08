@@ -20,8 +20,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
 
-import { CLINE_FREE_MODELS, FREE_NAME_DENYLIST, GO_SPACE_BUNNY_REF, buildFreeModelList, listFreeOpenCode } from './freemodels.mjs';
-import { canonicalAllowanceLanes, clearHoldInPlace, clearLaneHold, nextAvailableRoutes, poolOfLane, poolRows, tableFromPreferenceDoc } from './free-lanes.mjs';
+import { CLINE_FREE_MODELS, FREE_NAME_DENYLIST, GO_SPACE_BUNNY_REF, buildFreeModelList, listFreeOpenCode, listGoOpenCode } from './freemodels.mjs';
+import { canonicalAllowanceLanes, clearHoldInPlace, clearLaneHold, nextAvailableRoutes, poolOfLane, poolRows, tableFromPreferenceDoc, withCatalogLanes } from './free-lanes.mjs';
 import { holdEvidence, holdStampFromError, probeKindForLane, probeModelForLane, recheckTargets, selectBurnTargets } from './free-lane-probe.mjs';
 
 const PREF_DOC = fileURLToPath(
@@ -99,6 +99,48 @@ describe('the free pool', () => {
     expect(go.label).toBe('Go Space Bunny');
     expect(String(go.label)).not.toMatch(/\(free\)/i);
     expect(listFreeOpenCode(cacheWithBothBunnies())).not.toContain(BUNNY_GO);
+  });
+
+  it('lists every paid Go model on /model_go and none of them in the free inventory', () => {
+    const readJson = (file) => (String(file).endsWith('auth.json')
+      ? { opencode: { key: 'x' }, 'opencode-go': { key: 'x' } }
+      : {
+          opencode: { models: { 'space-bunny-free': { name: 'Space Bunny', cost: { input: 0, output: 0 } } } },
+          'opencode-go': {
+            models: {
+              'space-bunny-free': { name: 'Space Bunny Free', cost: { input: 0, output: 0 } },
+              'deepseek-v4-pro': { name: 'DeepSeek V4 Pro', cost: { input: 1, output: 2 } },
+              'grok-4.7': { name: 'Grok 4.7', cost: { input: 3, output: 4 } },
+            },
+          },
+        });
+    const go = listGoOpenCode({ readJson });
+    expect(go.map((r) => r.ref).sort()).toEqual([
+      'opencode-go/deepseek-v4-pro',
+      'opencode-go/grok-4.7',
+      'opencode-go/space-bunny-free',
+    ]);
+    expect(go.every((r) => !/\(free\)/i.test(r.label))).toBe(true);
+    const free = listFreeOpenCode({ readJson });
+    expect(free.some((ref) => String(ref).startsWith('opencode-go/'))).toBe(false);
+    expect(free).toContain(BUNNY_ZEN);
+    const list = buildFreeModelList({
+      opencodeBin: process.execPath,
+      location: 'vps',
+      home: '/tmp/no-such-home-go-catalog',
+      env: { PATH: '/usr/bin:/bin', HOME: '/tmp/no-such-home-go-catalog' },
+      readJson,
+    });
+    const goEntries = list.filter((e) => e && e.provider === 'opencode-go');
+    expect(goEntries.map((e) => e.ref).sort()).toEqual(go.map((r) => r.ref).sort());
+    expect(goEntries.every((e) => !/\(free\)/i.test(e.label))).toBe(true);
+    const folded = withCatalogLanes(tableFromPreferenceDoc(prefDoc()), list).table;
+    const canon = canonicalAllowanceLanes({ table: folded });
+    const goRows = poolRows(canon, 'go');
+    expect(goRows.some((r) => String(r.model).includes('deepseek-v4-pro') && r.plan === 'OG')).toBe(true);
+    expect(goRows.some((r) => String(r.model).includes('grok-4.7') && r.plan === 'OG')).toBe(true);
+    expect(poolRows(canon, 'coding').some((r) => poolOfLane(r.lane || r) === 'go')).toBe(false);
+    expect(poolRows(canon, 'light').some((r) => poolOfLane(r.lane || r) === 'go')).toBe(false);
   });
 
   it('keeps Cline Muse Spark free in the free list, with a preference row the check can reach', () => {
