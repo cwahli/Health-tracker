@@ -1,0 +1,23 @@
+{
+  "schema": "meal-audit-request/1",
+  "mealId": "meal_1791282747593",
+  "name": "Co-op British Outdoor Bred Breaded Ham, Aresto Cacao Orange Protein Balls, and Apple, Mango, Spinach & Avocado Juice",
+  "provenance": "debug_payload",
+  "photos": [
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791282747593/photos/sha256_3c3e1637f78636c6f807aec1b93c3ed62290e8f379447a1c9c7ce8b703722a0f.jpg",
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791282747593/photos/sha256_a113439b29d3750aab8c0c5290cec81230fd32379e38f60679787946787498b1.jpg",
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791282747593/photos/sha256_a9e845973219f85ab32c4a0077030cb7d802db7aa610fa00978e1d1281db6e69.jpg",
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791282747593/photos/sha256_e930ddbf64882b3b4f5f2e88370d1eb53b47f28e41ac950ebfbe4fb29fdaae90.jpg"
+  ],
+  "skeleton": "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791282747593/flow_skeleton.json",
+  "requestedAt": "2026-10-06T11:17:08.271Z",
+  "requestedBy": "meal-audit-loop",
+  "status": "pending",
+  "instructions": [
+    "Audit this meal and produce a ground-truth bundle.",
+    "For each dish: dishName, weightGrams, boundingBox2D (0-1000, required because photos exist), and all 32 nutrient keys.",
+    "Weight must come from the catalog (scripts/meal-audit-assist.mjs api:<query>) or a scale, never an eyeball estimate.",
+    "Run scripts/generate-meal-result.mjs to write meal_result.json, then report the bundle path with `complete`.",
+    "If the catalog cannot source a nutrient, the audit is INCOMPLETE: say so rather than filling zeros."
+  ]
+}

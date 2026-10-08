@@ -1,0 +1,249 @@
+---
+id: B2B-1
+status: draft
+class: bots-have-no-addressable-peer
+edit_mode: patch
+skill: debug-contract
+auto_go: false
+allowed_files:
+  - scripts/lib/tg-peers.mjs
+  - scripts/lib/tg-handoff.mjs
+  - scripts/lib/commands.mjs
+  - scripts/bot-host.mjs
+  - scripts/assert-bot-peer-policy.test.mjs
+  - tests/bot-host.test.ts
+frozen_files:
+  - src/App.tsx
+  - src/components/LogChat.tsx
+  - src/jobs/JobStore.ts
+  - src/jobs/SupabaseJobSync.ts
+  - src/jobs/JobQueueRunner.ts
+  - src/utils/debugRunTree.ts
+  - server_meal_gate.ts
+  - bots/registry.json
+  - scripts/lib/registry.mjs
+  - scripts/lib/project-registry.mjs
+  - scripts/lib/pm-fleet.mjs
+  - scripts/lib/pm-ladder.mjs
+  - scripts/lib/pm-sheet.mjs
+  - scripts/lib/pm-run.mjs
+  - scripts/pm-current.mjs
+  - AGENTS.md
+  - docs/agent/standing.json
+  - scripts/assert-standing.mjs
+  - scripts/journey-guard.mjs
+gate:
+  - npx tsc --noEmit
+  - node scripts/assert-bot-peer-policy.test.mjs
+  - node scripts/assert-command-parity.mjs
+  - node scripts/assert-bot-clone.mjs
+  - npx vitest run tests/bot-host.test.ts
+  - node scripts/journey-guard.mjs B2B-1
+---
+
+# B2B-1 — one addressable peer, one direction, bounded
+
+## Journey
+
+A seat can name another seat, send it one typed message, and the receiving
+seat **proposes** what to do about it — without a human relaying, without a
+second message bus, and without any path that can loop. "Better" here is
+narrow on purpose: one pair (`vm3 → pm`), one direction, depth 2, and a
+receiving side that files a proposal instead of starting a turn. Everything
+else in the fleet is a later packet earned by this one running quietly.
+
+## Findings (do not redo)
+
+**Platform.** Telegram shipped native bot-to-bot in **Bot API 10.0, 8 May
+2026** (platform release 7 May); current Bot API is 10.3. Private-chat bot→bot
+by `@username` needs Bot-to-Bot Communication Mode on **both** bots, else
+`USER_BOT_TO_BOT_DISABLED`; group `/command@Bot` or a direct reply needs it on
+**one**. Enabling the mode makes the bot's **existing `getUpdates` long-poll
+start delivering `from.is_bot=true`** — no second poller, and `onePollerOnly`
+stays true.
+
+**The mode alone is inert here.** `scripts/bot-host.mjs` gates every inbound on
+`telegram.allowedUserIds.includes(userId)` (three call sites). A bot sender has
+a bot id, so it is dropped before any agent sees it. **The sender-type policy
+is the load-bearing change; the BotFather toggle is one click.**
+
+**Prior art in this repo, and a boundary not to cross.** `PM-1` decided
+cross-seat nudges go through the userbot session (`tg-userbot.mjs`
+`sendAsUser`) and explicitly refused "a second message bus." This packet does
+not add a bus: it uses Telegram's own transport. `sendAsUser` stays as-is for
+the PM ladder; nothing here calls it.
+
+**Real framework declined this.** `openclaw#79077` (closed `not_planned`,
+7 Sep 2026) names the same gap we have: no inter-bot routing, and the handler
+answers bot mail as if a human sent it. Its asks become our spec —
+`senderTypePolicy`, an explicit peers map, `inboundRateLimit`.
+
+**The loop is the documented failure class.** 20.6% of confirmed infinite-loop
+defects in real agent projects are "multi-agent chat without turn bound";
+95.6% of impacts are cost exhaustion or model DoS. This fleet already showed the
+signature on one seat: vm3 burned ~2.3M tokens across two 900s timeouts
+(17:27–18:43 on 4 Oct).
+
+**Proof the naive path is wrong.** A message sent with vm3's own token on
+4 Oct 20:19 landed in the user's chat *as a vm3 message* and vm3 never received
+it — a bot cannot hear itself, and a user-id allowlist is not a sender policy.
+
+**Docs trap.** `core.telegram.org/bots/faq` still says bots cannot see other
+bots "regardless of mode," while the features page and changelog say otherwise
+in the enabled contexts. Do not let a Builder treat the FAQ as current.
+
+## Standing features that apply
+
+- **`load_hack_forbidden`** — a lib imported without a correct-path call site
+  is a FAIL, not a helper. `tg-handoff.mjs` must be called on the live send
+  and receive paths; `tg-peers.mjs` must be called by the ingress classifier.
+- **`egress_conservation`** — same class, different surface: an unbounded
+  feedback path that multiplies requests. Our five bounds are the fleet's
+  version of `job poll only when hasActiveJob`. Proposed new standing row
+  (`bot_handoff_bounded`) goes through Reviewer → your `promote`, **not** an
+  edit here.
+
+## Plan
+
+Node graph, sequential. Each node: target files → done when → pitfall.
+
+**Node 0 — precondition (no code).** `scripts/bot-host.mjs`,
+`scripts/lib/commands.mjs`, `scripts/lib/registry.mjs` and
+`scripts/lib/project-registry.mjs` currently carry another owner's uncommitted
+work (16 modified files in `~/src/Health-tracker`, `bot-host.mjs` +179). PM-1 is
+`locked`, PM-2 is `draft`, and PM-2 owns `bots/registry.json` — which this
+packet freezes. **Do not start until that work is committed on its own branch
+and `bots/registry.json` is free.** Done when: `git status` in the base
+checkout shows those four files clean.
+
+**Node 1 — identity + peers (`scripts/lib/tg-peers.mjs`, new, pure).**
+Resolve a seat id → its `@username` from the cached `getMe` value the poller
+already records at connect (`connected as @ht_vm3_bot`); never hardcode a
+username. One directed map, default-empty:
+`{ "<from>": { "<to>": { maxDepth, cooldownMs, ttlMs } } }`. Resolve policy from
+a three-state env: `humans-only` (default) / `humans-and-allowlisted-bots` /
+`open`; **`open` is refused outside tests.**
+Done when: `assert-bot-peer-policy.test.mjs` covers unknown id, unknown peer,
+default-deny, and the `open` refusal.
+Pitfall: `Condition: cache miss` → `Action: refuse, do not call getMe inline`
+(would put a network call on the message path) → `Pitfall: a lookup that can
+hang the ingress is worse than a denied peer`.
+
+**Node 2 — envelope + bounds (`scripts/lib/tg-handoff.mjs`, new, pure).**
+Fixed envelope `{ v:1, from, to, kind, ref, body, depth, expires, reply_to }`
+with `kind ∈ ask | answer | blocked | handoff-request | ack | close`. Five
+bounds, all mandatory, all pure functions so they are testable without a
+network: max depth per chain (2), per-pair cooldown, global send budget per
+window, dedupe on `reply_to`/message id, TTL on `ask`. Invalid envelope →
+`specs/bot-handoff-dead-letter/<ts>-<from>-<to>.json` with the reason; **never
+a silent drop, never an unbounded retry.**
+Done when: the policy test proves a 3-deep chain is refused at the send, an
+expired `ask` is refused at the receive, a replayed `reply_to` is deduped, and
+an unparseable body lands in the dead-letter file.
+Pitfall: `Condition: depth arrives in the payload` → `Action: recompute from
+local state, treat the payload as a claim` → `Pitfall: trusting it is how a
+loop becomes unbounded`.
+
+**Node 3 — ingress classifier (`scripts/bot-host.mjs`).**
+Classify every update's sender as human or bot **before** the existing
+`allowedUserIds` check. Human path unchanged. Bot path: policy must be
+`humans-and-allowlisted-bots`, sender must be in the peers map, then the
+envelope is validated and the message is filed as a **proposal** — one line in
+`~/.agents/nudges/inbox-<location>.md` naming the peer, the `ref`, and the
+command to inspect it. **A bot-sourced update never starts an agent turn.**
+Done when: `tests/bot-host.test.ts` proves a bot-sourced update with no peers
+entry produces zero turn invocations, and one with an entry produces exactly
+one proposal line and still zero turn invocations.
+Pitfall: `Condition: sender is a bot` → `Action: file, never dispatch` →
+`Pitfall: dispatching on receipt is the loop class Telegram warns about, and
+the cost signature we already paid for once`.
+
+**Node 4 — `/tell` (`scripts/lib/commands.mjs` + send path in
+`bot-host.mjs`).** One command: `/tell <bot> <text>`. Resolves the target id to
+`@username`, encodes the envelope (`kind: ask`, `depth: 1`, `expires: now+30m`),
+enforces Node 2's five bounds, then sends via the existing api wrapper with
+`chat_id: '@username'`. Help text and the published command list both carry it
+(`assert-command-parity` is the gate).
+Done when: `/tell vm3 hello` from the vm2 seat returns Telegram's message id on
+a live send, and a bounds violation returns a one-line refusal and sends
+nothing.
+Pitfall: `Condition: target does not resolve` → `Action: refuse with the list
+of addressable peer ids` → `Pitfall: guessing a username turns a typo into a
+message to a stranger`.
+
+**Node 5 — the human surface.** When a proposal is acted on, the seat writes
+one line to the sheet row it already owns (`sheet_row.rb --note`) and one short
+line to the user's chat. Telegram states users can observe bot-to-bot
+conversations, so the chat is a **visibility** surface, never the record.
+Done when: the row note exists for every acted-on proposal, and no raw
+envelope is ever pasted into a chat.
+Pitfall: relaying the exchange into chat is how a 3-message hop becomes a
+40-message wall — and how the record ends up somewhere no gate can read.
+
+**Node 6 — host-only step (human, cannot be automated).** BotFather miniapp →
+bot settings → **Bot-to-Bot Communication Mode** on `vm3` and `pm`. Until this
+is on, every send fails `USER_BOT_TO_BOT_DISABLED` — which Node 4's test
+asserts as the expected refusal signature rather than a crash.
+
+**Node 7 — sensors + live proof (L18).** Named test:
+`scripts/assert-bot-peer-policy.test.mjs` (pure policy/bounds/dedupe/DLQ) plus
+one case in `tests/bot-host.test.ts` (ingress classification). Live proof:
+drive a real `vm3 → pm` exchange end to end, capture the proposal line, the
+`pm` reply, and the resolved sheet row — screenshots into Drive `Work done`
+under a subfolder named for this packet's id, linked from the row.
+
+## Sensitive transitions as (Condition, Action, Pitfall)
+
+- **Enabling the mode** — (mode ON on two seats) → (only ever after Node 3 is
+  green on `main`) → (a mode-on fleet with a humans-only ingress is inert; a
+  mode-on fleet with an open ingress is a 21-bot loop).
+- **Receiving bot mail** — (sender is a bot) → (file a proposal) → (dispatching
+  is the whole failure class).
+- **Effects** — (any bot-to-bot exchange) → (may propose only) → (two writers on
+  one hub file corrupts silently — the law that already applies to agents
+  applies to agents talking to agents).
+- **Retry** — (delivery failed) → (one dead-letter write, no auto-retry) →
+  (a retry loop is the 95.6% cost case).
+
+## Test plan
+
+```text
+npx tsc --noEmit
+node scripts/assert-bot-peer-policy.test.mjs
+node scripts/assert-command-parity.mjs
+node scripts/assert-bot-clone.mjs
+npx vitest run tests/bot-host.test.ts
+node scripts/journey-guard.mjs B2B-1
+```
+
+## Audit plan
+
+1. **Blast radius** — three source files, two of them hub files that Node 0
+   gates. `src/**`, `bots/registry.json` and the PM libs are Frozen and must
+   not appear in the diff.
+2. **Honest limits, named not painted** — `src/utils/debugRunTree.ts` is Frozen,
+   so bot-to-bot hops do **not** appear in the app's canonical run tree. Their
+   observability is the turn archive plus the fleet `Bots` tab. That is a
+   real gap in the debug contract (L16), recorded here rather than faked.
+3. **One-way door** — after this lands, `/tell` exists on seats. Adding the
+   return path (`pm → vm3`) is a **separate packet** with its own bound change.
+4. **Standing proposal, not standing edit** — `bot_handoff_bounded` goes to
+   Reviewer after the first live run; this packet may not touch
+   `docs/agent/standing.json`.
+5. **Blast-radius class check** — no file in this diff may appear in
+   `docs/agent/DOMAIN_REGRESSION_MAP.md`'s job-lifecycle list, and no
+   `src/jobs/**` call site is in scope.
+
+## Blast radius
+
+Allowed / Frozen are the YAML lists above.
+Out of scope: any BotFather change made by the agent · `sendAsUser` /
+`tg-userbot.mjs` · the PM ladder · enabling mode on any seat beyond `vm3` and
+`pm` · the return path · group-chat context.
+
+## Stop and come back
+
+Two repairs fail · Frozen file in the diff · Node 0 still blocked · a proposal
+starts producing turns · any send needs `sendAsUser` to work · the user asks
+for the return path (new packet) · live proof impossible without the human
+flipping the BotFather toggle.

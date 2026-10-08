@@ -1,0 +1,16 @@
+{
+  "slug": "B2B-1",
+  "node": "builder-start",
+  "at": "2026-10-04T23:25:39.625Z",
+  "git": {
+    "head": "3ce86b4cf5b242a0addab3b3a146e07f3ec0444e",
+    "stashCommit": "741d74d96097518499fa05d6e8c82ff0c456bd9a"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/B2B-1.md"
+  ]
+}

@@ -147,7 +147,83 @@ export const FREE_NAME_EXCEPTIONS = {
   'big-pickle': 'qa-evidence/model-comparison.json — "Free, no card; no per-day cap published"',
 };
 
-export function listFreeOpenCode({ modelsCachePath, authPath, readJson = defaultReadJson, home = os.homedir(), env = process.env, includeUnready = false } = {}) {
+/**
+ * Free lanes the live catalog still lists but this host cannot actually run.
+ *
+ * These two are catalogued by OpenCode and free by name, so nothing filters them
+ * out — but a real turn against them returns the vendor's own refusal, twice in
+ * a row, not a transient blip:
+ *
+ *   opencode/fledge-alpha-free       403 FreeTierError "This model is not
+ *                                    available in your country" — a per-region
+ *                                    block, so it will not fix itself here.
+ *   opencode/ling-3.0-flash-fin-free 404 "Upstream request failed: Endpoint is
+ *                                    unavailable." — the upstream endpoint is
+ *                                    gone.
+ *
+ * They are listed rather than dropped, for the same reason an unwired keyed
+ * provider is: a silent gap cannot be told apart from a model that does not
+ * exist. The vendor's own words are the citation so the row can be re-probed
+ * (`opencode run -m <ref> "Reply with exactly: ok"`) and the entry deleted when
+ * the vendor starts answering, rather than trusted on the strength of this note.
+ */
+export const UNRUNNABLE_FREE_LANES = {
+  'opencode/fledge-alpha-free': 'Vendor 403: "This model is not available in your country" (probed 2026-10-07, twice).',
+  'opencode/ling-3.0-flash-fin-free': 'Vendor 404: "Upstream request failed: Endpoint is unavailable." (probed 2026-10-07, twice).',
+};
+
+/**
+ * The live catalog, straight from the OpenCode CLI: `opencode models`.
+ *
+ * This used to read ~/.cache/opencode/models.json, and that file is a fossil.
+ * OpenCode v2 keeps its catalog in ~/.local/share/opencode/opencode.db and no
+ * longer rewrites the JSON cache, so on this host the last write was 2026-09-26
+ * and nothing since has touched it (an orphaned models.json.*.tmp from an
+ * interrupted write is still sitting next to it). /freemodel therefore offered 36
+ * opencode free lanes of which 25 were gone — every one of them answered
+ * `provider.no-route: Model unavailable` on a real turn.
+ *
+ * `opencode models` is the source /model already uses, it costs ~0.3s against a
+ * warm background service, and it only lists providers this host can actually
+ * route — which is also why the old hand-rolled auth.json gate is not needed on
+ * this path. Returns null (not []) when the CLI cannot answer, so the caller can
+ * fall back to the cache rather than read "no free models" into a broken CLI.
+ */
+function liveOpenCodeModels({ env = process.env, opencodeBin, timeoutMs = 15000 } = {}) {
+  try {
+    const out = execFileSync(resolveOpencodeBin(opencodeBin), ['models'], {
+      env,
+      encoding: 'utf8',
+      timeout: timeoutMs,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      maxBuffer: 4 << 20,
+    });
+    const refs = String(out)
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => /^[^\s/]+\/[^\s/]+$/.test(line));
+    return refs.length ? refs : null;
+  } catch {
+    return null;
+  }
+}
+
+export function listFreeOpenCode({ modelsCachePath, authPath, readJson = defaultReadJson, home = os.homedir(), env = process.env, includeUnready = false, liveModels, opencodeBin, liveTimeoutMs } = {}) {
+  // The live catalog answers "what can this host run today", so it is asked
+  // first. Cost is deliberately not consulted here: v2 does not put cost on the
+  // model list at all (GET /api/model returns cost as []), so the name is the
+  // only free signal there is — which is what FREE_NAME_EXCEPTIONS already says.
+  const live = typeof liveModels === 'function'
+    ? liveModels({ env, opencodeBin, timeoutMs: liveTimeoutMs })
+    : liveOpenCodeModels({ env, opencodeBin, timeoutMs: liveTimeoutMs });
+  if (live && live.length) {
+    const refs = live.filter((ref) => {
+      const id = ref.slice(ref.indexOf('/') + 1);
+      return /-free/.test(id) || FREE_NAME_EXCEPTIONS[id];
+    });
+    return [...new Set(refs)].sort();
+  }
+
   const paths = defaultPaths(home);
   const cache = readJson(modelsCachePath || paths.modelsCachePath);
   const auth = readJson(authPath || paths.authPath);
@@ -272,13 +348,17 @@ export function buildFreeModelList(opts = {}) {
     for (const ref of opencodeRefs) {
       // A keyed provider that is present but not wired up stays in the list as a
       // row with a verdict, rather than being dropped. The user then sees which
-      // models exist and what is missing, instead of a silent gap.
+      // models exist and what is missing, instead of a silent gap. The same goes
+      // for a lane the vendor still catalogues but refuses to run (see
+      // UNRUNNABLE_FREE_LANES): it is offered as a row you can see and cannot
+      // pick, with the vendor's own reason, not as a button that fails on tap.
       const vendor = String(ref).split('/')[0].toLowerCase();
-      const notReady = vendor === 'tokenharbor' && !keyedReady.tokenharbor
-        ? 'Token Harbor is not configured on this host (/setup)'
-        : vendor === 'cloudflare' && !keyedReady.cloudflare
-          ? 'Cloudflare Workers AI is not configured on this host (/setup)'
-          : '';
+      const notReady = UNRUNNABLE_FREE_LANES[String(ref).toLowerCase()]
+        || (vendor === 'tokenharbor' && !keyedReady.tokenharbor
+          ? 'Token Harbor is not configured on this host (/setup)'
+          : vendor === 'cloudflare' && !keyedReady.cloudflare
+            ? 'Cloudflare Workers AI is not configured on this host (/setup)'
+            : '');
       entries.push(entry(ref, { surface: 'opencode', tool: 'opencode', location, selectable: !notReady, note: notReady }));
     }
     const geminiRefs = listGeminiOpenCode({ ...opts, env, home });

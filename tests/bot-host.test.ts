@@ -50,6 +50,7 @@ import {
   formatFreeLabel,
   listFreeOpenCode,
   buildFreeModelList,
+  UNRUNNABLE_FREE_LANES,
   formatFreeModelText,
   CLINE_FREE_MODELS,
   GEMINI_MODELS,
@@ -1027,8 +1028,78 @@ describe('freemodels', () => {
       if (file.endsWith('auth.json')) return { opencode: { key: 'x' } };
       return null;
     };
-    const refs = listFreeOpenCode({ modelsCachePath: '/x/models.json', authPath: '/x/auth.json', readJson });
+    // liveModels: null pins the cache fallback — the live CLI is asked first in
+    // production, and this test is about the cache path only.
+    const refs = listFreeOpenCode({ modelsCachePath: '/x/models.json', authPath: '/x/auth.json', readJson, liveModels: () => null });
     expect(refs).toEqual(['opencode/big-pickle', 'opencode/mimo-v2.6-flash-free']);
+  });
+
+  // The stale-cache bug: ~/.cache/opencode/models.json stopped being written by
+  // OpenCode v2, so the list was built from a 2026-09-26 fossil and offered 25
+  // models that answer `provider.no-route` on a real turn. The live catalog is
+  // the source; the cache is only a fallback for when the CLI cannot answer.
+  it('offers the live catalog, not the stale cache, when the CLI answers', () => {
+    const readJson = () => ({
+      opencode: {
+        models: {
+          // Two lanes the frozen cache still advertised and the vendor has
+          // since removed — they must not survive into the list.
+          'glm-5-free': { cost: { input: 0, output: 0 } },
+          'minimax-m3-free': { cost: { input: 0, output: 0 } },
+          // One live lane that IS in the frozen cache too.
+          'mimo-v2.6-flash-free': { cost: { input: 0, output: 0 } },
+        },
+      },
+    });
+    const live = [
+      'opencode/space-bunny-free',
+      'opencode/exo-free',
+      'opencode/ling-3.1-flash-free',
+      'opencode-go/longcat-2.5-preview-free',
+      'opencode/big-pickle', // free by exception, no -free in the name
+      'opencode/paid-model', // live but not free by name
+    ];
+    expect(listFreeOpenCode({ modelsCachePath: '/x/models.json', readJson, liveModels: () => live })).toEqual([
+      'opencode-go/longcat-2.5-preview-free',
+      'opencode/big-pickle',
+      'opencode/exo-free',
+      'opencode/ling-3.1-flash-free',
+      'opencode/space-bunny-free',
+    ]);
+  });
+
+  it('falls back to the cache when the live CLI cannot answer', () => {
+    const readJson = (file: string) => {
+      if (file.endsWith('models.json')) return { opencode: { models: { 'big-pickle': { cost: { input: 0, output: 0 } } } } };
+      if (file.endsWith('auth.json')) return { opencode: { key: 'x' } };
+      return null;
+    };
+    // null (CLI broken or timed out) must NOT be read as "this host has no free
+    // models" — that would silently empty the whole list.
+    expect(listFreeOpenCode({ modelsCachePath: '/x/models.json', authPath: '/x/auth.json', readJson, liveModels: () => null }))
+      .toEqual(['opencode/big-pickle']);
+    expect(listFreeOpenCode({ modelsCachePath: '/x/models.json', authPath: '/x/auth.json', readJson, liveModels: () => [] }))
+      .toEqual(['opencode/big-pickle']);
+  });
+
+  it('lists a lane the vendor refuses to run as visible but not selectable', () => {
+    const live = ['opencode/space-bunny-free', ...Object.keys(UNRUNNABLE_FREE_LANES)];
+    const entries = buildFreeModelList({
+      liveModels: () => live,
+      opencodeBin: process.execPath,
+      clineBin: '/definitely/not/installed',
+      readJson: () => null,
+    });
+    for (const [ref, reason] of Object.entries(UNRUNNABLE_FREE_LANES)) {
+      const row = entries.find((e) => e.ref === ref);
+      expect(row, `${ref} must still be visible in the list`).toBeDefined();
+      expect(row?.selectable).toBe(false);
+      expect(row?.note).toBe(reason);
+    }
+    // ...and a healthy lane on the same surface stays selectable.
+    expect(entries.find((e) => e.ref === 'opencode/space-bunny-free')?.selectable).toBe(true);
+    const text = formatFreeModelText(entries, { current: 'opencode/space-bunny-free' });
+    expect(text).toContain('not available in your country');
   });
 
   it('lists cline free models first, only when the local CLI and auth are usable', () => {

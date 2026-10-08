@@ -1,0 +1,22 @@
+{
+  "schema": "meal-audit-request/1",
+  "mealId": "food_1791191692718_wuso1t",
+  "name": "Rowan Hill Bakery High Protein Bagel Thin",
+  "provenance": "photo_only",
+  "photos": [
+    "http://127.0.0.1:3000/photos/sha256_7be48ab5f0c71f16899bef7368f961891cad70db5fc3bffa00ee142beb29593a.jpg",
+    "http://127.0.0.1:3000/photos/sha256_1d27212ed4c05df9d39352cf0c62aa5686db2a7567782e77f44b5bae41605d07.jpg"
+  ],
+  "skeleton": "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/food_1791191692718_wuso1t/rowan-hill-bakery-high-protein-bagel-thin-food_1791191692718_wuso1t/flow_skeleton.json",
+  "requestedAt": "2026-10-05T09:17:02.913Z",
+  "requestedBy": "meal-audit-loop",
+  "status": "pending",
+  "instructions": [
+    "Audit this meal and produce a ground-truth bundle.",
+    "For each dish: dishName, weightGrams, boundingBox2D (0-1000, required because photos exist), and all 32 nutrient keys.",
+    "Weight must come from the catalog (scripts/meal-audit-assist.mjs api:<query>) or a scale, never an eyeball estimate.",
+    "Run scripts/generate-meal-result.mjs to write meal_result.json, then report the bundle path with `complete`.",
+    "If the catalog cannot source a nutrient, the audit is INCOMPLETE: say so rather than filling zeros.",
+    "PHOTO_ONLY: there is no edit history for this meal. Do NOT file turn_mismatch or edit_not_applied."
+  ]
+}

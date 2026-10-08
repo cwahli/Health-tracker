@@ -1,0 +1,20 @@
+{
+  "schema": "meal-audit-request/1",
+  "mealId": "meal_1791308531200",
+  "name": "Chicken & Chorizo Club Wrap, Aioli & Chilli Bites, and Grilled Chicken Rice Box",
+  "provenance": "debug_payload",
+  "photos": [
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791308531200/photos/sha256_634ed535d11a3011a747e5553d0d139aece9b4d13213bd59571ffb8f0d11acc4.jpg"
+  ],
+  "skeleton": "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791308531200/flow_skeleton.json",
+  "requestedAt": "2026-10-06T18:17:04.468Z",
+  "requestedBy": "meal-audit-loop",
+  "status": "pending",
+  "instructions": [
+    "Audit this meal and produce a ground-truth bundle.",
+    "For each dish: dishName, weightGrams, boundingBox2D (0-1000, required because photos exist), and all 32 nutrient keys.",
+    "Weight must come from the catalog (scripts/meal-audit-assist.mjs api:<query>) or a scale, never an eyeball estimate.",
+    "Run scripts/generate-meal-result.mjs to write meal_result.json, then report the bundle path with `complete`.",
+    "If the catalog cannot source a nutrient, the audit is INCOMPLETE: say so rather than filling zeros."
+  ]
+}

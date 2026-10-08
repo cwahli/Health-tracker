@@ -77,7 +77,9 @@ try {
     `${freebuffReady({ env: { PATH: process.env.PATH }, home: '/home/ubuntu' })} vs ${findFreebuffCredentials({ env: {}, home: '/home/ubuntu' }).ok}`);
   check('a host with no freebuff credentials reads as not ready',
     freebuffReady({ env: { PATH: process.env.PATH }, home: '/tmp/definitely-not-here' }) === false);
-  const hostList = buildFreeModelList({ location: 'vps', env: { PATH: process.env.PATH }, home: '/home/ubuntu' });
+  // liveModels: [] pins the cache fallback so this assertion is about freebuff
+  // readiness, not about whatever the host's live OpenCode catalog lists today.
+  const hostList = buildFreeModelList({ location: 'vps', env: { PATH: process.env.PATH }, home: '/home/ubuntu', liveModels: () => [] });
   check('so /freemodel does not offer a pending placeholder for a signed-in freebuff',
     !hostList.some((e) => e.status === 'pending-signin' && e.tool === 'freebuff'),
     JSON.stringify(hostList.filter((e) => e.status === 'pending-signin').map((e) => e.tool)));

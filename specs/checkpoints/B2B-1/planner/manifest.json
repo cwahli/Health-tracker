@@ -1,0 +1,16 @@
+{
+  "slug": "B2B-1",
+  "node": "planner",
+  "at": "2026-10-04T23:24:20.527Z",
+  "git": {
+    "head": "3ce86b4cf5b242a0addab3b3a146e07f3ec0444e",
+    "stashCommit": "f62a3b0ea367d10a68d598769c24a4fed0bc49e4"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/B2B-1.md"
+  ]
+}

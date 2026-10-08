@@ -99,6 +99,7 @@
         "tokenEnv": "VM2_BOT_TOKEN"
       },
       "agent": {
+        "healthRole": "data_steward",
         "playwrightOutputDir": "/tmp/bot-host-shots-vm2"
       }
     },
@@ -304,6 +305,8 @@
       "agent": {
         "playwrightOutputDir": "/tmp/bot-host-shots-tax-accountant",
         "workspace": "/home/ubuntu/chiwah-tax",
+        "taxRole": "tax_accountant",
+        "homeProject": "chiwah-tax",
         "skills": [
           ".agents/skills/tax-sweep"
         ]
@@ -322,10 +325,57 @@
       "agent": {
         "playwrightOutputDir": "/tmp/bot-host-shots-tax-verifier",
         "workspace": "/home/ubuntu/chiwah-tax",
+        "taxRole": "tax_verifier",
+        "homeProject": "chiwah-tax",
         "skills": [
           ".agents/skills/tax-verify"
         ],
         "model": "opencode/muse-spark-1.3-contributor"
+      }
+    },
+    {
+      "id": "vm4",
+      "name": "VM4 bot",
+      "runtime": "bot-host",
+      "enabled": true,
+      "extends": "vm",
+      "notes": "Health-coach seat: Health Analyst. Thin clone of vm.",
+      "telegram": {
+        "tokenEnv": "VM4_BOT_TOKEN"
+      },
+      "agent": {
+        "healthRole": "health_analyst",
+        "playwrightOutputDir": "/tmp/bot-host-shots-vm4"
+      }
+    },
+    {
+      "id": "vm5",
+      "name": "VM5 bot",
+      "runtime": "bot-host",
+      "enabled": true,
+      "extends": "vm",
+      "notes": "Health-coach seat: Test Planner. Thin clone of vm.",
+      "telegram": {
+        "tokenEnv": "VM5_BOT_TOKEN"
+      },
+      "agent": {
+        "healthRole": "test_planner",
+        "playwrightOutputDir": "/tmp/bot-host-shots-vm5"
+      }
+    },
+    {
+      "id": "vm6",
+      "name": "VM6 bot",
+      "runtime": "bot-host",
+      "enabled": true,
+      "extends": "vm",
+      "notes": "Health-coach seat: Research Lead. Thin clone of vm.",
+      "telegram": {
+        "tokenEnv": "VM6_BOT_TOKEN"
+      },
+      "agent": {
+        "healthRole": "research_lead",
+        "playwrightOutputDir": "/tmp/bot-host-shots-vm6"
       }
     }
   ]

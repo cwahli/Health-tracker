@@ -152,6 +152,7 @@ import {
 import { claimFiles, releaseFiles, listLocks, extractFiles } from './lib/file-locks.mjs';
 import {
   KNOWN_PROJECTS,
+  bindRegistryBot,
   getChatProject,
   getChatRole,
   switchChatProject,
@@ -166,6 +167,19 @@ import {
 } from './lib/project-registry.mjs';
 import { runPmCommand } from './lib/pm-run.mjs';
 import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-runner.mjs';
+import { classifyHealthGroupTurn, answerHealthGroup, dedicatedHealthRoleIds, readHealthVerify } from './lib/health-group.mjs';
+import { gateFromArtifact } from './lib/health/docs.mjs';
+import {
+  answerTaxGroup,
+  classifyTaxGroupTurn,
+  dedicatedTaxRoleIds,
+  forgetTaxGroup,
+  isTaxGroupChat,
+  readTaxSnapshot,
+  rememberTaxGroup,
+  taxDeskBotId,
+  TAX_PROJECT_ID,
+} from './lib/tax-group.mjs';
 // The Personal Health Coach's data loop. `/health` is deliberately not gated on
 // the chat's active project: the command names its own project, so a verify can
 // be run from any chat, and the reply says which one it read.
@@ -2701,17 +2715,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     case 'bugs': {
       // Shared bug board mini app (packet bug-board-miniapp, Node 5). Same
       // web_app button pattern as /tui, served by the same gateway host under
-      // /bugs/ behind the initData door. Scoped to the bug ticket bot: it owns
-      // the canonical card list.
-      // Served from bot-host bots that hold a gateway token. vm is the
-      // master bot and validates today; bug_ticket stays listed so the scope
-      // is correct if it ever gains a bot-host surface (it is a hermes bot
-      // and has no bot-host command path).
-      const BOARD_BOTS = ['vm', 'bug_ticket'];
-      if (!BOARD_BOTS.includes(config.id)) {
-        await api.sendMessage(chatId, '🐛 The bug board lives on the VM bot — ask it for /bugs and it will hand you the button.');
-        return;
-      }
+      // /bugs/ behind the initData door. Served by every bot-host bot: the
+      // button carries ?bot=<this bot> and the gateway validates the opener's
+      // initData against that bot's token (auto-matching any token it holds),
+      // so no per-bot allowlist lives here.
       const bugsGatewayUrl = readTuiUrl();
       if (!bugsGatewayUrl) {
         const onPhone = Boolean(process.env.TERMUX_VERSION || process.env.ANDROID_ROOT);
@@ -4040,12 +4047,32 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   }
   // Five bots can share one group only if each answers solely when addressed.
   // Direct chats skip this entirely: everything there is for this bot.
-  const isMasterBot = config.id === 'vm' || Boolean(config.isMaster);
+  let fleetBots = [];
+  try {
+    fleetBots = loadRegistry(registryFileInUse()).bots;
+  } catch {
+    fleetBots = [];
+  }
+  const dedicatedRoleIds = [
+    ...dedicatedHealthRoleIds(fleetBots),
+    ...dedicatedTaxRoleIds(fleetBots),
+  ];
+  const taxWorkspace = KNOWN_PROJECTS[TAX_PROJECT_ID].workspace;
+  const deskId = taxDeskBotId(fleetBots, 'vm');
+  const isTaxDesk = config.id === deskId;
+  const myRoles = [config.agent?.healthRole, config.agent?.taxRole].filter(Boolean);
+  // The tax desk is a coordinator in its own supergroup, the same way vm is
+  // the coordinator for the health seats. Both can be admins of one group;
+  // the chat binding decides which council a bare question belongs to.
+  const isMasterBot = config.id === 'vm' || Boolean(config.isMaster) || isTaxDesk;
   const addr = resolveGroupAddressing(message, config.me, {
-    role: config.role || config.agent?.role || null,
+    role: myRoles[0] || config.role || config.agent?.role || null,
+    roles: myRoles,
     name: config.name,
     isMaster: isMasterBot,
     allowGroupBroadcast: true,
+    hasDedicatedRoleBots: dedicatedRoleIds.length > 0,
+    dedicatedRoleIds,
   });
   if (chatKind(message) === 'group' && !addr.addressed) {
     return;
@@ -4062,6 +4089,128 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId, kind: chatKind(message) });
     return;
   }
+
+  // A named health seat, or a bare question to the room, is answered here.
+  // It does not fall through to the website coder: that turn can edit the
+  // repo and does not see the verify artifact. The coordinator runs the seats
+  // in order and posts one message. A seat bot posts only its own answer.
+  const storedProjectId = getChatProject(chatId).id;
+  // The tax desk's home is the tax supergroup. A chat that has never been
+  // switched still looks like health-tracker, and this bot must not answer
+  // that room as the health council.
+  const deskHome = isTaxDesk
+    && config.agent?.homeProject === TAX_PROJECT_ID
+    && storedProjectId === 'health-tracker';
+  const taxChat = storedProjectId === TAX_PROJECT_ID || isTaxGroupChat(taxWorkspace, chatId) || deskHome;
+  const healthTurn = classifyHealthGroupTurn({
+    kind: chatKind(message),
+    addr,
+    text,
+    projectId: storedProjectId,
+    taxChat,
+  });
+  if (healthTurn?.mode === 'skip') return;
+  if (healthTurn) {
+    if (busy.has(chatId)) {
+      await api.sendMessage(chatId, 'Still working through the seats. Ask again when that answer is in the chat.');
+      return;
+    }
+    busy.add(chatId);
+    const workspace = KNOWN_PROJECTS['external-health'].workspace;
+    console.log(`[${config.id}] health group ${healthTurn.mode}${healthTurn.roleId ? ` ${healthTurn.roleId}` : ''}`);
+    let reply;
+    try {
+      const artifact = readHealthVerify(workspace);
+      const closed = artifact && gateFromArtifact(artifact);
+      if (closed?.allowed && closed.total > 0) {
+        await api.sendMessage(chatId, healthTurn.mode === 'council'
+          ? 'Council is working through the seats in order. One answer follows.'
+          : `${healthTurn.roleId.replace(/_/g, ' ')} is looking at the verified rows.`).catch(() => {});
+      }
+      reply = await answerHealthGroup({
+        ...healthTurn,
+        workspace,
+        runModel: async ({ prompt }) => {
+          const { runGemini } = await import('./lib/agent-gemini.mjs');
+          const res = await runGemini({
+            prompt,
+            model: process.env.COUNCIL_MODEL || 'gemini/gemini-3.7-flash',
+            timeoutMs: 120000,
+          });
+          const out = String(res?.finalText || '').trim();
+          if (!out) throw new Error(res?.lastError || 'the model returned no text');
+          return out;
+        },
+      });
+    } catch (err) {
+      await api.sendMessage(chatId, `The health seats did not finish: ${err.message}`).catch(() => {});
+      return;
+    } finally {
+      busy.delete(chatId);
+    }
+    if (reply?.text) await api.sendMessage(chatId, reply.text).catch(() => {});
+    if (reply?.answered) {
+      if (healthTurn.mode === 'seat') forgetTaxGroup(taxWorkspace, chatId);
+      recordActiveThread(chatId, {
+        roleId: healthTurn.roleId || null,
+        botId: config.me?.id || config.id,
+        isCouncil: healthTurn.mode === 'council',
+        jointRoles: addr?.jointRoles || [],
+        timestamp: Date.now(),
+      });
+    }
+    return;
+  }
+
+  // Same shape as the health room, for the tax seats. A named seat answers
+  // alone. A bare question in the tax supergroup is one consolidated reply
+  // after the accountant and the verifier, in that order. No slash command.
+  const taxProjectId = deskHome ? TAX_PROJECT_ID : storedProjectId;
+  const taxHome = taxProjectId === TAX_PROJECT_ID || taxChat;
+  const taxTurn = classifyTaxGroupTurn({
+    kind: chatKind(message),
+    addr,
+    text,
+    projectId: taxProjectId,
+    taxChat: taxHome,
+    isDesk: isTaxDesk,
+  });
+  if (taxTurn?.mode === 'skip') return;
+  if (taxTurn) {
+    if (busy.has(chatId)) {
+      await api.sendMessage(chatId, 'Still working through the tax seats. Ask again when that answer is in the chat.');
+      return;
+    }
+    busy.add(chatId);
+    console.log(`[${config.id}] tax group ${taxTurn.mode}${taxTurn.roleId ? ` ${taxTurn.roleId}` : ''}`);
+    let reply;
+    try {
+      rememberTaxGroup(taxWorkspace, chatId);
+      reply = answerTaxGroup({
+        ...taxTurn,
+        workspace: taxWorkspace,
+        snapshot: readTaxSnapshot(taxWorkspace),
+      });
+    } catch (err) {
+      await api.sendMessage(chatId, `The tax seats did not finish: ${err.message}`).catch(() => {});
+      return;
+    } finally {
+      busy.delete(chatId);
+    }
+    if (reply?.text) await api.sendMessage(chatId, reply.text).catch(() => {});
+    if (reply?.answered) {
+      recordActiveThread(chatId, {
+        roleId: taxTurn.roleId || null,
+        botId: config.me?.id || config.id,
+        isCouncil: taxTurn.mode === 'council',
+        jointRoles: addr?.jointRoles || [],
+        timestamp: Date.now(),
+      });
+    }
+    return;
+  }
+  if (chatKind(message) === 'group' && addr.isBroadcast && taxHome && !isTaxDesk) return;
+  if (chatKind(message) === 'group' && addr.isBroadcast && isTaxDesk && config.id !== 'vm' && !taxHome) return;
 
   if (busy.has(chatId)) {
     // Direct phone interaction: a message sent mid-run queues as a follow-up
@@ -4793,7 +4942,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     if (storeFacts.outcome === 'answered') {
       recordActiveThread(chatId, {
         roleId: activeRole || addr?.roleId || null,
-        botId: config.id,
+        botId: config.me?.id || config.id,
         isCouncil: Boolean(addr?.isBroadcast),
         jointRoles: addr?.jointRoles || [],
         timestamp: Date.now(),
@@ -5004,6 +5153,8 @@ async function main() {
   }
   const bot = getBot(registry, args.id);
   const config = normalizeConfig(bot, { defaultWorkspace: REPO_ROOT });
+  // Private-chat roles are per bot. Bind before any command or turn reads them.
+  bindRegistryBot(config.id);
   if (config.runtime !== 'bot-host' && config.runtime !== 'device') {
     throw new Error(
       `Bot "${config.id}" has runtime "${config.runtime}" — it is not run by bot-host`,

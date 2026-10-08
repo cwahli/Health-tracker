@@ -1,0 +1,23 @@
+{
+  "schema": "meal-audit-request/1",
+  "mealId": "meal_1791123761037",
+  "name": "Mediterranean Almonds with Cinnamon and Coconut, Teriyaki Flavoured Broad Beans, Coated Peas and Corn, and 2 other dishes",
+  "provenance": "debug_payload",
+  "photos": [
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791123761037/photos/sha256_16cfc9cd039ec110bc96572523c2f5ae36187ca8a6a30652ef94c086de4d29f6.jpg",
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791123761037/photos/sha256_26354e93fcd8ff638cb76371697301d0fe1121602d2bf91289c240c4334c051e.jpg",
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791123761037/photos/sha256_4f2228bc5b9ea66cdbcaa7951d3ee06e220b6b120620b279fcdcbe2c7ed63fc9.jpg",
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791123761037/photos/sha256_7d4be9ea8a98a0a02858ac6469c76f67d8d180224671b0941644f2f44afc34de.jpg"
+  ],
+  "skeleton": "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791123761037/flow_skeleton.json",
+  "requestedAt": "2026-10-05T09:17:06.667Z",
+  "requestedBy": "meal-audit-loop",
+  "status": "pending",
+  "instructions": [
+    "Audit this meal and produce a ground-truth bundle.",
+    "For each dish: dishName, weightGrams, boundingBox2D (0-1000, required because photos exist), and all 32 nutrient keys.",
+    "Weight must come from the catalog (scripts/meal-audit-assist.mjs api:<query>) or a scale, never an eyeball estimate.",
+    "Run scripts/generate-meal-result.mjs to write meal_result.json, then report the bundle path with `complete`.",
+    "If the catalog cannot source a nutrient, the audit is INCOMPLETE: say so rather than filling zeros."
+  ]
+}

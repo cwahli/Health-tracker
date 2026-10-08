@@ -686,7 +686,7 @@ test('E2E: `/role pm take` adopts the persona and `/role pm status` shows it', a
     // The adoption is a persisted chat role, not a reply string: later turns in
     // this chat run under the PM mandate through the production path.
     const state = JSON.parse(fs.readFileSync(path.join(home.home, '.hermes', 'projects_state.json'), 'utf8'));
-    assert.equal(state.chats.sim.roleId, 'pm');
+    assert.equal(state.chats['vm:sim'].roleId, 'pm');
 
     const status = await simulate('/role pm status', args);
     assert.equal(status.code, 0, `bot-host exited 0 (stderr: ${status.stderr.slice(0, 400)})`);
@@ -695,7 +695,7 @@ test('E2E: `/role pm take` adopts the persona and `/role pm status` shows it', a
     const reset = await simulate('/role pm reset', args);
     assert.match(reset.stdout, /Back to general/);
     const after = JSON.parse(fs.readFileSync(path.join(home.home, '.hermes', 'projects_state.json'), 'utf8'));
-    assert.ok(!after.chats.sim.roleId, 'reset leaves the seat');
+    assert.ok(!after.chats['vm:sim']?.roleId, 'reset leaves the seat');
   } finally {
     home.cleanup();
     await fake.close();
