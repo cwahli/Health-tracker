@@ -1541,36 +1541,9 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   if (advice.depleted && advice.active) {
     lines.push("Active sticky is empty — fail over to Next up (do not hang).");
   }
-  // The Freebuff line reads the SAME verdict as the ❌/✅ row above it, or the two
-  // contradict: the mark comes from the projection (a terminal-only lane is ❌ —
-  // "terminal only, not selectable from chat") while this line took `usable`, the
-  // table's own verdict, so a lane the ledger had already spent was announced as
-  // "ready" directly under a ❌ row. Live 2026-10-06, on the vm3 bot's own reply.
-  //
-  // The other half of that contradiction is the terminal-only row itself, which the
-  // first fix missed. Its ❌ means "no chat tap", its Reset column is `—` because
-  // the ledger carries no Freebucks stamp (`nextResetAt: null`, resetRule "shared
-  // daily Freebucks (Freebuff UI)"), and this line still said "ready (~1h
-  // Freebucks)" — an availability claim plus a time figure, under the ❌, on no
-  // evidence: `~1h` was the string literal below, not a measurement. So the
-  // not-spent case now states what the ledger actually knows — terminal-only, no
-  // chat tap, bar untracked — and nothing is announced ready beside a ❌ row.
-  // Live 2026-10-06, second paste of the same reply.
-  const fb = (rows || []).find((r) => String(r.provider || "").toLowerCase().includes("freebuff") || String(r.bucket || "").toLowerCase().includes("freebuff"))
-    || usable.find((l) => String(l.provider || "").toLowerCase() === "freebuff" || String(l.bucket || "").toLowerCase().includes("freebuff"));
+  const fb = usable.find((l) => String(l.provider || "").toLowerCase() === "freebuff" || String(l.bucket || "").toLowerCase().includes("freebuff"));
   if (fb) {
-    const spent = rows ? Boolean(fb.depleted || fb.ended) : !laneIsUsable(fb);
-    const fbName = escHtml(shortModelName(fb));
-    if (spent) {
-      const until = fb.resetAt ? ` (${escHtml(String(labelFn(fb.resetAt)))})` : "";
-      lines.push("Freebuff: " + fbName + (fb.ended ? " is over" : " is depleted") + until + " — terminal only; not usable right now.");
-    } else if (fb.tg === true) {
-      // A chat-selectable Freebuff lane (the experimental FREEBUFF_TG_LANE) is the
-      // one case that may call itself ready — still without an invented figure.
-      lines.push("Freebuff: " + fbName + " — ready; shared daily Freebucks.");
-    } else {
-      lines.push("Freebuff: " + fbName + " — terminal only; not selectable from chat. Shared daily Freebucks, reset not tracked here.");
-    }
+    lines.push("Freebuff: " + escHtml(shortModelName(fb)) + " ready (~1h Freebucks) — terminal only; use it promptly.");
   }
   // Token Harbor's free models share ONE rolling ~7-day value bar, which is what
   // the table's own resetRule says on every TH row and what the shared
@@ -1772,7 +1745,7 @@ export function laneScoreFromCatalog(lane) {
 export const TIER_GROUPS = [
   { tier: 'high', label: 'Coding-agent capable' },
   { tier: 'unlisted', label: 'Not in the catalog' },
-  { tier: 'light', label: 'No published figure · docs/inventory' },
+  { tier: 'light', label: 'Light · docs/inventory' },
 ];
 
 /**

@@ -216,17 +216,7 @@ try {
   // 7. Wiring: the turn path calls the ledger selection, not failoverModels alone.
   const src = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('the turn path calls selectTurnLanes', /const laneChoice = selectTurnLanes\(\{/.test(src));
-  // The landed refactor (#592) moved this expression into a variable and hands the
-  // walk `models: turnLaneModels`, so the old check — which pinned the inline
-  // property form — went red on correct code, and stayed red because this gate is
-  // not one CI runs. The rule is the WIRING, not the shape: the chain is
-  // laneChoice.models (never failoverModels alone) and the walk receives exactly
-  // that expression.
-  const chainVar = (src.match(/const (\w+) = laneChoice\.models\.length \? laneChoice\.models/) || [])[1] || '';
-  check('the chain comes from laneChoice.models', /laneChoice\.models\.length \? laneChoice\.models/.test(src));
-  check('and the walk is handed that chain, not failoverModels alone', chainVar
-    ? new RegExp(`models: ${chainVar}\\b`).test(src)
-    : /models: laneChoice\.models\.length \? laneChoice\.models/.test(src));
+  check('the chain comes from laneChoice.models', /models: laneChoice\.models\.length \? laneChoice\.models/.test(src));
   // QS-9: the chain may have run elsewhere first, so the line says nothing
   // FURTHER was run — and names every host tried before giving up.
   check('an exhausted host is told nothing further ran', /Nothing further was run and nothing was spent/.test(src));

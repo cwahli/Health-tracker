@@ -170,7 +170,7 @@ check('the benchmark on a button carries no AA prefix — the reader’s call, t
 // --- headings and the cancel row are the same rendered length as a row ---
 const heads = [
   headingWidth('Coding-agent capable (11)'),
-  headingWidth('No published figure · docs/inventory (19)'),
+  headingWidth('Light · docs/inventory (19)'),
   headingWidth('Cancel — keep current model'),
 ];
 check('a heading and the cancel row finish at COPY_UNITS, indented, dash last',

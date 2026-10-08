@@ -35,6 +35,7 @@ export const SCOPES = {
   drive: 'https://www.googleapis.com/auth/drive',
   spreadsheets: 'https://www.googleapis.com/auth/spreadsheets',
   documents: 'https://www.googleapis.com/auth/documents',
+  calendar: 'https://www.googleapis.com/auth/calendar.readonly',
 };
 
 const API = {

@@ -377,6 +377,20 @@
         "healthRole": "research_lead",
         "playwrightOutputDir": "/tmp/bot-host-shots-vm6"
       }
+    },
+    {
+      "id": "agenda",
+      "name": "Agenda bot",
+      "runtime": "bot-host",
+      "enabled": true,
+      "extends": "vm",
+      "notes": "Thin clone of the registry master (scripts/add-bot.mjs): agent/progress/session are inherited. Add a per-bot difference only by allowlisting the key in scripts/assert-bot-clone.mjs.",
+      "telegram": {
+        "tokenEnv": "AGENDA_BOT_TOKEN"
+      },
+      "agent": {
+        "playwrightOutputDir": "/tmp/bot-host-shots-agenda"
+      }
     }
   ]
 }

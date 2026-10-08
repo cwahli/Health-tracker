@@ -228,6 +228,10 @@ async function main() {
         body('<p>Nothing here. You can close this tab.</p>');
         return;
       }
+      if (!u.searchParams.has('state') && !u.searchParams.has('code')) {
+        body('<p>Waiting for OAuth callback...</p>');
+        return;
+      }
       if (u.searchParams.get('state') !== state) {
         body('<p>State mismatch — this response is not from the request this script started.</p>');
         done({ ok: false, error: 'state mismatch' });
