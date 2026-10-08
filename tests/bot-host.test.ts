@@ -89,6 +89,7 @@ import {
   variantKeyboard,
   decodeCallback,
   helpText,
+  POOL_POINTER,
   statusText,
   formatModelList,
   formatUsage,
@@ -730,9 +731,11 @@ describe('commands', () => {
       agent: { model: 'opencode-go/deepseek-v4.1-flash', variant: 'high' },
     };
     const text = helpText(config, { model: 'opencode-go/muse-spark-1.3' });
-    for (const cmd of ['/new', '/status', '/model', '/models', '/model_light_free', '/model_free', '/model_go', '/help', '/resume']) {
+    for (const cmd of ['/new', '/status', '/model_light_free', '/model_free', '/model_go', '/help', '/resume']) {
       expect(text).toContain(cmd);
     }
+    expect(text).not.toMatch(/\/model(?!_)/);
+    expect(text).not.toContain('/models');
     // Run controls are gone: no /abort or /watch anywhere on the surface.
     expect(text).not.toContain('/abort');
     expect(text).not.toContain('/watch');
@@ -1040,9 +1043,13 @@ describe('pickers', () => {
       expect(toTelegramCommands().find((c) => c.command === pool)?.description.length).toBeGreaterThan(0);
     }
     expect(COMMAND_NAMES).not.toContain('freemodel');
+    expect(COMMAND_NAMES).not.toContain('model');
+    expect(COMMAND_NAMES).not.toContain('models');
     // Still handled, because deleting the name would turn a typed `/freemodel`
     // into a model prompt — the exact opposite of helpful.
     expect(src).toContain("case 'freemodel':");
+    expect(src).toContain("case 'model':");
+    expect(src).toContain("case 'models':");
     // …and it answers a POINTER: no keyboard, no list, nothing billed. Sliced from
     // its own case to the case that opens the first pool, so the pool handlers'
     // keyboards — which are the point of the three new names — are not what this
@@ -1050,8 +1057,14 @@ describe('pickers', () => {
     // rule exists to prevent.
     const oldNameCase = src.slice(src.indexOf("case 'freemodel':"), src.indexOf("case 'model_light_free':"));
     expect(oldNameCase.length).toBeGreaterThan(0);
-    expect(oldNameCase).toContain('/model_light_free');
+    expect(oldNameCase).toContain('POOL_POINTER');
+    expect(POOL_POINTER).toContain('/model_light_free');
+    expect(POOL_POINTER).toContain('/model_go');
+    expect(POOL_POINTER).not.toMatch(/\/model clears/);
     expect(oldNameCase).not.toMatch(/reply_markup|modelKeyboard|formatFreemodelWithDepletion|sendFreeModelPicker/);
+    const retiredCase = src.slice(src.indexOf("case 'model':"), src.indexOf("case 'store':"));
+    expect(retiredCase).toContain('POOL_POINTER');
+    expect(retiredCase).not.toMatch(/setPref|pool:\s*null|modelKeyboard/);
     expect(BOT_COMMANDS.length).toBe(new Set(COMMAND_NAMES).size);
     const shim = await import('../scripts/lib/bot-commands.mjs');
     expect(shim.BOT_COMMANDS).toEqual(BOT_COMMANDS);
@@ -2102,7 +2115,8 @@ describe('ProgressRenderer finish (bot restart/timeout truthfulness)', () => {
     const all = sent.join('\n');
     expect(all).toContain('Timed out after 15m');
     expect(all).not.toContain('900000ms');
-    expect(all).toContain('/model');
+    expect(all).toContain('/model_light_free');
+    expect(all).not.toMatch(/\/model(?!_)/);
   });
 
   it('non-timeout errors keep the Error: prefix unchanged', async () => {

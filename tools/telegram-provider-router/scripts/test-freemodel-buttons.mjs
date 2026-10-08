@@ -137,6 +137,8 @@ const {
   availableClineKnownLanes,
   MODEL_POOLS,
   poolOfLane,
+  freemodelProviderTag,
+  appendGoSpaceBunny,
 } = mod;
 
 let failed = 0;
@@ -431,7 +433,20 @@ check("G7 the Go pool keeps the go-plan lane alone",
 check("G8 the Go body says the paid lane does not move on its own",
   /Go plan/.test(goReply.text) && /never moves on its own/.test(goReply.text), goReply.text);
 check("G9 a free pool says a quota hit stays inside it, and names the way out",
-  /moves inside this pool only/.test(lightReply.text) && /\/model clears the pool/.test(lightReply.text), lightReply.text);
+  /moves inside this pool only/.test(lightReply.text) && /Pick another pool command to leave this one/.test(lightReply.text) && !/\/model clears the pool/.test(lightReply.text), lightReply.text);
+check("G12 an opencode-go id is tagged Go, not OpenCode",
+  freemodelProviderTag("opencode", { id: "opencode-go/space-bunny-free" }) === "Go");
+check("G13 the Go probe adds Space Bunny and not the rest of the paid catalog",
+  (() => {
+    const added = appendGoSpaceBunny([], [{ id: "opencode-go", models: { "space-bunny-free": { name: "Space Bunny" }, "deepseek-v4": { name: "DeepSeek" } } }]);
+    return added.length === 1 && added[0].id === "opencode-go/space-bunny-free";
+  })());
+check("G14 a successful probe still shows the Go bunny when the provider omits it, once",
+  (() => {
+    const once = appendGoSpaceBunny([], []);
+    const twice = appendGoSpaceBunny(once, []);
+    return once.length === 1 && once[0].id === "opencode-go/space-bunny-free" && twice.length === 1;
+  })());
 check("G10 the three pools partition the one list",
   (() => {
     const all = flatten(allPoolsReply.keyboard).length - 1; // minus Cancel

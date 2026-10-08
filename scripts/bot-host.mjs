@@ -179,8 +179,9 @@ import {
   variantKeyboard,
   decodeCallback,
   helpText,
-  formatModelList,
   formatUsage,
+  POOL_POINTER,
+  POOL_EXIT_NOTE,
   extractMedia,
   extractCodeBlocks,
 } from './lib/commands.mjs';
@@ -1349,9 +1350,9 @@ function poolNoteLines({ pool, location, total, usable, soonest = '' } = {}) {
     ? 'the Go plan is paid, so this lane never moves on its own'
     : 'a quota hit moves inside this pool only';
   if (!total) {
-    return [`${name} — no lane of this pool is on ${loc} right now${soonest ? `; soonest reset in ${soonest}` : ''}. ${move}. /model clears the pool.`];
+    return [`${name} — no lane of this pool is on ${loc} right now${soonest ? `; soonest reset in ${soonest}` : ''}. ${move}. ${POOL_EXIT_NOTE}`];
   }
-  const out = [`${name} · ${total} lane${total === 1 ? '' : 's'} on ${loc} · ${usable} usable — ${move}. /model clears the pool.`];
+  const out = [`${name} · ${total} lane${total === 1 ? '' : 's'} on ${loc} · ${usable} usable — ${move}. ${POOL_EXIT_NOTE}`];
   if (!usable) out.push(`Nothing in this pool is usable right now${soonest ? ` — soonest reset in ${soonest}` : ''}.`);
   return out;
 }
@@ -2229,7 +2230,7 @@ export class ProgressRenderer {
         lead = `⏱ ${friendly}`;
         const last = this.lastActivityLine();
         hint =
-          `${last ? `\n${last}` : ''}\n${this.timeoutResumeHint()}\nTip: retry with /thinking medium, a smaller ask, /model for a faster model, or /new for a fresh session.`;
+          `${last ? `\n${last}` : ''}\n${this.timeoutResumeHint()}\nTip: retry with /thinking medium, a smaller ask, /model_light_free for a lighter model, or /new for a fresh session.`;
       }
       await this.deliver(`${lead}${errTail}${hint}`);
       return;
@@ -3166,80 +3167,12 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
-    case 'model': {
-      if (!cmd.args) {
-        const models = await getModels(config, caches);
-        if (!models.length) {
-          await api.sendMessage(chatId, 'Could not read the model list from opencode.');
-          return;
-        }
-        await api.sendMessage(chatId, `Select a model (current: ${eff.model}):\nTip: /model_free lists this host's locally available free models.`, {
-          reply_markup: modelKeyboard(models),
-        });
-        return;
-      }
-      if (cmd.args === 'reset') {
-        const current = prefFor(prefs, chatId);
-        delete current.model;
-        delete current.variant;
-        delete current.pool;
-        setPref(prefs, chatId, current);
-        if (Object.keys(prefFor(prefs, chatId)).length === 0) prefs.delete(chatId);
-        savePrefs(config.id, prefs);
-        await api.sendMessage(chatId, `Model reset to ${config.agent.model}.`);
-        return;
-      }
-      const ref = parseModelRef(cmd.args);
-      if (ref.surface === 'cline') {
-        if (!CLINE_FREE_MODELS.includes(ref.id)) {
-          await api.sendMessage(chatId, `Unknown cline model: ${ref.id}\nUse /model_free to pick from the free list.`);
-          return;
-        }
-        const stored = toModelRef('cline', ref.id);
-        setPref(prefs, chatId, { model: stored, pool: null });
-        savePrefs(config.id, prefs);
-        await api.sendMessage(chatId, `Model set to ${formatFreeLabel(stored)} for this chat.`);
-        return;
-      }
-      if (ref.surface === 'gemini') {
-        const migrated = GEMINI_TO_OPENCODE[ref.id];
-        if (!GEMINI_MODELS.includes(ref.id) || !migrated) {
-          await api.sendMessage(chatId, `Unknown gemini model: ${ref.id}\nUse /model_free to pick a locally available model.`);
-          return;
-        }
-        setPref(prefs, chatId, { model: migrated, pool: null });
-        savePrefs(config.id, prefs);
-        await api.sendMessage(chatId, `Model set to ${formatFreeLabel(migrated)} for this chat.`);
-        return;
-      }
-      const models = await getModels(config, caches);
-      let target = ref.id;
-      if (models.length && !models.includes(target) && !target.includes('/')) {
-        const hit = models.find((m) => m.split('/').pop() === target);
-        if (hit) target = hit;
-      }
-      if (models.length && !models.includes(target)) {
-        await api.sendMessage(chatId, `Unknown model: ${cmd.args}\nUse /model to pick from the list or /model_free for free models.`);
-        return;
-      }
-      // /model stays the unconstrained setter: naming a model here clears any
-      // pool a pool command set, which restores the inferred-from-the-model
-      // behaviour exactly. Strictly additive intent, never a second walk.
-      setPref(prefs, chatId, { model: target, pool: null });
-      savePrefs(config.id, prefs);
-      await api.sendMessage(chatId, `Model set to ${target} for this chat.`);
-      return;
-    }
-
-    // /free is gone (2026-10-03). It was the raw-catalog free-model text list, the
-    // surface /freemodel replaced with the canonical lane list and a tappable
-    // keyboard. Two names for one screen, one of them the older and less
-    // accurate of the two, so it is removed rather than aliased: a reader who
-    // typed /free gets "Unknown command" and the menu, which is the honest
-    // answer now that the replacement is /freemodel.
+    case 'model':
     case 'models': {
-      const models = await getModels(config, caches);
-      await sendChunked(api, chatId, formatModelList(models));
+      // Retired names. A pointer, not a setter: clearing `pool` here was how a
+      // typed /model left a pool, and that setter is gone. Deleting the case
+      // would make isKnownCommand() false and the typed name would run as a prompt.
+      await api.sendMessage(chatId, POOL_POINTER);
       return;
     }
 
@@ -3291,13 +3224,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // fall through to the tool as a prompt — the opposite of helpful — and a host
       // still on the previous build during a roll keeps reaching a real answer.
       // One line, no list, no keyboard, nothing billed.
-      await api.sendMessage(chatId, [
-        'The free-model picker is now three pools — pick the one this chat should stay in:',
-        '`/model_light_free` — light lanes only; a quota hit moves inside light',
-        '`/model_free` — coding-capable lanes only (rating 35 and above)',
-        '`/model_go` — the paid Go plan; it never moves on its own',
-        '`/model` clears the pool and goes back to the plain setter.',
-      ].join('\n'));
+      await api.sendMessage(chatId, POOL_POINTER);
       return;
     }
 
@@ -4723,11 +4650,12 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
         model = models.includes(value) ? value : models[Number(value)];
       }
       if (!model) {
-        await api.answerCallbackQuery(query.id, { text: 'Expired, run /model again' });
+        await api.answerCallbackQuery(query.id, { text: 'Expired, run a pool command again' });
         return;
       }
-      // This is /model's own keyboard, i.e. the unconstrained path, so it clears
-      // any pool a pool command set — the same thing typing /model <name> does.
+      // An already-shown model keyboard from a previous build. Typing /model is
+      // now a pointer and does not set a model; this tap still applies the button
+      // the reader already has on screen.
       setPref(prefs, chatId, { model, pool: null });
       savePrefs(config.id, prefs);
       const variants = await getVariants(config, caches, model);

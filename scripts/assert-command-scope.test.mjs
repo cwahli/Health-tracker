@@ -148,7 +148,7 @@ test('the real tree publishes canonical /thinking and keeps /think as an alias',
   // answers a one-line pointer so muscle memory does not fall through to a model
   // prompt — and no longer publishes it. An alias target has to be published, so
   // it cannot live in COMMAND_ALIASES any more; it is declared here instead.
-  assert.deepEqual(out.aliases, ['think', 'freemodel']);
+  assert.deepEqual(out.aliases, ['think', 'freemodel', 'model']);
 });
 
 // --- parsers ---------------------------------------------------------------
