@@ -5042,10 +5042,14 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
     // because the other pool is no longer a fallback.
     orderedLanes = poolLanes;
   } else {
+    // No pool still walks the free lanes. The Go subscription is a picker, not
+    // the free walk's next hop: a chat that never sent /model_go must not spend
+    // the paid plan just because those rows are now in the catalog.
+    const notGo = (l) => poolOfRoute(l) !== 'go';
     orderedLanes = model
-      ? [...fallbackLanes].filter((l) => tierOf(l) === currentGroup).sort(bySameTier)
-        .concat([...fallbackLanes].filter((l) => tierOf(l) !== currentGroup).sort(byTierThenRating))
-      : [...fallbackLanes].sort(byTierThenRating);
+      ? [...fallbackLanes].filter((l) => notGo(l) && tierOf(l) === currentGroup).sort(bySameTier)
+        .concat([...fallbackLanes].filter((l) => notGo(l) && tierOf(l) !== currentGroup).sort(byTierThenRating))
+      : [...fallbackLanes].filter(notGo).sort(byTierThenRating);
   }
   const codingLeft = orderedLanes.filter((l) => tierOf(l) === 'high').length;
   const lightLeft = orderedLanes.filter((l) => tierOf(l) === 'light').length;

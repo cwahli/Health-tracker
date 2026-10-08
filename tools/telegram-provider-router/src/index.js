@@ -3255,25 +3255,29 @@ function freemodelProviderTag(providerKey, item) {
 const GO_SPACE_BUNNY_ID = "opencode-go/space-bunny-free";
 
 /**
- * Add the Go Space Bunny to a successful OpenCode probe.
+ * Add the paid OpenCode Go catalog to a successful OpenCode probe.
  *
- * The probe only walks provider id `opencode`, so the Go plan never appeared
- * on /model_go. A model under provider id `opencode-go` is included only when
- * it is this bunny — the rest of the paid catalog stays off the free probe.
- * The authored id is appended when the probe itself succeeded and the row is
- * missing. Callers must not call this on a failed probe.
+ * The probe only walks provider id `opencode` and only free-tagged ids, so the
+ * subscription never appeared on /model_go. Every model under provider id
+ * `opencode-go` is a Go-plan row. The authored Space Bunny is appended only
+ * when that provider is absent, so a probe that succeeded but has no Go auth
+ * still has one button. Callers must not call this on a failed probe.
  */
 function appendGoSpaceBunny(items, providers = []) {
   const out = Array.isArray(items) ? items.map((item) => ({ ...item })) : [];
   const go = (providers || []).find((p) => p && p.id === "opencode-go" && p.models);
-  if (go?.models) {
-    for (const [mid, meta] of Object.entries(go.models)) {
-      const idLow = String(mid).toLowerCase();
-      if (idLow !== "space-bunny-free" && idLow !== GO_SPACE_BUNNY_ID) continue;
-      if (out.some((x) => String(x.id).toLowerCase() === GO_SPACE_BUNNY_ID)) continue;
-      const name = (meta && meta.name) || "Space Bunny";
-      out.push({ id: GO_SPACE_BUNNY_ID, label: "Space Bunny", display: name });
+  const models = go?.models && typeof go.models === "object" ? Object.entries(go.models) : [];
+  if (models.length) {
+    for (const [mid, meta] of models) {
+      const bare = String(mid || "").trim();
+      if (!bare) continue;
+      const id = bare.includes("/") ? bare : `opencode-go/${bare}`;
+      if (out.some((x) => String(x.id).toLowerCase() === id.toLowerCase())) continue;
+      const name = (meta && meta.name) || bare;
+      const label = String(name).replace(/\s*\(free\)\s*$/i, "").trim() || bare;
+      out.push({ id, label, display: name });
     }
+    return out;
   }
   if (!out.some((x) => String(x.id).toLowerCase() === GO_SPACE_BUNNY_ID)) {
     out.push({ id: GO_SPACE_BUNNY_ID, label: "Space Bunny", display: "Space Bunny" });

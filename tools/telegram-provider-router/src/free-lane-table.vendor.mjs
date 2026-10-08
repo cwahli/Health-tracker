@@ -1697,10 +1697,15 @@ export function supersedeOlderVersions(lanes, { scoreOf = null } = {}) {
   const dropped = [];
   for (const lane of lanes || []) {
     const id = String(lane?.model || '');
+    // The Go plan is a paid catalog the reader picks from. A newer free
+    // DeepSeek must not hide the Go DeepSeek, and a newer Go model must not
+    // hide an older one the subscription still offers.
+    if (planCodeForLane(lane) === 'OG') { out.push(lane); continue; }
     const mine = versionOf(id);
     const family = familyOf(id);
     const rival = (lanes || []).find((other) => {
       if (other === lane) return false;
+      if (planCodeForLane(other) === 'OG') return false;
       if (familyOf(other?.model || '') !== family) return false;
       return cmp(versionOf(other?.model || ''), mine) > 0;
     });

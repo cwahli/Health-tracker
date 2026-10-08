@@ -276,10 +276,11 @@ try {
   // The walk's own state is in the check NAME, not a detail argument: this
   // sensor's `check(name, cond)` takes two arguments, so a third is dropped and a
   // failure here would say only that it failed, not what it returned.
-  check(`with no pool the walk is unchanged, crossing as it always did — pool=${openChoice.pool} exhausted=${openChoice.exhausted} [${openChoice.models.join(',')}]`,
-    openChoice.pool === null && openChoice.models.length > 2
+  check(`with no pool the walk stays on the free lanes and does not spend the Go plan — pool=${openChoice.pool} exhausted=${openChoice.exhausted} [${openChoice.models.join(',')}]`,
+    openChoice.pool === null && openChoice.models.length >= 2
     && openChoice.models.some((m) => m.includes('glm-4.7'))
-    && openChoice.models.some((m) => m.includes(GO_LANE)));
+    && openChoice.models.some((m) => m.includes('laguna'))
+    && !openChoice.models.some((m) => m.includes(GO_LANE)));
 
   const lightChoice = selectTurnLanes({ botId: 'pool-healthy-bot', model: 'opencode/muse-spark-1.3-contributor-free', fallback: 'zen/muse', pool: 'light' });
   check('a light-pool chat walks only light lanes',
