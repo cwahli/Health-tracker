@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { RefreshCw, Play, Upload, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronRight, Trash2, Download, Copy } from 'lucide-react';
-import { PHASE_LABEL, groupJourneyByDish, mealLineNamesMatch } from '../utils/goldenScoreboard';
+import { PHASE_LABEL, groupJourneyByDish, findObservedMealLine } from '../utils/goldenScoreboard';
 import { buildGoldenChecklist, classifyStudioRed, formatGoldenShare, replayTapeBanner, studioLoopPlan } from '../utils/goldenStudio';
 import { fetchPhotosAsDataUrls, requestGoldenNewAnalyze, sameOriginPhotoUrl } from '../utils/goldenIngestClient';
 
@@ -220,8 +220,8 @@ export default function GoldenInboxPanel() {
         label: p.label,
         youDo: p.youDo,
       })),
-      mealLines: (board.expectedMeal || []).map((exp: any, idx: number) => {
-        const obs = findMealObs(board, exp, idx);
+      mealLines: (board.expectedMeal || []).map((exp: any) => {
+        const obs = findMealObs(board, exp);
         return {
           name: exp.name,
           expected: exp.calories != null ? `${exp.calories} kcal` : 'N/A',
@@ -761,7 +761,7 @@ export default function GoldenInboxPanel() {
                   </p>
                   <div className="space-y-1 text-[10px]">
                     {detail.board.expectedMeal.map((exp: any, idx: number) => {
-                      const obs = findMealObs(detail.board, exp, idx);
+                      const obs = findMealObs(detail.board, exp);
                       const st = mealLineStatus(detail.board, exp, obs);
                       return (
                         <div key={idx} className={`p-1.5 rounded border flex flex-wrap items-center justify-between gap-1 ${st.tone === 'warn' ? 'bg-amber-950/30 border-amber-500/30' : st.tone === 'ok' ? 'bg-emerald-950/30 border-emerald-500/30' : 'bg-rose-950/30 border-rose-500/30'}`}>
@@ -787,8 +787,8 @@ export default function GoldenInboxPanel() {
               {(() => {
                 const board = detail.board || {};
                 const mealMisses = (board.expectedMeal || [])
-                  .map((exp: any, idx: number) => {
-                    const obs = findMealObs(board, exp, idx);
+                  .map((exp: any) => {
+                    const obs = findMealObs(board, exp);
                     if (!obs) return `missing item "${exp.name}"`;
                     return '';
                   })
@@ -979,13 +979,8 @@ function AttemptBox({ id, onSaved }: { id: string; onSaved: () => Promise<void> 
   );
 }
 
-function findMealObs(board: any, exp: any, idx: number) {
-  const list = board?.observedMeal || [];
-  const presenceOnly = exp.calories == null;
-  return (
-    list.find((o: any) => mealLineNamesMatch(exp.name, o.name, presenceOnly)) ||
-    (presenceOnly ? undefined : list[idx])
-  );
+function findMealObs(board: any, exp: any) {
+  return findObservedMealLine(board?.observedMeal, exp);
 }
 
 function mealLineStatus(board: any, exp: any, obs: any): { label: string; tone: 'ok' | 'warn' | 'bad' } {
@@ -1032,7 +1027,7 @@ function uniquePending(board: any): Array<{
   };
   const hamMissing = (board?.expectedMeal || []).some((exp: any) => {
     if (!/^ham$/i.test(String(exp.name || '').trim()) || exp.calories != null) return false;
-    return !findMealObs(board, exp, -1);
+    return !findMealObs(board, exp);
   });
   const invs = (board?.invariants || []).filter((i: any) => {
     if (i.pass || !i.label) return false;

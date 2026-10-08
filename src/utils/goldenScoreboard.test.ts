@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { GoldenOutcome } from './goldenScoreboard';
 import {
+  findObservedMealLine,
   parseKnownFails,
   parseTensions,
   extractMealLines,
@@ -28,6 +29,26 @@ const picnicLog = `
 [backend] [ReceiptInvariant] REPAIRED rows→softBudget factor=1.114 itemCal=492
 [backend] [MatchPriority] Bound direct Curator query match id=2710321 ("Popsicle, no sugar added") for component "sugar"
 `;
+
+describe('findObservedMealLine', () => {
+  const observed = [
+    { name: 'Ham', calories: 102 },
+    { name: 'Sweet chilli chicken wrap', calories: 480 },
+  ];
+
+  it('pairs by name when the observed list is in a different order', () => {
+    expect(findObservedMealLine(observed, { name: 'Sweet chilli chicken wrap', calories: 480 })?.name)
+      .toBe('Sweet chilli chicken wrap');
+  });
+
+  it('does not bind the dish that merely sits in the same slot', () => {
+    expect(findObservedMealLine(observed, { name: 'Missing side', calories: 50 })).toBeUndefined();
+  });
+
+  it('still matches a presence-only line by name', () => {
+    expect(findObservedMealLine(observed, { name: 'Ham', calories: null })?.calories).toBe(102);
+  });
+});
 
 describe('goldenScoreboard parser', () => {
   it('scoreGoldenRun scores expected meal lines against a new pipeline foodLog', () => {

@@ -89,6 +89,21 @@ export function mealLineNamesMatch(a: string, b: string, presenceOnly?: boolean)
   return normA.includes(normB) || normB.includes(normA);
 }
 
+/** Pair an expected meal line with an observed one by name.
+ * Position is not a match: a shifted `observedMeal` used to bind the dish
+ * in the same slot, so an inbox leftover (V-47, sweet chilli chicken wrap)
+ * dropped out of the logged meal and the ham-missing check read the wrong row.
+ */
+export function findObservedMealLine<T extends { name?: string; calories?: number | null; weightGrams?: number | null }>(
+  observed: readonly T[] | null | undefined,
+  expected: { name?: string; calories?: number | null } | null | undefined,
+): T | undefined {
+  if (!expected) return undefined;
+  const list = observed || [];
+  const presenceOnly = expected.calories == null;
+  return list.find((row) => mealLineNamesMatch(String(expected.name || ''), String(row?.name || ''), presenceOnly));
+}
+
 export function parseKnownFails(logText: string): GoldenOutcome[] {
   const outcomes: GoldenOutcome[] = [];
   const text = logText || '';
