@@ -246,6 +246,7 @@ describe('bugSnapshot', () => {
           contentType: 'image/png',
         }],
       }],
+      // Canonical public origin. The legacy duckdns host is not a fixture value.
       origin: 'https://health-tracker.co.uk',
     });
     expect(abs).toContain('name=shot-01.png');
