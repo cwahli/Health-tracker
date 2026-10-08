@@ -3836,8 +3836,9 @@ describe('TG TUI failproof sync — no split sessions, no false same-session cla
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
     expect(src.match(/tuiCanOpen\s*\?/g)?.length).toBe(2);
     // Both conditionals fall back to the same honest advice, and so does the
-    // /tui gate: the const plus its three call sites, and no fourth promise.
-    expect(src.match(/tuiNoSessionAdvice/g)?.length).toBe(4);
+    // /tui gate: the const plus its four call sites, and no fifth promise.
+    // (The fourth site is the sessionless-open guard on the /tui open path.)
+    expect(src.match(/tuiNoSessionAdvice/g)?.length).toBe(5);
   });
 
   it('/new stops promising a terminal it cannot open yet', () => {
@@ -4555,5 +4556,63 @@ describe('/freemodel names the provider a host cannot run', () => {
       { ref: 'opencode/muse-spark-1.3-contributor-free', provider: 'opencode', selectable: true, depleted: false, ended: false, terminalOnly: false, reason: 'available' },
     ], { current: '', location: 'test', canonical: [], tableLanes: [] });
     expect(body.text).toBe(FREEMODEL_EMPTY_BODY);
+  });
+});
+
+describe('TG ping turns leave no scaffolding in the chat transcript', () => {
+  it('isPingTurn is declared before the greeting assignment (never TDZ)', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    const declAt = src.indexOf('let isPingTurn = false;');
+    expect(declAt).toBeGreaterThan(-1);
+    expect(src.indexOf('isPingTurn = true;')).toBeGreaterThan(declAt);
+  });
+
+  it('ping turns force a fresh session and never bind back', () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('if (isPingTurn) turnSessionId = null;');
+    expect(src).toContain('if (result.sessionID && !isPingTurn) {');
+  });
+});
+
+describe('TG TUI — a kept pane with no lease stays closeable', () => {
+  const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tui-pane-'));
+
+  it('readTuiPane returns the published name, null when absent', () => {
+    const dir = tmpRoot();
+    try {
+      expect(readTuiPane('vm2', dir)).toBeNull();
+      fs.writeFileSync(path.join(dir, 'tui-pane'), 'VM-tui-vm2\n');
+      expect(readTuiPane('vm2', dir)).toBe('VM-tui-vm2');
+      fs.writeFileSync(path.join(dir, 'tui-pane'), '  \n');
+      expect(readTuiPane('vm2', dir)).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('hasTuiPane asks tmux and survives a refusal', () => {
+    expect(hasTuiPane('VM-tui-vm2', () => true)).toBe(true);
+    expect(hasTuiPane('VM-tui-vm2', () => { throw new Error('no tmux'); })).toBe(false);
+    expect(hasTuiPane('', () => true)).toBe(false);
+    expect(hasTuiPane(null, () => true)).toBe(false);
+  });
+
+  it('tuiStatusLine reports a kept pane when the lease is gone', () => {
+    // Live 2026-10-04: VM-tui-vm2 alive with no lease after detach, and
+    // both /tui status (before the TDZ fix) and /tui off missed it.
+    const dir = tmpRoot();
+    try {
+      const none = tuiStatusLine('no-such-bot-xyz', 'ses_none', () => false, dir);
+      expect(none).toContain('none open');
+      fs.writeFileSync(path.join(dir, 'tui-pane'), 'VM-tui-vm2');
+      const kept = tuiStatusLine('no-such-bot-xyz', 'ses_none', () => true, dir);
+      expect(kept).toContain('VM-tui-vm2');
+      expect(kept).toContain('pane kept');
+      expect(kept).toContain('/tui off closes it');
+      const gone = tuiStatusLine('no-such-bot-xyz', 'ses_none', () => false, dir);
+      expect(gone).toContain('none open');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -3653,6 +3653,27 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         ].join('\n'));
         return;
       }
+      // No session to share means no terminal worth opening: tui-attach.sh
+      // refuses a sessionless opencode open (live 2026-10-04), so the button
+      // below would promise a conversation and deliver that refusal on the
+      // user's screen. Say it here, where the answer belongs. Asked BEFORE the
+      // tui-open.json write so a null session is never recorded as a fact about
+      // the chat — that snapshot with `sessionId: null` is what an auditor reads
+      // afterwards and cannot tell from a broken record.
+      //
+      // Live 2026-10-05: `/new` cleared the chat's session row at 10:54:23,
+      // `/tui` ran at 10:54:43, wrote the null snapshot and sent the button,
+      // and the tap 20s later printed "No chat session recorded yet — nothing
+      // shared to attach to" on a phone. tuiSessionId was already resolved at the
+      // top of this case; nothing read it on the open path.
+      if (!tuiCanOpen) {
+        await api.sendMessage(chatId, [
+          '⌨️ There is nothing for the terminal to attach to yet — this chat has no session.',
+          tuiNoSessionAdvice,
+          '(`/new` puts you here on purpose: a fresh chat has no session until your next message.)',
+        ].join('\n'));
+        return;
+      }
       // Record which chat opened the TUI, which lane it is on, and the session
       // that lane produced. ttyd runs one static command per bot, so it cannot
       // be told the chat any other way — and tui-attach.sh reading only ids[0]
@@ -6734,7 +6755,6 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       finalPrompt = `[KNOWN DEAD ENDS — do not repeat these]\n${deadEnds.map((r) => `- ${r.text}`).join('\n')}\n\n${finalPrompt}`;
       console.log(`[${config.id}] injected ${deadEnds.length} dead-end note(s) into a ${turnKindFor(text)} turn`);
     }
-
     const ref = parseModelRef(eff.model);
     // The chat's saved /location wins over this process's env: env dies on
     // restart, the pref is reloaded on boot. A saved remote host that went
