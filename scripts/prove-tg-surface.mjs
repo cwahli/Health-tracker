@@ -206,7 +206,11 @@ export function milestoneSteps(milestone) {
         { send: '/thinking high', wait: 'reply' },
         { send: 'prove-tg-surface m4 cline ping {{tok}}. Do not use any tools. Reply with exactly: CLINE-OK', wait: 'quiescent', capture: 'cline' },
         { send: '/do-check-source prove-tg-surface m4 cline fixture {{tok}}: the sky is blue', wait: 'reply', capture: 'cskill' },
-        { send: '/freemodel', wait: 'reply', capture: 'freemodel' },
+        // The picker is three pools now. This section sends the LIGHT pool, because
+        // the next step taps the Freebuff button and a terminal-only lane lives in the
+        // light pool (the catalog refuses to place it as a coding lane) — the tap must
+        // land on the keyboard this send renders.
+        { send: '/model_light_free', wait: 'reply', capture: 'freemodel' },
         { tap: ' FB ', wait: 'bounded', capture: 'fbtap' },
       ];
     case 'm5':

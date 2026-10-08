@@ -23,6 +23,14 @@ import {
   syncFreeLaneTableFromSession,
   formatCompactAllowanceChat,
   formatResetIn,
+  // The three model pools: `/freemodel` became /model_light_free, /model_free and
+  // /model_go, each a FILTER of this one list. Same shared home as every other
+  // free-lane helper (vendored mirror; drift fails the propagation gate), so the
+  // router and bot-host cannot disagree about what a pool contains.
+  MODEL_POOLS,
+  poolOfLane,
+  poolOfRef,
+  poolDisplayName,
 } from "./free-lane-table.js";
 import { freebuffLaneEnabled, runFreebuffLane } from "./freebuff-tg-lane.js";
 // BOT-22: per-chat OpenCode sessions (same contract as BOT-12). One global
@@ -551,6 +559,12 @@ function loadState() {
       lastReceivedText: null,
       // E) light quota memory: quota["provider/model"] = { depletedUntil, lastError }.
       quota: {},
+      // G) the pool the three pickers set: null = unconstrained (the walk infers it
+      // from the chat's own model), else 'light' | 'coding' | 'go'. One per provider
+      // and not per chat, exactly like `models` above: the router's route is a
+      // single sticky lane, and calling the pool per-chat would be a claim this
+      // state shape cannot keep.
+      pool: null,
       // F) per-chat project selection (chats[chatId] = { projectId, roleId, switchedAt }).
       // Absent = the default health-tracker repo, i.e. today's behaviour.
       chats: {},
@@ -569,6 +583,9 @@ function loadState() {
   if (!("clinePid" in s)) s.clinePid = null;
   if (!("lastReceivedText" in s)) s.lastReceivedText = null;
   if (!s.quota || typeof s.quota !== "object") s.quota = {};
+  // G) older state files predate the pools, and a stale id from a removed pool is
+  // dropped rather than trusted: both read as unconstrained.
+  if (!("pool" in s) || !(s.pool in MODEL_POOLS)) s.pool = null;
   if (!s.sessions) s.sessions = {};
   ensureChatsMap(s);
   if (!s.models) s.models = {};
@@ -2193,10 +2210,22 @@ function buildDispatchRoutes(start) {
     seen.add(k);
     return true;
   });
+  // The pool is the reader's own instruction (`/model_light_free`, `/model_free`,
+  // `/model_go`), so a quota hit must not cross it: drop every route outside the
+  // pool, and for the paid Go plan keep the sticky lane alone — a paid lane never
+  // moves on its own. With no pool set this is exactly the walk that was here.
+  const pool = state.pool || null;
+  if (pool) {
+    routes = routes.filter((r) => poolOfLane({ provider: r.provider, model: r.model }) === pool);
+    if (pool === "go") routes = routes.slice(0, 1);
+  }
   // E) Skip routes known-depleted until depletedUntil passes.
   routes = routes.filter((r) => !isDepleted(r.provider, r.model));
   // Never re-stick to a still-depleted lane when another ✅ preference exists.
-  if (!routes.length) {
+  // The preference-table fallback below is NOT pool-aware, so it is skipped under
+  // a pool: topping the list back up from it is how a light-pinned chat would
+  // quietly answer on a coding lane.
+  if (!routes.length && !pool) {
     const table = loadFreeLaneTable();
     const more = table
       ? nextAvailableRoutes(table, state, { fromProvider: start.provider, fromModel: start.model })
@@ -2206,6 +2235,14 @@ function buildDispatchRoutes(start) {
     if (more.length) routes = more;
   }
   if (!routes.length) {
+    // A pinned chat is refused rather than moved: the pool is the reader's own
+    // instruction, so the refusal names that pool and the way out of it instead of
+    // announcing an auto-switch the reader did not ask for.
+    if (pool) {
+      throw new Error(
+        `No ${pool} lane can take this turn — this chat is pinned to the ${poolDisplayName(pool, "router")} and a quota hit does not cross pools. Send /model to clear the pool, or wait for a reset.`
+      );
+    }
     throw new Error(allFreeLanesDepletedMessage(start.provider, start.model));
   }
   return routes;
@@ -3140,6 +3177,16 @@ function applyFreeModelPick(providerKey, modelId) {
       `Telegram messages still go to ${PROVIDERS[state.provider]?.label || state.provider}. Nothing was switched.`
     );
   }
+  // The constraint follows the last explicit action: a real switch re-derives the
+  // pool from the lane that was picked. Deliberately AFTER the Freebuff branch — a
+  // terminal-only tap switches no route, so it must not move the pool either — and
+  // best-effort, because a pool lookup must never be able to fail a pick the reader
+  // has already made.
+  try {
+    state.pool = poolOfRef(
+      String(modelId).includes("/") ? String(modelId) : `${providerKey}/${modelId}`
+    );
+  } catch {}
   // Token Harbor free taps → OpenCode + tokenharbor/<id> so tools/files work.
   // Chat-only Token Harbor remains available via /switch tokenharbor.
   let destProvider = providerKey;
@@ -3258,8 +3305,15 @@ function dedupeFreemodelItems(results) {
   ]);
 }
 
-/** Pure body + keyboard builder (tests call this with fixture probe results). */
-function buildFreemodelReply(results, now = Date.now()) {
+/**
+ * Pure body + keyboard builder (tests call this with fixture probe results).
+ *
+ * `pool` filters the deduped rows to one of the three pools and nothing else, so
+ * the three keyboards together are exactly the rows the unfiltered picker shows:
+ * one list, three filters, no row lost and none in two pools. Passed null the
+ * output is byte-identical to what this returned before the split.
+ */
+function buildFreemodelReply(results, now = Date.now(), pool = null) {
   const lines = [...FREEMODEL_HEADER, ""];
   let total = 0;
   let depletedCount = 0;
@@ -3269,7 +3323,13 @@ function buildFreemodelReply(results, now = Date.now()) {
     .filter(([, res]) => !res?.ok || !res.items?.length)
     .map(([key, res]) => ({ label: PROVIDERS[key]?.label || key, reason: res?.reason || "none available" }));
   const kb = new InlineKeyboard();
-  for (const [key, res] of dedupeFreemodelItems(results)) {
+  const shown = pool
+    ? dedupeFreemodelItems(results).map(([key, res]) => [
+      key,
+      { ...res, items: (res.items || []).filter((item) => poolOfLane({ provider: key, model: item.id }) === pool) },
+    ])
+    : dedupeFreemodelItems(results);
+  for (const [key, res] of shown) {
     for (const item of res.items) {
       total += 1;
       const dep = freeModelDepletion(key, item.id, now);
@@ -3279,10 +3339,21 @@ function buildFreemodelReply(results, now = Date.now()) {
       kb.text(leftishButtonLabel(btnText), freemodelCallbackData(key, item.id)).row();
     }
   }
+  if (pool) {
+    // One honest line ABOVE the header: with a pool the keyboard is a subset, so
+    // the reader has to be told which list this is and what a quota hit will do —
+    // the same line bot-host puts in the picker body.
+    lines.unshift(
+      `${poolDisplayName(pool, "router")} · ${total} lane${total === 1 ? "" : "s"} on this host — ` +
+        (pool === "go"
+          ? "the Go plan is paid, so this lane never moves on its own. /model clears the pool."
+          : "a quota hit moves inside this pool only. /model clears the pool.")
+    );
+  }
   if (total) {
     lines.push(`Total: ${total}${depletedCount ? ` · ${depletedCount} depleted ❌` : ""}`);
   } else {
-    lines.push("No free models available right now.");
+    lines.push(pool ? "Nothing in this pool is available right now." : "No free models available right now.");
   }
   if (skipped.length) {
     // One short footer line — never a second per-model list.
@@ -3294,13 +3365,13 @@ function buildFreemodelReply(results, now = Date.now()) {
     );
   }
   if (total) kb.text("Cancel — keep current model", "fm_cancel").row();
-  return { text: lines.join("\n"), keyboard: total ? kb : null, total, depletedCount, skipped };
+  return { text: lines.join("\n"), keyboard: total ? kb : null, total, depletedCount, skipped, pool };
 }
 
-async function freemodelReply(filterProvider, opts = {}) {
+async function freemodelReply(filterProvider, opts = {}, pool = null) {
   const packed = await listAvailableFreeModels(filterProvider, opts);
   if (packed.error) return { text: packed.error, keyboard: null };
-  return buildFreemodelReply(packed.results);
+  return buildFreemodelReply(packed.results, Date.now(), pool);
 }
 
 
@@ -3839,20 +3910,31 @@ bot.command("model", async (ctx) => {
     );
     return;
   }
-  // Allow any id; warn if not in free list
+  // Allow any id; warn if not in free list. /model stays the unconstrained setter:
+  // naming a model here clears any pool a picker set, which restores the
+  // infer-from-the-model behaviour exactly.
   state.models[p] = arg;
+  state.pool = null;
   saveState(state);
   const note = list.includes(arg) ? "" : "\n(Not in the default free list — OK if you know the id.)";
   await ctx.reply(`Model set to \`${arg}\` on ${PROVIDERS[p].label}.${note}`);
 });
 
 
-bot.command("freemodel", async (ctx) => {
-  if (!gate(ctx)) return;
-  const arg = (ctx.message?.text || "").split(/\s+/)[1]?.toLowerCase();
-  const thinking = await ctx.reply("Checking free models…");
+/**
+ * The three pool pickers, one body.
+ *
+ * The pool is set BEFORE the keyboard is shown, so the constraint holds for the
+ * very next message rather than only after a tap: a chat that ran
+ * /model_light_free and then sent a message must not spend a coding lane on the
+ * next quota hit.
+ */
+async function poolPickerReply(ctx, poolId) {
+  state.pool = poolId;
+  saveState(state);
+  const thinking = await ctx.reply(`Checking ${poolId} free models…`);
   try {
-    const { text, keyboard } = await freemodelReply(arg);
+    const { text, keyboard } = await freemodelReply(null, {}, poolId);
     let body = text;
     if (body.length > 3900) body = body.slice(0, 3900) + "\n…truncated";
     const opts = keyboard ? { reply_markup: keyboard } : {};
@@ -3862,8 +3944,38 @@ bot.command("freemodel", async (ctx) => {
         await ctx.reply(body, opts);
       });
   } catch (e) {
-    await ctx.reply(`freemodel failed: ${String(e.message || e).slice(0, 500)}`);
+    await ctx.reply(`${poolId} picker failed: ${String(e.message || e).slice(0, 500)}`);
   }
+}
+
+bot.command("model_light_free", async (ctx) => {
+  if (!gate(ctx)) return;
+  await poolPickerReply(ctx, "light");
+});
+
+bot.command("model_free", async (ctx) => {
+  if (!gate(ctx)) return;
+  await poolPickerReply(ctx, "coding");
+});
+
+bot.command("model_go", async (ctx) => {
+  if (!gate(ctx)) return;
+  await poolPickerReply(ctx, "go");
+});
+
+bot.command("freemodel", async (ctx) => {
+  if (!gate(ctx)) return;
+  // Handled but deliberately no longer published: `freemodel` is declared a hidden
+  // alias in bots/capabilities.json, and a typed /freemodel keeps reaching a real
+  // answer — a pointer to the three pools — rather than a dead end or a model
+  // prompt. No probe, no keyboard, no list.
+  await ctx.reply(
+    "The free-model picker is now three pools — pick the one this chat should stay in:\n" +
+      "`/model_light_free` — light lanes only; a quota hit moves inside light\n" +
+      "`/model_free` — coding-capable lanes only (rating 35 and above)\n" +
+      "`/model_go` — the paid Go plan; it never moves on its own\n" +
+      "`/model` clears the pool and goes back to the plain setter."
+  );
 });
 
 // /tui — a real terminal for THIS chat, as a Telegram Mini App, matched to the
@@ -4305,7 +4417,9 @@ const BOT_COMMANDS = [
   { command: "switch", description: "Switch provider (opencode, cline, …)" },
   { command: "project", description: "Switch project workspace (e.g. /project external 4)" },
   { command: "model", description: "List or set model for active provider" },
-  { command: "freemodel", description: "Tap to pick an available free model" },
+  { command: "model_light_free", description: "Pick a free model from the light pool (a quota hit moves inside light only)" },
+  { command: "model_free", description: "Pick a free model: coding-capable lanes only (rating at or above 35)" },
+  { command: "model_go", description: "Pick a lane on the paid Go plan (never moves on its own)" },
   { command: "unlock", description: "Cancel stuck work and unlock the bot" },
   { command: "new", description: "New OpenCode session" },
 ];
@@ -4495,6 +4609,10 @@ export {
   buildFreemodelReply,
   applyFreeModelPick,
   freemodelReply,
+  MODEL_POOLS,
+  poolOfLane,
+  poolOfRef,
+  poolDisplayName,
   probeFreebuffFree,
   freebuffCredsOk,
   FREEBUFF_DEFAULT_MODEL,

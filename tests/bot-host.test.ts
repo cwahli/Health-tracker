@@ -115,6 +115,8 @@ import {
   sweepOrphanedLeases,
   selectTurnLanes,
   formatFreemodelWithDepletion,
+  blockedProviderLines,
+  FREEMODEL_EMPTY_BODY,
   getContextLimit,
   laneContextLimits,
   resetInBit,
@@ -122,6 +124,7 @@ import {
 } from '../scripts/bot-host.mjs';
 import { isHardModelFailure, ensureBotLedger, withCatalogLanes, stampCooldown, CONNECTION_FAILED_COOLDOWN_MS, HARD_MODEL_FAILURE_COOLDOWN_MS, canonicalAllowanceLanes, planCodeForLane } from '../scripts/lib/free-lanes.mjs';
 import { projectLanes, nextUsableLane, formatCompactAllowanceChat, annotateFreemodelEntries } from '../scripts/lib/free-lanes.mjs';
+import { laneWalkRef } from '../scripts/lib/free-lanes.mjs';
 import {
   buildStatusSnapshot,
   formatStatusPlain,
@@ -727,7 +730,7 @@ describe('commands', () => {
       agent: { model: 'opencode-go/deepseek-v4.1-flash', variant: 'high' },
     };
     const text = helpText(config, { model: 'opencode-go/muse-spark-1.3' });
-    for (const cmd of ['/new', '/status', '/model', '/models', '/freemodel', '/help', '/resume']) {
+    for (const cmd of ['/new', '/status', '/model', '/models', '/model_light_free', '/model_free', '/model_go', '/help', '/resume']) {
       expect(text).toContain(cmd);
     }
     // Run controls are gone: no /abort or /watch anywhere on the surface.
@@ -765,12 +768,15 @@ describe('commands', () => {
     expect(COMMAND_NAMES).not.toContain('web');
     const { personalWebUiLink, gatewaySecretFromHostEnv, WEB_LINK_TTL_SEC } =
       await import('../scripts/bot-host.mjs');
-    expect(WEB_LINK_TTL_SEC).toBe(900);
+    // 4 h, not the old 900 s: a personal /web link now outlives one sitting,
+    // which is what the renewal work is for — the page refreshes its own
+    // token long before the link dies (WEB_LINK_TTL_SEC = 4 * 60 * 60).
+    expect(WEB_LINK_TTL_SEC).toBe(4 * 60 * 60);
     const link = personalWebUiLink({ webUrl: 'https://web.test', botId: 'vm', chatId: '42', secret: 's3cret', now: 1000 });
     expect(link.startsWith('https://web.test/?token=')).toBe(true);
     const { verifyToken } = await import('../scripts/tui-gateway.mjs');
     expect(verifyToken(decodeURIComponent(link.split('token=')[1]), 's3cret', { now: 1000 }).ok).toBe(true);
-    expect(verifyToken(decodeURIComponent(link.split('token=')[1]), 's3cret', { now: 1000 + 901000 }).ok).toBe(false);
+    expect(verifyToken(decodeURIComponent(link.split('token=')[1]), 's3cret', { now: 1000 + (4 * 60 * 60 + 1) * 1000 }).ok).toBe(false);
     expect(personalWebUiLink({ webUrl: '', botId: 'vm', chatId: '42', secret: 's3cret' })).toBe('');
     expect(personalWebUiLink({ webUrl: 'https://web.test', botId: 'vm', chatId: '', secret: 's3cret' })).toBe('');
     expect(personalWebUiLink({ webUrl: 'https://web.test', botId: 'vm', chatId: '42', secret: '' })).toBe('');
@@ -1025,9 +1031,27 @@ describe('pickers', () => {
     expect(toTelegramCommands().find((c) => c.command === 'free')).toBeUndefined();
     expect(src).not.toContain("case 'free'");
     // The replacement is still there and still published — removing the old name
-    // must not have taken the surface the reader is meant to use instead.
-    expect(COMMAND_NAMES).toContain('freemodel');
-    expect(toTelegramCommands().find((c) => c.command === 'freemodel')?.description.length).toBeGreaterThan(0);
+    // must not have taken the surface the reader is meant to use instead. The one
+    // picker became three pools (2026-10-07), so the replacement is now three
+    // names, and the old one is a declared hidden pointer rather than a menu entry.
+    for (const pool of ['model_light_free', 'model_free', 'model_go']) {
+      expect(COMMAND_NAMES).toContain(pool);
+      expect(help).toContain(`/${pool}`);
+      expect(toTelegramCommands().find((c) => c.command === pool)?.description.length).toBeGreaterThan(0);
+    }
+    expect(COMMAND_NAMES).not.toContain('freemodel');
+    // Still handled, because deleting the name would turn a typed `/freemodel`
+    // into a model prompt — the exact opposite of helpful.
+    expect(src).toContain("case 'freemodel':");
+    // …and it answers a POINTER: no keyboard, no list, nothing billed. Sliced from
+    // its own case to the case that opens the first pool, so the pool handlers'
+    // keyboards — which are the point of the three new names — are not what this
+    // reads. A second list under the old name is the exact failure the one-list
+    // rule exists to prevent.
+    const oldNameCase = src.slice(src.indexOf("case 'freemodel':"), src.indexOf("case 'model_light_free':"));
+    expect(oldNameCase.length).toBeGreaterThan(0);
+    expect(oldNameCase).toContain('/model_light_free');
+    expect(oldNameCase).not.toMatch(/reply_markup|modelKeyboard|formatFreemodelWithDepletion|sendFreeModelPicker/);
     expect(BOT_COMMANDS.length).toBe(new Set(COMMAND_NAMES).size);
     const shim = await import('../scripts/lib/bot-commands.mjs');
     expect(shim.BOT_COMMANDS).toEqual(BOT_COMMANDS);
@@ -1518,6 +1542,103 @@ describe('vm5 failover refs (live 2026-10-03)', () => {
       expect(texts.some((t) => /\bOG\b/.test(t))).toBe(true);
       expect(texts.some((t) => /\bGM\b/.test(t))).toBe(true);
       expect(/\bGM\b/.test(texts[texts.length - 1])).toBe(true);
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = oldHome;
+      if (oldLanes === undefined) delete process.env.FREE_LANES_DIR;
+      else process.env.FREE_LANES_DIR = oldLanes;
+      if (oldShared === undefined) delete process.env.FREE_LANES_SHARED_DIR;
+      else process.env.FREE_LANES_SHARED_DIR = oldShared;
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(lanesDir, { recursive: true, force: true });
+      fs.rmSync(sharedDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('walk refs (live VM4 2026-10-06)', () => {
+  // A walk that hands the OpenCode CLI a bare model slug can never succeed: the
+  // CLI answers `Invalid model reference` BEFORE it routes, so every hop burns a
+  // spawn, a round trip and a user-visible "switching to" line — nine of them
+  // inside a fourteen-hop walk for the prompt "hi". The input is the point of
+  // this coverage: `withCatalogLanes` strips a lane's own `opencode/` prefix for
+  // quota-key hygiene (the quota key reads `opencode/big-pickle`), so the walk
+  // sees `{provider:'opencode', model:'big-pickle'}` — a storage shape the vm5
+  // table above never produced, because every one of its ids already carried its
+  // path and the old `opencode` carve-out ("legacy bare ids still pass through")
+  // handed those back untouched. Same table as scripts/assert-walk-refs.mjs, the
+  // CI gate over this walk.
+  const CASES: [string, string, string][] = [
+    ['opencode', 'big-pickle', 'opencode/big-pickle'],
+    ['opencode', 'nemotron-3.5-lightning-free', 'opencode/nemotron-3.5-lightning-free'],
+    ['opencode', 'opencode/big-pickle', 'opencode/big-pickle'],
+    ['opencode', 'tokenharbor/deepseek-v4.1-flash:free', 'tokenharbor/deepseek-v4.1-flash:free'],
+    ['opencode', 'google/gemini-3.7-flash', 'google/gemini-3.7-flash'],
+    ['', 'legacy-bare', 'opencode/legacy-bare'],
+    ['tokenharbor', 'mimo-v2.6-flash:free', 'tokenharbor/mimo-v2.6-flash:free'],
+    ['cloudflare', 'qwen3.8-flash:free', 'cloudflare/qwen3.8-flash:free'],
+    ['opencode-go', 'space-bunny-free', 'opencode-go/space-bunny-free'],
+    ['google', 'gemini-3.8-flash', 'gemini:gemini/gemini-3.8-flash'],
+    ['gemini', 'gemini/gemini-3.1-pro', 'gemini:gemini/gemini-3.1-pro'],
+    ['cline', 'cline-free/kat-coder-pro', 'cline:cline-free/kat-coder-pro'],
+    ['freebuff', 'freebuff-x', 'freebuff/freebuff-x'],
+  ];
+
+  it('keeps the two mirrored ref builders in step, shape for shape', () => {
+    // `toModelRef` (freemodels) and `laneWalkRef` (free-lanes) decide the shape
+    // in two files; a fix applied to one only is the defect this whole gate
+    // exists for.
+    const drift = CASES.filter(([s, i]) => toModelRef(s, i) !== laneWalkRef(s, i));
+    expect(drift.map(([s, i]) => `${s || '(none)'}:${i}`)).toEqual([]);
+  });
+
+  it('emits a routable ref for every shape the ledger and the catalog produce', () => {
+    for (const [s, i, want] of CASES) {
+      expect(`${s || '(none)'}:${i} -> ${toModelRef(s, i)}`).toBe(`${s || '(none)'}:${i} -> ${want}`);
+    }
+    const bare = CASES.filter(([s, i]) => {
+      const r = String(toModelRef(s, i) ?? '');
+      return !r.includes('/') && !r.includes(':');
+    });
+    expect(bare.map(([s, i]) => `${s || '(none)'}/${i}`)).toEqual([]);
+  });
+
+  it('walks a catalog-folded opencode lane as opencode/big-pickle, never bare', () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'walkrefs-home-'));
+    const lanesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'walkrefs-lanes-'));
+    const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'walkrefs-shared-'));
+    const oldHome = process.env.HOME;
+    const oldLanes = process.env.FREE_LANES_DIR;
+    const oldShared = process.env.FREE_LANES_SHARED_DIR;
+    process.env.HOME = homeDir;
+    process.env.FREE_LANES_DIR = lanesDir;
+    process.env.FREE_LANES_SHARED_DIR = sharedDir;
+    try {
+      // Fold real catalog entries into an EMPTY ledger — that is what writes the
+      // stripped storage shape, and it is the step the old `assert-r16-failover`
+      // fixture skipped by hand-writing `model:'opencode/…'` with its prefix.
+      const { table: folded } = withCatalogLanes(
+        { version: 1, updatedAt: new Date().toISOString(), buckets: {}, lanes: [] },
+        ['opencode/big-pickle', 'opencode-go/space-bunny-free', 'tokenharbor/deepseek-v4.1-flash:free'],
+      );
+      const stripped = (folded.lanes || []).find((l) => l.provider === 'opencode' && l.model === 'big-pickle');
+      expect(stripped).toBeTruthy();
+
+      const { dir } = ensureBotLedger('walkrefs');
+      fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(folded, null, 2));
+      fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ quota: {} }, null, 2));
+
+      const choice = selectTurnLanes({
+        botId: 'walkrefs',
+        model: 'opencode/longcat-2.5-preview-free',
+        fallback: 'opencode/longcat-2.5-preview-free',
+      });
+      const walked: string[] = choice.models || [];
+      expect(walked.length).toBeGreaterThan(0);
+      // Nothing the walk dispatches may be a bare slug.
+      expect(walked.filter((m) => !m.includes('/') && !m.includes(':'))).toEqual([]);
+      expect(walked).toContain('opencode/big-pickle');
+      expect(walked).not.toContain('big-pickle');
     } finally {
       if (oldHome === undefined) delete process.env.HOME;
       else process.env.HOME = oldHome;
@@ -2131,7 +2252,7 @@ describe('VM2 transcript error shapes', () => {
   it('classifies ProviderModelNotFound with its suggestion, deduped', () => {
     const out = extractLogError(`${modelNotFoundLine}\n${modelNotFoundLine}`);
     expect(out).toContain('Model not found');
-    expect(out).toContain('/freemodel');
+    expect(out).toContain('/model_free');
     expect(out).toContain('glm-5');
     expect(out).not.toContain('timestamp=');
     expect(out.indexOf('glm-4.7-free')).toBe(out.lastIndexOf('glm-4.7-free'));
@@ -2527,6 +2648,86 @@ describe('BOT-9 live failover wiring', () => {
       expect(result.finalText).toBe('fixed it');
       expect(sent.length).toBe(1);
       expect(sent[0]).toMatch(/m1.*switching to.*m2/);
+    } finally {
+      if (oldLog === undefined) delete process.env.BOT_FAILURE_LOG;
+      else process.env.BOT_FAILURE_LOG = oldLog;
+    }
+  });
+
+  // VM4 2026-10-07: a twelve-hop cascade in which three Cline lanes rendered as
+  // bare names (`glm-5.3-flash`, `deepseek-v4.1-flash`, `solar-pro4`) and four
+  // differently-caused quota failures all read `free limit hit`. The reader
+  // concluded Cline was never tried and that Space Bunny still had allowance;
+  // Cline had been tried three times, and one of the four was not a free-tier
+  // limit at all. The line is the only evidence a human has, so it has to name
+  // the surface and the cause.
+  it('names the lane surface on a switch line', async () => {
+    const { laneSwitchLabel } = await import('../scripts/bot-host.mjs');
+    expect(laneSwitchLabel('cline:cline-free/glm-5.3-flash')).toBe('CL glm-5.3-flash');
+    expect(laneSwitchLabel('cline:cline-free/solar-pro4')).toBe('CL solar-pro4');
+    expect(laneSwitchLabel('opencode/space-bunny-free')).toBe('OC space-bunny-free');
+    expect(laneSwitchLabel('opencode-go/space-bunny-free')).toBe('OG space-bunny-free');
+    expect(laneSwitchLabel('tokenharbor/mimo-v2.6-flash:free')).toBe('TH tokenharbor/mimo-v2.6-flash');
+    expect(laneSwitchLabel('gemini:gemini/gemini-3.8-flash')).toBe('GM gemini-3.8-flash');
+    // The two Space Bunny pools are separate quota and must stay tellable
+    // apart — that is the whole reason the prefix existed.
+    expect(laneSwitchLabel('opencode/space-bunny-free'))
+      .not.toBe(laneSwitchLabel('opencode-go/space-bunny-free'));
+  });
+
+  it('says which limit was hit instead of calling every quota error a free limit', async () => {
+    const { quotaVerdictShort } = await import('../scripts/bot-host.mjs');
+    // A real free-allowance exhaustion keeps its wording — the QS-2 gate asserts it.
+    expect(quotaVerdictShort('Error: INFERENCE_CAP_ERROR {"code":429,"message":"Daily free limit reached. Try again in 11h 35m."}'))
+      .toBe('free limit hit (Retry in ~11h 35m.)');
+    // An unfunded account, a transient throttle and a capacity 5xx are three
+    // different decisions for the reader, so they stop reading the same.
+    expect(quotaVerdictShort('AI_APICallError: Insufficient account funds')).toBe('account unfunded');
+    expect(quotaVerdictShort('Provider rate limit hit — this model is throttled right now.')).toBe('rate limited');
+    expect(quotaVerdictShort('AI_APICallError: Provider is over capacity')).toBe('provider at capacity');
+    expect(quotaVerdictShort('')).toBe('');
+  });
+
+  it('the switch line carries both the surface and the real reason', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
+    const oldLog = process.env.BOT_FAILURE_LOG;
+    process.env.BOT_FAILURE_LOG = '0';
+    try {
+      let first = true;
+      const spawnImpl = () => {
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => child.emit('close', 1);
+        queueMicrotask(() => {
+          if (first) {
+            first = false;
+            child.stderr.emit('data', Buffer.from('level=ERROR msg="run failed" error.error="AI_APICallError: Insufficient account funds"\n'));
+            child.emit('close', 1);
+          } else {
+            child.stdout.emit('data', Buffer.from('{"type":"text","part":{"text":"done"}}\n'));
+            child.emit('close', 0);
+          }
+        });
+        return child;
+      };
+      const sent: string[] = [];
+      const result = await runOpencodeWithFailover({
+        api: { sendMessage: async (_chatId: number, text: string) => { sent.push(text); return {}; } },
+        chatId: 7,
+        prompt: 'x',
+        models: ['cline:cline-free/glm-5.3-flash', 'opencode/space-bunny-free'],
+        workspace: '/tmp',
+        timeoutMs: 5000,
+        spawnImpl,
+      });
+      expect(result.finalText).toBe('done');
+      expect(sent.length).toBe(1);
+      expect(sent[0]).toMatch(/\*CL glm-5\.3-flash\* failed \(account unfunded\)/);
+      expect(sent[0]).toMatch(/switching to \*OC space-bunny-free\*/);
+      // An unfunded account is not a spent free allowance, and the line must not say it is.
+      expect(sent[0]).not.toMatch(/free limit hit/);
     } finally {
       if (oldLog === undefined) delete process.env.BOT_FAILURE_LOG;
       else process.env.BOT_FAILURE_LOG = oldLog;
@@ -3226,6 +3427,42 @@ describe('depleted-lane notice (one verdict, one next lane)', () => {
     const noticeLine = depletedLaneProse({ resetIn: '5h 15', next }).split('\n')[1];
     expect(noticeLine).toBe('Next up: Qwen 3.8 27B · CF · cloudflare/@cf/qwen/qwen3.8-27b');
     expect(body).toContain('Next up: Qwen 3.8 27B · CF · <code>cloudflare/@cf/qwen/qwen3.8-27b</code>');
+  });
+
+  it('names the lane that was tapped instead of saying "that lane"', () => {
+    const table = laneTable();
+    const rows = projectLanes(table, {}, { now: NOW });
+    const next = nextUsableLane({ table, rows, provider: 'opencode', model: 'opencode/space-bunny-free', now: NOW });
+    const prose = depletedLaneProse({ label: 'Space Bunny', resetIn: '5h 15', next });
+    expect(prose.split('\n')[0]).toBe('Space Bunny is depleted (reset in 5h 15).');
+    // and the name is the row the table itself marks, so the notice and the table agree
+    expect(formatCompactAllowanceChat(table, {}, { now: NOW, rows })).toContain('❌ Space Bunny');
+  });
+
+  it('the Freebuff line follows its own row — never "ready" beside a ❌ it cannot use', () => {
+    const table = laneTable();
+    const healthy = projectLanes(table, {}, { now: NOW });
+    const fbLine = (out: string) => out.split('\n').filter((l) => l.startsWith('Freebuff:')).join(' | ');
+    // A terminal-only lane IS ❌ (chat cannot select it) and the ledger has no
+    // Freebucks stamp for it, so the line may not announce it ready and may not
+    // print a figure this host cannot know: "~1h" was a string literal under a ❌
+    // row (live 2026-10-06, the vm3 reply the operator pasted twice).
+    const okOut = formatCompactAllowanceChat(table, {}, { now: NOW, rows: healthy });
+    expect(okOut).toContain('❌ DeepSeek V4.1');
+    expect(fbLine(okOut)).toContain('Freebuff: DeepSeek V4.1 — terminal only; not selectable from chat');
+    expect(fbLine(okOut)).not.toContain('ready');
+    expect(fbLine(okOut)).not.toMatch(/~1h|reset in -\b/);
+    // The reset the row cannot show is admitted, not invented — the row's own `—`.
+    expect(okOut).toContain('Freebuff: DeepSeek V4.1 — terminal only; not selectable from chat. Shared daily Freebucks, reset not tracked here.');
+    // The ledger has spent it: the line follows the verdict, not the table.
+    const spent = healthy.map((r) => (r.provider === 'freebuff' ? { ...r, depleted: true, selectable: false, resetAt: NOW + 3600_000 } : r));
+    const out = formatCompactAllowanceChat(table, {}, { now: NOW, rows: spent });
+    expect(out).toContain('❌ DeepSeek V4.1');
+    expect(fbLine(out)).not.toContain('ready');
+    expect(out).toContain('Freebuff: DeepSeek V4.1 is depleted');
+    // ... and one that chat CAN take is the only one that may say so.
+    const chatLane = healthy.map((r) => (r.provider === 'freebuff' ? { ...r, selectable: true, terminalOnly: false, tg: true } : r));
+    expect(fbLine(formatCompactAllowanceChat(table, {}, { now: NOW, rows: chatLane }))).toBe('Freebuff: DeepSeek V4.1 — ready; shared daily Freebucks.');
   });
 
   it('never prints the table placeholder as a duration', () => {
@@ -4262,5 +4499,61 @@ describe('B2B-2 peer envelope send', () => {
     const led = JSON.parse(fs.readFileSync(path.join(stateRoot, 'vm4', 'handoff.json'), 'utf8'));
     expect(led.chains['gp-letter-r1'].ourAgree).toBe(1);
     expect(led.chains['gp-letter-r1'].terminal).toBe(true);
+  });
+});
+
+/**
+ * A provider this host cannot run used to leave /freemodel without a trace.
+ *
+ * The operator's report on 2026-10-07 was "I still can't see muse from Cline",
+ * while Cline's own recommended-models catalog lists
+ * `cline-free/muse-spark-1.3-contributor` as free. The row was not missing: the
+ * projection marked every Cline lane `needsSetup` on a host with no signed-in
+ * Cline CLI, `canonicalAllowanceLanes` skips those verdicts, and the formatter
+ * filtered them out of the rows AND the keyboard — so the reader could not tell
+ * "this model does not exist" from "this host cannot run it", while /allowance
+ * has always named the missing variable under its table.
+ */
+describe('/freemodel names the provider a host cannot run', () => {
+  it('says which provider, how many lanes, and what is missing', () => {
+    expect(blockedProviderLines([
+      { ref: 'cline:cline-free/muse-spark-1.3-contributor', provider: 'cline', selectable: false, reason: 'needs a signed-in Cline CLI on this host' },
+      { ref: 'cline:cline-free/deepseek-v4.1-flash', provider: 'cline', selectable: false, reason: 'needs a signed-in Cline CLI on this host' },
+      { ref: 'tokenharbor/deepseek-v4.1-flash:free', provider: 'tokenharbor', selectable: false, reason: 'needs TOKEN_HARBOR_API_KEY' },
+    ])).toEqual([
+      'Cline: 2 free lanes not on this host — needs a signed-in Cline CLI on this host',
+      'Token Harbor: 1 free lane not on this host — needs TOKEN_HARBOR_API_KEY',
+    ]);
+  });
+
+  it('counts one lane once, and says so in the singular', () => {
+    expect(blockedProviderLines([{ ref: 'a', provider: 'cline', selectable: false, reason: 'no CLI' }]))
+      .toEqual(['Cline: 1 free lane not on this host — no CLI']);
+    expect(blockedProviderLines([])).toEqual([]);
+    expect(blockedProviderLines(undefined)).toEqual([]);
+  });
+
+  it('the note reaches the message for a blocked row, and never for a depleted one', () => {
+    const blocked = formatFreemodelWithDepletion([], [
+      { ref: 'cline:cline-free/muse-spark-1.3-contributor', provider: 'cline', selectable: false, depleted: false, ended: false, terminalOnly: false, reason: 'needs a signed-in Cline CLI on this host' },
+      { ref: 'opencode/muse-spark-1.3-contributor-free', provider: 'opencode', selectable: true, depleted: false, ended: false, terminalOnly: false, reason: 'available' },
+    ], { current: '', location: 'test', canonical: [], tableLanes: [] });
+    expect(blocked.text).toContain('Cline: 1 free lane not on this host — needs a signed-in Cline CLI on this host');
+    expect(blocked.blocked).toHaveLength(1);
+
+    // A depleted lane is unusable for a different reason, and the note must not
+    // claim its provider is absent from this host — that is the whole distinction.
+    const spent = formatFreemodelWithDepletion([], [
+      { ref: 'opencode/muse-spark-1.3-contributor-free', provider: 'opencode', selectable: false, depleted: true, ended: false, terminalOnly: false, reason: 'depleted until 3h' },
+    ], { current: '', location: 'test', canonical: [], tableLanes: [] });
+    expect(spent.text).not.toContain('not on this host');
+    expect(spent.blocked).toEqual([]);
+  });
+
+  it('so an empty body still means exactly that', () => {
+    const body = formatFreemodelWithDepletion([], [
+      { ref: 'opencode/muse-spark-1.3-contributor-free', provider: 'opencode', selectable: true, depleted: false, ended: false, terminalOnly: false, reason: 'available' },
+    ], { current: '', location: 'test', canonical: [], tableLanes: [] });
+    expect(body.text).toBe(FREEMODEL_EMPTY_BODY);
   });
 });

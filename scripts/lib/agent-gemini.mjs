@@ -170,7 +170,7 @@ export function mapGeminiError({ status, body, message } = {}) {
     return `Gemini quota or rate limit reached${short ? ` (${short})` : ''}.`;
   }
   if (code === 404 || /model not found|not_found|did you mean/i.test(text)) {
-    return `Gemini model not found — the vendor model list may be stale, pick again from /freemodel${short ? ` (${short})` : ''}.`;
+    return `Gemini model not found — the vendor model list may be stale, pick again from /model_free${short ? ` (${short})` : ''}.`;
   }
   if (code >= 500 || /overloaded|internal|unavailable|timeout|timed out/i.test(text)) {
     return `Gemini provider error${short ? `: ${short}` : ''}.`;
@@ -203,12 +203,12 @@ export async function runGemini({
     return fail(
       'Gemini API key missing: set GEMINI_API_KEY on this host ' +
         '(VPS ~/.config/bot-host/common.env, phone ~/.config/opencode-bot/<id>.env). ' +
-        'The /freemodel picker works without it; runs do not.',
+        'The /model_free picker works without it; runs do not.',
     );
   }
   const apiModel = geminiModelId(model);
   if (!apiModel) {
-    return fail(`Unknown gemini model: ${model}. Use /freemodel to pick from the list.`);
+    return fail(`Unknown gemini model: ${model}. Use /model_free to pick from the list.`);
   }
   // Unknown or empty disables the hop; a caller on the lite engine itself
   // never hops to itself.

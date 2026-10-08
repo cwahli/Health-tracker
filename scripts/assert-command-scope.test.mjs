@@ -144,7 +144,11 @@ test('the real tree publishes canonical /thinking and keeps /think as an alias',
   assert.ok(out.published.includes('thinking'), 'popup must advertise /thinking');
   assert.ok(!out.published.includes('think'), 'popup must not advertise the /think alias');
   assert.ok(out.handled.includes('think'), '/think must stay a working alias');
-  assert.deepEqual(out.aliases, ['think']);
+  // `/freemodel` joined it (BOT-26): the router still HANDLES the old name — it
+  // answers a one-line pointer so muscle memory does not fall through to a model
+  // prompt — and no longer publishes it. An alias target has to be published, so
+  // it cannot live in COMMAND_ALIASES any more; it is declared here instead.
+  assert.deepEqual(out.aliases, ['think', 'freemodel']);
 });
 
 // --- parsers ---------------------------------------------------------------
@@ -160,9 +164,13 @@ test('the router popup and its handlers differ only by declared aliases', () => 
   const { published, handled } = readRouterSurface();
   const registry = readRegistry();
   const aliases = registry.commands.aliases || [];
+  // The rule is SET-equality: which names are handled-but-unpublished. Array order
+  // is not part of it — the source order of `bot.command(...)` is not something a
+  // reader could act on — and with two aliases that accidental coupling began
+  // reding this sensor for a reordering that changes nothing.
   assert.deepEqual(
-    handled.filter((c) => !published.includes(c)),
-    aliases,
+    [...handled.filter((c) => !published.includes(c))].sort(),
+    [...aliases].sort(),
     'handled-but-unpublished must be exactly the declared aliases',
   );
   assert.ok(published.includes('switch'), 'router owns /switch — it is a separate product');

@@ -1,0 +1,30 @@
+{
+  "slug": "allowance-watch-hold-renewal",
+  "timestamp": "2026-10-07T22:45:00Z",
+  "failed_hypotheses": [
+    {
+      "id": "h1-stamp-depleted-on-uncertain-probe",
+      "summary": "An uncertain probe (hang / timeout / no key / unreachable) re-stamps the lane depleted on the default TTL, on the assumption the lane is still limited",
+      "why_failed": "The sweep only ever probes lanes that are already dark, so each uncertain probe reset the clock on a lane whose darkness had already expired: 27 re-stamps in one day, ~46 minutes apart, off a 429 that had reset eleven days earlier. Uncertain was treated as evidence of a limit; it is evidence of nothing.",
+      "signature": "uncertain → default TTL",
+      "divergent_node": "tools/telegram-provider-router/bin/ht-allowance-watch",
+      "guard_fail_id": "allowance_hold_needs_evidence"
+    },
+    {
+      "id": "h2-hand-patch-the-installed-unit",
+      "summary": "Fix the lane by editing /etc/systemd/system/ht-allowance-watch.service on the box",
+      "why_failed": "Leaves production state outside version control: nothing records it, nothing re-applies it after a reimage, and the next reader cannot tell a hand-edit from a deploy. The user's requirement was the opposite (persistent, implemented in the repo).",
+      "signature": "unit authored on the host, then daemon-reload + restart",
+      "divergent_node": "/etc/systemd/system/ht-allowance-watch.service",
+      "guard_fail_id": "runtime_unit_is_versioned_and_checked"
+    },
+    {
+      "id": "h3-probe-through-the-units-path",
+      "summary": "Reuse the unit's PATH to find the `cline` binary",
+      "why_failed": "The unit PATH has no ~/.npm-global/bin, where the CLI actually is, so the probe never ran and every sweep stayed uncertain — the watcher called Cline 'not installed' while the bot, resolving absolutely, called it ready.",
+      "signature": "spawnSyncFn('cline', args, { cwd })",
+      "divergent_node": "tools/telegram-provider-router/src/allowance-watch-core.cjs",
+      "guard_fail_id": "allowance_hold_needs_evidence"
+    }
+  ]
+}

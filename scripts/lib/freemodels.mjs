@@ -173,6 +173,25 @@ export const FREE_NAME_EXCEPTIONS = {
   'big-pickle': 'qa-evidence/model-comparison.json — "Free, no card; no per-day cap published"',
 };
 
+/**
+ * Models whose name says free but which are NOT free on the surface they are
+ * reached through.
+ *
+ * The mirror image of `FREE_NAME_EXCEPTIONS`, for the same reason: a name is a
+ * claim, and the claim only holds on the surface it was made on. `opencode-go` is
+ * the PAID plan on this stack (plan/BOT_ROLES.md, plan/ROADMAP.md V-30.4 — "zen
+ * funds depleted and opencode-go is paid"), so a zero list price under it means
+ * "not metered", not "free allowance" — the same trap `grok-code` fell into.
+ * The user checked on 2026-10-07 and confirmed `opencode-go/space-bunny-free` is
+ * not free there, after a preference-doc row authored off the "-free" suffix
+ * offered it as a second free Space Bunny pool. Its OpenCode Zen twin
+ * `opencode/space-bunny-free` IS free and is untouched — the two are different
+ * POOLS (different quota), which is not the same claim as two free ones.
+ */
+export const FREE_NAME_DENYLIST = {
+  'opencode-go/space-bunny-free': 'paid Go plan: not a free lane there (user, 2026-10-07)',
+};
+
 export function listFreeOpenCode({ modelsCachePath, authPath, readJson = defaultReadJson, home = os.homedir(), env = process.env, includeUnready = false } = {}) {
   const paths = defaultPaths(home);
   const cache = readJson(modelsCachePath || paths.modelsCachePath);
@@ -198,6 +217,10 @@ export function listFreeOpenCode({ modelsCachePath, authPath, readJson = default
       if (Number(cost.input) !== 0 || Number(cost.output) !== 0) continue;
       // A zero price is not a free model; the name is the signal.
       if (!/-free/.test(id) && !FREE_NAME_EXCEPTIONS[id]) continue;
+      // ...and a name is not enough either: a `-free` model on a paid surface is
+      // not a free lane. Checked on the qualified ref, because the same model is
+      // genuinely free through its own provider (see FREE_NAME_DENYLIST).
+      if (FREE_NAME_DENYLIST[`${provider}/${id}`.toLowerCase()]) continue;
       refs.push(`${provider}/${id}`);
     }
   }

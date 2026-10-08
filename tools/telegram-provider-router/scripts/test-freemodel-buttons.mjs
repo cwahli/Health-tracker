@@ -135,6 +135,8 @@ const {
   freeModelDepletion,
   allFreeLanesDepletedMessage,
   availableClineKnownLanes,
+  MODEL_POOLS,
+  poolOfLane,
 } = mod;
 
 let failed = 0;
@@ -370,6 +372,77 @@ check("Z4 freeModelDepletion resolves Space Bunny to the shared bucket", Boolean
 check("Z5 non-Zen lanes are not marked by the Zen bucket (TH tools mimo stays clean)", !zenButtons.some((b) => /^❌ .*(qwen|TH tools|Token Harbor|Freebuff)/.test(b.label)), JSON.stringify(zenButtons.map((b) => b.label)));
 // Derived: total follows the deduped lane count, depleted follows the Zen bucket.
 check("Z6 the Total line counts the Zen-depleted buttons", new RegExp(`Total: ${EXPECTED_LANES} · 3 depleted ❌`).test(zenReply.text), zenReply.text);
+
+// ---- G) the three pools: one list, three filters -----------------------------
+// /freemodel became /model_light_free, /model_free and /model_go. Each picker is
+// a FILTER of the same probe list, so the pools must partition it: no lane lost,
+// none in two pools, and the paid Go pool is exactly the go-plan lanes — a lane
+// that carries a benchmark figure like any other model, which is why the plan is
+// tested before the tier.
+//
+// The light id is looked up rather than hardcoded, so the check pins the LAW ("the
+// documented light class lands in the light pool") and not one catalog row: if
+// both documented light lanes ever moved tier, this fails and says which.
+const LIGHT_ID = [
+  "opencode/laguna-s-2.1-free",
+  "opencode/cloudflare/@cf/zai-org/glm-4.7-flash",
+].find((id) => poolOfLane({ provider: "opencode", model: id }) === "light");
+const poolFixture = () => [
+  ["opencode", { ok: true, reason: "", items: [
+    { id: "opencode/muse-spark-1.3-contributor-free", label: "muse spark 1.3 free" },
+    ...(LIGHT_ID ? [{ id: LIGHT_ID, label: "a documented light lane" }] : []),
+  ] }],
+  ["opencode-go", { ok: true, reason: "", items: [
+    { id: "opencode-go/space-bunny-free", label: "space bunny (go plan)" },
+  ] }],
+];
+const poolTexts = (reply) => flatten(reply.keyboard).map((b) => b.text.trimEnd());
+const showsLabel = (reply, label) => poolTexts(reply).some((t) => t.endsWith(`: ${label}`));
+
+const allPoolsReply = buildFreemodelReply(poolFixture(), now);
+const lightReply = buildFreemodelReply(poolFixture(), now, "light");
+const codingReply = buildFreemodelReply(poolFixture(), now, "coding");
+const goReply = buildFreemodelReply(poolFixture(), now, "go");
+
+check("G1 the pool ids are the three published commands",
+  // Both sides sorted: the assertion is the SET (one command per pool), and
+  // writing one side by hand put it in the wrong lexical order and failed on
+  // correct code.
+  JSON.stringify(Object.values(MODEL_POOLS).map((p) => p.command).sort()) === JSON.stringify(["model_light_free", "model_free", "model_go"].sort()),
+  JSON.stringify(MODEL_POOLS));
+check("G2 a documented coding lane is the CODING pool",
+  poolOfLane({ provider: "opencode", model: "opencode/muse-spark-1.3-contributor-free" }) === "coding",
+  String(poolOfLane({ provider: "opencode", model: "opencode/muse-spark-1.3-contributor-free" })));
+check("G3 a documented light lane is the LIGHT pool", Boolean(LIGHT_ID), String(LIGHT_ID));
+check("G4 an opencode-go lane is the GO pool even though it is rated",
+  poolOfLane({ provider: "opencode-go", model: "opencode-go/space-bunny-free" }) === "go",
+  String(poolOfLane({ provider: "opencode-go", model: "opencode-go/space-bunny-free" })));
+check("G5 the light pool shows the light lane and neither the coding nor the Go lane",
+  showsLabel(lightReply, "a documented light lane")
+    && !showsLabel(lightReply, "muse spark 1.3 free")
+    && !showsLabel(lightReply, "space bunny (go plan)"),
+  JSON.stringify(poolTexts(lightReply)));
+check("G6 the coding pool shows the coding lane and not the light one",
+  showsLabel(codingReply, "muse spark 1.3 free") && !showsLabel(codingReply, "a documented light lane"),
+  JSON.stringify(poolTexts(codingReply)));
+check("G7 the Go pool keeps the go-plan lane alone",
+  showsLabel(goReply, "space bunny (go plan)") && goReply.total === 1 && !showsLabel(goReply, "muse spark 1.3 free"),
+  JSON.stringify(poolTexts(goReply)));
+check("G8 the Go body says the paid lane does not move on its own",
+  /Go plan/.test(goReply.text) && /never moves on its own/.test(goReply.text), goReply.text);
+check("G9 a free pool says a quota hit stays inside it, and names the way out",
+  /moves inside this pool only/.test(lightReply.text) && /\/model clears the pool/.test(lightReply.text), lightReply.text);
+check("G10 the three pools partition the one list",
+  (() => {
+    const all = flatten(allPoolsReply.keyboard).length - 1; // minus Cancel
+    const sum = lightReply.total + codingReply.total + goReply.total;
+    const overlap = ["a documented light lane", "muse spark 1.3 free", "space bunny (go plan)"]
+      .filter((l) => [lightReply, codingReply, goReply].filter((r) => showsLabel(r, l)).length > 1);
+    return sum === all && overlap.length === 0;
+  })(),
+  `base=${allPoolsReply.total} sum=${lightReply.total + codingReply.total + goReply.total}`);
+check("G11 the unconstrained reply carries no pool line (unchanged)",
+  !/Light pool|Coding pool|Go plan/.test(allPoolsReply.text), allPoolsReply.text);
 
 mkdirSync(stateDir, { recursive: true });
 if (failed) {

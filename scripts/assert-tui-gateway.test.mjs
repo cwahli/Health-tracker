@@ -1013,6 +1013,22 @@ console.log('assert-tui-gateway:');
     && webAuthShimJs().includes('EventSource')
     && webAuthShimJs().includes('location.origin')
     && !webAuthShimJs().includes('telegram.org'));
+  check('web/token renews a live token with a fresh cookie',
+    await (async () => {
+      const r = await call(`/web/token?token=${encodeURIComponent(wtoken)}`, { host: 'web.test' });
+      const body = JSON.parse(r.body);
+      return r.code === 200 && body.ok === true && typeof body.token === 'string'
+        && body.token !== wtoken && String(r.h['set-cookie'] || '').includes(COOKIE_NAME);
+    })());
+  check('web/token refuses a garbage token',
+    await (async () => {
+      const r = await call('/web/token?token=garbage', { host: 'web.test' });
+      return r.code === 401;
+    })());
+  check('the shim renews proactively on a timer',
+    webAuthShimJs().includes('/web/token')
+    && webAuthShimJs().includes('setInterval')
+    && webAuthShimJs().includes('setTimeout'));
   check('the served html carries the shim before the bundle',
     planted.body.includes(WEB_AUTH_STORAGE_KEY)
     && planted.body.indexOf(WEB_AUTH_STORAGE_KEY) < planted.body.indexOf('serve index'));
