@@ -46,5 +46,11 @@ __pycache__/
 *.py[cod]
 *.pyo
 
+# b2b dead letters used to be written here (default process.cwd()), so a
+# serving clone accumulated untracked files. They live under the state
+# root now (bot-host.mjs: deadLetterRoot); this keeps any that a box still
+# holds from reading as working-tree changes.
+specs/bot-handoff-dead-letter/
+
 # bugctl offline write queue (local replay state, never committed)
 .bugctl-queue.jsonl

@@ -3802,6 +3802,84 @@ describe('TG TUI failproof sync — reset and resync paths', () => {
   });
 });
 
+describe('the serving tree stays clean, and the connect reports its cost', () => {
+  it('dead letters default under the state root, never into the working tree', () => {
+    // Live 2026-10-08: the serving clone carried 17 untracked files, every one
+    // of them a dead letter written to `<cwd>/specs/bot-handoff-dead-letter` —
+    // the record of a refusal landing inside the tree under deploy, which is
+    // also the tree a checkout reports as dirty.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toContain('function deadLetterRoot(botDir)');
+    expect(src).not.toContain("path.join(process.cwd(), 'specs', 'bot-handoff-dead-letter')");
+    // Both writing paths go through it: the send-side bound (which owns the
+    // caller's root) and the receive-side handler (which owns the bot's dir).
+    expect(src).toContain('deadLetterRoot(path.join(stateRoot, config.id))');
+    expect(src).toContain('const deadLetterDir = deadLetterRoot(dir);');
+    expect(src).toContain("process.env.TG_DEAD_LETTER_DIR || path.join(botDir, 'dead-letter')");
+  });
+
+  it('the attach records how long the connect took, phase by phase', () => {
+    // The operator's first symptom is 'it is slow', which had no number
+    // anywhere: nothing measured the tap-to-usable path. Four wall-clock
+    // reads and one log record is what makes it measurable.
+    const sh = fs.readFileSync(new URL('../scripts/mobile/tui-attach.sh', import.meta.url), 'utf8');
+    expect(sh).toContain('now_ms() {');
+    expect(sh).toContain('T_START="$(now_ms)"');
+    expect(sh).toContain('T_RESOLVED="$(now_ms)"');
+    expect(sh).toContain('T_READY="$(now_ms)"');
+    expect(sh).toContain('ready_ms=$READY_MS resolve_ms=$RESOLVE_MS wait_ms=$WAIT_MS');
+    expect(sh).toContain('connected in %ss');
+  });
+
+  it('a refused send-side handoff dead-letters under the state root, not the tree', async () => {
+    // The production default, with no TG_DEAD_LETTER_DIR override: the caller's
+    // root is the only thing that decides where the letter lands. Before this,
+    // the default was `<cwd>/specs/bot-handoff-dead-letter` — inside the serving
+    // clone, which is what made it dirty.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dl-default-'));
+    const OLD = process.env.TG_DEAD_LETTER_DIR;
+    delete process.env.TG_DEAD_LETTER_DIR;
+    try {
+      fs.mkdirSync(path.join(root, 'pm'), { recursive: true });
+      fs.writeFileSync(
+        path.join(root, 'pm', 'identity.json'),
+        JSON.stringify({ id: 'pm', username: 'ht_pm_bot', telegramId: 555 }),
+      );
+      fs.mkdirSync(path.join(root, 'vm3'), { recursive: true });
+      // A terminal chain is the cheapest send-side bound to trip offline — it
+      // needs no username resolution to be right — and the send-side bounds are
+      // the ones that dead-letter.
+      fs.writeFileSync(
+        path.join(root, 'vm3', 'handoff.json'),
+        JSON.stringify({
+          chains: { 'tell:vm3:pm': { depth: 0, lastAt: Date.now(), terminal: true } },
+          lastSentAt: {},
+          seen: {},
+          sent: [],
+          turns: [],
+        }),
+      );
+      const v = await sendPeerHandoff({
+        config: { id: 'vm3' } as never,
+        args: 'pm hello --ref Sheet-03',
+        api: null,
+        stateDirPath: root,
+        policy: 'humans-and-allowlisted-bots',
+        peers: { vm3: { pm: { maxDepth: 2, cooldownMs: 60_000, ttlMs: 1_800_000 } } },
+      });
+      expect(v.ok).toBe(false);
+      expect(v.code).toBe('AFTER_TERMINAL');
+      const letters = fs.readdirSync(path.join(root, 'vm3', 'dead-letter'));
+      expect(letters).toHaveLength(1);
+      expect(letters[0]).toMatch(/\.json$/);
+    } finally {
+      if (OLD === undefined) delete process.env.TG_DEAD_LETTER_DIR;
+      else process.env.TG_DEAD_LETTER_DIR = OLD;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('TG TUI failproof sync — no split sessions, no false same-session claim', () => {
   it('attach refuses a sessionless opencode open before any tmux runs', () => {
     // Live 2026-10-04: a pre-message tap launched bare opencode on "" while
