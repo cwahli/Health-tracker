@@ -5,6 +5,7 @@ skill: sync-jobs
 edit_mode: patch
 allowed_files:
   - scripts/lib/agent-opencode.mjs
+  - scripts/lib/health/seat-model.mjs
   - scripts/assert-tier-pin.mjs
 frozen_files:
   - src/App.tsx
@@ -70,6 +71,8 @@ node scripts/journey-guard.mjs tier-pin-1
 ## Blast radius
 Allowed / Frozen are the YAML lists above.
 Out of scope: free-lanes projection, bot-host message path, TUI rendering.
+
+Seat turns opt in (`allowTierDowngrade: true` in `runSeatModel`). Their chain is the chat model, then the bot's configured default, and `assert-seat-model` requires that default to run even when the catalog calls it light. The pin still applies to every other caller.
 
 ## Stop and come back
 Two repairs fail · Frozen file in the diff · New class appears · Live Gemini requested

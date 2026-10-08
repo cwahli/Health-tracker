@@ -197,8 +197,12 @@ export async function runSeatModel({
       attempts: [],
     };
   }
+  // This chain is the chat's model, then the bot's configured default.
+  // That second lane is an explicit fallback, including when the catalog
+  // calls it light. Callers that do not opt in still drop a silent high→light hop.
   const { result, attempts } = await runWithModelFailover({
     models: chain,
+    allowTierDowngrade: true,
     makeRun: (model) =>
       runOpencodeImpl({ prompt, model, timeoutMs, workspace, thinking }),
   });
