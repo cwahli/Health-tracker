@@ -294,6 +294,34 @@ jobs:
       - name: PM role gate (assert-pm-role)
         run: node scripts/assert-pm-role.test.mjs
 
+      # The model failover chain ran nowhere in CI, which is how the 2026-10-05
+      # outage shipped: `defaultIsRetryable` treated a timeout as terminal, so a
+      # dead primary lane held the turn for its full 900s budget and returned
+      # empty — "Done (exit 1), but the model returned no text output." — while
+      # the healthy fallback already in the chain was never attempted. The gate
+      # existed and passed 15/15 locally; it just was never run here. Its timeout
+      # case drives the real timer, and needs only node: builtins, so it is safe
+      # in a checkout with no node_modules.
+      #
+      # HOME is pinned because bot-host creates ~/.hermes as an import side
+      # effect, and assert-bug-pack treats "does ~/.hermes exist" as "am I on a
+      # real host?" — with a shared HOME this step silently flipped that gate to
+      # the real-profile path (3 failures) purely by running earlier. Keep the
+      # step hermetic so it neither depends on nor perturbs the gates around it.
+      - name: Model failover gate (assert-model-failover)
+        run: HOME="$(mktemp -d)" node scripts/assert-model-failover.mjs
+
+      # The walk must offer the CLI a ref it can route. A bare slug is rejected
+      # BEFORE dispatch (`Invalid model reference`), so each one burns a spawn, a
+      # round trip and a "switching to" line the user has to read: nine of them
+      # inside a fourteen-hop walk for the prompt "hi" (live VM4 2026-10-06).
+      # `assert-r16-failover` could not see it because its fixture stores
+      # `model:'opencode/x'` WITH the prefix while `withCatalogLanes` strips it —
+      # this gate folds a real catalog entry and reads what the walk dispatches.
+      # HOME pinned for the same reason as the step above: it imports bot-host.
+      - name: Walk ref gate (assert-walk-refs)
+        run: HOME="$(mktemp -d)" node scripts/assert-walk-refs.mjs
+
       # The group surfaces ran nowhere in CI, which is how #458 merged green
       # while main was red: two bots were seated as health_analyst and two as
       # test_planner, and assert-health-group — the sensor that refuses exactly
@@ -319,6 +347,16 @@ jobs:
       # workspace falls back to its pack, and no other directory may.
       - name: Seat brief gate (assert-health-brief)
         run: node scripts/assert-health-brief.mjs
+
+      # A seat's model is host config, not this repo's opinion. The lane was
+      # pinned to one vendor in three places at once — COUNCIL_MODEL defaulted to
+      # a Gemini id, the readiness gate asked geminiKeyIn(), and runGemini
+      # rejected any id outside GEMINI_MODELS — so `/health readiness` reported
+      # "No model credential on this host" on a box whose Telegram bot answered
+      # all day and whose catalog listed 72 lanes. Seats now take the host's own
+      # lanes, free first, walking them with the bot's failover.
+      - name: Seat model gate (assert-seat-model)
+        run: node scripts/assert-seat-model.mjs
 
       # The coder build gate must never be fooled by the npm `tsc` decoy: when a
       # worktree has no local compiler, `npx tsc` resolves version 2.0.4 of the
@@ -377,8 +415,16 @@ jobs:
 
       # pack-fixture: BUG-8449 fixture traceability + packer rules. Host-profile
       # bootstrap uses the committed fixture HOME on clean runners (CI-safe).
+      #
+      # HOME is pinned for the same reason the failover step above pins it: this
+      # gate reads "does ~/.hermes exist" as "am I on a real host?" — and the
+      # prepush chain now runs tests/bot-host.test.ts, which creates ~/.hermes as
+      # a side effect. Without the pin the step flips to the real-profile path.
+      # Measured 2026-10-06, on the PR that put that suite into prepush: three
+      # failures (SOUL.md, config.yaml, MEMORY.md) and no "(fixture HOME)" note
+      # in the check names — the tell that the host branch had been taken.
       - name: Bug pack fixture gate (assert-bug-pack)
-        run: node scripts/assert-bug-pack.mjs
+        run: HOME="$(mktemp -d)" node scripts/assert-bug-pack.mjs
 
       # continuity: §4.10 route-shape + offline projection walk (no chat).
       - name: Bug ticket continuity gate (assert-bug-ticket-continuity)

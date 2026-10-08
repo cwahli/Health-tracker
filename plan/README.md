@@ -5,6 +5,7 @@
 | File | Pillar |
 |---|---|
 | [ROADMAP.md](./ROADMAP.md) | Execute — all tracks |
+| [TG_TOOL_SURFACE.md](./TG_TOOL_SURFACE.md) | Telegram runs the tool: skills, thinking, lanes, locations, live proof |
 | [BIOMARKER_LIFECYCLE.md](./BIOMARKER_LIFECYCLE.md) | 1 Architecture |
 | [FOOD.md](./FOOD.md) | 2 Pipeline + meal |
 | [RELIABILITY.md](./RELIABILITY.md) | 3 Infra / quotas |

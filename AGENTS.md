@@ -104,16 +104,16 @@ Not L15: `continue`, `work`, pack phases.
 Live: `GET /api/bugs/next` (or `?mode=next` / `?n=11`). Drain **automatic** tape fails on `continue.active_line`. Named vitest for the class. `POST /attempts`. Do not `POST /loop` or paint `expected.json`. Detail: `plan/QUALITY.md` §14 if you are actually on a bug card.
 
 ### L16 — Feature Test & Debug Coupling (Case-by-case)
-When implementing or updating features (new agent flows, dispatches, interactive dialog actions, or schema updates), integrate them directly into the testing and debugging framework:
-- **Debug observability match**: Ensure the feature's states, dispatches, and UI components are represented in the Canonical Run Tree (`debugRunTree.ts`, `dumpContract.ts`) or dialog inventory so runs are immediately inspectable.
-- **Testing & golden consolidation**: Identify where the feature naturally belongs in the testing framework (e.g., existing golden process tests, golden meal/biomarker suites, or Tier 2 Playwright stubs). Consolidate assertions into the **most relevant existing file** rather than spawning redundant, uncontrolled one-off test suites.
-- **Scope**: Applied on a case-by-case basis. Pure cosmetic/copy tweaks (Class S) do not require debug or golden updates; substantive logic, pipeline, or UI interaction updates must have their matching debug and golden/test representation.
+Substantive logic/pipeline/UI updates must be represented in the debug tree (`debugRunTree.ts`, `dumpContract.ts`) or dialog inventory, with assertions consolidated into the most relevant existing suite — never a redundant one-off. Cosmetic tweaks (Class S) are exempt.
+
+### L19 — Leave no stranded work (all locations)
+A turn ends with its branch pushed **and** a PR open (draft counts) or the branch deleted — unpushed/un-PR'd work is invisible to every other box and reads as abandonment to the hygiene loop. Beat while you run (`agent-heartbeat.mjs`) so the cleaner vetoes live work. You may delete your own merged branches and close your own superseded PRs with a reason; never another agent's without its owner. A branch with no open PR and no push for 7 days is reaped.
 
 ### L17 — Hashimoto's Ratchet & Reversible Loops (SHEPHERD)
 Every bugfix must leave behind a deterministic Sensor (named unit/contract test) and grow `docs/agent/standing.json` via Learner (`specs/learnings/`) so the error can never recur. If a Builder attempt fails Guard, do not patch on top of dirty code: use SHEPHERD `[revert]` (`node scripts/journey-checkpoint.mjs restore <slug> <node>`) to snap back to the clean checkpoint before forking Hypothesis 2 (`[fork]`). Two failed attempts → STOP and escalate to Reviewer / Learner.
 
 ### L18 — Live proof before done
-No task is complete without live end-to-end proof on the real chain: drive it with live data through to the final screen(s), attach screenshot(s) — one per proof point — and keep working until then. “It loads” ≠ done; loaded-with-data, seen, is done. Never ask for blind re-taps: on failure read the delivered bytes (gateway log, ledger, API response), not guesses. Phone-side rendering is witnessed on-device only — confirm it from the user's own screenshot. Screenshots land in Drive folder “Work done” (1G7dhvqRy7iOmRg7AfN9a6g8cbIhz14yS) — one file per proof point.
+No task is complete without live end-to-end proof on the real chain: drive it with live data through to the final screen(s), attach screenshot(s) — one per proof point — and keep working until then. “It loads” ≠ done; loaded-with-data, seen, is done. An all-empty (every cell —, zero rows) capture is not proof — re-drive until a populated cell renders, then download the delivered bytes and screenshot that render. Never ask for blind re-taps: on failure read the delivered bytes (gateway log, ledger, API response), not guesses. Phone-side rendering is witnessed on-device only — confirm it from the user's own screenshot. Screenshots land in Drive folder “Work done” (1G7dhvqRy7iOmRg7AfN9a6g8cbIhz14yS) — one file per proof point.
 
 ### L10 — COMPLETE (code only)
 `tsc` + matching regression-map commands + the ROADMAP ID’s named assert if any. Skip all of that when no application code changed. Forbidden until then: “all done” / “fully verified.”

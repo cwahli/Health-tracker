@@ -705,7 +705,7 @@ Firebase project `kempt-charmer-0r5vm`. OAuth client ID lives in Google Console 
 
 **Firebase Console → Authentication → Settings → Authorized domains** (exact hosts):
 
-- Production host (`https://health-tracking.duckdns.org`)
+- Production host (`https://health-tracker.co.uk`)
 - `localhost` (AI Studio)
 - Optional stable `preview.<custom>` — **not** `*.pages.dev`
 
@@ -732,7 +732,7 @@ Firebase project `kempt-charmer-0r5vm`. OAuth client ID lives in Google Console 
 
 ### 12.7 Phases (one ID at a time)
 
-**R-13.0 Preconditions (no app code, agent CLI).** `node --env-file=.env scripts/r13-0-preflight.mjs`. Workers Paid is **not** required (API is Node). D1 + R2 already exist. R2 CORS for `http://localhost:3000` + `https://health-tracking.duckdns.org`. Secrets stay on the **runtime** process (copy from env at deploy; never Vite build, never git). `NODE_ENV=production` is already in the Dockerfile. Firebase + OAuth allowlists (§12.5) after 13.1 prints the exact prod host.
+**R-13.0 Preconditions (no app code, agent CLI).** `node --env-file=.env scripts/r13-0-preflight.mjs`. Workers Paid is **not** required (API is Node). D1 + R2 already exist. R2 CORS for `http://localhost:3000` + `https://health-tracker.co.uk`. Secrets stay on the **runtime** process (copy from env at deploy; never Vite build, never git). `NODE_ENV=production` is already in the Dockerfile. Firebase + OAuth allowlists (§12.5) after 13.1 prints the exact prod host.
 
 **R-13.1 Ship: static SPA + existing Express in a Node process.** Host (locked 2026-09-19): **OVH VPS-2** (`node dist/server.cjs` behind Caddy). **Not** Cloudflare Containers and **not** Cloud Run. V-0…V-16 COMPLETE, live since 2026-09-20. Worker `health-tracker-2` is a no-build edge proxy to the VPS.
 

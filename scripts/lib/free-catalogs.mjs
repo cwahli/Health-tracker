@@ -310,6 +310,55 @@ function demonstratedMatch(id) {
 }
 
 /**
+ * The owner's own placement, where the published-figure rule has nothing to read.
+ *
+ * The rule above ("no published figure is light, unless it is *demonstrated*") is
+ * the owner's, and so is the right to say a model is not a docs/inventory model
+ * when no benchmark publishes a figure for it. The catalogs under
+ * `golden/scorecard/current/` are written by the scorecard, not by a Builder, so
+ * the owner's placement lives here — one table, one place, read by every surface
+ * through `tierForModel`, which is the same single-source path the catalog rule
+ * uses. It is not a second tier file and not a per-bot fork (QS-6): nothing else
+ * in the stack reads it, and /freemodel, /allowance and the turn's failover walk
+ * all learn the new tier by calling this function, exactly as before.
+ *
+ * Each row carries who said it and when, for the same reason every other claim in
+ * this file does. It applies AFTER the locks (a forbidden model stays forbidden)
+ * and INSTEAD of the benchmark rule (there is no figure to weigh), and it is
+ * deliberately short: three Zen-catalog rows the operator looked at on
+ * 2026-10-07 and called coding models, against a catalog that had no row for two
+ * of them at all.
+ *
+ *   exo-free, fledge-alpha-free  live in the OpenCode Zen free catalog
+ *                                (`opencode models`, 2026-10-07) with no entry in
+ *                                any catalog here, so the no-figure rule filed
+ *                                both as Light · docs/inventory.
+ *   qwen3.8-27b                  the Cloudflare-hosted 27B of the Qwen 3.8 class;
+ *                                the catalog has no published figure for the 27B
+ *                                specifically, so it fell to Light while its
+ *                                sibling Qwen 3.8 Flash sits at AA 39.9 in the
+ *                                coding pool.
+ */
+export const OWNER_PLACEMENT = {
+  'exo-free': { tier: 'high', since: '2026-10-07', why: 'Zen free coding model; no catalog figure exists to weigh' },
+  'fledge-alpha-free': { tier: 'high', since: '2026-10-07', why: 'Zen free coding model; no catalog figure exists to weigh' },
+  'qwen3.8-27b': { tier: 'high', since: '2026-10-07', why: 'Qwen 3.8 class coding model; no published figure for the 27B' },
+};
+
+/**
+ * The table, keyed the way model ids arrive.
+ *
+ * A lane's id reaches here as `opencode/exo-free`, `cloudflare/@cf/qwen/qwen3.8-27b`
+ * or `tokenharbor/qwen3.8-flash:free` — three spellings of a name that has already
+ * been reduced by `modelIdOf`. `loose()` is the same reduction the catalog matching
+ * uses, so one key matches every way the model is reached instead of only the
+ * spelling it was written in (the first cut of this table keyed on the literal
+ * strings and matched nothing, which is precisely the silent no-op a tier table
+ * must not be).
+ */
+const OWNER_PLACEMENT_BY_ID = new Map(Object.entries(OWNER_PLACEMENT).map(([key, row]) => [loose(key), { ...row, key }]));
+
+/**
  * Catalog tier for a model: 'high' | 'light' | null (locked out).
  *
  * The catalog's rule, applied in the catalog's order:
@@ -333,6 +382,14 @@ export function tierForModel(ref) {
     return { tier: null, source: hit.source, line: null, why: hit.why };
   }
   if (!id || !text) return { tier: null, source: where, line: null, why: null };
+
+  // The owner's placement is the owner's, and it sits between the locks and the
+  // benchmark: a lock still outranks it, and where a published figure exists it is
+  // not consulted — the figures are the better evidence and already decide.
+  const owner = OWNER_PLACEMENT_BY_ID.get(loose(id));
+  if (owner && !benchmarkFor(ref).published) {
+    return { tier: owner.tier, source: where, line: null, why: `owner placement ${owner.since} — ${owner.why}` };
+  }
 
   const bench = benchmarkFor(ref);
   if (bench.published && typeof bench.aa === 'number') {

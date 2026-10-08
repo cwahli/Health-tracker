@@ -123,7 +123,12 @@ export function parseOcrLabel(rawLabel: any, targetWeight: number, defaultR: num
     ocrServingGrams = Math.round(targetWeight / Number(rawLabel.servingsPerContainer || rawLabel.jumlahSajianPerKemasan || rawLabel.servings_per_container));
   }
 
-  const rawCalStr = rawLabel.calories ?? rawLabel.energy ?? rawLabel.kcal ?? rawLabel.energyKcal ?? rawLabel.energiTotal ?? rawLabel.energi ?? rawLabel.kalori;
+  // Order matters: an explicit kcal field must beat the bare energy field. On
+  // UK/EU tables `energy` is kilojoules (live job_1791222829174_c2oveqa1n read a
+  // McDonald's menu board showing "1,558 kJ/371 kcal"), so preferring `energy`
+  // over `energyKcal` read 1558 kJ as 1558 kcal — a 4.2x overdose on the meal.
+  // Bare `energy` is only trusted as kcal once no explicit kcal field is present.
+  const rawCalStr = rawLabel.calories ?? rawLabel.energyKcal ?? rawLabel.kcal ?? rawLabel.kcalori ?? rawLabel.energy ?? rawLabel.energiTotal ?? rawLabel.energi;
   const ocrCal = typeof rawCalStr === 'number'
     ? rawCalStr
     : (rawCalStr ? parseFloat(String(rawCalStr).replace(/[^0-9.]/g, '')) : NaN);
@@ -563,6 +568,15 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
         : (Array.isArray(item.compositeSiblings) ? item.compositeSiblings : [])));
 
   let componentsDetailList: any[] | undefined = undefined;
+  // Capture, from the RAW components, which fat macros were actually stated. The
+  // map below normalises every component to a numeric totalFat/saturatedFat, so
+  // after mapping a silent component is indistinguishable from a real zero — and
+  // summing it would erase a fat figure the dish itself reported.
+  const rawCompsSawFat = rawComps.some((c: any) =>
+    typeof c?.totalFat === 'number' || typeof c?.fat === 'number' ||
+    typeof c?.nutrients?.totalFat === 'number' || typeof c?.nutrients?.fat === 'number');
+  const rawCompsSawSat = rawComps.some((c: any) =>
+    typeof c?.saturatedFat === 'number' || typeof c?.nutrients?.saturatedFat === 'number');
   if (rawComps.length > 0) {
     const origWeight = Math.max(1, Number(item.estimatedWeightGrams || nutrientBasisWeight || consumedWeight));
     const scale = consumedWeight / origWeight;
@@ -575,7 +589,14 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
 
       const cNuts = c.nutrients || {};
       let cProtRaw = Number(c.protein ?? cNuts.protein ?? 0);
-      let cFatRaw = Number(c.totalFat ?? c.fat ?? cNuts.totalFat ?? cNuts.fat ?? cNuts.saturatedFat ?? 0);
+      // NEVER fall back to saturatedFat here. Live job_1791222829174_c2oveqa1n
+      // (McChicken, 2 burgers): the scout dish carried totalFat=32 at dish level
+      // but its foods[] component shipped only saturatedFat=7. Inheriting that
+      // turned 7 g of saturated fat into 7 g of TOTAL fat, which then poisoned
+      // the per-100g basis and the back-computed calories. A missing totalFat is
+      // resolved from the canonical DB below (or left 0 to re-estimate) — it is
+      // never a reason to reuse the saturated figure.
+      let cFatRaw = Number(c.totalFat ?? c.fat ?? cNuts.totalFat ?? cNuts.fat ?? 0);
       let cSatRaw = Number(c.saturatedFat ?? cNuts.saturatedFat ?? 0);
       let cCarbsRaw = Number(c.carbohydrates ?? c.carbs ?? cNuts.carbohydrates ?? 0);
       let cNaRaw = Number(c.sodium ?? cNuts.sodium ?? 0);
@@ -699,6 +720,12 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
       let sumNa = 0;
       let sumTrans = 0;
       let sumFibre = 0;
+      // Which macros the components actually reported. A component that omits a
+      // macro contributes 0 to the sum, and a sum of 0 is indistinguishable from
+      // a genuine zero unless we track it. Without this, a dish whose own
+      // totalFat was known (live job_1791222829174_c2oveqa1n carried 32 g at dish
+      // level) got overwritten by the sum of components that said nothing about
+      // fat at all, collapsing the dish to whatever the sat-fat floor allowed.
       for (const c of componentsDetailList) {
         sumCal += (c.calories || 0);
         sumProt += (c.protein || 0);
@@ -712,8 +739,13 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
       if (sumCal > 0 || sumProt > 0 || sumFat > 0 || sumCarbs > 0) {
         if (!lockedNutrientKeys.includes('calories')) nutrients.calories = Math.round(sumCal);
         if (!lockedNutrientKeys.includes('protein')) nutrients.protein = Math.round(sumProt * 10) / 10;
-        if (!lockedNutrientKeys.includes('totalFat')) nutrients.totalFat = Math.round(sumFat * 10) / 10;
-        if (!lockedNutrientKeys.includes('saturatedFat')) nutrients.saturatedFat = Math.round(sumSat * 10) / 10;
+        // Keep the dish's own figure when no component spoke to that macro.
+        if (!lockedNutrientKeys.includes('totalFat')) {
+          nutrients.totalFat = rawCompsSawFat ? Math.round(sumFat * 10) / 10 : (Number(nutrients.totalFat) || 0);
+        }
+        if (!lockedNutrientKeys.includes('saturatedFat')) {
+          nutrients.saturatedFat = rawCompsSawSat ? Math.round(sumSat * 10) / 10 : (Number(nutrients.saturatedFat) || 0);
+        }
         if (!lockedNutrientKeys.includes('carbohydrates')) nutrients.carbohydrates = Math.round(sumCarbs * 10) / 10;
         if (!lockedNutrientKeys.includes('sodium')) nutrients.sodium = Math.round(sumNa);
         if (!lockedNutrientKeys.includes('transFat') && sumTrans > 0) nutrients.transFat = Math.round(sumTrans * 10) / 10;

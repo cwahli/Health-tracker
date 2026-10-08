@@ -11,7 +11,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { GEMINI_MODELS } from './lib/freemodels.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RUNNER = path.join(HERE, 'council-runner.mjs');
@@ -43,15 +42,22 @@ for (const phrase of ['Forensic Audit & Accuracy Review', 'Vulnerability Scores'
 check('executeRoleTurn throws when the model call throws', /catch \(err\) \{\s*\n\s*throw new Error\(`model call failed/.test(src));
 check('executeRoleTurn throws when the model returns no text', /if \(!text\) \{[\s\S]{0,200}throw new Error/.test(src));
 
-// 3. The council model is an id this host can actually run. The old hardcoded
-// 'gemini-2.0-flash' was not in GEMINI_MODELS, so every call resolved to
-// "Unknown gemini model" and the fallback wrote the document instead.
-const modelLine = src.match(/const COUNCIL_MODEL = process\.env\.COUNCIL_MODEL \|\| '([^']+)'/);
-check('council model is pinned to a known gemini id', Boolean(modelLine));
-check(
-  `pinned council model is in GEMINI_MODELS (${modelLine ? modelLine[1] : 'n/a'})`,
-  Boolean(modelLine) && GEMINI_MODELS.includes(modelLine[1]),
-);
+// 3. The seat's model must be one this host can actually run.
+//
+// This used to read a literal out of the source — `const COUNCIL_MODEL =
+// process.env.COUNCIL_MODEL || '<id>'` — and assert that id was in GEMINI_MODELS.
+// That caught the real bug it was written for (a hardcoded 'gemini-2.0-flash'
+// that resolved to "Unknown gemini model", so the fallback wrote the document
+// instead), but it could only ever validate a *pinned* id.
+//
+// A seat no longer pins one: with no runner injected the turn takes the host's
+// own catalog, free lanes first (scripts/lib/health/seat-model.mjs). So the rule
+// is now the one that actually matters — no seat model may be hardcoded in
+// council-runner, because a hardcoded id is exactly what rots when the host's
+// catalog changes. `assert-seat-model.mjs` proves the resolution itself.
+check('no seat model is hardcoded in council-runner', !/const COUNCIL_MODEL\s*=/.test(src));
+check('a seat with no runner takes the host catalog', /runSeatModel/.test(src));
+check('an injected runner still wins over the host catalog', /if \(runModel\)/.test(src));
 check('COUNCIL_MODEL can be overridden to force a failure', /process\.env\.COUNCIL_MODEL/.test(src));
 
 // 4. The CLI called runCouncilStage with its arguments swapped, so --stage

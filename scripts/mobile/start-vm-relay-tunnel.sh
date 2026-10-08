@@ -13,7 +13,7 @@ while true; do
     -o ExitOnForwardFailure=yes -o BatchMode=yes \
     -o ConnectTimeout=15 \
     -i "$HOME/.ssh/moshi_vps" \
-    ubuntu@health-tracking.duckdns.org >>"$LOG" 2>&1
+    ubuntu@health-tracker.co.uk >>"$LOG" 2>&1
   echo "=== tunnel exited code=$? $(date -u +%FT%TZ) restart in 10s ===" >> "$LOG"
   sleep 10
 done

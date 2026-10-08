@@ -82,7 +82,7 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mem13-'));
 const memDir = path.join(home, '.hermes', 'memories');
 fs.mkdirSync(memDir, { recursive: true });
 fs.writeFileSync(path.join(memDir, 'USER.md'), 'Cwah Li. Short replies.');
-fs.writeFileSync(path.join(memDir, 'MEMORY.md'), 'Live site is https://health-tracking.duckdns.org.');
+fs.writeFileSync(path.join(memDir, 'MEMORY.md'), 'Live site is https://health-tracker.co.uk.');
 
 const row = lib.appendRow('decisions', { ticket: 'BUG-1', text: 'Retry once on depleted model, then stop.' }, { home });
 check('appendRow returns stored row', row.ticket === 'BUG-1' && row.text.length > 0);

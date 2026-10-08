@@ -185,6 +185,13 @@ try {
       { provider: 'opencode', model: 'opencode/mimo-v2.6-flash-free', pref: 2, status: 'available', tg: true },
       { provider: 'opencode', model: 'cloudflare/@cf/qwen/qwen3.8-27b', pref: 3, status: 'available', tg: true },
       { provider: 'opencode', model: 'cloudflare/@cf/zai-org/glm-4.7-flash', pref: 4, status: 'available', tg: true },
+      // Two Light lanes, because the Qwen 27B above used to be one of them and the
+      // operator placed it in the coding pool on 2026-10-07 (OWNER_PLACEMENT in
+      // scripts/lib/free-catalogs.mjs). The invariant under test is unchanged —
+      // Light stays Light-first and never jumps up — so the fixture's Light
+      // representative moves to a lane the catalog still calls Light rather than
+      // the assertion being dropped. Laguna S 2.1 is catalog rank 6, "Proven light".
+      { provider: 'poolside', model: 'poolside/laguna-s-2.1', pref: 5, status: 'available', tg: true },
     ],
   };
   const { dir: tierDir } = ensureBotLedger('tier-bot');
@@ -199,13 +206,17 @@ try {
   });
   const tierChoice = selectTurnLanes({ botId: 'tier-bot', model: 'opencode/muse-spark-1.3-contributor-free', fallback: 'opencode/muse-spark-1.3-contributor-free' });
   check('a depleted Standard lane fails over inside Standard first', tierChoice.models[0] === 'opencode/mimo-v2.6-flash-free');
+  // The Light lane is named by the model that IS light (the Cloudflare GLM 4.7
+  // Flash), not by its vendor: `/cloudflare/i` now matches the Qwen 27B too, which
+  // is a Standard lane since the owner's re-placement, and a check that finds a
+  // Standard lane where it expected a Light one would pass for the wrong reason.
   check('and every Standard lane comes before any Light lane',
     tierChoice.models.indexOf('opencode/mimo-v2.6-flash-free') !== -1
-    && tierChoice.models.indexOf('opencode/mimo-v2.6-flash-free') < tierChoice.models.findIndex((m) => /cloudflare/i.test(m)));
-  const lightKeep = selectTurnLanes({ botId: 'tier-bot', model: 'opencode/cloudflare/@cf/qwen/qwen3.8-27b', fallback: 'opencode/muse-spark-1.3-contributor-free' });
-  check('a usable Light lane stays first', lightKeep.models[0] === 'opencode/cloudflare/@cf/qwen/qwen3.8-27b');
+    && tierChoice.models.indexOf('opencode/mimo-v2.6-flash-free') < tierChoice.models.findIndex((m) => /glm-4\.7/i.test(m)));
+  const lightKeep = selectTurnLanes({ botId: 'tier-bot', model: 'opencode/cloudflare/@cf/zai-org/glm-4.7-flash', fallback: 'opencode/muse-spark-1.3-contributor-free' });
+  check('a usable Light lane stays first', lightKeep.models[0] === 'opencode/cloudflare/@cf/zai-org/glm-4.7-flash');
   check('and Light lanes come before any Standard fallback',
-    lightKeep.models.findIndex((m) => /cloudflare.*glm/i.test(m)) < lightKeep.models.findIndex((m) => /mimo/i.test(m)));
+    lightKeep.models.findIndex((m) => /laguna/i.test(m)) < lightKeep.models.findIndex((m) => /mimo/i.test(m)));
 
   // 6. A host with no ledger keeps the old chain, so a fresh install is unchanged.
   const bare = selectTurnLanes({ botId: 'brand-new-bot', model: 'zen/muse', fallback: 'zen/nemotron' });
@@ -216,12 +227,127 @@ try {
   // 7. Wiring: the turn path calls the ledger selection, not failoverModels alone.
   const src = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('the turn path calls selectTurnLanes', /const laneChoice = selectTurnLanes\(\{/.test(src));
-  check('the chain comes from laneChoice.models', /models: laneChoice\.models\.length \? laneChoice\.models/.test(src));
+  // The landed refactor (#592) moved this expression into a variable and hands the
+  // walk `models: turnLaneModels`, so the old check — which pinned the inline
+  // property form — went red on correct code, and stayed red because this gate is
+  // not one CI runs. The rule is the WIRING, not the shape: the chain is
+  // laneChoice.models (never failoverModels alone) and the walk receives exactly
+  // that expression.
+  const chainVar = (src.match(/const (\w+) = laneChoice\.models\.length \? laneChoice\.models/) || [])[1] || '';
+  check('the chain comes from laneChoice.models', /laneChoice\.models\.length \? laneChoice\.models/.test(src));
+  check('and the walk is handed that chain, not failoverModels alone', chainVar
+    ? new RegExp(`models: ${chainVar}\\b`).test(src)
+    : /models: laneChoice\.models\.length \? laneChoice\.models/.test(src));
   // QS-9: the chain may have run elsewhere first, so the line says nothing
   // FURTHER was run — and names every host tried before giving up.
   check('an exhausted host is told nothing further ran', /Nothing further was run and nothing was spent/.test(src));
   check('and the give-up names every host tried', /cont\.hops\.map\(\(h\) =>/.test(src));
   check('the raw two-entry chain is no longer the only list', !/models: failoverModels\(eff\.model, config\.agent\.model\),/.test(src));
+
+  // 8. The pool commands: /model_light_free, /model_free and /model_go constrain
+  // the walk to ONE pool. A quota hit may move inside it and never across it, and
+  // the paid Go pool does not move at all — those three rules are the whole
+  // difference between the pools and the one list they came from, so each is
+  // pinned against real ledger rows here rather than against the shape of the code.
+  const poolTable = {
+    lanes: [
+      { provider: 'opencode', model: 'opencode/muse-spark-1.3-contributor-free', pref: 1, status: 'available', tg: true },
+      { provider: 'opencode', model: 'cloudflare/@cf/zai-org/glm-4.7-flash', pref: 2, status: 'available', tg: true },
+      { provider: 'poolside', model: 'poolside/laguna-s-2.1', pref: 3, status: 'available', tg: true },
+      { provider: 'opencode-go', model: 'opencode-go/space-bunny-free', pref: 4, status: 'available', tg: true },
+    ],
+  };
+  const writePoolLedger = (id) => {
+    const { dir } = ensureBotLedger(id);
+    fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(poolTable, null, 2));
+    return dir;
+  };
+  const CODING_LANE = 'muse-spark-1.3-contributor-free';
+  const GO_LANE = 'opencode-go/space-bunny-free';
+  const LIGHT_LANES = ['glm-4.7-flash', 'laguna-s-2.1'];
+  writePoolLedger('pool-healthy-bot');
+
+  // This one must be read BEFORE any stamp below: the fixture's quota records live
+  // in one shared session store, so a stamp made through one bot's dir is visible
+  // to every other bot here (the pre-existing sections already rely on that — the
+  // "healthy" ledger carries the ghost-model key from the route-key section).
+  // Read last, it would be reading the drains this section is about to create.
+  const openChoice = selectTurnLanes({ botId: 'pool-healthy-bot', model: 'opencode/muse-spark-1.3-contributor-free', fallback: 'zen/muse' });
+  // The walk's own state is in the check NAME, not a detail argument: this
+  // sensor's `check(name, cond)` takes two arguments, so a third is dropped and a
+  // failure here would say only that it failed, not what it returned.
+  check(`with no pool the walk is unchanged, crossing as it always did — pool=${openChoice.pool} exhausted=${openChoice.exhausted} [${openChoice.models.join(',')}]`,
+    openChoice.pool === null && openChoice.models.length > 2
+    && openChoice.models.some((m) => m.includes('glm-4.7'))
+    && openChoice.models.some((m) => m.includes(GO_LANE)));
+
+  const lightChoice = selectTurnLanes({ botId: 'pool-healthy-bot', model: 'opencode/muse-spark-1.3-contributor-free', fallback: 'zen/muse', pool: 'light' });
+  check('a light-pool chat walks only light lanes',
+    lightChoice.pool === 'light' && lightChoice.models.length > 0
+    && lightChoice.models.every((m) => LIGHT_LANES.some((l) => m.includes(l))),
+    lightChoice.models.join(','));
+  check('and it never offers the coding or the Go lane',
+    !lightChoice.models.some((m) => m.includes(CODING_LANE) || m.includes(GO_LANE)),
+    lightChoice.models.join(','));
+
+  const codingChoice = selectTurnLanes({ botId: 'pool-healthy-bot', model: 'opencode/cloudflare/@cf/zai-org/glm-4.7-flash', fallback: 'zen/muse', pool: 'coding' });
+  check('a coding-pool chat walks only coding lanes',
+    codingChoice.pool === 'coding' && codingChoice.models.length > 0
+    && codingChoice.models.every((m) => m.includes(CODING_LANE)),
+    codingChoice.models.join(','));
+  check('and it never falls onto a light lane',
+    !codingChoice.models.some((m) => m.includes('glm-4.7') || m.includes('laguna')),
+    codingChoice.models.join(','));
+
+  const goChoice = selectTurnLanes({ botId: 'pool-healthy-bot', model: 'opencode/muse-spark-1.3-contributor-free', fallback: 'zen/muse', pool: 'go' });
+  check('a Go-pool chat runs exactly one lane even with every free lane healthy',
+    goChoice.models.length === 1 && goChoice.models[0].includes(GO_LANE), goChoice.models.join(','));
+  const goStay = selectTurnLanes({ botId: 'pool-healthy-bot', model: 'opencode-go/space-bunny-free', fallback: 'zen/muse', pool: 'go' });
+  check('and a Go chat already on its lane stays exactly there',
+    goStay.models.length === 1 && goStay.models[0].includes(GO_LANE), goStay.models.join(','));
+
+  // A pool with nothing usable refuses the turn and names ITS OWN reset, rather
+  // than answering on the other pool — the across-pool step the pools remove.
+  const lightDryDir = writePoolLedger('pool-dead-light-bot');
+  // Stamped with each lane's OWN provider and model, spelled exactly as the table
+  // holds them: a stamp that does not match its lane leaves the pool healthy and
+  // the case passes for the wrong reason.
+  for (const [i, lane] of [
+    { provider: 'opencode', model: 'cloudflare/@cf/zai-org/glm-4.7-flash' },
+    { provider: 'poolside', model: 'poolside/laguna-s-2.1' },
+  ].entries()) {
+    stampDepleted({
+      stateDir: lightDryDir,
+      provider: lane.provider,
+      model: lane.model,
+      errText: '429 Too Many Requests, try again in 2h',
+      depletedUntil: now + (i + 2) * 3600 * 1000,
+      countdownHint: `${i + 2}h`,
+    });
+  }
+  const lightDry = selectTurnLanes({ botId: 'pool-dead-light-bot', model: 'opencode/muse-spark-1.3-contributor-free', fallback: 'zen/muse', pool: 'light' });
+  check(`a dry light pool refuses instead of crossing into coding — exhausted=${lightDry.exhausted} [${lightDry.models.join(',')}]`,
+    lightDry.exhausted === true && lightDry.models.length === 0
+    && !lightDry.models.some((m) => m.includes(CODING_LANE)));
+  check(`and the refusal names a reset rather than offering the coding lane — ${lightDry.soonest?.label}`,
+    Boolean(lightDry.soonest?.label));
+
+  const codingDryDir = writePoolLedger('pool-dead-code-bot');
+  stampDepleted({
+    stateDir: codingDryDir,
+    provider: 'opencode',
+    model: `opencode/${CODING_LANE}`,
+    errText: '429 Too Many Requests, try again in 4h',
+    depletedUntil: now + 4 * 3600 * 1000,
+    countdownHint: '4h',
+  });
+  const codingDry = selectTurnLanes({ botId: 'pool-dead-code-bot', model: 'opencode/cloudflare/@cf/zai-org/glm-4.7-flash', fallback: 'zen/muse', pool: 'coding' });
+  check(`a dry coding pool refuses instead of crossing into light — exhausted=${codingDry.exhausted} [${codingDry.models.join(',')}]`,
+    codingDry.exhausted === true && codingDry.models.length === 0
+    && !codingDry.models.some((m) => m.includes('glm-4.7')));
+
+  // No pool is still exactly the old walk: own tier first, then the other, which
+  // is what every /model user keeps.
 } finally {
   if (oldHome === undefined) delete process.env.HOME;
   else process.env.HOME = oldHome;
@@ -240,9 +366,10 @@ check('a light lane is still reachable as a last resort',
 // displaced a depleted lane on 2026-09-26 06:51Z, answered on the next lane, and
 // the chat was told nothing.
 check('a displaced lane is announced to the chat, not just logged',
-  /this turn ran on \\`\$\{laneChoice\.chose\}\\` instead/.test(botWalkSrc));
-check('and that line quotes the ledger reason, never a raw provider envelope',
-  /is \$\{why\} — this turn ran on/.test(botWalkSrc) && /const why = stamp && !reason\.includes\(stamp\)/.test(botWalkSrc));
+  /this turn ran on \\`\$\{chatLaneName\(laneChoice\.chose\)\}\\` instead/.test(botWalkSrc));
+check('and that line quotes the compact countdown, never the absolute stamp',
+  /is \$\{why\} — this turn ran on/.test(botWalkSrc) && /const why = laneChoice\.displaced\.until/.test(botWalkSrc)
+  && /formatResetIn\(laneChoice\.displaced\.until/.test(botWalkSrc) && !/until \$\{stamp\}/.test(botWalkSrc));
 check('and the turn is told when it dropped to a light model',
   /no coding lane is free right now/.test(botWalkSrc));
 // Sticky failover (2026-10-02: a depleted auto-switch was re-announced as the

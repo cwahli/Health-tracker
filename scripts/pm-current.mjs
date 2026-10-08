@@ -3,9 +3,16 @@
  * pm-current.mjs — the readable face of the PM sheet.
  *
  * `ongoing_projects` is an append-only log (669 rows for 28 live keys): correct
- * as history, unreadable as a board. This script rebuilds the `current` tab —
+ * as history, unreadable as a board. This script rebuilds the `fleet` tab —
  * one row per live key — from live sources at build time, so every cell is
  * today's truth, not the last sweep's:
+ *
+ * `fleet` is a projection this repo owns end to end: clear + update, one
+ * writer, nothing else may touch it. `current` is the opposite — the human PM
+ * board the shared /do-github-sync skill writes (one row per ticket, via
+ * `sheet_row.rb` only). The two shared `current` for a while, so every
+ * projection run wiped the ticket rows and blanked the /fleet mini app; this
+ * tab split is the fix.
  *
  *   - state/blocked/stall live from the fleet projection (packets, tickets,
  *     ledger, heartbeats — the same four sources the sweep uses);
@@ -25,13 +32,14 @@
  *     agent beats one — dispatches do this automatically).
  *
  * Deliberately NOT part of the sweep: the governed writer is append-only, and
- * this tab is overwrite (clear + update). Run it on the VM after a sweep:
+ * the `fleet` tab is overwrite (clear + update). Run it on the VM after a
+ * sweep:
  *   node scripts/pm-current.mjs --id=vm
  *
  * Governed identity only: `loadHostEnv` / `identityFromEnv` / `accessToken`
  * from `./lib/google-store.mjs`. Never convert an OAuth bundle to a /tmp ADC
  * file or read the tab back through a second `gws` client — the writer logs
- * the exact `currentReadRange()` to read, and `--print-markdown` renders the
+ * the exact `fleetReadRange()` to read, and `--print-markdown` renders the
  * same rows as markdown tables with no Google call at all:
  *   node scripts/pm-current.mjs --id=vm --print-markdown
  */
@@ -50,11 +58,11 @@ import {
 import { attemptFor, ladderFile, readLadder } from './lib/pm-ladder.mjs';
 import { USER_AGENT } from './lib/google-store.mjs';
 
-export const CURRENT_TAB = 'current';
+export const FLEET_TAB = 'fleet';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 
-export const CURRENT_COLUMNS = [
+export const FLEET_COLUMNS = [
   'key',
   'id',
   'kind',
@@ -91,14 +99,14 @@ export function colLetter(index) {
 }
 
 /**
- * Exact A1 range for the `current` tab given a row count (header + rows).
- * The tab is always CURRENT_COLUMNS wide, so 20 columns × (rows + 1).
+ * Exact A1 range for the `fleet` tab given a row count (header + rows).
+ * The tab is always FLEET_COLUMNS wide, so 20 columns × (rows + 1).
  * Bots must read this range verbatim — never guess `T57` vs `T56`.
  */
-export function currentReadRange(rowCount) {
+export function fleetReadRange(rowCount) {
   const rows = Math.max(0, Number(rowCount) || 0);
-  const lastCol = colLetter(CURRENT_COLUMNS.length - 1);
-  return `${CURRENT_TAB}!A1:${lastCol}${rows + 1}`;
+  const lastCol = colLetter(FLEET_COLUMNS.length - 1);
+  return `${FLEET_TAB}!A1:${lastCol}${rows + 1}`;
 }
 
 /** One markdown cell: no pipes, no newlines — same 240-char cap as the sheet. */
@@ -131,9 +139,9 @@ export function summarizeFleet(builtRows) {
   const packets = byKind('spec');
   const cards = byKind('card');
   const lanes = byKind('lane');
-  const live = rows.filter((r) => r?.values?.[CURRENT_COLUMNS.indexOf('agent_live')] === 'live').length;
-  const stale = rows.filter((r) => r?.values?.[CURRENT_COLUMNS.indexOf('agent_live')] === 'stale').length;
-  const blocked = rows.filter((r) => r?.values?.[CURRENT_COLUMNS.indexOf('blocked')] === 'yes').length;
+  const live = rows.filter((r) => r?.values?.[FLEET_COLUMNS.indexOf('agent_live')] === 'live').length;
+  const stale = rows.filter((r) => r?.values?.[FLEET_COLUMNS.indexOf('agent_live')] === 'stale').length;
+  const blocked = rows.filter((r) => r?.values?.[FLEET_COLUMNS.indexOf('blocked')] === 'yes').length;
   return {
     packets: packets.length,
     packetsDraft: countState(packets, 'draft'),
@@ -350,7 +358,7 @@ export function listPrs({ exec = nodeExecFileSync } = {}) {
 }
 
 /** One fleet item + live lookups → one `current` row, in column order. */
-export function currentRow(item, {
+export function fleetRow(item, {
   at = new Date().toISOString(),
   rung = '',
   attempts = 0,
@@ -449,7 +457,7 @@ async function main() {
     const tree = linkedTree(item.kind, item.id, { home });
     return {
       item,
-      values: currentRow(item, {
+      values: fleetRow(item, {
         at: now,
         rung: att.rung || '',
         attempts: att.attempts || 0,
@@ -464,7 +472,7 @@ async function main() {
   });
 
   if (printMarkdown) {
-    const range = currentReadRange(rows.length);
+    const range = fleetReadRange(rows.length);
     const sum = summarizeFleet(rows);
     console.log(`read: ${range}`);
     console.log(`fleet: ${sum.packets} packets (${sum.packetsLocked} locked, ${sum.packetsDraft} draft) · ${sum.cards} cards (${sum.cardsPacked} packed, ${sum.cardsNew} new, ${sum.cardsInFix} in_fix, ${sum.cardsDone} done) · ${sum.lanes} lanes · live: ${sum.live} · stale: ${sum.stale} · blocked: ${sum.blocked} · total: ${sum.total}`);
@@ -472,7 +480,7 @@ async function main() {
       const group = rows.filter((r) => r?.item?.kind === kind);
       if (!group.length) continue;
       const headers = ['id', 'state', 'owner', 'author', 'github', 'tree', 'agent_live', 'attempts', 'goal', 'todo'];
-      const body = group.map((r) => headers.map((h) => r.values[CURRENT_COLUMNS.indexOf(h)] || ''));
+      const body = group.map((r) => headers.map((h) => r.values[FLEET_COLUMNS.indexOf(h)] || ''));
       console.log(`\n## ${kind}s (${group.length})`);
       console.log(markdownTable(headers, body));
     }
@@ -489,25 +497,25 @@ async function main() {
 
   const metaRes = await getSheet(sid, token);
   if (!metaRes.ok) throw new Error(`cannot read sheet: ${metaRes.error}`);
-  const hasTab = (metaRes.sheet.sheets || []).some((s) => s.properties?.title === CURRENT_TAB);
+  const hasTab = (metaRes.sheet.sheets || []).some((s) => s.properties?.title === FLEET_TAB);
   const api = 'https://sheets.googleapis.com/v4/spreadsheets';
   const headers = { 'User-Agent': USER_AGENT, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   if (!hasTab) {
     const mk = await fetch(`${api}/${sid}:batchUpdate`, {
-      method: 'POST', headers, body: JSON.stringify({ requests: [{ addSheet: { properties: { title: CURRENT_TAB } } }] }),
+      method: 'POST', headers, body: JSON.stringify({ requests: [{ addSheet: { properties: { title: FLEET_TAB } } }] }),
     });
-    if (!mk.ok) throw new Error(`cannot create ${CURRENT_TAB}: ${(await mk.text()).slice(0, 200)}`);
+    if (!mk.ok) throw new Error(`cannot create ${FLEET_TAB}: ${(await mk.text()).slice(0, 200)}`);
   }
-  const clear = await fetch(`${api}/${sid}/values/${encodeURIComponent(`${CURRENT_TAB}!A1:Z5000`)}:clear`, { method: 'POST', headers });
-  if (!clear.ok) throw new Error(`cannot clear ${CURRENT_TAB}: ${(await clear.text()).slice(0, 200)}`);
-  const put = await fetch(`${api}/${sid}/values/${encodeURIComponent(`${CURRENT_TAB}!A1`)}?valueInputOption=RAW`, {
-    method: 'PUT', headers, body: JSON.stringify({ values: [CURRENT_COLUMNS, ...rows.map((r) => r.values)] }),
+  const clear = await fetch(`${api}/${sid}/values/${encodeURIComponent(`${FLEET_TAB}!A1:Z5000`)}:clear`, { method: 'POST', headers });
+  if (!clear.ok) throw new Error(`cannot clear ${FLEET_TAB}: ${(await clear.text()).slice(0, 200)}`);
+  const put = await fetch(`${api}/${sid}/values/${encodeURIComponent(`${FLEET_TAB}!A1`)}?valueInputOption=RAW`, {
+    method: 'PUT', headers, body: JSON.stringify({ values: [FLEET_COLUMNS, ...rows.map((r) => r.values)] }),
   });
-  if (!put.ok) throw new Error(`cannot write ${CURRENT_TAB}: ${(await put.text()).slice(0, 200)}`);
+  if (!put.ok) throw new Error(`cannot write ${FLEET_TAB}: ${(await put.text()).slice(0, 200)}`);
   const done = await put.json().catch(() => ({}));
-  console.log(`current: ${rows.length} row(s) + header written (${done?.updatedCells ?? '?'} cells). read: ${currentReadRange(rows.length)}`);
+  console.log(`fleet: ${rows.length} row(s) + header written (${done?.updatedCells ?? '?'} cells). read: ${fleetReadRange(rows.length)}`);
   for (const r of rows) {
-    console.log(`• ${r.item.id} [${r.item.kind}/${r.item.state}] author=${r.values[CURRENT_COLUMNS.indexOf('author')] || '-'} github=${r.values[CURRENT_COLUMNS.indexOf('github')] || '-'} tree=${r.values[CURRENT_COLUMNS.indexOf('tree')] || '-'}`);
+    console.log(`• ${r.item.id} [${r.item.kind}/${r.item.state}] author=${r.values[FLEET_COLUMNS.indexOf('author')] || '-'} github=${r.values[FLEET_COLUMNS.indexOf('github')] || '-'} tree=${r.values[FLEET_COLUMNS.indexOf('tree')] || '-'}`);
   }
 }
 

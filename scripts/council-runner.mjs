@@ -37,11 +37,23 @@ import { validateDoctorReport } from './lib/health/doctor.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
 
-// Must be an id in GEMINI_MODELS (scripts/lib/freemodels.mjs). The previous
-// hardcoded 'gemini-2.0-flash' was not on that list, so every run resolved to
-// "Unknown gemini model" and the synthesised fallback wrote the document
-// instead. COUNCIL_MODEL is the injection point for the card 2 live proof.
-const COUNCIL_MODEL = process.env.COUNCIL_MODEL || 'gemini/gemini-3.7-flash';
+// The model a seat runs on is **host config**, not this file's business. It used
+// to be pinned here to 'gemini/gemini-3.7-flash', and `runGemini` validated that
+// against GEMINI_MODELS — so a host with no Gemini key could not run a seat at
+// all, and pointing COUNCIL_MODEL at a model the host *could* run produced
+// "Unknown gemini model". Both are vendor pins on a lane that never needed one.
+//
+// With no runner injected, a seat turn now goes to seatModelChain, which
+// resolves exactly the way the Telegram bot's `getModels()` does: the OpenCode
+// CLI's catalog for this host, free lanes first, COUNCIL_MODEL honoured as an
+// override. runSeatModel walks that chain with the same failover the bot uses,
+// so a dead or quota'd lane moves on rather than answering nothing.
+//
+// An **injected** runner is still honoured and always wins: the health runners
+// and bot-host pass their own, the 690-case sensor drives fixtures through this
+// seam, and a caller that deliberately supplies a runner must not have it
+// ignored in favour of a subprocess.
+const SEAT_RUNNER = process.env.COUNCIL_RUNNER || 'host';
 
 export const COUNCIL_PHASES = [
   { id: 'accuracy_review', title: 'Phase 1: Accuracy & Forensic Audit', file: '01_accuracy_audit.md' },
@@ -378,7 +390,22 @@ export function getCouncilStatus(projectId = 'external-1') {
   };
 }
 
-export async function executeRoleTurn({ projectId = 'external-1', roleId, prompt, contextText = '', runGemini: runModel = runGemini }) {
+/**
+ * `runGemini` is the injection seam and stays one: pass a runner to control the
+ * model, omit it to take the host's own lanes. It used to *default* to
+ * `runGemini`, which meant every caller that wanted the host's catalog had no
+ * way to ask — and Gemini was the only lane. Defaulting to "no runner" is what
+ * makes the seat model-agnostic while keeping every existing call site valid.
+ */
+export async function executeRoleTurn({
+  projectId = 'external-1',
+  roleId,
+  prompt,
+  contextText = '',
+  runGemini: runModel = null,
+  seatChatModel = '',
+  seatBotModel = '',
+}) {
   const soul = getProjectSoul(projectId) || '';
   const roleInst = getRoleInstructions(projectId, roleId) || '';
 
@@ -399,11 +426,21 @@ ${prompt}`;
   // the reader and invents case facts nobody supplied.
   let res;
   try {
-    res = await runModel({
-      prompt: fullPrompt,
-      model: COUNCIL_MODEL,
-      timeoutMs: 120000,
-    });
+    if (runModel) {
+      res = await runModel({
+        prompt: fullPrompt,
+        model: process.env.COUNCIL_MODEL || 'gemini/gemini-3.7-flash',
+        timeoutMs: 120000,
+      });
+    } else {
+      // No runner injected: take whatever the host has configured. `chatModel` /
+      // `botModel` are the values the Telegram bot already resolved for the chat
+      // that asked, so a seat answers on the same lane the user picked. Called
+      // from the CLI they are empty, and seatModelChain falls back to the host
+      // catalog — which is why `/health doctor` works without a bot in the loop.
+      const { runSeatModel } = await import('./lib/health/seat-model.mjs');
+      res = await runSeatModel({ prompt: fullPrompt, timeoutMs: 120000, chatModel: seatChatModel, botModel: seatBotModel });
+    }
   } catch (err) {
     throw new Error(`model call failed for role ${roleId}: ${err.message}`);
   }

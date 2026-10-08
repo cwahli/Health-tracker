@@ -5,8 +5,9 @@
  * WHY THIS EXISTS
  * ---------------
  * `/help` was a hand-maintained string separate from BOT_COMMANDS, so new
- * commands (/free, /tax) shipped in the autocomplete popup with no help line —
- * and the drift was invisible until a user asked. Separately, the autocomplete
+ * commands (/tax, and the /free that was removed in 2026-10-03) shipped in the
+ * autocomplete popup with no help line — and the drift was invisible until a
+ * user asked. Separately, the autocomplete
  * itself can be shadowed: Telegram resolves the narrowest setMyCommands scope
  * first, so a stale `all_private_chats` list (this happened on vm: an old
  * 27-command list with `abort`/`watch`/`project_external_*` hid /forge in
@@ -37,9 +38,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   BOT_COMMANDS,
+  COMMAND_ALIASES,
   COMMAND_NAMES,
   HIDDEN_COMMANDS,
   HELP_USAGE,
+  SKILL_MENU_COMMANDS,
   assertValidCommands,
   helpText,
   toTelegramCommands,
@@ -114,6 +117,7 @@ const asJson = process.argv.includes('--json');
 const failures = (() => {
   try {
     assertValidCommands(BOT_COMMANDS);
+    assertValidCommands(SKILL_MENU_COMMANDS);
   } catch (err) {
     return [{ kind: 'invalid-commands', command: '', detail: String(err?.message || err) }];
   }
@@ -126,10 +130,14 @@ const failures = (() => {
   for (const name of ['HELP_USAGE', 'HIDDEN_COMMANDS']) {
     if (!shim.includes(name)) extra.push({ kind: 'shim-drift', command: '', detail: `bot-commands.mjs shim does not re-export ${name} — a second source of truth by omission.` });
   }
-  // toTelegramCommands must be the same set (the popup IS the menu list).
+  // toTelegramCommands is the menu list: bot commands plus menu-only skill
+  // entries (underscore form — Telegram forbids hyphens). The skills are
+  // deliberately NOT in COMMAND_NAMES, so a tapped entry still falls through
+  // to the turn path as a prompt instead of hitting handleCommand.
   const published = toTelegramCommands().map((c) => c.command).sort();
-  if (published.join(',') !== [...COMMAND_NAMES].sort().join(',')) {
-    extra.push({ kind: 'popup-drift', command: '', detail: 'toTelegramCommands() drifted from BOT_COMMANDS — the popup is no longer the menu list.' });
+  const expectedMenu = [...COMMAND_NAMES, ...SKILL_MENU_COMMANDS.map((c) => c.command)].sort();
+  if (published.join(',') !== expectedMenu.join(',')) {
+    extra.push({ kind: 'popup-drift', command: '', detail: 'toTelegramCommands() drifted from BOT_COMMANDS + SKILL_MENU_COMMANDS — the popup is no longer the menu list.' });
   }
   // Boot must reconcile narrow scopes — a stale per-scope list shadows the
   // default menu in matching chats (/forge vanished from vm private chats
@@ -158,6 +166,23 @@ const failures = (() => {
   } catch (err) {
     extra.push({ kind: 'bad-role', command: '', detail: `roles.json unreadable: ${String(err?.message || err).slice(0, 200)}` });
   }
+  const canonicalSet = new Set(COMMAND_NAMES);
+// An alias must point at a command that EXISTS and is published. The failure
+  // this covers is real: `/freemodels` (plural, the spelling a reader types)
+  // matched no case and came back "Unknown command" plus the whole menu — the
+  // opposite of the one screen that was asked for. An alias that silently rots
+  // into pointing at nothing is the same failure with a shorter name.
+  for (const [alias, target] of Object.entries(COMMAND_ALIASES)) {
+    if (!canonicalSet.has(target)) {
+      extra.push({ kind: 'dangling-alias', command: alias, detail: `/${alias} routes to /${target}, which is not a published command.` });
+    }
+    if (canonicalSet.has(alias)) {
+      extra.push({ kind: 'alias-is-published', command: alias, detail: `/${alias} is in BOT_COMMANDS as well as COMMAND_ALIASES — one name, one place.` });
+    }
+    if (!help.includes(`/${target}`)) {
+      extra.push({ kind: 'alias-target-missing-from-help', command: alias, detail: `/${alias} routes to /${target}, which helpText() does not list.` });
+    }
+  }
   return [...extra, ...audit({
     canonical: [...COMMAND_NAMES],
     handled: readHandledCommands(),
@@ -172,6 +197,6 @@ else if (failures.length) {
   console.error(`command-parity FAILED (${failures.length}):`);
   for (const f of failures) console.error(`- [${f.kind}] ${f.command ? `/${f.command} ` : ''}${f.detail}`);
 } else {
-  console.log(`command-parity OK — ${COMMAND_NAMES.length} menu commands, ${Object.keys(HIDDEN_COMMANDS).length} declared hidden, help generated from the one list.`);
+  console.log(`command-parity OK — ${COMMAND_NAMES.length} menu commands + ${SKILL_MENU_COMMANDS.length} skill entries, ${Object.keys(HIDDEN_COMMANDS).length} declared hidden, help generated from the one list.`);
 }
 process.exit(failures.length ? 1 : 0);

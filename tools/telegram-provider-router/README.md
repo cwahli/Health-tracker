@@ -26,17 +26,17 @@ This package encodes the fixes. Read `docs/` and `tickets/*_REPORT.md` before ch
 
 | Provider | How Telegram drives it | Free allowance shape | Notes |
 |----------|------------------------|----------------------|-------|
-| **OpenCode** | HTTP to `OPENCODE_SERVER_URL` (`serve` on :4096) | **Shared Zen free bucket** for Muse / MiMo / Ling / Nemotron / Space Bunny when catalogued | Tools + files. `/freemodel` only lists models the **live** `GET /provider` returns. |
+| **OpenCode** | HTTP to `OPENCODE_SERVER_URL` (`serve` on :4096) | **Shared Zen free bucket** for Muse / MiMo / Ling / Nemotron / Space Bunny when catalogued | Tools + files. `/model_free` only lists models the **live** `GET /provider` returns. |
 | **Cline** | CLI (`cline -m cline-free/…`) | **Per-model** daily free caps | Track child PID; default timeout ≥20 min; SIGTERM→SIGKILL on unlock/timeout. `/think` wired. |
-| **Token Harbor** | OpenAI-compatible API *or* OpenCode `tokenharbor/<model>` | **Shared** rolling ~7-day free value bar | `/freemodel` Token Harbor taps → OpenCode+tools; `/switch tokenharbor` stays chat-only. |
+| **Token Harbor** | OpenAI-compatible API *or* OpenCode `tokenharbor/<model>` | **Shared** rolling ~7-day free value bar | `/model_free` Token Harbor taps → OpenCode+tools; `/switch tokenharbor` stays chat-only. |
 | **Cloudflare** | OpenCode `@cf/…` / Workers AI | **Shared** 10k neurons/day (UTC) | `/allowance` uses per-reply neuron estimates; live GraphQL needs Analytics Read on the token. |
 | **Freebuff** | CLI / session Freebucks | **Shared** daily Freebucks (region-based) | Terminal-only by default (TUI/`login` only, one session per account). EXPERIMENTAL Telegram lane exists behind `FREEBUFF_TG_LANE=1` (`src/freebuff-tg-lane.js`, stub-tested): yields to a live terminal session, single-flight, balance pre-check, always cleans up. Needs funded balance + idle account — not yet proven live. |
 
-Commands (high level): `/switch`, `/model`, `/freemodel`, `/allowance`, `/allowance table` (same free-lane ledger as an HTML grid, delivered with `MEDIA:<abs-path.html>`), `/status`, `/think`, `/compact`, `/project`, `/tui`, `/unlock`, Cancel & unlock on Busy replies.
+Commands (high level): `/switch`, `/model`, `/model_light_free`, `/model_free`, `/model_go`, `/allowance`, `/allowance table` (same free-lane ledger as an HTML grid, delivered with `MEDIA:<abs-path.html>`), `/status`, `/think`, `/compact`, `/project`, `/tui`, `/unlock`, Cancel & unlock on Busy replies.
 
 `/tui` opens a real terminal for this chat as a Telegram Mini App. The router does not run ttyd: it hands out the shared gateway URL (`TUI_GATEWAY_URL`) with this bot's id, and the gateway checks the Mini App `initData` against this bot's own token. Setup (route + token on the gateway, one ttyd per bot) is three steps in [docs/TUI_ROUTER.md](./docs/TUI_ROUTER.md); until it is configured `/tui` says what is missing rather than sending a dead button.
 
-`/freemodel` is **buttons-only**: a short header plus one inline button per free lane (no per-model text dump). Token Harbor chat and OpenCode `tokenharbor/…` are the same free bar, so they render as **one** button (the OpenCode tools path wins). Freebuff gets a button whenever the box is signed in; tapping it replies with terminal-only instructions (run `freebuff` in a tmux on the host) and does **not** switch the Telegram route. Labels are right-padded with spaces because Telegram's `InlineKeyboardButton` has no `align` (see `tmp/ht-freemodel-buttons-only/REPORT.md`).
+`/model_free` is **buttons-only**: a short header plus one inline button per free lane (no per-model text dump). Token Harbor chat and OpenCode `tokenharbor/…` are the same free bar, so they render as **one** button (the OpenCode tools path wins). Freebuff gets a button whenever the box is signed in; tapping it replies with terminal-only instructions (run `freebuff` in a tmux on the host) and does **not** switch the Telegram route. Labels are right-padded with spaces because Telegram's `InlineKeyboardButton` has no `align` (see `tmp/ht-freemodel-buttons-only/REPORT.md`).
 
 ---
 
@@ -59,7 +59,7 @@ On a free-limit / rate-limit error:
 - **Per-model:** key stays `cline/…`; siblings stay available.
 - `/allowance` shows **Buckets** (Depleted vs Still available) + active route + CF neuron block.
 
-Space Bunny may be listed in the Zen bucket membership for future failover honesty, but must **not** appear on `/freemodel` until the live OpenCode server catalogs it (CLI-only ids → `Model not found`, not a clean quota miss).
+Space Bunny may be listed in the Zen bucket membership for future failover honesty, but must **not** appear on `/model_free` until the live OpenCode server catalogs it (CLI-only ids → `Model not found`, not a clean quota miss).
 
 ---
 

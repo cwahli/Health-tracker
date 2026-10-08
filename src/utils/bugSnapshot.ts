@@ -149,7 +149,7 @@ export function bugShotName(keyOrName: string): string {
 /**
  * Absolute origin for links this server hands to off-origin readers.
  *
- * Never hardcode a host: the same process serves localhost, the duckdns name,
+ * Never hardcode a host: the same process serves localhost, the public names,
  * and an ephemeral quick-tunnel hostname that changes on every reconnect.
  * `x-forwarded-proto` is honoured because the deploy sits behind a tunnel, so
  * `req.protocol` alone reports http and hands out http links behind https.
@@ -174,7 +174,7 @@ export interface BugEvidenceTextInput {
   reports?: Array<Record<string, any>>;
   /**
    * Absolute origin to prefix artifact URLs with, e.g.
-   * `https://health-tracking.duckdns.org`. Optional on purpose: the in-app
+   * `https://health-tracker.co.uk`. Optional on purpose: the in-app
    * browser resolves a relative path fine and must keep doing so, but a chat
    * message cannot — Telegram only auto-links absolute http(s) URLs, so a
    * relative `/api/bugs/...` in `/resume` renders as dead text. Server callers

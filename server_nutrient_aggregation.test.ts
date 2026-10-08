@@ -387,3 +387,73 @@ describe("server_nutrient_aggregation", () => {
     expect(result.nutrients.phosphorus).toBeGreaterThan(0);
   });
 });
+
+/**
+ * Live regression: job_1791044439374_4x4srekyi. A 440 ml bottle labelled
+ * "Energy: 54 kcal per 100ml" (~238 kcal) was logged at 88 kcal — exactly
+ * 22 g carbohydrate x 4. Atwater cannot express alcohol energy, and the existing
+ * Atwater gate only guards a lower bound from fat, so with 0 g fat it never fired.
+ */
+describe("printed-label energy is truth (alcohol / fibre energy)", () => {
+  const BEER_LABEL = {
+    servingSize: "100ml",
+    calories: "54 kcal",
+    addedSugar: "0g",
+    protein: "0.0g",
+    salt: "<0.01g",
+    saturatedFat: "0.0g",
+    sodium: "0g",
+    sugar: "1.7g",
+    totalCarbohydrate: "5.0g",
+    totalFat: "0.0g",
+    totalFibre: "0g"
+  };
+
+  const beer = (overrides: Record<string, any> = {}) => [
+    {
+      name: "Desperados Original Beer",
+      weightGrams: 440,
+      dbSource: "estimated",
+      rawNutritionLabel: BEER_LABEL,
+      // The scout emitted macros but no energy, which is what let Atwater win.
+      labelNutrientsPerServing: {
+        servingSizeGrams: 100,
+        protein: 0,
+        carbohydrates: 5,
+        totalFat: 0,
+        saturatedFat: 0,
+        sodium: 0
+      },
+      ...overrides
+    }
+  ];
+
+  it("charges the printed energy for the consumed weight, not the macro sum", () => {
+    const result = aggregateItemsNutrients(beer(), 440, new Map(), [], () => {});
+    expect(result.nutrients.calories).toBe(238);
+    expect(result.nutrients.calories).not.toBe(88);
+  });
+
+  it("an explicit calories lock still wins over the printed energy", () => {
+    const result = aggregateItemsNutrients(
+      beer({ lockedNutrientKeys: ["calories"], truthNutrients: { calories: 120 } }),
+      440,
+      new Map(),
+      [],
+      () => {}
+    );
+    expect(result.nutrients.calories).toBe(120);
+  });
+
+  it("a verified catalog match is not overruled by the panel", () => {
+    const dbMatchMap = new Map([["FDC_1", { calories: 43, protein: 0.5, totalFat: 0, saturatedFat: 0, carbohydrates: 3.6 }]]);
+    const result = aggregateItemsNutrients(beer({ dbId: "FDC_1", dbSource: "usda" }), 440, dbMatchMap, [], () => {});
+    expect(result.nutrients.calories).toBeCloseTo(189.2, 1);
+  });
+
+  it("says so in the debug log", () => {
+    const logs: string[] = [];
+    aggregateItemsNutrients(beer(), 440, new Map(), [], (m: string) => logs.push(m));
+    expect(logs.some((l) => l.includes("[Label Energy Gate]") && l.includes("Desperados"))).toBe(true);
+  });
+});

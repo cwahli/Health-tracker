@@ -180,7 +180,7 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const { chromium } = await import('playwright');
       const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-      const testUrl = process.env.PLAYWRIGHT_TEST_BASE_URL || 'https://health-tracking.duckdns.org';
+      const testUrl = process.env.PLAYWRIGHT_TEST_BASE_URL || 'https://health-tracker.co.uk';
       await page.goto(testUrl, { waitUntil: 'commit', timeout: 30000 });
       const demoBtn = page.locator('#demo-login-btn');
       if (await demoBtn.isVisible().catch(() => false)) await demoBtn.click();

@@ -222,7 +222,7 @@ export function buildOpencodeArgs({ prompt, model, variant, thinking = true, ses
 const FATAL_LOG_ERRORS = [
   {
     pattern: /model not found/i,
-    reason: 'Model not found on this provider — the model list may be stale, pick again from /freemodel.',
+    reason: 'Model not found on this provider — the model list may be stale, pick again from /model_free.',
   },
   {
     pattern: /free_tier_limit|free usage exceeded|free limit reached|subscribe to go/i,
@@ -339,8 +339,18 @@ export function isQuotaOrLimitError(msg) {
   return QUOTA_OR_LIMIT_RE.test(String(msg || ''));
 }
 
-/** A timeout/abort means re-running would just wait again — never auto-retry those. */
-const NO_RETRY_RE = /timed out after|aborted|^Abort/i;
+/**
+ * Only a deliberate cancel blocks failover. Re-running the *same* model after
+ * a timeout would just wait again, but the next candidate in the chain has its
+ * own fresh timeout budget and has not been tried — so a `timed out after Nms`
+ * failure must advance the chain instead of ending the turn.
+ *
+ * Regression (2026-10-05): `timed out after` used to be listed here, so a dead
+ * primary lane held the chain for the full timeout and then returned empty —
+ * bot-host reported "Done (exit 1), but the model returned no text output." and
+ * the healthy fallback was never attempted.
+ */
+const NO_RETRY_RE = /aborted|^Abort/i;
 
 /**
  * Failover chain for one dispatch: the chat's effective model first, then

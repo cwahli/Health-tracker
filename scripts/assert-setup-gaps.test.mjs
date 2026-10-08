@@ -172,7 +172,7 @@ try {
   const src = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('there is a /setup command', /case 'setup':/.test(src));
   check('it prints the fix for each gap', /fix: \$\{g\.fix\}/.test(src));
-  check('it says what is blocked while unfixed', /not offered in \/freemodel until the credential is present/.test(src));
+  check('it says what is blocked while unfixed', /not offered in the picker \(\/model_free\) until the credential is present/.test(src));
   check('readiness is cached with the model list', /caches\.readiness/.test(src));
   check('the fix names the service of the bot asking', /setServiceUnit\(botId\)/.test(src));
   check('/setup re-reads readiness for its own bot', /caches\.readiness = null;\s*\n\s*const readiness = hostReadiness\(caches, config\.id\)/.test(src));

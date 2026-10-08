@@ -12,7 +12,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
   createGateway,
@@ -30,6 +33,8 @@ import {
   getFleetNodes as getStatusNodes,
   getFleetTickets as getStatusTickets,
   getFleetBots as getStatusBots,
+  driveFileIdFrom,
+  ticketFromRow,
 } from './lib/fleet-status.mjs';
 
 function makeInitData(botToken, { user = { id: 123456, first_name: 'Test' }, authDate = Math.floor(Date.now() / 1000) } = {}) {
@@ -413,14 +418,14 @@ test('heartbeat endpoint enforces authentication and rejects spoofed locations',
     });
     assert.equal(badSecretRes.status, 401);
 
-    // 3. Valid global secret admits
+    // 3. Valid global secret admits (agent identifies the model — required)
     const validRes = await fetch(`${base}/fleet/api/heartbeat`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         'x-fleet-telemetry-secret': secret,
       },
-      body: JSON.stringify({ location: 'Mac', phase: 'working', task: 'Valid global secret' }),
+      body: JSON.stringify({ location: 'Mac', agent: 'Probe Agent', phase: 'working', task: 'Valid global secret' }),
     });
     assert.equal(validRes.status, 200);
 
@@ -439,3 +444,192 @@ test('heartbeat endpoint enforces authentication and rejects spoofed locations',
   }
 });
 
+
+test('heartbeat without agent is refused and never stored', async () => {
+  resetFleetStateForTest();
+  const t0 = 10000000;
+
+  // Unit level: no agent and no model → refused
+  const noAgent = recordFleetHeartbeat({ location: 'Mac', phase: 'working', task: 'Agent-less probe' }, { now: t0 });
+  assert.equal(noAgent.ok, false);
+  assert.equal(noAgent.error, 'missing agent');
+
+  // Explicit "Unknown" is not an identity either
+  const unknown = recordFleetHeartbeat({ location: 'Mac', agent: 'Unknown', phase: 'working' }, { now: t0 });
+  assert.equal(unknown.ok, false);
+
+  // Nothing stored: Mac pane stays off the reporter path
+  const nodes = getFleetNodes({ now: t0 });
+  const mac = nodes.find((n) => n.location === 'Mac');
+  assert.notEqual(mac.agent, 'Unknown');
+
+  // HTTP level: authenticated but agent-less → 400, not 200
+  const secret = 'gateway-secret-telemetry-444';
+  const handle = createGateway({ env: { FLEET_TELEMETRY_SECRET: secret } });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/fleet/api/heartbeat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-telemetry-secret': secret },
+      body: JSON.stringify({ location: 'Mac', phase: 'working', task: 'Agent-less probe' }),
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    server.close();
+  }
+});
+
+test('beats older than 60m read offline instead of stale forever', () => {
+  resetFleetStateForTest();
+  const t0 = 10000000;
+
+  recordFleetHeartbeat({
+    location: 'Mac',
+    agent: 'Antigravity (Gemini 3.8 Flash High)',
+    phase: 'working',
+    task: 'Session ended without disconnect',
+  }, { now: t0 });
+
+  // 20m: stale, last phase kept
+  let nodes = getFleetNodes({ now: t0 + 20 * 60 * 1000 });
+  assert.equal(nodes.find((n) => n.location === 'Mac').status, 'stale');
+
+  // 61m: reporter gone → offline, no badge, no sentence
+  nodes = getFleetNodes({ now: t0 + 61 * 60 * 1000 });
+  const mac = nodes.find((n) => n.location === 'Mac');
+  assert.equal(mac.status, 'offline');
+  assert.equal(mac.lastPhase, 'offline');
+  assert.equal(mac.agent, '—');
+  assert.equal(mac.task, 'No reporter (last beat expired)');
+});
+
+test('VM pane shows one row per live opencode session with model and working marker', async () => {
+  resetFleetStateForTest();
+  const t0 = 10000000;
+  const { DatabaseSync } = await import('node:sqlite');
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-vm-'));
+  const dbPath = path.join(tmpHome, 'opencode.db');
+  const db = new DatabaseSync(dbPath);
+  db.exec(`create table session_v2 (id text, model text, directory text, title text, time_updated integer, time_archived integer)`);
+  db.exec(`create table session_message (session_id text, type text, time_created integer, data text)`);
+  const ins = db.prepare(`insert into session_v2 (id, model, directory, title, time_updated, time_archived) values (?, ?, ?, ?, ?, ?)`);
+  const msg = db.prepare(`insert into session_message (session_id, type, time_created, data) values (?, ?, ?, ?)`);
+  ins.run('ses_working', JSON.stringify({ id: 'space-bunny-free', providerID: 'opencode' }), '/home/ubuntu', 'Meal QA audit', t0 - 2 * 60 * 1000, null);
+  msg.run('ses_working', 'assistant', t0 - 60 * 1000, JSON.stringify({ time: { created: 1, streamed: 2 } }));
+  ins.run('ses_idle', JSON.stringify({ id: 'muse-spark', providerID: 'opencode-go' }), '/home/ubuntu/src/Health-tracker', 'None', t0 - 5 * 60 * 1000, null);
+  msg.run('ses_idle', 'idle', t0 - 4 * 60 * 1000, JSON.stringify({ time: { created: 1 }, outcome: 'succeeded' }));
+  ins.run('ses_old', JSON.stringify({ id: 'old-model', providerID: 'opencode' }), '/home/ubuntu', 'Cold session', t0 - 30 * 60 * 1000, null);
+  ins.run('ses_arch', JSON.stringify({ id: 'archived-model', providerID: 'opencode' }), '/home/ubuntu', 'Archived', t0 - 1 * 60 * 1000, t0);
+  // Row clock stale but the message stream is fresh: a turn still generating.
+  ins.run('ses_stream', JSON.stringify({ id: 'stream-model', providerID: 'opencode' }), '/home/ubuntu', 'Slow stream', t0 - 40 * 60 * 1000, null);
+  msg.run('ses_stream', 'assistant', t0 - 2 * 60 * 1000, JSON.stringify({ time: { created: 1, streamed: 2 } }));
+  db.close();
+
+  // One row per session: no aggregate sentence, each row carries its own model.
+  const tickets = [{ id: 'spec:vm-claim', owner: 'Some Agent @ vps-france', status: 'In progress' }];
+  const nodes = getFleetNodes({ now: t0, home: tmpHome, vmOpencodeDb: dbPath, tickets });
+  const vmRows = nodes.filter((n) => n.location === 'VM');
+  assert.equal(vmRows.length, 3);
+  assert.equal(vmRows[0].agent, 'opencode/space-bunny-free');
+  assert.equal(vmRows[0].status, 'working');
+  assert.equal(vmRows[0].task, 'Meal QA audit');
+  assert.equal(vmRows[1].agent, 'opencode/muse-spark');
+  assert.equal(vmRows[1].status, 'idle');
+  assert.equal(vmRows[1].task, 'Health-tracker');
+  assert.equal(vmRows[2].agent, 'opencode/stream-model');
+  assert.equal(vmRows[2].status, 'working');
+  assert.ok(!vmRows.some((r) => r.task.includes('working:')));
+  assert.ok(!vmRows.some((r) => r.task.includes('old-model') || r.task.includes('archived-model')));
+
+  // The sheet claim attaches once, to the first row.
+  assert.equal(vmRows[0].ticketKey, 'spec:vm-claim');
+  assert.equal(vmRows[1].ticketKey, '');
+
+  fs.rmSync(tmpHome, { recursive: true, force: true });
+});
+
+test('ticket projection follows the live sheet headers (key, LAST ACTIVITY)', async () => {
+  resetFleetStateForTest();
+  const { getFleetTickets: liveTickets } = await import('./lib/fleet-status.mjs');
+  const tickets = await liveTickets({ refresh: true });
+  assert.ok(tickets.length > 0, 'live sheet must project rows');
+  for (const t of tickets) {
+    // 'key' holds the ticket identity (spec:/req:/card:/sync:…); a bare row index means the id lookup missed.
+    // `lane:` joined the prefixes on 2026-10-04: the current tab carries the
+    // orchestrator lane row, and it is a keyed item like any other. `auto:`
+    // joined it the same day for the same reason — the activity watcher files
+    // machine rows as `auto:<box>:<cluster>` and the board carries them until
+    // they are claimed or triaged. The intent is unchanged — a bare row index
+    // means the id lookup missed.
+    assert.match(t.id, /^(spec:|req:|card:|task:|proj:|sync:|lane:|auto:|bug-|fleet-|meal-|sheet-)/i, `ticket id keeps sheet key, got ${t.id}`);
+    // 'LAST ACTIVITY' header carries the timestamp; a dash means the lookup missed.
+    assert.notEqual(t.lastActivity, '—', `lastActivity projected for ${t.id}`);
+  }
+});
+
+test('only a Drive FILE link becomes a screenshot; a folder, key, or prose stays text', () => {
+  // A file link is a screenshot: the cell renders the picture, not the URL.
+  assert.equal(
+    driveFileIdFrom('https://drive.google.com/file/d/162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM/view'),
+    '162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM',
+  );
+  assert.equal(
+    driveFileIdFrom('https://drive.google.com/file/d/1yEcrqTRVFf358Bty6F0xnl29frgcbgDt/view?usp=sharing'),
+    '1yEcrqTRVFf358Bty6F0xnl29frgcbgDt',
+  );
+  assert.equal(
+    driveFileIdFrom('https://drive.google.com/thumbnail?id=162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM&sz=w400'),
+    '162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM',
+  );
+  // A FOLDER is not one image — it must never be guessed into a screenshot.
+  assert.equal(driveFileIdFrom('https://drive.google.com/drive/folders/1kY6Z2TDoNM5s0vuRiv_rXE_k145cDMnj'), '');
+  // Prose and bare keys are not links at all.
+  assert.equal(driveFileIdFrom('TRANSCRIPT+payload-render, real-surface render still owed'), '');
+  assert.equal(driveFileIdFrom('spec:fleet-beat-fixes'), '');
+  assert.equal(driveFileIdFrom('sync-2026-10-02b-checkouts'), '');
+  assert.equal(driveFileIdFrom(''), '');
+  assert.equal(driveFileIdFrom('—'), '');
+  assert.equal(driveFileIdFrom('see https://example.com/a/b/c for detail'), '');
+});
+
+test('a row projects from either current-tab layout, not just the curated one', () => {
+  // The curated layout: what the operator hand-writes.
+  const curated = {
+    'Original request': 'Do the thing',
+    'Work done so far': 'Half of it',
+    "What's left to do": 'The other half',
+    'Owner': 'Space Bunny Free (high) VM',
+    'Status': 'In progress',
+    'Completion proof': 'https://drive.google.com/file/d/162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM/view',
+    'Completion gate': 'tsc 0',
+    'last_activity': '2026-10-04T01:00:00Z',
+  };
+  // The projected layout: what pm-current used to write into `current` before
+  // the 2026-10-04 split (it now owns its own `fleet` tab). The fallback stays
+  // — a stale `current` once reverted to these headers and blanked five columns.
+  const projected = {
+    key: 'spec:x', goal: 'Do the thing', agent_note: 'Half of it',
+    todo: 'The other half', owner: '', author: 'Space Bunny Free (high) VM',
+    state: 'locked', stall_reason: '', last_activity: '2026-10-04T01:00:00Z',
+  };
+  const reader = (row) => (n) => String(row[n] ?? '').trim();
+
+  const a = ticketFromRow(reader(curated), 0);
+  assert.equal(a.originalRequest, 'Do the thing');
+  assert.equal(a.owner, 'Space Bunny Free (high) VM');
+  assert.equal(a.status, 'In progress');
+  assert.equal(a.proofFileId, '162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM');
+
+  const b = ticketFromRow(reader(projected), 0);
+  assert.equal(b.id, 'spec:x');
+  assert.equal(b.originalRequest, 'Do the thing', 'goal stands in for the request');
+  assert.equal(b.workDoneSoFar, 'Half of it', 'agent_note stands in for work done');
+  assert.equal(b.whatsLeftToDo, 'The other half', 'todo stands in for what is left');
+  assert.equal(b.owner, 'Space Bunny Free (high) VM', 'author stands in for owner');
+  assert.equal(b.status, 'locked', 'state stands in for status — never the Pending placeholder');
+  assert.equal(b.lastActivity, '2026-10-04T01:00:00Z');
+  // No proof column in the projected layout, so the cell stays text, not a guess.
+  assert.equal(b.proofFileId, '');
+  assert.equal(b.completionProof, '—');
+});

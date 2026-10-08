@@ -7,7 +7,7 @@
 // ADAPTER CONTRACT for a new platform runner:
 //   import {
 //     buildStatusSnapshot, formatStatusPlain,
-//     compactUnsupported, COMPACT_SUMMARY_PROMPT,
+//     compactUnsupported,
 //   } from './lib/bot-status.mjs';
 //
 //   const snap = buildStatusSnapshot({
@@ -31,10 +31,6 @@
 // uniformly on every bot.
 
 import { formatUsage, formatTokens, isFreeModel } from './commands.mjs';
-
-export const COMPACT_SUMMARY_PROMPT =
-  'Summarize this session for handoff in at most 10 short plain-text lines: ' +
-  'goal, key decisions and facts, current state, immediate next step. No fluff, no code blocks.';
 
 export function compactUnsupported(platform, reason) {
   return (
@@ -111,7 +107,7 @@ export function buildStatusSnapshot({
     handoff: Boolean(handoff),
     lastRun,
     totals: runs > 0 || totalTokens > 0 || totalCost > 0 ? { runs, tokens: totalTokens, cost: totalCost } : null,
-    compact: capabilities.compact ? 'session compaction ready — /compact to summarize + start fresh' : null,
+    compact: capabilities.compact ? 'session compaction ready — /compact compacts in place (stays on it)' : null,
     uptime: runtime.bootedAt ? formatUptime(runtime.bootedAt) : '',
     taskState: runtime.taskState || 'idle',
     lock: runtime.lock || null,

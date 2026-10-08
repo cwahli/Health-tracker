@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { assertReadOnlySql, parseEnvFile, loadD1Config, createD1Reader, resolveProfileUid, parseBiomarkers, parseProfile, QUERIES } from './lib/health/d1.mjs';
-import { parseCsvLine, isoDate, mapSheetTest, parseSheetCsv, parseSheetDump, sheetRecord, MARKER_LABELS } from './lib/health/sheet.mjs';
+import { parseCsvLine, isoDate, mapSheetTest, parseSheetCsv, parseSheetDump, sheetRecord, unitFromResult, MARKER_LABELS } from './lib/health/sheet.mjs';
 import { extractAppState, reconcile, evaluateFixList, unreviewedAppRows, valuesEqual, FIX_LIST } from './lib/health/reconcile.mjs';
 import { KNOWN_PROJECTS, resolveProjectId, resolveRoleId, getProjectRoles, getRoleInstructions, getProjectSoul, seedProjectWorkspace } from './lib/project-registry.mjs';
 import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText, RESEARCH_LOG, DOCTOR_FILE, DOCTOR_ARTIFACT, ANALYSIS_FILE, extractAnalysisPayload } from './health-runner.mjs';
@@ -120,6 +120,11 @@ console.log('assert-external-health:');
   eq('sheet csv keeps the rows and marks the panel header', [parsed.length, parsed[2].map.skip === true], [3, true]);
   eq('sheet csv maps hba1c', [parsed[0].key ?? parsed[0].map.key, parsed[0].value, parsed[0].date], ['hba1c', 40, '2026-06-05']);
   eq('sheet csv keeps units', parsed[1].unit, 'umol/L');
+  eq('a BMI unit keeps its exponent', unitFromResult('23.49 kg/m2'), 'kg/m2');
+  eq('an eGFR unit keeps the body-surface factor', unitFromResult('80 mL/min/1.73m2'), 'mL/min/1.73m2');
+  eq('blood pressure keeps only mmHg', unitFromResult('109 / 53 mmHg', { composite: true }), 'mmHg');
+  eq('an audit scale is not a unit', unitFromResult('3 /12'), '');
+  eq('a mapped BMI row keeps kg/m2', sheetRecord(['27-Mar-2024', 'Body mass index', '23.49 kg/m2', '', '']).unit, 'kg/m2');
 
   const dump = parseSheetDump(JSON.stringify({
     source: { title: 'Medical Test Results - Chiwah', fetchedAt: '2026-09-30T18:33:28.031Z' },
@@ -367,6 +372,8 @@ const fixtureArtifact = (state = 'open') => ({
   missing: [{ key: 'ldl', label: 'LDL', value: 2.1, unit: 'mmol/L', date: '2026-06-03' }],
   appOnly: [{ key: 'hba1c', label: 'HbA1c', value: 40, date: '2026-07-08' }],
   gaps: [{ date: '2026-06-05', test: 'GPPAQ usual level of walking pace - fast' }],
+  conflicts: [{ kind: 'value', key: 'weight', label: 'Weight', date: '2023-11-17', value: 61, unit: 'kg', appValue: 61.9 }],
+  latest: [{ key: 'hba1c', label: 'HbA1c', date: '2026-06-05', value: 40, unit: 'mmol/mol' }],
   fixList: {
     closed: state === 'open' ? 0 : 8,
     open: state === 'open' ? 8 : 0,
@@ -449,6 +456,7 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   check('the header carries dated provenance', snapshot.text.includes('medical-test-results-chiwah_2026-09-30_19-32-41.json') && snapshot.text.includes('real') && snapshot.text.includes('2026-10-01'), 'provenance missing');
   check('the header names the open items', snapshot.text.includes('(H-1, H-2, H-3, H-4, H-5, H-6, H-7, H-8)'), 'item list missing');
   check('data sections still render the verified facts', snapshot.text.includes('HbA1c 40 mmol/mol — 2026-06-05') && snapshot.text.includes('LDL: the sheet has 1 value'), 'data sections missing');
+  check('the snapshot shows the latest sheet value, the open items, and a disagreement', snapshot.text.includes('## Latest on the sheet') && snapshot.text.includes('**H-5**') && snapshot.text.includes('Weight on 2023-11-17: app 61.9 vs sheet 61'), snapshot.text.slice(0, 400));
   eq('the snapshot has no analysis section to refuse (it is the data document)', snapshot.refused, []);
 
   // Conditions & Actions is where the refusal has to be visible.
@@ -1055,7 +1063,7 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
 
   // The real command surface: exit 3 when a seat could not run, 0 when it could.
   const runner = path.join(ROOT, 'scripts', 'health-runner.mjs');
-  const noKeyEnv = { ...process.env, HEALTH_WORKSPACE: dir, GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '' };
+  const noKeyEnv = { ...process.env, HEALTH_WORKSPACE: dir, GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '', HEALTH_SEAT_MODEL_CATALOG: '' };
   let noKeyCode = 0;
   let noKeyOut = '';
   try {

@@ -13,15 +13,29 @@
 | Fix-list items open | _(ids, or "none")_ |
 | Newest verified lab | _(date)_ |
 
+## Latest on the sheet
+
+_The newest value the sheet holds for each marker. This is the current sheet
+reading, including rows the app has not matched._
+
 ## What is trusted
 
 _Markers that match the sheet exactly, with dates. One line each: marker, value,
-unit, date._
+unit, date. An older exact match is not the latest sheet reading._
 
 ## What is a placeholder, not data
 
 _Fields that came from an application default rather than a measurement, and the
 fields that were never measured at all._
+
+## What the fix list still says
+
+_Each item still open or waived, with the detail from the last verify._
+
+## What disagrees
+
+_A sheet value the app filed on another date, or a same-date value that does
+not match. These rows are not in "what is trusted" and not in "what is missing"._
 
 ## What is missing
 

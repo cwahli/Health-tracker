@@ -95,6 +95,48 @@ export function healthPaths(projectId = DEFAULT_PROJECT, { env = process.env } =
 
 const shortStamp = (iso) => String(iso || '').slice(0, 16).replace('T', ' ');
 
+function sheetFact(verdict) {
+  return {
+    key: verdict.key,
+    label: markerLabel(verdict.key),
+    date: verdict.date,
+    value: verdict.value,
+    unit: verdict.unit || '',
+  };
+}
+
+/** Sheet rows the app did not match on the same date. */
+function conflictRows(report) {
+  const dates = verdictsOf(report, 'DATE_MISMATCH').map((verdict) => ({
+    ...sheetFact(verdict),
+    kind: 'date',
+    appDate: verdict.appDate,
+    appValue: verdict.appValue,
+    offDays: verdict.offDays,
+  }));
+  const values = verdictsOf(report, 'VALUE_MISMATCH').map((verdict) => ({
+    ...sheetFact(verdict),
+    kind: 'value',
+    appValue: verdict.appValue,
+  }));
+  return [...values, ...dates];
+}
+
+/** Newest valued sheet row for each marker. */
+function latestSheetRows(report) {
+  const rows = [];
+  for (const [key, bucket] of Object.entries(report?.byKey || {})) {
+    const valued = (bucket.sheet || [])
+      .filter((row) => !row.gap && row.value !== null && row.value !== '')
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const last = valued[valued.length - 1];
+    if (!last) continue;
+    rows.push({ key, label: markerLabel(key), date: last.date, value: last.value, unit: last.unit || '' });
+  }
+  rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.label.localeCompare(b.label)));
+  return rows;
+}
+
 /**
  * Read the app, read the sheet, diff, evaluate.
  *
@@ -197,6 +239,10 @@ export async function runHealthVerify({
     missing: verdictsOf(report, 'MISSING').map((v) => ({ key: v.key, label: markerLabel(v.key), date: v.date, value: v.value, unit: v.unit, appNearest: v.appNearest })),
     appOnly: unreviewedAppRows(report).map((v) => ({ key: v.key, label: markerLabel(v.key), date: v.date, value: v.appValue, sourceDates: v.sourceDates })),
     gaps: verdictsOf(report, 'GAP').map((v) => ({ date: v.date, test: v.test })),
+    // A date or value clash is neither a match nor a missing row. Without this
+    // list the snapshot hides the sheet value the app filed on the wrong day.
+    conflicts: conflictRows(report),
+    latest: latestSheetRows(report),
   };
 
   try {
@@ -1171,6 +1217,21 @@ export function renderFixListMarkdown(artifact) {
     }
     p();
   }
+  if (artifact.conflicts?.length) {
+    p('## Disagreements');
+    p();
+    for (const row of artifact.conflicts) {
+      if (row.kind === 'date') p(`- ${row.label} ${row.value}${row.unit ? ` ${row.unit}` : ''} is on the sheet at ${row.date}; the app has ${JSON.stringify(row.appValue)} on ${row.appDate}`);
+      else p(`- ${row.label} on ${row.date}: app ${JSON.stringify(row.appValue)} vs sheet ${JSON.stringify(row.value)}`);
+    }
+    p();
+  }
+  if (artifact.latest?.length) {
+    p('## Latest on the sheet');
+    p();
+    for (const row of artifact.latest) p(`- ${row.date}: ${row.label} ${row.value}${row.unit ? ` ${row.unit}` : ''}`);
+    p();
+  }
   if (artifact.gaps.length) {
     p('## In the sheet only (no app field for these)');
     p();
@@ -1293,7 +1354,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (mode === 'readiness') {
       // Exit 3 when a seat could not run — the same "refused on purpose" code
       // --analyze uses, so a caller can tell "not ready" from "crashed".
-      const res = checkHealthReadiness({ projectId: args.project, paths: healthPaths(args.project) });
+      // The model probe is awaited here, not inside the check, so the check
+      // stays synchronous for its 15 other call sites. This is the surface the
+      // operator reads, so it gets the honest answer: what the host can run.
+      //
+      // `HEALTH_SEAT_MODEL_CATALOG=''` makes the probe resolve to "no lanes"
+      // without asking anything, which is how the sensor drives the refusing
+      // case without depending on whether the machine running the suite has an
+      // OpenCode CLI. Unset means the real host, which is the point.
+      const { seatModelReach } = await import('./lib/health/seat-model.mjs');
+      const forcedCatalog = Object.prototype.hasOwnProperty.call(process.env, 'HEALTH_SEAT_MODEL_CATALOG')
+        ? String(process.env.HEALTH_SEAT_MODEL_CATALOG || '').split(',').map((s) => s.trim()).filter(Boolean)
+        : null;
+      const modelReach = await seatModelReach({ models: forcedCatalog });
+      const res = checkHealthReadiness({ projectId: args.project, paths: healthPaths(args.project), modelReach });
       console.log(args.json ? JSON.stringify(res, null, 1) : formatReadinessText(res));
       process.exit(res.exit);
     }

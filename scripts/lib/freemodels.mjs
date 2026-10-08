@@ -93,8 +93,34 @@ export function parseModelRef(raw) {
 
 export function toModelRef(surface, id) {
   if (surface === 'cline') return `cline:${id}`;
-  if (surface === 'gemini') return `gemini:${id}`;
-  return id;
+  // `google/` catalog rows execute through the direct Gemini runner: the
+  // OpenCode `google/` provider is unavailable on hosts without a wired
+  // OpenCode google credential (live VPS 2026-10-03), while GEMINI_API_KEY
+  // answers directly. Mirrored in free-lanes.laneWalkRef — keep both in sync.
+  if (surface === 'google' || surface === 'gemini') {
+    const full = String(id || '').startsWith('gemini/') ? id : `gemini/${id}`;
+    return `gemini:${full}`;
+  }
+  if (surface === 'freebuff') {
+    return String(id || '').startsWith('freebuff/') ? id : `freebuff/${id}`;
+  }
+  // A chat-only lane id without a vendor path (e.g. provider `tokenharbor`,
+  // model `mimo-v2.6-flash:free`) is not runnable as-is: the OpenCode CLI
+  // answers `Invalid model reference` and the walk burns a turn on it every
+  // time (live VM5 2026-10-03). Keep the vendor so the attempt is routed and
+  // stamped against the right lane and bucket.
+  //
+  // `opencode` is not an exception. `withCatalogLanes` strips `opencode/` off
+  // the stored lane for quota-key hygiene, so `toModelRef('opencode',
+  // 'big-pickle')` handed the CLI a bare slug and the walk burned nine turns on
+  // `Invalid model reference` before it reached a lane that worked (live VM4
+  // 2026-10-06, 14 hops for the prompt "hi"). An id that already carries a path
+  // (`opencode/big-pickle`, `tokenharbor/x`, `google/gemini-3.8-flash`) still
+  // returns as-is — that is the whole of the old behaviour — and only the
+  // genuinely bare id gains its surface. A provider-less lane is an OpenCode
+  // lane, which is also how `routeCandidates` reads it.
+  if (String(id || '').includes('/')) return id;
+  return `${surface || 'opencode'}/${id}`;
 }
 
 export function formatFreeLabel(ref) {
@@ -147,6 +173,25 @@ export const FREE_NAME_EXCEPTIONS = {
   'big-pickle': 'qa-evidence/model-comparison.json — "Free, no card; no per-day cap published"',
 };
 
+/**
+ * Models whose name says free but which are NOT free on the surface they are
+ * reached through.
+ *
+ * The mirror image of `FREE_NAME_EXCEPTIONS`, for the same reason: a name is a
+ * claim, and the claim only holds on the surface it was made on. `opencode-go` is
+ * the PAID plan on this stack (plan/BOT_ROLES.md, plan/ROADMAP.md V-30.4 — "zen
+ * funds depleted and opencode-go is paid"), so a zero list price under it means
+ * "not metered", not "free allowance" — the same trap `grok-code` fell into.
+ * The user checked on 2026-10-07 and confirmed `opencode-go/space-bunny-free` is
+ * not free there, after a preference-doc row authored off the "-free" suffix
+ * offered it as a second free Space Bunny pool. Its OpenCode Zen twin
+ * `opencode/space-bunny-free` IS free and is untouched — the two are different
+ * POOLS (different quota), which is not the same claim as two free ones.
+ */
+export const FREE_NAME_DENYLIST = {
+  'opencode-go/space-bunny-free': 'paid Go plan: not a free lane there (user, 2026-10-07)',
+};
+
 export function listFreeOpenCode({ modelsCachePath, authPath, readJson = defaultReadJson, home = os.homedir(), env = process.env, includeUnready = false } = {}) {
   const paths = defaultPaths(home);
   const cache = readJson(modelsCachePath || paths.modelsCachePath);
@@ -172,6 +217,10 @@ export function listFreeOpenCode({ modelsCachePath, authPath, readJson = default
       if (Number(cost.input) !== 0 || Number(cost.output) !== 0) continue;
       // A zero price is not a free model; the name is the signal.
       if (!/-free/.test(id) && !FREE_NAME_EXCEPTIONS[id]) continue;
+      // ...and a name is not enough either: a `-free` model on a paid surface is
+      // not a free lane. Checked on the qualified ref, because the same model is
+      // genuinely free through its own provider (see FREE_NAME_DENYLIST).
+      if (FREE_NAME_DENYLIST[`${provider}/${id}`.toLowerCase()]) continue;
       refs.push(`${provider}/${id}`);
     }
   }
@@ -306,36 +355,9 @@ export function buildFreeModelList(opts = {}) {
   return entries;
 }
 
-export function formatFreeModelText(entries, { current, location = '' } = {}) {
-  const list = Array.isArray(entries) ? entries : [];
-  const selectable = list.filter((entry) => entry.selectable !== false);
-  const countProvider = (provider) => selectable.filter((entry) => entry.provider === provider).length;
-  const countOpencode = selectable.filter((entry) => entry.tool === 'opencode' && entry.provider !== 'tokenharbor' && !/^(?:opencode|google)\/gemini-/i.test(entry.ref)).length;
-  const countGemini = selectable.filter((entry) => /^(?:opencode|google)\/gemini-/i.test(entry.ref)).length;
-  const where = location || list[0]?.location || 'this host';
-  const parts = [
-    ['opencode', countOpencode],
-    ['cline', countProvider('cline')],
-    ['tokenharbor', countProvider('tokenharbor')],
-    ['gemini', countGemini],
-    ['freebuff', countProvider('freebuff')],
-  ].filter(([, n]) => n > 0).map(([provider, n]) => `${n} ${provider}`);
-  const pending = list.filter((entry) => entry.status === 'pending-signin');
-  const terminal = list.length - selectable.length - pending.length;
-  const lines = [
-    `Free models at ${where}: ${selectable.length} selectable${parts.length ? ` (${parts.join(', ')})` : ''}${pending.length ? ` · ${pending.length} pending setup/sign-in` : ''}${terminal ? ` · ${terminal} terminal-only` : ''} · current: ${current || '(unknown)'}`,
-    'This list is location-scoped: tools, credentials, and quota belong to this host.',
-  ];
-  if (selectable.length) lines.push('Tap a model below to switch this chat.');
-  else lines.push('No selectable free model is currently installed and authenticated on this host.');
-  const notes = list.filter((entry) => entry.note).map((entry) => `• ${entry.label}: ${entry.note}`);
-  if (notes.length) lines.push('', ...notes);
-  if (pending.length) {
-    lines.push('', 'Pending setup/sign-in:');
-    lines.push(...pending.map((entry) => `• ${entry.tool}: ${entry.pendingAction}`));
-  }
-  if (countProvider('cline')) lines.push('', 'Cline is listed only when its local CLI and auth are usable; its daily caps are per host.');
-  if (list.some((entry) => String(entry.ref || '').match(/^(?:opencode|google)\/gemini-/i))) lines.push('Gemini is exposed through OpenCode, not as a standalone bot surface.');
-  if (list.some((entry) => entry.surface === 'freebuff' && entry.selectable !== false)) lines.push('Freebuff is shown for visibility but is terminal-only and is not a Telegram tap target.');
-  return lines.join('\n');
-}
+// formatFreeModelText used to live here and is gone with /free (2026-10-03).
+// It rendered the raw catalog as a prose list, told the reader "Tap a model
+// below to switch this chat" while attaching no keyboard at all, and /freemodel
+// had already replaced it with the canonical lane list and real buttons. It was
+// the only thing here that rendered that list as text, so removing the command
+// removed its last caller rather than orphaning it.
