@@ -46,7 +46,7 @@ console.log('assert-pr-summary:');
 // 1. Full contract with each accepted pointer shape.
 for (const next of [
   'Next: TUI_TG_AUTH_TRAIL.md#live-state-left-for-you',
-  'Next: plan/ROADMAP.md#current-work-one-sequence-2026-09-26',
+  'Next: plan/ROADMAP.md#current-work-sequence-closed-on-the-vm-fleet-2026-10-09',
   'Next: agent/tui-lifecycle',
   'Next: #369',
 ]) {
@@ -84,7 +84,7 @@ for (const next of [
 
 // 6. Pointer resolvability: roadmap anchors and files must exist.
 {
-  const anchor = 'plan/ROADMAP.md#current-work-one-sequence-2026-09-26';
+  const anchor = 'plan/ROADMAP.md#current-work-sequence-closed-on-the-vm-fleet-2026-10-09';
   const r = run(good(`- x\n\nNext: ${anchor}`));
   check('real roadmap anchor passes', r.code === 0, `exit ${r.code}: ${r.out.slice(0, 200)}`);
   const bad = run(good('- x\n\nNext: plan/ROADMAP.md#no-such-row'));
