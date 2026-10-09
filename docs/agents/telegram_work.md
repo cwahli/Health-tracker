@@ -194,7 +194,7 @@ To permanently eliminate these failure modes, the monolithic bash cascade was re
 
 2. **Subcommands for Complete Visibility & Control:**
    - **`status` (`./scripts/run-coding-dispatch.sh status`):**
-     - Reads `${HERMES_DIR}/dispatch_lock` and `${HERMES_DIR}/dispatch_active.json`.
+     - Reads per-bug records under `${HERMES_DIR}/dispatch_locks`. The legacy `${HERMES_DIR}/dispatch_lock` file is informational and does not reserve the repo.
      - Checks if the process PID is alive.
      - Strips ANSI escape sequences and extracts the current activity line from the active log.
      - Returns grounded state: active agent, model, thinking mode, elapsed time, current action, and recent log tail.
@@ -239,7 +239,7 @@ To maintain modularity and prevent the script from duplicating LLM reasoning:
 │     • Shields coder from 30-60s Telegram tool timeouts.                │
 │                                                                        │
 │  2. Exclusivity & Process Group Termination:                           │
-│     • Enforces concurrency mutex (`~/.hermes/dispatch_lock`).          │
+│     • Does not reserve the repo. One worktree per coder.              │
 │     • On `stop`: cleanly kills entire process group (`kill -- -$PID`). │
 │                                                                        │
 │  3. Continuous Telegram Observability:                                 │
