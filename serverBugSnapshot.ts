@@ -1562,6 +1562,10 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
             tag_id: t.id,
             public_n: item.public_n,
             title: t.title,
+            // The board reads this column for declined (wont_fix stays queue
+            // ready). The Telegram open list needs the same column. This route
+            // still returns every row.
+            status: t.status,
             bug: item.bug,
             class: item.class,
             fingerprint: item.fingerprint,

@@ -867,6 +867,28 @@ describe('commands', () => {
     expect(text).toContain('3 closed or declined hidden');
   });
 
+  it('formatBugsListText hides a wont_fix card the API still marks ready', async () => {
+    const { formatBugsListText } = await import('../scripts/bot-host.mjs');
+    const text = formatBugsListText({
+      source: 'canonical-bug-list',
+      count: 4,
+      generated_at: '2026-10-09T01:00:00.000Z',
+      rows: [
+        { public_n: 2, title: 'Declined wont', state: 'new', queue: 'ready', status: 'wont_fix' },
+        { public_n: 3, title: 'Ignored live', state: 'done', queue: 'done', status: 'ignored' },
+        { public_n: 1, title: 'Open one', state: 'packed', queue: 'ready', status: 'to_fix' },
+        { public_n: 7, title: 'Journey green', state: 'verifying', queue: 'in_progress', status: 'in_progress' },
+      ],
+    });
+    expect(text).toContain('2 cards');
+    expect(text).not.toContain('4 cards');
+    expect(text).toContain('#1 Open one (packed/ready)');
+    expect(text).toContain('#7 Journey green (verifying/in_progress)');
+    expect(text).not.toContain('Declined wont');
+    expect(text).not.toContain('Ignored live');
+    expect(text).toContain('2 closed or declined hidden');
+  });
+
   it('redirectFreebuffTurn runs the chat on the OpenCode model and refuses only when that model is Freebuff too', async () => {
     const { redirectFreebuffTurn } = await import('../scripts/bot-host.mjs');
     const same = redirectFreebuffTurn({ model: 'opencode/deepseek-v4.1-flash', hostModel: 'opencode/deepseek-v4.1-flash' });
