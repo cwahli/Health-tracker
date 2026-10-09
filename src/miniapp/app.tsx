@@ -65,6 +65,50 @@ function openInGateway(route: string) {
   window.location.href = route + (window.location.search || '');
 }
 
+/**
+ * P3.8 — the webview must not fail silently. Same-origin targets are
+ * pre-flighted against the registry `health` endpoint (8s cap) before
+ * navigating: a dead backend renders an honest offline card naming it,
+ * never a blank page. Absolute URLs skip the check (cross-origin fetch
+ * cannot read the answer) and navigate directly.
+ */
+function GoButton({ def, target, label, health }: { def: MiniAppDef; target: string; label: string; health?: string }) {
+  const [state, setState] = useState<'idle' | 'checking' | 'offline'>('idle');
+  const go = () => {
+    if (state === 'checking') return;
+    const check = health !== undefined ? health : def.health || '';
+    if (!health.startsWith('/')) {
+      openInGateway(target);
+      return;
+    }
+    setState('checking');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    fetch(health + (window.location.search || ''), { signal: ctrl.signal })
+      .then((res) => {
+        clearTimeout(timer);
+        if (res.ok) openInGateway(target);
+        else setState('offline');
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        setState('offline');
+      });
+  };
+  return (
+    <div>
+      <button type="button" onClick={go} disabled={state === 'checking'}>
+        {state === 'checking' ? 'Checking…' : label}
+      </button>
+      {state === 'offline' && (
+        <p style={{ opacity: 0.7 }}>
+          {def.title} is not answering right now. Tap again to retry.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function openExternal(def: MiniAppDef) {
   const t = tg();
   // External entries carry the absolute URL in `route` (no `url` field).
@@ -99,9 +143,7 @@ function PendingTab({ def }: { def: MiniAppDef }) {
         Migrates into this shell in P3. Until then the standalone page below
         is the live view — same door, same data.
       </p>
-      <button type="button" onClick={() => openInGateway(def.route)}>
-        Open {def.title}
-      </button>
+      <GoButton def={def} target={def.route} label={`Open ${def.title}`} />
     </div>
   );
 }
@@ -111,12 +153,11 @@ function TtyTab({ def }: { def: MiniAppDef }) {
     <div style={{ padding: 24, textAlign: 'center' }}>
       <h2 style={{ margin: '0 0 8px' }}>{def.title}</h2>
       <p style={{ opacity: 0.7 }}>
-        A real terminal attaches to this chat&apos;s session. It opens on its
-        own route so the socket token flow stays exactly as today.
+        A real terminal attaches to this chat&apos;s session. It opens on the
+        gateway landing (`/` keeps the bot + token query) so the socket token
+        flow stays exactly as today.
       </p>
-      <button type="button" onClick={() => openInGateway(def.route)}>
-        Open the terminal
-      </button>
+      <GoButton def={def} target="/" health="/" label="Open the terminal" />
     </div>
   );
 }
