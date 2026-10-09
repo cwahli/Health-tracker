@@ -40,9 +40,58 @@ function telegramChrome() {
     if (t.ready) t.ready();
     if (t.expand) t.expand();
     if (t.disableVerticalSwipes) t.disableVerticalSwipes();
+    // Fresh shell owns no back action — hide a stale one (e.g. after
+    // history.back() from an external tab). Drawer/exit flows show it.
+    if (t.BackButton?.hide) t.BackButton.hide();
   } catch {
     /* dev browser without Telegram — shell still renders */
   }
+}
+
+function currentQuery(): string {
+  try {
+    return window.location.search || '';
+  } catch {
+    return '';
+  }
+}
+
+function setQueryToken(token: string) {
+  try {
+    const q = new URLSearchParams(window.location.search || '');
+    q.set('token', token);
+    window.history.replaceState(null, '', `?${q.toString()}`);
+  } catch {
+    /* history unavailable — retry rides the old query and fails honestly */
+  }
+}
+
+/**
+ * The 900s page token dies while tabs stay open (and initData is
+ * single-use), so a 401 is usually just an old token, not a dead backend.
+ * Renew once through /app/token (grace-bound, absolute cliff enforced
+ * server-side) and retry the caller once.
+ */
+async function renewToken(): Promise<boolean> {
+  try {
+    const res = await fetch('/app/token' + currentQuery());
+    const body = await res.json().catch(() => null);
+    if (res.ok && body && body.ok && typeof body.token === 'string' && body.token) {
+      setQueryToken(body.token);
+      return true;
+    }
+  } catch {
+    /* falls through to false */
+  }
+  return false;
+}
+
+async function fetchLive(path: string): Promise<Response> {
+  const res = await fetch(path + currentQuery());
+  if (res.status === 401 && (await renewToken())) {
+    return fetch(path + currentQuery());
+  }
+  return res;
 }
 
 function readQuery(): { bot: string; tab: string } {
@@ -146,14 +195,23 @@ function GoButton({ def, target, label, health }: { def: MiniAppDef; target: str
     if (!check.startsWith('/')) {
       // Absolute target (another host/app): navigate bare, in-WebView so the
       // Telegram session (and its initData for the target's own door) stays.
-      // The gateway query token is NOT forwarded cross-host.
+      // The gateway query token is NOT forwarded cross-host. Best-effort
+      // BackButton → history.back() so the phone can return; the bot's menu
+      // button (bottom-left) always returns regardless.
+      try {
+        const t = tg();
+        if (t?.BackButton?.show) t.BackButton.show();
+        if (t?.BackButton?.onClick) t.BackButton.onClick(() => window.history.back());
+      } catch {
+        /* older clients — menu button is the way back */
+      }
       window.location.href = target;
       return;
     }
     setState('checking');
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
-    fetch(health + (window.location.search || ''), { signal: ctrl.signal })
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    fetchLive(check)
       .then((res) => {
         clearTimeout(timer);
         if (res.ok) openInGateway(target);
@@ -171,7 +229,8 @@ function GoButton({ def, target, label, health }: { def: MiniAppDef; target: str
       </button>
       {state === 'offline' && (
         <p style={{ opacity: 0.7 }}>
-          {def.title} is not answering right now. Tap again to retry.
+          {def.title} is not answering right now (session already refreshed).
+          Tap again to retry.
         </p>
       )}
     </div>
@@ -211,7 +270,8 @@ function PendingTab({ def }: { def: MiniAppDef }) {
       <h2 style={{ margin: '0 0 8px' }}>{def.title}</h2>
       <p style={{ opacity: 0.7 }}>
         This app opens on its own page below — same Telegram session,
-        same door.
+        same door. Use the bot&apos;s menu button (bottom-left) to come
+        back here.
       </p>
       <GoButton def={def} target={def.route} label={`Open ${def.title}`} />
     </div>

@@ -1028,6 +1028,18 @@ console.log('assert-tui-gateway:');
       const r = await call('/web/token?token=garbage', { host: 'web.test' });
       return r.code === 401;
     })());
+  check('app/token renews a live token with a fresh cookie',
+    await (async () => {
+      const r = await call(`/app/token?token=${encodeURIComponent(wtoken)}`, { host: 'tui.health-tracker.co.uk' });
+      const body = JSON.parse(r.body);
+      return r.code === 200 && body.ok === true && typeof body.token === 'string'
+        && body.token !== wtoken && String(r.h['set-cookie'] || '').includes(COOKIE_NAME);
+    })());
+  check('app/token refuses a garbage token',
+    await (async () => {
+      const r = await call('/app/token?token=garbage', { host: 'tui.health-tracker.co.uk' });
+      return r.code === 401;
+    })());
   check('the shim renews proactively on a timer',
     webAuthShimJs().includes('/web/token')
     && webAuthShimJs().includes('setInterval')
