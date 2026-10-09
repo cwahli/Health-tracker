@@ -212,6 +212,9 @@ jobs:
       - name: Work queue sensor (generated list fails closed)
         run: node scripts/assert-work-queue.test.mjs
 
+      - name: Closed roadmap rows stay closed
+        run: node scripts/assert-closed-stays-closed.test.mjs
+
       # A manual merge (laptop `gh pr merge`, web UI) bypasses the driver:
       # no commit_message is sent, so the squash body falls back to the
       # branch's commit list and ## Left never reaches git log. The PR runs
