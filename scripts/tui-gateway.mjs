@@ -869,6 +869,19 @@ const buf = Buffer.isBuffer(got.bytes) ? got.bytes : Buffer.from(got.bytes || ''
 
 export const fleetSseClients = new Set();
 
+export const reviewSseClients = new Set();
+
+export function broadcastReviewEvent(event, data) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of reviewSseClients) {
+    try {
+      res.write(payload);
+    } catch {
+      reviewSseClients.delete(res);
+    }
+  }
+}
+
 export function recordFleetHeartbeat(payload, opts = {}) {
   const res = recordFleetHeartbeatStatus(payload, opts);
   if (res.ok && res.node) {
@@ -1732,6 +1745,32 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       return res.end(JSON.stringify({ ...state, generatedAt: new Date().toISOString() }));
     }
 
+    if (url.pathname === '/review/api/events') {
+      const authHeader = req.headers['x-telegram-init-data'] || '';
+      let verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
+      if (!verdict.ok && authHeader) {
+        const authVer = authorizeForgeAtGateway({ initData: String(authHeader), env });
+        if (authVer.ok) verdict = { ok: true };
+      }
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        'connection': 'keep-alive',
+        'x-accel-buffering': 'no',
+      });
+      res.flushHeaders?.();
+      reviewSseClients.add(res);
+      req.on('close', () => { reviewSseClients.delete(res); });
+      getReviewItems({ env, root: REPO_ROOT }).then((state) => {
+        res.write(`event: state\ndata: ${JSON.stringify(state)}\n\n`);
+      }).catch(() => {});
+      return;
+    }
+
     if (url.pathname === '/review/api/proof') {
       const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
       if (!verdict.ok) {
@@ -1790,6 +1829,14 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         return res.end(JSON.stringify({ ok: false, error: parsed.error }));
       }
       const out = await answerReviewItemStatus(parsed.json?.key, parsed.json || {}, { env });
+      if (out.ok) {
+        // Review screens stay live without polling: push the fresh queue to
+        // every open SSE client. Fire-and-forget — never delays the answer.
+        getReviewItems({ env, root: REPO_ROOT }).then(
+          (state) => broadcastReviewEvent('state', state),
+          () => {},
+        );
+      }
       res.writeHead(out.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify(out));
     }
@@ -1809,6 +1856,13 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       const out = url.pathname === '/review/api/approve'
         ? await approveReviewItemStatus(data.key, { env })
         : await commentReviewItemStatus(data.key, data.text, data.target, { env });
+      if (out.ok) {
+        // Same live push as /answer above: the queue changed, tell the screens.
+        getReviewItems({ env, root: REPO_ROOT }).then(
+          (state) => broadcastReviewEvent('state', state),
+          () => {},
+        );
+      }
       res.writeHead(out.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify(out));
     }

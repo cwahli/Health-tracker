@@ -835,28 +835,62 @@
     setTimeout(function () { document.getElementById('btn-refresh').classList.remove('spinning'); }, 600);
   });
 
+  // Cursor-preserving apply: shared by the poll fetch and the SSE push so a
+  // live update never steals the item under review.
+  function applyItems(items) {
+    var cur = state.items[state.idx] && state.items[state.idx].key;
+    state.items = items || [];
+    var at = -1;
+    for (var i = 0; i < state.items.length; i++) { if (state.items[i].key === cur) { at = i; break; } }
+    state.idx = at >= 0 ? at : Math.min(state.idx, Math.max(0, state.items.length - 1));
+    document.getElementById('live-indicator').style.background = '#10b981';
+    render();
+  }
+
   function fetchState(isRefresh) {
     var q = isRefresh ? (query ? query + '&refresh=1' : '?refresh=1') : query;
     fetch('/review/api/state' + q, { headers: { Accept: 'application/json' } })
       .then(function (res) { return res.json(); })
       .then(function (data) {
-        if (data && data.ok) {
-          var cur = state.items[state.idx] && state.items[state.idx].key;
-          state.items = data.items || [];
-          var at = -1;
-          for (var i = 0; i < state.items.length; i++) { if (state.items[i].key === cur) { at = i; break; } }
-          state.idx = at >= 0 ? at : Math.min(state.idx, Math.max(0, state.items.length - 1));
-          document.getElementById('live-indicator').style.background = '#10b981';
-          render();
-        }
+        if (data && data.ok) applyItems(data.items);
       })
       .catch(function () {
         document.getElementById('live-indicator').style.background = '#ef4444';
       });
   }
 
+  // Live push: same `state` shape as /review/api/state, applied through the
+  // same cursor-preserving path. The 30s poll below stays as the fallback.
+  var sse = null;
+  function connectSse() {
+    try { if (sse) sse.close(); } catch (e) {}
+    sse = null;
+    if (document.visibilityState !== 'visible') return;
+    if (typeof EventSource === 'undefined') return;
+    try {
+      sse = new EventSource('/review/api/events' + query);
+      sse.addEventListener('state', function (e) {
+        try {
+          var data = JSON.parse(e.data);
+          if (data && (Array.isArray(data.items) || data.ok !== false)) applyItems(data.items || []);
+        } catch (err) {}
+      });
+      sse.onerror = function () {
+        document.getElementById('live-indicator').style.background = '#f59e0b';
+      };
+      sse.onopen = function () {
+        document.getElementById('live-indicator').style.background = '#10b981';
+      };
+    } catch (e) { sse = null; }
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') { connectSse(); fetchState(false); }
+    else { try { if (sse) sse.close(); } catch (e) {} sse = null; }
+  });
+
   setTarget('left');
   fetchState(false);
+  connectSse();
   setInterval(function () {
     if (document.visibilityState === 'visible') fetchState(false);
   }, 30000);

@@ -437,6 +437,28 @@ test('gateway /review routes: landing, app, state, proof guard, write validation
     });
     assert.equal(answerRes.status, 400);
     assert.match((await answerRes.json()).error, /needs a picture or a note/);
+
+    // The events endpoint streams SSE (never ends by design): assert the
+    // status + content-type, read one chunk, then abort. An abort that hangs
+    // or a non-SSE content-type fails the live contract review.html needs.
+    const evCtrl = new AbortController();
+    const evRes = await fetch(`${base}/review/api/events`, { signal: evCtrl.signal });
+    assert.equal(evRes.status, 200);
+    assert.match(evRes.headers.get('content-type') || '', /text\/event-stream/);
+    const evReader = evRes.body.getReader();
+    const evTimeout = setTimeout(() => evCtrl.abort(), 5000);
+    let evChunk = '';
+    try {
+      const { value } = await evReader.read();
+      evChunk = Buffer.from(value || []).toString('utf8');
+    } catch {
+      evChunk = '';
+    } finally {
+      clearTimeout(evTimeout);
+      evCtrl.abort();
+      try { await evReader.cancel(); } catch {}
+    }
+    assert.ok(evChunk.includes('event: state'), 'initial state push rides the stream');
   } finally {
     server.close();
   }
@@ -455,6 +477,7 @@ test('gateway /review/api routes refuse without a token outside test auth', asyn
     assert.equal((await fetch(`${base}/review/api/proof?key=a&file=b`)).status, 401);
     assert.equal((await fetch(`${base}/review/api/approve`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 401);
     assert.equal((await fetch(`${base}/review/api/answer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 401);
+    assert.equal((await fetch(`${base}/review/api/events`)).status, 401);
   } finally {
     server.close();
   }
