@@ -843,6 +843,67 @@ describe('commands', () => {
     expect(text.length).toBeLessThan(4096);
   });
 
+  it('formatBugsListText hides done, fixed, and declined rows and quotes the open count', async () => {
+    const { formatBugsListText } = await import('../scripts/bot-host.mjs');
+    const text = formatBugsListText({
+      source: 'canonical-bug-list',
+      count: 5,
+      generated_at: '2026-10-02T12:00:00.000Z',
+      rows: [
+        { public_n: 2, title: 'omega-3 float', state: 'fixed', queue: 'done' },
+        { public_n: 1, title: 'Open one', state: 'packed', queue: 'ready' },
+        { public_n: 4, title: 'Ignored card', state: 'ignored', queue: 'ready' },
+        { public_n: 7, title: 'Journey green', state: 'verifying', queue: 'in_progress' },
+        { public_n: 8, title: 'Really done', state: 'done', queue: 'done' },
+      ],
+    });
+    expect(text).toContain('2 cards');
+    expect(text).not.toContain('5 cards');
+    expect(text).toContain('#1 Open one (packed/ready)');
+    expect(text).toContain('#7 Journey green (verifying/in_progress)');
+    expect(text).not.toContain('omega-3');
+    expect(text).not.toContain('Ignored card');
+    expect(text).not.toContain('Really done');
+    expect(text).toContain('3 closed or declined hidden');
+  });
+
+  it('formatBugsListText hides a wont_fix card the API still marks ready', async () => {
+    const { formatBugsListText } = await import('../scripts/bot-host.mjs');
+    const text = formatBugsListText({
+      source: 'canonical-bug-list',
+      count: 4,
+      generated_at: '2026-10-09T01:00:00.000Z',
+      rows: [
+        { public_n: 2, title: 'Declined wont', state: 'new', queue: 'ready', status: 'wont_fix' },
+        { public_n: 3, title: 'Ignored live', state: 'done', queue: 'done', status: 'ignored' },
+        { public_n: 1, title: 'Open one', state: 'packed', queue: 'ready', status: 'to_fix' },
+        { public_n: 7, title: 'Journey green', state: 'verifying', queue: 'in_progress', status: 'in_progress' },
+      ],
+    });
+    expect(text).toContain('2 cards');
+    expect(text).not.toContain('4 cards');
+    expect(text).toContain('#1 Open one (packed/ready)');
+    expect(text).toContain('#7 Journey green (verifying/in_progress)');
+    expect(text).not.toContain('Declined wont');
+    expect(text).not.toContain('Ignored live');
+    expect(text).toContain('2 closed or declined hidden');
+  });
+
+  it('redirectFreebuffTurn runs the chat on the OpenCode model and refuses only when that model is Freebuff too', async () => {
+    const { redirectFreebuffTurn } = await import('../scripts/bot-host.mjs');
+    const same = redirectFreebuffTurn({ model: 'opencode/deepseek-v4.1-flash', hostModel: 'opencode/deepseek-v4.1-flash' });
+    expect(same.redirect).toBe(false);
+    expect(same.refuse).toBe(false);
+    const turn = redirectFreebuffTurn({ model: 'freebuff/freebuff', hostModel: 'opencode/deepseek-v4.1-flash' });
+    expect(turn.redirect).toBe(true);
+    expect(turn.model).toBe('opencode/deepseek-v4.1-flash');
+    expect(turn.from).toBe('freebuff/freebuff');
+    expect(turn.note).toContain('Freebuff runs in the terminal');
+    const stuck = redirectFreebuffTurn({ model: 'freebuff/freebuff', hostModel: 'freebuff/freebuff' });
+    expect(stuck.refuse).toBe(true);
+    expect(stuck.redirect).toBe(false);
+  });
+
   it('shows the effective model in status', () => {
     const config = {
       agent: { model: 'opencode-go/deepseek-v4.1-flash', variant: 'high', workspace: '/tmp' },

@@ -68,3 +68,13 @@ d4219bd6  merge main into plan/tg-tool-surface: same as above, waived 2026-10-08
 fddee60  agent/tg-tool-surface plumbing generator: blob-identical file already upstream via #581; remaining delta is branch-behind downgrades (pool pickers, web renewal); 0% new content verified, waived 2026-10-08
 e0443075  agent/tg-tool-surface gateway defaults: co.uk default already on main plus newer web-renewal work; landing reverts it, waived 2026-10-08
 befe83e9  tui-lifecycle session/workspace binding: fully upstream in evolved form (scoping core, attach settling, always-pass-session all on main); rebase emptied to zero residual, waived 2026-10-08
+
+# origin/agent/model-pools and origin/agent/model-pools-bin-fallback share
+# 02bba992, the pre-squash commit of #614. The squash is a1d9ef7c, an ancestor
+# of origin/main. The only watched-file change is one sentence in
+# scripts/mobile/tui-attach.sh ("/freemodel" -> "/model_free"), and origin/main
+# already has that sentence. git cherry stays "+" because main rewrote the
+# file after the squash (refusal timing, connect timing). Landing the branch
+# would revert those later edits. The branches stay: agent/model-pools is a
+# named hold. One sha covers both branches.
+02bba992  origin/agent/model-pools and origin/agent/model-pools-bin-fallback: #614 squash a1d9ef7c already has the /model_free sentence in tui-attach.sh; later main edits moved the file, so the pre-squash sha is stranded, waived 2026-10-09
