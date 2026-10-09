@@ -68,6 +68,30 @@ OPENCODE_BIN="${OPENCODE_BIN:-/root/.opencode/bin/opencode}"
 # units set it explicitly for the same reason they set OPENCODE_BIN.
 CLINE_BIN="${CLINE_BIN:-$HOME/.npm-global/bin/cline}"
 WAIT_SECONDS="${TUI_WAIT_SECONDS:-180}"
+# How long a refusal message stays on screen before the shell exits. It was a
+# flat 20s, which is most of the perceived "it is slow to connect" on a refusal;
+# the message is the point, not the wait. Override with TUI_REFUSAL_SECONDS.
+REFUSAL_SECONDS="${TUI_REFUSAL_SECONDS:-5}"
+
+# --- how long the connect took, so "it is slow" is a number and not a
+# feeling. Read at four points the script already passes through: start,
+# resolved, waited-out, ready. Nothing here waits or retries, and the
+# numbers are reported once, before the pane takes the screen.
+now_ms() {
+  local raw
+  # Asking the formatter for milliseconds is not portable: on the live box the
+  # `%s%3N` form printed seconds followed by the FULL nanosecond field
+  # (1791499779774203295), so every duration became a nine-digit number and the
+  # report read "connected in 456481s". Measured on the box 2026-10-08 by
+  # running this script there. So take nanoseconds where they exist and divide,
+  # and fall back to whole seconds where they do not.
+  raw="$(date +%s%N 2>/dev/null || true)"
+  case "$raw" in
+    ''|*[!0-9]*) printf '%s000' "$(date +%s)" ;;
+    *) printf '%s' "$((raw / 1000000))" ;;
+  esac
+}
+T_START="$(now_ms)"
 
 read_json() {
   node -e '
@@ -291,6 +315,8 @@ if [ "${TUI_DRY_RUN:-0}" = "1" ]; then
   [ -n "$LAUNCH_REASON" ] && echo "REASON=$LAUNCH_REASON"
   exit 0
 fi
+# Resolution is done: everything below is the wait and the pane.
+T_RESOLVED="$(now_ms)"
 
 # --- refuse a shared-session attach with no session to share. An opencode
 # terminal with no SID launches a bare opencode whose session the bot never
@@ -302,11 +328,12 @@ fi
 # first message resolves fresh and reaps correctly. Cline keeps its
 # fresh-thread path: its terminal never shares the turn thread by design.
 if [ -z "$SID" ] && [ "$SURFACE" = "opencode" ]; then
-  echo "No chat session recorded yet — nothing shared to attach to."
-  echo "Send the bot a message first, then reopen this: the next attach"
-  echo "lands on that conversation instead of a blank terminal the bot"
-  echo "never joins."
-  sleep 20
+  echo "[tui] refused: nothing shared to attach to. This chat has no session"
+  echo "recorded yet, so opening a terminal here would be blank and the bot"
+  echo "would never join it."
+  echo "Fix: send the bot a message first, then reopen this — the next attach"
+  echo "lands on that conversation."
+  sleep "$REFUSAL_SECONDS"
   exit 0
 fi
 
@@ -327,12 +354,15 @@ while ! lease_held "$LEASES" 1800 && [ "$WAITED" -lt "$WAIT_SECONDS" ]; do
   WAITED=$((WAITED + 3))
 done
 if ! lease_held "$LEASES" 1800; then
-  echo "Still waiting on the bot after ${WAIT_SECONDS}s — not attaching, two"
-  echo "writers would corrupt the conversation."
-  echo "Close this and try again, or send /abort in the chat to stop the turn."
-  sleep 20
+  echo "[tui] refused: a bot turn has been running in this chat for over ${WAIT_SECONDS}s."
+  echo "Two writers on one conversation is what corrupts it, so this does not"
+  echo "attach on top of the bot."
+  echo "Fix: send /abort in the chat to stop that turn, then reopen this."
+  echo "If no turn is actually running, that is a stuck lease — see [tui] above."
+  sleep "$REFUSAL_SECONDS"
   exit 0
 fi
+T_WAITED="$(now_ms)"
 
 # --- refuse rather than fall back. Two different refusals, and they must not be
 # confused: a lane with NO terminal is a policy answer the user can act on
@@ -342,16 +372,17 @@ fi
 if [ "${#LAUNCH_ARGV[@]}" -eq 0 ]; then
   if [ -n "$LAUNCH_REASON" ]; then
     echo "No terminal for this chat — ${LAUNCH_REASON}."
-    echo "Move the chat to a lane with a real terminal with /freemodel, or use"
+    echo "Move the chat to a lane with a real terminal with /model_free, or use"
     echo "/tx on for the live tool feed here."
   else
+    echo "[tui] refused: could not resolve this chat's terminal."
     echo "Could not work out which terminal this chat needs, so nothing was"
     echo "opened. A bare \`opencode\` here would be a guess, and a guess is how"
     echo "this ended up on the wrong tool in the first place."
-    echo "Send /tui again, or check that the unit sets CLINE_BIN and"
+    echo "Fix: send /tui again, or check that the unit sets CLINE_BIN and"
     echo "OPENCODE_BIN and that scripts/lib/tui-surface.mjs is present."
   fi
-  sleep 20
+  sleep "$REFUSAL_SECONDS"
   exit 0
 fi
 
@@ -526,4 +557,18 @@ trap cleanup EXIT INT TERM
 tmux new-session -d -A -s "$TMUX_NAME" "${LAUNCH_ARGV[@]}"
 tmux set-option -t "$TMUX_NAME" status off 2>/dev/null || true
 tmux set-window-option -t "$TMUX_NAME" aggressive-resize on 2>/dev/null || true
+
+# The pane exists, so the connect is over and this is the only place the
+# number can exist at all. The phases are reported separately because
+# "slow" has two very different causes here: resolution (reading this
+# chat's prefs and session) and a wait for the bot's turn to finish.
+# Appended to the same log as the decision line, as a second record.
+T_READY="$(now_ms)"
+READY_MS=$((T_READY - T_START))
+RESOLVE_MS=$((T_RESOLVED - T_START))
+WAIT_MS=$((T_WAITED - T_RESOLVED))
+attach_log "decision=$DECISION ready_ms=$READY_MS resolve_ms=$RESOLVE_MS wait_ms=$WAIT_MS"
+printf '[tui] connected in %ss (resolved %ss, waited %ss)\n' \
+  "$((READY_MS / 1000))" "$((RESOLVE_MS / 1000))" "$((WAIT_MS / 1000))"
+
 tmux attach-session -t "$TMUX_NAME"
