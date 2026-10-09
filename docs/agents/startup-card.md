@@ -4,6 +4,8 @@ Run `node scripts/startup-card.mjs` from the Health-tracker checkout you are edi
 
 The card prints every Current-work row in `plan/ROADMAP.md` whose label says COMPLETE. Those rows are closed. Do not reopen one because a plan header, a card procedure, or an `AI_HANDOVER.md` bullet still says it is open.
 
+A packet whose own gate is already true is go for the files that gate names. Do not ask the user to type go. An open PR blocks only the files it lists. A cleared or COMPLETE phase is not an earlier open phase.
+
 On a VM session, the first action is `python3 ~/.agents/skills.py sync`, then this card. The card prints the machine, the sheet writer, and the last commits on `origin/main`. Sheet writes go only through `ruby ~/.agents/skills/do-github-sync/scripts/sheet_row.rb`. Agents never set Status to Done.
 
 `node scripts/sheet-watcher.mjs` is print-only. `--write` creates one temporary row after the same dirty fingerprint has sat for 20 minutes. It does not write that key again, because `sheet_row.rb` archives the previous row.

@@ -62,6 +62,9 @@ console.log('assert-closed-stays-closed:');
 {
   const rows = closedRowsFromRoadmap(roadmap);
   check('current work lists only its COMPLETE rows', rows.length === 1 && rows[0] === 'R-14.1', rows.join(','));
+  const withClosed = roadmap.replace('## Later', '3. **R-16 closed on the VM fleet (2026-10-09).** Cleared.\n\n## Later');
+  const both = closedRowsFromRoadmap(withClosed);
+  check('a closed row counts the same as COMPLETE', both.includes('R-14.1') && both.includes('R-16'), both.join(','));
 }
 
 {
@@ -83,6 +86,19 @@ console.log('assert-closed-stays-closed:');
 }
 
 {
+  const stillOpen = [
+    closedPlan,
+    '',
+    'Card 9 is the next open card. Re-run it on one restarted bot.',
+  ].join('\n');
+  const problems = contradictions({
+    roadmap,
+    files: { 'plan/R14_1_AGENT_PLAN.md': stillOpen },
+  });
+  check('a COMPLETE card section that still calls the card open fails', problems.some((line) => line.includes('is the next open card')), problems.join(' | '));
+}
+
+{
   const card = buildStartupCard({
     hostname: 'box',
     location: 'mac',
@@ -93,6 +109,7 @@ console.log('assert-closed-stays-closed:');
   check('the startup card says not to reopen it', /Do not reopen/.test(card));
   const plain = buildStartupCard({ hostname: 'box', location: 'mac', commits: [] });
   check('a card with no roadmap read does not invent a close', !plain.includes('Do not reopen'));
+  check('the card says not to ask for a go', /Do not ask the user to type go/.test(card));
 }
 
 {

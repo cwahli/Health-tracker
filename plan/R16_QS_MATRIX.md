@@ -3,17 +3,14 @@
 > Tracked in `plan/` beside the charter, not in `qa-evidence/`: that directory is
 > gitignored, and a board nobody can pull is not a board. Raw captures stay local.
 
-**Charter:** `plan/ROADMAP.md` → "R-16 — cross-location quota-resilience scorecard (QS-1..QS-12)".
-**This file is evidence, not a claim.** The charter's pass rule: "the scorecard passes only
-when every QS row below is green **in the same live pass**. One RED row = whole scorecard
-RED." So R-16 is **RED** today, and the table below says which rows are green, which are not,
-and what is missing — no row is rounded up.
+**Charter:** `plan/ROADMAP.md` → R-16, closed on the VM fleet on 2026-10-09.
+**This file is evidence, not a claim.** The 2026-10-09 decision clears QS-1, QS-3, QS-4,
+and QS-9, and clears the phone, Colab, and Grok halves of QS-5, QS-10, and QS-11.
+The eight green rows stand. Do not run another cross-device pass to turn a cleared
+row green.
 
-**Reorder note.** The charter says "No R-16 row may start while R-14.1 is open" and allows
-"an explicit human reorder". The repository owner ordered this work on 2026-09-26
-("get the latest version of github and see what you can do to get the scorecard green …
-do the work on your own"), which is that reorder. R-14.1 cards 4/5/6/6c/9 remain open
-regardless, so this file does not close them.
+**Reorder note.** R-14.1 closed on the VM fleet on 2026-10-06. The 2026-09-26 reorder
+that opened this board is history.
 
 **Deploy under test:** `/home/ubuntu/bot-host-r14` at `9dd26fc`, branch
 `agent/r14-vendor-sync`, services `bot-host@vm`, `bot-host@vm2`, `ht-allowance-watch`.
@@ -25,23 +22,23 @@ Secrets are never pasted here; the probe prints credential *presence* only.
 
 | ID | Row | State | One-line reason |
 |---|---|---|---|
-| QS-1 | Roam mobile → VM → grok → collab in one project | 🔴 | `mobile` is a physical device; `collab` and `grok` workers are not running in this box. vps half proved. |
+| QS-1 | Roam mobile → VM → grok → collab in one project | CLEARED 2026-10-09 | VM half stands. Phone, Colab, and Grok are not required. |
 | QS-2 | Quota-shaped error never surfaces raw JSON; next lane completes the prompt | 🟢 | Live: switch line names failed → next lane, answer completed, no raw JSON, ledger untouched. |
-| QS-3 | Exhausted host hands off project + context | 🔴 | Needs ≥2 connected workers with quota; only one host here. Code exists (`/location`, handoff pack), not proved live. |
-| QS-4 | Automated pack-up with three paths | 🔴 | Same blocker as QS-3. |
-| QS-5 | Every agent's pool pickers + `/allowance` match that host's probe | 🟡 | vps host green (probe ↔ rows agree per provider). `collab`/`grok`/`mobile` probes not captured. `/model` and `/models` are pointers now; this row stays partial. |
+| QS-3 | Exhausted host hands off project + context | CLEARED 2026-10-09 | Cross-device handoff is not required. |
+| QS-4 | Automated pack-up with three paths | CLEARED 2026-10-09 | Same close as QS-3. |
+| QS-5 | Every agent's pool pickers + `/allowance` match that host's probe | VM half stands; other hosts CLEARED 2026-10-09 | vps host green. Phone, Colab, and Grok probes are not required. |
 | QS-6 | Free list split high vs light, from the existing catalogs | 🟢 | Tiers read from `FREE_CODING_TOOLS_CATALOG.md`; the ratings table that forked them is deleted. |
 | QS-7 | Benchmark score on `/freemodel` from the bakeoff, "unranked" when absent | 🟢 | Button labels are bakeoff counts or "unranked"; no number exists that the ledger has no row for. |
 | QS-8 | `/freemodel` list == `/allowance` list | 🟢 | 30 == 30 on both bots, live, after the parity fixes. |
-| QS-9 | All agents auto-switch location on exhaustion | 🔴 | Needs multiple connected hosts; single-host walk order is proved (QS-10) instead. |
-| QS-10 | Exhaustion walks tier-first, then the next location | 🟡 | Tier-internal order proved (high → unlisted → light, light reachable + announced). The "next location" half needs QS-9. |
-| QS-11 | Mid-turn exhaustion detected, stamped, next model resumes | 🟡 | Displacement/stamp/`/allowance` reflection proved live; a **mid-stream** death has not been produced on this host. |
+| QS-9 | All agents auto-switch location on exhaustion | CLEARED 2026-10-09 | Cross-device auto-switch is not required. |
+| QS-10 | Exhaustion walks tier-first, then the next location | VM half stands; next location CLEARED 2026-10-09 | Tier-internal order proved. The next-location half went out with QS-9. |
+| QS-11 | Mid-turn exhaustion detected, stamped, next model resumes | VM half stands; cross-device resume CLEARED 2026-10-09 | Displacement, stamp, and `/allowance` reflection were proved on the VM. A manufactured mid-stream death is not required. |
 | QS-12 | No custom builds — shared components only | 🟢 | Propagation gate green, vendor mirrors byte-identical, no surface-local lane table. |
 | QS-13 | Project and role on a live chat | 🟢 | Live on @VM_19485_bot: /role ui, /role check ops, external isolation, legal policy text (R-14.1 cards 1, 2, 3, 7, 8). |
 | QS-14 | Mini App opens the right chat | 🟢 | Live on tui-gateway: per-chat tmux session attach, HMAC initData verification, token renewal grace (TUI S1–S5, S8). |
 | QS-15 | The tool's TUI stays on `work-view` | 🟢 | Live on VM: tmux `work-view` session survives across /project and /location without kill (R-14.1 card 6c). |
 
-**R-16 Status: 8 green, 3 partial, 4 red.** (Requires physical mobile/Grok/Colab workers online for full green).
+**R-16 Status: closed on the VM fleet, 2026-10-09.** Eight rows stay green (QS-2, QS-6, QS-7, QS-8, QS-12, QS-13, QS-14, QS-15). QS-1, QS-3, QS-4, and QS-9 are cleared. QS-5, QS-10, and QS-11 keep their VM evidence; their phone, Colab, and Grok halves are cleared.
 
 ---
 

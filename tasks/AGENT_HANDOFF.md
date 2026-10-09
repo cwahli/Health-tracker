@@ -24,12 +24,12 @@ Prior packet (Telegram consolidation / Cline) is fully closed out. State below i
 | `wip/index-7128b23`, `wip/index-f2715d3` | Old index snapshots |
 | `wip/stash-0-untracked-prototypes`, `wip/stash-1-applet-bugqueue`, `wip/stash-2-biomarker-lifecycle` | Old stash snapshots |
 
-## Open work (from `plan/ROADMAP.md` — not started this session)
-- **F-13.2** — blocked (needs live T2 `per_100g` lock capture).
-- **V-27** phone check — `blocked_human`.
-- **Track D D-1** unpaid Supabase probe (~24 Sep), **D-3 / D-5 / D-6 / D-10** — `blocked_human`.
-- **L-5** locale — human must name a locale first.
-- Meal-audit ledger: ~69 open rows (mostly `W2-OAT-01`, 48 with `actual=null`) — investigate only if asked.
+## Open work (refreshed 2026-10-09 from `plan/ROADMAP.md`)
+- **F-13.2** — blocked (needs a live T2 `per_100g` lock capture).
+- **D-10** — R2 orphan delete, only after an explicit go.
+- **V-17b** — DuckDNS log soak, then remove the DuckDNS blocks.
+- **Cleared 2026-10-09:** D-3, D-5…D-8, L-5, R-13.4, R-13.5, V-18, CB-7, CB-8, the cross-device half of R-16. Decision: keep D1.
+- D-1, D-2, and V-27 are done. Do not reopen them.
 
 ## Repo / deploy
 - Repo: `https://github.com/cwahli/Health-tracker.git` (was `Health-tracker-2` in older notes).

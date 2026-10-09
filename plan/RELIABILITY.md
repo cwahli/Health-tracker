@@ -85,7 +85,7 @@ These are the principles behind this program — not new invention.
 
 ## 4. Optimized target architecture (near-term)
 
-**Execute:** [DATA_PLANE.md](./DATA_PLANE.md) **Track D** (ROADMAP). Live SQL is **D1**, not Supabase. **R-5 is superseded.** VPS SQLite is a **benchmark (D-5)** after Track V cutover, not a second writer.
+**Execute:** [DATA_PLANE.md](./DATA_PLANE.md) **Track D** (ROADMAP). Live SQL is **D1**. **R-5 is superseded.** The SQLite benchmark (D-5…D-8) was cleared on 2026-10-09. Decision: keep D1.
 
 ```text
 Firebase Auth          → identity only (Google Sign-In; firebase_uid on rows; no app-data writes)
@@ -110,7 +110,7 @@ Local IDB              → chat transcripts, offline cache, in-flight jobs
 | Telemetry | Local only (no free-tier DB) |
 | Identity | Firebase Auth only |
 
-**Do not** dual-write D1 + disk SQLite, or keep D1 as a live spare of SQLite. **R-13** is the Node origin on VPS-2 — not a D1 rewrite, not Pages Functions importing `server.ts`. Native `env.DB` / `env.BUCKET` is **R-13.4**, after go-live, and is unrelated to Track D’s SQLite gate.
+**Do not** dual-write D1 + disk SQLite, or install SQLite. **R-13** is the Node origin on VPS-2. **R-13.4 and R-13.5 were cleared on 2026-10-09.** Do not start a Worker-native API.
 
 ---
 
@@ -172,7 +172,7 @@ Absorbed from archived `Reliability_perf.md`. **Do not start these to “finish 
 | R-13 | Cloudflare go-live + AI Studio parity | Human wants a public URL | See §12. Packet **locked**. R-13.0 preflight PASS. R-13.1 any agent. |
 | R-3 | Playwright leftover-English crawl plus Kosong empty Front Desk | After Track **S-1** string list is green; not a 10-case meal loop | Not a substitute for class goldens |
 | R-4 | Extract `server.ts` routes (food / jobs / biomarkers) | Touching the monolith anyway | Do not big-bang for free-tier |
-| R-5 | Investigate D1 as primary SQL | **SUPERSEDED (Track D).** D1 is already live. SQLite-on-VPS = [DATA_PLANE.md](./DATA_PLANE.md) D-5 after V-16 | Do not reopen “stay on Supabase” |
+| R-5 | Investigate D1 as primary SQL | **SUPERSEDED (Track D).** D1 stays the database. D-5 was cleared 2026-10-09 | Do not reopen “stay on Supabase” or SQLite |
 | R-6 | Job crash recovery soak | Interrupted jobs still orphan | Partial today — fix the bug, no new plan |
 | R-7 | knip / memoize `getBiomarkerStatus` | Never a reliability gate | **Abandoned** as a milestone |
 | R-8 | Measure client TTI + request count (Home / Health / first chat) | Page feels slow (**now true**) | No unmeasured “60%” claims |
@@ -749,9 +749,9 @@ Firebase project `kempt-charmer-0r5vm`. OAuth client ID lives in Google Console 
 
 **R-13.3 Auth productionization.** Tighten `server_auth.ts`: localhost skip = host is localhost / 127.0.0.1 **only**. Popup + redirect fallback. Preview policy. Test Chrome, Safari, incognito, Drive backup popup, email verification.
 
-**R-13.4 Edge-native adapter (parked until 13.1 is live).** `getD1()`: `env.DB` else REST. `getR2()`: `env.BUCKET` else S3. In-process `runFoodAnalyze` instead of loopback fetch (Worker-to-Worker `fetch` on the same zone **fails** without a service binding). Durable jobs: D1 + Durable Object or Queue/Workflow (15 min). Verify Firebase tokens with WebCrypto/`jose`, not `firebase-admin`. Drop `sharp` from the Worker path (client `imageCompressor.ts` already compresses). **Do not** start this to unstick 13.1.
+**R-13.4 Edge-native adapter. CLEARED 2026-10-09.** The API stays Node on the VPS. Do not add `env.DB` / `env.BUCKET`, in-process Worker analyze, or Durable Objects for this app.
 
-**R-13.5 Observability / cost.** Workers Logs (Pages Functions do not have them). Alert 1102 / 1027 / 524. Confirm `_routes` so static is free. Keep D1 3-row chunks (`server_db_d1.ts`).
+**R-13.5 Observability / cost. CLEARED 2026-10-09.** Do not buy Workers Logs for an API that is not a Worker. Keep D1 3-row chunks (`server_db_d1.ts`).
 
 ### 12.8 What can go wrong
 
