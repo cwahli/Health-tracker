@@ -1136,7 +1136,9 @@ describe('pickers', () => {
     const agents = agentKeyboard([{ name: 'build', type: 'primary' }]);
     expect(agents.inline_keyboard[0][0]).toEqual({ text: 'build (primary)', callback_data: 'a:build' });
     const variants = variantKeyboard(['low', 'high']);
-    expect(variants.inline_keyboard[1][0]).toEqual({ text: 'high', callback_data: 'v:high' });
+    expect(variants.inline_keyboard[0][1]).toEqual({ text: 'high', callback_data: 'v:high' });
+    const marked = variantKeyboard(['low', 'high'], { selected: 'high' });
+    expect(marked.inline_keyboard[0][1]).toEqual({ text: '✅ high', callback_data: 'v:high' });
     expect(decodeCallback('m:5')).toEqual({ kind: 'm', value: '5' });
     expect(decodeCallback('noop')).toEqual({ kind: 'noop', value: undefined });
   });

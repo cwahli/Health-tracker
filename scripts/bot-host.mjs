@@ -66,6 +66,7 @@ import {
   failoverModels,
   listModels,
   listAgents,
+  listModelsVerbose,
   buildOpencodeEnv,
   humanizeRunError,
   isTimeoutError,
@@ -173,6 +174,7 @@ import {
   toTelegramCommands,
   assertValidCommands,
   parseAgentList,
+  parseModelsVerbose,
   modelKeyboard,
   sortModelsFreeFirst,
   agentKeyboard,
@@ -3632,27 +3634,6 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, [
           `⌨️ No terminal for this chat — it is on \`${tuiSurface.tool}\`, which answers in one shot and has no session to attach to.`,
           '`/tx on` still gives you the live tool feed here, and `/model_free` moves the chat to a lane with a real terminal if you want one.',
-        ].join('\n'));
-        return;
-      }
-      // No session to share means no terminal worth opening: tui-attach.sh
-      // refuses a sessionless opencode open (live 2026-10-04), so the button
-      // below would promise a conversation and deliver that refusal on the
-      // user's screen. Say it here, where the answer belongs. Asked BEFORE the
-      // tui-open.json write so a null session is never recorded as a fact about
-      // the chat — that snapshot with `sessionId: null` is what an auditor reads
-      // afterwards and cannot tell from a broken record.
-      //
-      // Live 2026-10-05: `/new` cleared the chat's session row at 10:54:23,
-      // `/tui` ran at 10:54:43, wrote the null snapshot and sent the button,
-      // and the tap 20s later printed "No chat session recorded yet — nothing
-      // shared to attach to" on a phone. tuiSessionId was already resolved at the
-      // top of this case; nothing read it on the open path.
-      if (!tuiCanOpen) {
-        await api.sendMessage(chatId, [
-          '⌨️ There is nothing for the terminal to attach to yet — this chat has no session.',
-          tuiNoSessionAdvice,
-          '(`/new` puts you here on purpose: a fresh chat has no session until your next message.)',
         ].join('\n'));
         return;
       }
