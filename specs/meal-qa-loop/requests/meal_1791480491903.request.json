@@ -1,0 +1,21 @@
+{
+  "schema": "meal-audit-request/1",
+  "mealId": "meal_1791480491903",
+  "name": "Baguette Sandwich and Orange Juice",
+  "provenance": "debug_payload",
+  "photos": [
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791480491903/photos/sha256_00c76ae6be7dbfe9a85324a4b3d445cdd7c01ccb34473c79e5b6b8f05423356d.jpg",
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791480491903/photos/sha256_f81e131a582c69b6095368b85698d6dc278b04b55f5942c487930d043464809f.jpg"
+  ],
+  "skeleton": "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791480491903/flow_skeleton.json",
+  "requestedAt": "2026-10-08T18:17:06.920Z",
+  "requestedBy": "meal-audit-loop",
+  "status": "pending",
+  "instructions": [
+    "Audit this meal and produce a ground-truth bundle.",
+    "For each dish: dishName, weightGrams, boundingBox2D (0-1000, required because photos exist), and all 32 nutrient keys.",
+    "Weight must come from the catalog (scripts/meal-audit-assist.mjs api:<query>) or a scale, never an eyeball estimate.",
+    "Run scripts/generate-meal-result.mjs to write meal_result.json, then report the bundle path with `complete`.",
+    "If the catalog cannot source a nutrient, the audit is INCOMPLETE: say so rather than filling zeros."
+  ]
+}
