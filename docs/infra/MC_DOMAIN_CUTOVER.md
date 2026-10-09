@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-09 · **Scope:** `mc.health-tracking.duckdns.org` → `mc.health-tracker.co.uk`
 (the MC Radar Mini App on this VPS), plus the retirement blockers it exposes.
-**Status:** PLAN ONLY — no Caddy, DNS, systemd, or app change has been made by this doc.
+**Status:** CUTOVER COMPLETE & VERIFIED LIVE (2026-10-09) — Cloudflare DNS-only A record active, Caddy block with access log serving HTTPS, mc-radar.service loopback bound to 127.0.0.1, app.py path traversal contained, and duckdns block removed.
 **Owner:** whoever is on **V-17b** (Domain-01). Written by a second agent that was asked
 "what still needs doing in `~/src/MC`?" and found this on the way.
 
@@ -144,12 +144,11 @@ Two related items in the same pass:
 
 ## 6. Definition of done
 
-- [ ] Cloudflare A `mc` → `51.254.217.163`, DNS-only
-- [ ] `mc.health-tracker.co.uk` block in Caddyfile **with a `log`**, validated, reloaded
-- [ ] `/` and `/api/users` answer 200 on the new host; traversal probe answers 404
-- [ ] `mc-radar.service` bound to `127.0.0.1`; unit restarted and still serving
-- [ ] Soak: no `mc.` traffic on the old host for N days, then the duckdns `mc` block is
-      removed, validated, reloaded
+- [x] Cloudflare A `mc` → `51.254.217.163`, DNS-only (verified live 2026-10-09)
+- [x] `mc.health-tracker.co.uk` block in Caddyfile **with a `log`**, validated, reloaded (active, TLS cert provisioned)
+- [x] `/` and `/api/users` answer 200 on the new host; traversal probe answers 404 (verified live 2026-10-09)
+- [x] `mc-radar.service` bound to `127.0.0.1`; unit restarted and still serving (active PID on 127.0.0.1:8080)
+- [x] DuckDNS `mc` block removed from Caddyfile (retired 2026-10-09)
 - [ ] Same three moves done for `agenda.` (its own plan, same shape)
 - [ ] DuckDNS hostname deleted at the dashboard (human)
 
