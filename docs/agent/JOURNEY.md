@@ -167,6 +167,7 @@ Babysitting today is mostly **agent-induced**: compare overwritten, targets drop
 | Standing FAIL (restore/re-wire) | “Learn from meal log” |
 | Named vitest red for one class | Anything touching `App.tsx` / jobs / LogChat |
 | ROADMAP ID that already lists a gate | New journey, new product behavior |
+| Packet gate already true, for the files that gate names. Do not ask the user to type go. An open PR blocks only its own files. A cleared or COMPLETE phase is not an earlier open phase | A later phase that edits a hub file (`bot-host.mjs`, `free-lanes.mjs`, `work-session.mjs`, `tui-gateway.mjs`) |
 | Fingerprint / `assert-spec-diff` red | No named test yet |
 
 If there is no gate, Discover prints `(none)`. **Do not invent a night job.** First promote a standing row or a vitest (Reviewer → **promote**). Then the loop can eat it.

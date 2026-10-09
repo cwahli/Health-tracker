@@ -8,6 +8,7 @@ const FORBIDDEN = [
   { name: 'pick up the next open card', re: /pick up the next open card/i },
   { name: 'row is OPEN', re: /\bis OPEN\b/ },
   { name: 'do not mark the row done', re: /Do not mark [A-Z0-9.-]+ done/ },
+  { name: 'is the next open card', re: /is the next open card/i },
 ];
 
 export function currentWorkSection(markdown) {
@@ -27,7 +28,7 @@ export function closedRowsFromRoadmap(markdown) {
 export function completeItems(section) {
   const items = [];
   for (const line of String(section).split('\n')) {
-    const m = line.match(/\*\*(.+?)\s+COMPLETE\b/);
+    const m = line.match(/\*\*(.+?)\s+(?:COMPLETE|closed)\b/);
     if (!m) continue;
     const id = m[1].replace(/\s+/g, ' ').trim();
     const links = [];
@@ -55,6 +56,31 @@ export function card9HeadingHits(text) {
     .filter((line) => /^#{2,3} Card 9\b/.test(line) && !/CLOSED|COMPLETE/.test(line));
 }
 
+/** Body under a Card 9 heading that already says CLOSED or COMPLETE. */
+export function closedCardSectionHits(text) {
+  const hits = [];
+  const lines = String(text).split('\n');
+  let collecting = false;
+  const buf = [];
+  const flush = () => {
+    if (/is the next open card/i.test(buf.join('\n'))) hits.push('is the next open card');
+    buf.length = 0;
+  };
+  for (const line of lines) {
+    if (/^#{2,3} Card 9\b/.test(line)) {
+      if (collecting) flush();
+      collecting = /CLOSED|COMPLETE/.test(line);
+      continue;
+    }
+    if (collecting && /^#{1,3} /.test(line)) {
+      flush();
+      collecting = false;
+    } else if (collecting) buf.push(line);
+  }
+  if (collecting) flush();
+  return hits;
+}
+
 /**
  * @param {{ roadmap: string, files: Record<string, string> }} input
  * @returns {string[]} problems, empty when a COMPLETE row stays closed
@@ -73,6 +99,9 @@ export function contradictions({ roadmap, files }) {
       }
       for (const heading of card9HeadingHits(body)) {
         problems.push(`${rel}: Card 9 heading does not say CLOSED or COMPLETE: ${heading}`);
+      }
+      for (const hit of closedCardSectionHits(body)) {
+        problems.push(`${rel}: ${item.id} is COMPLETE and the card section still says "${hit}"`);
       }
     }
   }

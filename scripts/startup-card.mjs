@@ -25,6 +25,7 @@ export function buildStartupCard({ hostname, location, commits, closedRows } = {
     'Uncommitted work with no sheet row: node scripts/sheet-watcher.mjs (print-only; --write once, after 20 minutes on the same fingerprint).',
     'Code in a new worktree: node scripts/agent-worktree.mjs new <slug>',
     'Hub files, one agent at a time: scripts/bot-host.mjs, scripts/lib/free-lanes.mjs, scripts/lib/work-session.mjs',
+    'A packet whose own gate is already true is go for the files that gate names. Do not ask the user to type go. An open PR blocks only the files it lists. A cleared or COMPLETE phase is not an earlier open phase.',
   ];
   if (closedRows?.length) {
     lines.push('Closed on the roadmap. Do not reopen these. A plan header, a card procedure, or an AI_HANDOVER bullet that still says one of them is open is history:');

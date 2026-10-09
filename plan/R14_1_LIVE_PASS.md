@@ -372,9 +372,9 @@ cookie auth, per-bot terminals) is proven; the feed-first UI is not.
 
 ## Card 9 — COMPLETE 2026-10-06 (re-scoped to VM fleet baseline)
 
-Card 9 (re-run cards 1–8, including 6b and 6c, in order on one restarted
-`bot-host@vm`, one evidence block per card) is the next open card. It is not
-reachable from here. Two attempts, both recorded:
+Card 9 is CLOSED. Do not run this pass. Do not restart `bot-host@vm` for it,
+and do not paste a new matrix into the R-16 rows. The attempts below are the
+record of why the owner re-scoped the card, not a task list.
 
 **Attempt 1 — can the pass complete at all? No: card 6's router half has no bot.**
 Card 9 re-runs card 6, and card 6's live proof is required on `@VM_19485_bot`
