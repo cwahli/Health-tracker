@@ -110,13 +110,21 @@ function tgInitData(): string {
   }
 }
 
-/**
- * Same-gateway tabs render INSIDE the shell (burger stays put) via iframe.
- * Each door gets exactly what it accepts, nothing more:
- * - fleet/review/terminal: ?token= (their API doors read the query token)
- * - forge: ?initData= (its door takes initData header-or-query only)
- * The iframe has no Telegram bridge, so nothing here depends on it.
- */
+/** Shell frames every tab (burger stays put), each door getting exactly what
+ * it accepts: fleet/review ?token=&framed=1, terminal ?token= (`/` deep-link
+ * 302s to this bot's ttyd page), forge ?initData=, web ?token= on its host,
+ * tgtg the bag app's own initData door via the URL hash (telegram-web-app.js
+ * reads tgWebAppData from its own window's hash; the bag validator checks
+ * HMAC + user only, its Lax cookie is same-site across our hosts). */
+function absoluteBase(route: string): string | null {
+  try {
+    const u = new URL(route);
+    return u.origin + u.pathname;
+  } catch {
+    return null;
+  }
+}
+
 function frameSrc(def: MiniAppDef, bot: string): string | null {
   if (def.id === 'bugs') return null;
   if (def.kind === 'tty') {
@@ -126,13 +134,25 @@ function frameSrc(def: MiniAppDef, bot: string): string | null {
   if (def.id === 'fleet' || def.id === 'review') {
     const tok = queryToken();
     const base = def.id === 'fleet' ? '/fleet/app' : '/review/app';
-    return tok ? `${base}?token=${encodeURIComponent(tok)}` : null;
+    return tok ? `${base}?token=${encodeURIComponent(tok)}&framed=1` : null;
   }
   if (def.id === 'forge') {
     const init = tgInitData();
     return init ? `/forge/?initData=${encodeURIComponent(init)}` : null;
   }
-  return null;
+  if (def.id !== 'web' && def.id !== 'tgtg') return null;
+  const base = absoluteBase(def.route);
+  if (!base) return null;
+  if (def.id === 'web') {
+    const tok = queryToken();
+    return tok ? `${base}?token=${encodeURIComponent(tok)}` : null;
+  }
+  const init = tgInitData();
+  if (!init) return null;
+  const t = tg();
+  const ver = t?.version ? String(t.version) : '8.0';
+  const plat = t?.platform ? String(t.platform) : 'unknown';
+  return `${base}#tgWebAppData=${encodeURIComponent(init)}&tgWebAppVersion=${encodeURIComponent(ver)}&tgWebAppPlatform=${encodeURIComponent(plat)}`;
 }
 
 function Frame({ src, title }: { src: string; title: string }) {
@@ -140,8 +160,28 @@ function Frame({ src, title }: { src: string; title: string }) {
     <iframe
       src={src}
       title={title}
+      allow="clipboard-read; clipboard-write"
       style={{ flex: '1 1 auto', minHeight: 0, width: '100%', border: 0, background: '#0b1220' }}
     />
+  );
+}
+
+/** Cross-host tabs (bags, web) frame their own app with its own door, so the
+ * burger never unloads. The full-screen link is the honest escape hatch. */
+function ExternalFrame({ src, def }: { src: string; def: MiniAppDef }) {
+  return (
+    <>
+      <Frame src={src} title={def.title as string} />
+      <div style={{ flex: '0 0 auto', textAlign: 'center', padding: '4px 8px', borderTop: '1px solid #1e293b' }}>
+        <button
+          type="button"
+          onClick={() => { window.location.href = def.route; }}
+          style={{ background: 'none', border: 0, color: '#7dd3fc', fontSize: 12, cursor: 'pointer' }}
+        >
+          Blank page? Open {def.title} full-screen ↗
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -247,8 +287,7 @@ function GoButton({ def, target, label, health }: { def: MiniAppDef; target: str
       // Absolute target (another host/app): navigate bare, in-WebView so the
       // Telegram session (and its initData for the target's own door) stays.
       // The gateway query token is NOT forwarded cross-host. Best-effort
-      // BackButton → history.back() so the phone can return; the bot's menu
-      // button (bottom-left) always returns regardless.
+      // BackButton → history.back(); the bot menu button always returns.
       try {
         const t = tg();
         if (t?.BackButton?.show) t.BackButton.show();
@@ -286,21 +325,6 @@ function GoButton({ def, target, label, health }: { def: MiniAppDef; target: str
       )}
     </div>
   );
-}
-
-function openExternal(def: MiniAppDef) {
-  const t = tg();
-  // External entries carry the absolute URL in `route` (no `url` field).
-  const url = def.route;
-  try {
-    if (t?.openLink) {
-      t.openLink(url);
-      return;
-    }
-  } catch {
-    /* fall through to plain navigation */
-  }
-  window.location.href = url;
 }
 
 function BugsTab() {
@@ -379,6 +403,18 @@ function Shell() {
     }
   }, []);
 
+  // Token frames carry ?token= in their own src, minted from the shell's
+  // 900s page token. Renew on every switch to a token tab so the frame is
+  // born live instead of 401ing inside an unreachable iframe. initData tabs
+  // (bags, forge) re-forward top-level initData per frame — no renewal.
+  useEffect(() => {
+    if (def.id === 'fleet' || def.id === 'review' || def.id === 'tui' || def.id === 'web') {
+      renewToken().then((ok) => {
+        if (ok) setQueryEpoch((n) => n + 1);
+      });
+    }
+  }, [def.id]);
+
   useEffect(() => {
     document.title = `${def.title} — Mini App`;
     try {
@@ -418,49 +454,40 @@ function Shell() {
     return <BrowserLogin onDone={() => setFbAuthed(true)} />;
   }
 
+  // No shell header bar: each tab keeps its single original title and one
+  // floating burger (top-left, above everything incl. iframes) opens the
+  // drawer on every tab. Framed pages shift their mastheads after it
+  // (?framed=1); the native board leaves room via its embedded padding.
   return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}>
-      <header
-        style={{
-          display: 'flex', alignItems: 'center', gap: 12,
-          padding: '8px 12px', borderBottom: '1px solid #1e293b', flex: '0 0 auto',
-        }}
-      >
-        <button type="button" aria-label="Menu" onClick={() => setDrawer((v) => !v)}>
-          ☰
-        </button>
-        <strong>{def.title}</strong>
-      </header>
+      <button type="button" aria-label="Menu" onClick={() => setDrawer((v) => !v)}
+        style={{ position: 'fixed', top: 10, left: 10, zIndex: 60, width: 40, height: 40, borderRadius: 12, background: 'rgba(15,23,42,0.88)', border: '1px solid #334155', color: '#e2e8f0', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        ☰
+      </button>
       {drawer && (
-        <nav aria-label="Mini apps">
-          {apps.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              onClick={() => {
-                setDrawer(false);
-                if (a.kind === 'external') {
-                  openExternal(a);
-                  return;
-                }
-                setTab(a.id);
-              }}
-              style={{
-                display: 'block', width: '100%', textAlign: 'left',
-                padding: '10px 12px',
-                fontWeight: a.id === def.id ? 700 : 400,
-              }}
-            >
-              {a.title}
-            </button>
-          ))}
-        </nav>
+        <div role="presentation" onClick={() => setDrawer(false)}
+          style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(2,6,23,0.6)' }}>
+          <nav aria-label="Mini apps" onClick={(e) => e.stopPropagation()}
+            style={{ width: 'min(320px, 85vw)', height: '100%', background: '#0f172a', borderRight: '1px solid #334155', padding: '12px 0', overflowY: 'auto' }}>
+            <div style={{ padding: '4px 12px 10px', color: '#94a3b8', fontSize: 12 }}>Mini Apps</div>
+            {apps.map((a) => (
+              <button key={a.id} type="button" onClick={() => { setDrawer(false); setTab(a.id); }}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', background: 'none', border: 0, color: '#e2e8f0', cursor: 'pointer', fontWeight: a.id === def.id ? 700 : 400 }}>
+                {a.title}
+              </button>
+            ))}
+          </nav>
+        </div>
       )}
       <main style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {def.id === 'bugs' ? (
           <BugsTab />
         ) : frameSrc(def, query.bot) ? (
-          <Frame key={`${def.id}:${queryEpoch}`} title={def.title as string} src={frameSrc(def, query.bot) as string} />
+          def.id === 'tgtg' || def.id === 'web' ? (
+            <ExternalFrame key={`${def.id}:${queryEpoch}`} def={def} src={frameSrc(def, query.bot) as string} />
+          ) : (
+            <Frame key={`${def.id}:${queryEpoch}`} title={def.title as string} src={frameSrc(def, query.bot) as string} />
+          )
         ) : def.kind === 'tty' ? (
           <TtyTab def={def} />
         ) : (

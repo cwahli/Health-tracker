@@ -215,8 +215,9 @@ export function BugBoard({
     : 'fixed inset-0 z-[10050] bg-[#0b1220] flex flex-col w-full h-full p-0 text-[#f8fafc] font-sans antialiased overflow-hidden select-text';
   const frame = (
         <div className={frameClass}>
-          {/* Top Header */}
-          <header className="px-3 sm:px-5 py-2.5 flex items-center justify-between gap-x-3 gap-y-2 flex-wrap bg-[#111827]/80 backdrop-blur shrink-0 border-b border-white/5">
+          {/* Top Header — embedded leaves room for the shell's floating
+              burger, so the board keeps its single original title. */}
+          <header className={embedded ? "pl-14 pr-3 sm:pr-5 py-2.5 flex items-center justify-between gap-x-3 gap-y-2 flex-wrap bg-[#111827]/80 backdrop-blur shrink-0 border-b border-white/5" : "px-3 sm:px-5 py-2.5 flex items-center justify-between gap-x-3 gap-y-2 flex-wrap bg-[#111827]/80 backdrop-blur shrink-0 border-b border-white/5"}>
             <div className="flex items-center gap-2 min-w-0">
               <div className="min-w-0">
                 <h1 className="text-base font-bold tracking-tight flex items-center gap-1.5">
