@@ -552,3 +552,26 @@ exceptions.txt` says a branch that no longer exists cannot strand work and a
 waiver for it is just debt. If the Freebuff wording is wanted back, it belongs in
 `formatCompactAllowanceChat` as a fresh change driven by the projection's
 `terminalOnly` verdict, not by a hardcoded promo duration.
+
+## 2026-10-09: `02bba992` is the #614 squash, and the branches stay
+
+The unlanded-fix ratchet flagged `origin/agent/model-pools` and
+`origin/agent/model-pools-bin-fallback` (`02bba992`, past 24h) and that failed
+`tsc + named gates` on PR #648. Measured:
+
+- **The commit is the pre-squash half of merged #614.** The squash is
+  `a1d9ef7c` ("BOT-26: three pool pickers replace /freemodel"), an ancestor of
+  origin/main. `git merge-base --is-ancestor 02bba992 origin/main` is no,
+  because a squash does not keep the pre-squash sha.
+- **The only watched-file change is already on main.** `02bba992` touches
+  `scripts/mobile/tui-attach.sh` by one line: the refusal sentence names
+  `/model_free` instead of `/freemodel`. origin/main has that sentence.
+- **`git cherry` stays `+` because the file moved on.** After `a1d9ef7c`, main
+  rewrote the same script (refusal timing, connect timing, the cookie lock).
+  The patch context no longer matches, and the blobs are not identical, so the
+  ratchet cannot see the squash by itself. Landing the branch would revert
+  those later edits.
+- **The branches are not deleted.** `agent/model-pools` (tip `622b583e`) is a
+  named hold. `agent/model-pools-bin-fallback` carries the same sha. The
+  waiver is the one sha `02bba992` in `scripts/tui-stranded-exceptions.txt`.
+  The gate itself is unchanged.
