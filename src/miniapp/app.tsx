@@ -200,6 +200,7 @@ function BugsTab() {
       {...board}
       onClose={() => tg()?.close?.()}
       language="en"
+      embedded
     />
   );
 }
@@ -292,11 +293,11 @@ function Shell() {
   }
 
   return (
-    <div>
+    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <header
         style={{
           display: 'flex', alignItems: 'center', gap: 12,
-          padding: '8px 12px', borderBottom: '1px solid #1e293b',
+          padding: '8px 12px', borderBottom: '1px solid #1e293b', flex: '0 0 auto',
         }}
       >
         <button type="button" aria-label="Menu" onClick={() => setDrawer((v) => !v)}>
@@ -329,7 +330,7 @@ function Shell() {
           ))}
         </nav>
       )}
-      <main>
+      <main style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {def.id === 'bugs' ? (
           <BugsTab />
         ) : def.kind === 'tty' ? (
