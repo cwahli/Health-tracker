@@ -1,6 +1,7 @@
 ---
 id: meta-miniapp
-status: draft
+status: locked
+auto_go: true
 skill: sync-jobs
 edit_mode: patch
 allowed_files:
@@ -32,12 +33,11 @@ gate:
   - node scripts/assert-review-miniapp.test.mjs
 ---
 
-# Packet: meta mini-app — one shell, ten toggleable TG apps (DRAFT, do not execute yet)
+# Packet: meta mini-app — one shell, ten toggleable TG apps
 
-Human replies: **go** | **stop** | one comment. `go` only after R-14.1 closes
-(`plan/ROADMAP.md` Current work) — this packet touches `tui-gateway.mjs`,
-`bot-host.mjs`, `vite.config.ts`, all Current-work files. Sequencing is the
-gate before any node.
+**Go recorded 2026-10-09. Do not ask the user.** R-14.1 is closed, which was this packet's own gate. R-16, BOT-24, and BOT-26 are cleared and are not a sequencing stop. An open PR on `plan/ROADMAP.md` blocks that file only.
+
+This go is **P1 only**: create `src/miniapp/miniapp-registry.ts` and `scripts/lib/tg-oauth.mjs`. Zero hub edits. Zero behavior change. The other paths in `allowed_files` are the later phases. Do not edit `scripts/bot-host.mjs`, `scripts/lib/free-lanes.mjs`, `scripts/lib/work-session.mjs`, `scripts/tui-gateway.mjs`, `vite.config.ts`, or the existing mini-app pages in this go.
 
 ## Journey
 
@@ -167,11 +167,9 @@ Never `npm test`. Docs-only changes run nothing.
 
 Allowed: YAML list above. Out of scope: food/biomarker pipelines,
 endpoint unification (`bug-board-miniapp.md:40` — separate packet),
-`App.tsx`/`LogChat.tsx`/`JobStore.ts`, table redesign. ROADMAP entry for
-this packet lands as a one-line follow-up after PR #647 merges (it claims
-`plan/ROADMAP.md` today; claim-guard forbids overlapping it).
+`App.tsx`/`LogChat.tsx`/`JobStore.ts`, table redesign. The one-line roadmap entry is in PR #647, which already owns `plan/ROADMAP.md`. Do not open a second edit of that file. Do not wait for that PR before creating the two P1 files.
 
 ## Stop and come back
 
 Two repairs fail · Frozen file in the diff · New class appears · Live Gemini
-requested · R-14.1 still open when asked to execute.
+requested · A diff that touches a hub file under this P1 go.
