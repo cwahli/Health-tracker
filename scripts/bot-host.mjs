@@ -66,7 +66,6 @@ import {
   failoverModels,
   listModels,
   listAgents,
-  listModelsVerbose,
   buildOpencodeEnv,
   humanizeRunError,
   isTimeoutError,
@@ -76,6 +75,7 @@ import {
 } from './lib/agent-opencode.mjs';
 import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from './lib/opencode-tui.mjs';
 import { issueToken } from './tui-gateway.mjs';
+import { listModelCatalog } from './lib/opencode-api.mjs';
 import { KNOWN_HOSTS, workerStatus, isLocalHost, machineLabel } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
@@ -173,7 +173,6 @@ import {
   toTelegramCommands,
   assertValidCommands,
   parseAgentList,
-  parseModelsVerbose,
   modelKeyboard,
   sortModelsFreeFirst,
   agentKeyboard,
@@ -730,13 +729,36 @@ async function getModels(config, caches) {
   return caches.models;
 }
 
-async function getVariants(config, caches, modelId) {
+/**
+ * The model catalog for this host, cached for the life of the process.
+ *
+ * `opencode models --verbose` was removed from the CLI — it now exits with
+ * "Unrecognized flag", so this used to throw on every `/thinking`, `/model` and
+ * `/status` that needed a context limit. `opencode api model.list` is the
+ * supported surface. A host that cannot answer yields an empty list rather than
+ * an exception: the commands then say what they cannot determine instead of
+ * dying silently.
+ */
+async function modelCatalog(config, caches) {
   if (!caches.verbose) {
-    caches.verbose = parseModelsVerbose(
-      await listModelsVerbose({ opencodeBin: config.agent.opencodeBin, env: opencodeEnv(config) }),
-    );
+    const rows = await listModelCatalog({
+      opencodeBin: config.agent.opencodeBin,
+      env: opencodeEnv(config),
+      workspace: config.agent.workspace,
+    });
+    caches.verbose = rows || [];
+    if (!rows) caches.catalogUnavailable = true;
   }
-  const entry = caches.verbose.find((m) => m.id === modelId);
+  return caches.verbose;
+}
+
+async function getVariants(config, caches, modelId) {
+  const catalog = await modelCatalog(config, caches);
+  // A stored model may name a provider the catalog spells differently, so fall
+  // back to the bare model id before concluding there are no levels.
+  const bare = String(modelId || '').split('/').slice(1).join('/');
+  const entry = catalog.find((m) => m.id === modelId)
+    || catalog.find((m) => m.id.split('/').slice(1).join('/') === bare);
   return entry?.variants || [];
 }
 
@@ -1879,6 +1901,7 @@ export class ProgressRenderer {
         ctxLimit: this.ctxLimit || ctxLimitFor(this.modelLabel),
       });
       lines.push(`${this.settledLabel}${modelBit ? ` · ${modelBit}` : ''} · ${Math.max(0, Math.round(elapsedSec))}s${suffix}`);
+
     } else {
       lines.push(
         formatWorkingHeadline({
@@ -3361,26 +3384,56 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.');
         return;
       }
-      const variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+      let variants = [];
+      try {
+        variants = ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+      } catch (err) {
+        // A read failure must not read as "this model has no levels". Say which
+        // it was, so the answer is actionable.
+        await api.sendMessage(chatId, `Could not read this host's model catalog, so I cannot list the thinking levels for ${eff.model}.\n(${err.message})`);
+        return;
+      }
+      const levels = [...new Set(variants.filter(Boolean))];
       if (!cmd.args) {
-        if (!variants.length) {
-          await api.sendMessage(chatId, `No thinking levels exposed for ${eff.model}.`);
+        if (!levels.length) {
+          // Distinguish "the catalog is unreachable" from "this model is
+          // single-shot". They used to look identical, which is how a dead
+          // catalog read as a working answer.
+          await api.sendMessage(
+            chatId,
+            caches.catalogUnavailable
+              ? `This host cannot read its model catalog, so the levels for ${eff.model} are unknown.`
+              : `${eff.model} exposes no thinking levels — it runs at its default.`,
+          );
           return;
         }
-        await api.sendMessage(chatId, `Thinking level for ${eff.model} (current: ${eff.variant || 'default'}):`, {
-          reply_markup: variantKeyboard(variants),
+        // Name the level in force so the reply answers "what am I on" without
+        // a second command, and mark it on the keyboard.
+        const current = eff.variant && levels.includes(eff.variant) ? eff.variant : null;
+        await api.sendMessage(chatId, `Thinking levels for ${eff.model} — current: ${current || 'default'}:`, {
+          reply_markup: variantKeyboard(levels, { selected: current }),
         });
         return;
       }
-      const target = cmd.args;
-      if (variants.length && !variants.includes(target)) {
-        await api.sendMessage(chatId, `Unknown level: ${target}\nUse /thinking to pick from the list.`);
+      const target = cmd.args.trim().toLowerCase();
+      if (levels.length && !levels.includes(target)) {
+        await api.sendMessage(chatId, `Unknown level: ${cmd.args}\n${eff.model} offers: ${levels.join(', ')}.`);
         return;
       }
       setPref(prefs, chatId, { variant: target });
       savePrefs(config.id, prefs);
-      await api.sendMessage(chatId, `Thinking level set to ${target}.`);
+      await api.sendMessage(chatId, `Thinking level set to ${target} for this chat.`);
+      return;
+    }
+
+    case 'skills': {
+      const typed = listTypedSkills(config);
+      if (!typed.length) {
+        await api.sendMessage(chatId, 'No /do-* skills found on this host. The canonical copy is ~/.agents/skills.');
+        return;
+      }
+      const lines = typed.map(([cmd, blurb]) => (blurb ? `${cmd} — ${blurb}` : cmd));
+      await api.sendMessage(chatId, `Skills you can type here (typed, not buttons — just send the line):\n${lines.join('\n')}`);
       return;
     }
 
@@ -3579,6 +3632,27 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, [
           `⌨️ No terminal for this chat — it is on \`${tuiSurface.tool}\`, which answers in one shot and has no session to attach to.`,
           '`/tx on` still gives you the live tool feed here, and `/model_free` moves the chat to a lane with a real terminal if you want one.',
+        ].join('\n'));
+        return;
+      }
+      // No session to share means no terminal worth opening: tui-attach.sh
+      // refuses a sessionless opencode open (live 2026-10-04), so the button
+      // below would promise a conversation and deliver that refusal on the
+      // user's screen. Say it here, where the answer belongs. Asked BEFORE the
+      // tui-open.json write so a null session is never recorded as a fact about
+      // the chat — that snapshot with `sessionId: null` is what an auditor reads
+      // afterwards and cannot tell from a broken record.
+      //
+      // Live 2026-10-05: `/new` cleared the chat's session row at 10:54:23,
+      // `/tui` ran at 10:54:43, wrote the null snapshot and sent the button,
+      // and the tap 20s later printed "No chat session recorded yet — nothing
+      // shared to attach to" on a phone. tuiSessionId was already resolved at the
+      // top of this case; nothing read it on the open path.
+      if (!tuiCanOpen) {
+        await api.sendMessage(chatId, [
+          '⌨️ There is nothing for the terminal to attach to yet — this chat has no session.',
+          tuiNoSessionAdvice,
+          '(`/new` puts you here on purpose: a fresh chat has no session until your next message.)',
         ].join('\n'));
         return;
       }
@@ -4839,8 +4913,18 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
         await api.editMessageText(chatId, messageId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.').catch(() => {});
         return;
       }
-      let variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+      let variants = [];
+      try {
+        variants = ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+      } catch (err) {
+        // Never leave a tap unanswered: the keyboard would sit there looking
+        // live. Say what happened and clear it.
+        await api.answerCallbackQuery(query.id, { text: 'Catalog unavailable' });
+        await api.editMessageText(chatId, messageId, `Could not read this host's model catalog, so ${eff.model}'s thinking levels are unknown.\n(${err.message})`, {
+          reply_markup: CLEAR_KEYBOARD,
+        }).catch(() => {});
+        return;
+      }
       // New buttons carry the name (`v:high`); old keyboards carry an index
       // (`v:0`). Support both so already-shown keyboards keep working.
       let variant = variants.includes(value) ? value : variants[Number(value)];
@@ -6803,10 +6887,6 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
         ? workSession.opencodeSessionId
         : undefined);
-    // Connectivity pings run throwaway: force a fresh session so their
-    // scaffolding never lands in the chat's transcript or the TUI.
-    if (isPingTurn) turnSessionId = null;
-
 
     // A TUI is open on this same conversation, so the user can watch this turn
     // happen in the terminal as well. It shares the session, so what runs here
@@ -6828,6 +6908,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         : `⌨️ A ${openSurface.tool} terminal is open, but ${openSurface.tool} cannot resume a thread headlessly — this turn will not appear there. The terminal stays on the last ${openSurface.tool} thread.`
       ).catch(() => {});
     }
+    // TEMP-TEST 2026-10-05: pings run IN the chat session, not throwaway.
+    // Throwaway kept Telegram and the web UI permanently incoherent (the
+    // answer exists nowhere the UI reads, so the UI can never update). With
+    // PONG humanized at delivery, the transcript cost is one bracketed user
+    // line in the TUI — worth coherent surfaces. Branch owner decides final.
+    // if (isPingTurn) turnSessionId = null;
 
     // A TUI is open on this same conversation, so the user can watch this turn
     // happen in the terminal as well. It shares the session, so what runs here
@@ -6855,6 +6941,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // switched project passes nothing here rather than the previous project's
     // conversation — which the tool would happily resume, in the wrong tree.
     if (workSession.viewMode !== 'tui' && turnSessionId) extraArgs.push('--session', turnSessionId);
+
     try { observer = createObserver(workSession); } catch {}
     observerContext = { model: eff.model, attempt: 1, surface: ref.surface, provider: ref.surface };
     // Local fanout: headline + observer log always. The feed is

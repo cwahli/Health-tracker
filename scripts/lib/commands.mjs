@@ -12,7 +12,7 @@ export const BOT_COMMANDS = [
   { command: 'start', description: 'Start the bot and show help' },
   { command: 'help', description: 'Show available commands' },
   { command: 'status', description: 'Show session, model, agent, usage' },
-  { command: 'status_all', description: 'Show fleet-wide status across agents in this chat' },
+  { command: 'status_all', fleetRead: true, description: 'Show fleet-wide status across agents in this chat' },
   { command: 'new', description: 'Start a fresh session' },
   { command: 'compact', description: "Compact this chat's session in place (stays on it)" },
   { command: 'model_light_free', description: 'Pick a free model from the light pool (a quota hit moves inside light only)' },
@@ -279,7 +279,26 @@ export function greetingReply(text) {
   return null;
 }
 
-  export function parseCommand(text) {
+
+  /**
+ * `fleetRead: true` marks a command whose answer is ABOUT THE ROOM rather than
+ * about the bot that ran it — one table for every agent present in this chat.
+ *
+ * Such a command must produce exactly one reply in a group. A bare one is
+ * addressed to nobody (see resolveGroupAddressing), so on a group with no master
+ * seat every bot dropped it and the room saw nothing. The gate now elects one
+ * renderer from the agents that are actually present, keyed off this flag — so
+ * marking a command here is all it takes to make it work in any group, and no
+ * command name is hardcoded anywhere else.
+ */
+export function isFleetReadCommand(name) {
+  const key = String(name ?? '').trim().toLowerCase();
+  if (!key) return false;
+  return BOT_COMMANDS.some((c) => c.command === key && c.fleetRead === true);
+}
+
+/** Every agent that has observed this chat, in registry order. */
+export function parseCommand(text) {
     const raw = String(text ?? '').trim();
     if (!raw.startsWith('/')) return null;
     let normalized = raw;
@@ -857,14 +876,26 @@ export function agentKeyboard(agents) {
   };
 }
 
-export function variantKeyboard(variants) {
+export function variantKeyboard(variants, { selected = null, columns = 2 } = {}) {
   // Embed the variant name (short, e.g. "low"/"high") instead of a bare
   // index so taps stay valid even if the cached model list was refetched
   // or reordered between showing the keyboard and tapping it.
   // Old `v:<index>` buttons still decode via the index fallback.
-  return {
-    inline_keyboard: variants.map((variant) => [{ text: variant, callback_data: `v:${variant}` }]),
-  };
+  const list = [...new Set((Array.isArray(variants) ? variants : []).map((v) => String(v ?? '').trim()).filter(Boolean))];
+  // The level in force is marked in the label, so the keyboard answers "what am
+  // I on" by itself. It stays tappable — a tap on the current level is a no-op
+  // re-set, not an error — and callback_data is untouched, so an old tap still
+  // decodes to the same level.
+  const buttons = list.map((variant) => ({
+    text: variant === selected ? `✅ ${variant}` : variant,
+    callback_data: `v:${variant}`,
+  }));
+  // Two per row: five levels in five rows is a column of text on a phone, and
+  // every model that offers levels offers several.
+  const perRow = Math.max(1, Math.min(columns, buttons.length || 1));
+  const rows = [];
+  for (let i = 0; i < buttons.length; i += perRow) rows.push(buttons.slice(i, i + perRow));
+  return { inline_keyboard: rows };
 }
 
 export function decodeCallback(data) {

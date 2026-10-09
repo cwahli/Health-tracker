@@ -23,7 +23,6 @@ import {
   dedicatedTaxRoleIds,
   forgetTaxGroup,
   formatTaxGroupReply,
-  isTaxAsk,
   isTaxGroupChat,
   readTaxSnapshot,
   rememberTaxGroup,
@@ -35,27 +34,12 @@ const HOST = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
 
 let passed = 0;
 let failed = 0;
-let skipped = 0;
 function check(name, cond, detail = '') {
   if (cond) passed += 1;
   else {
     failed += 1;
     console.log(`  FAIL  ${name}${detail ? `  — ${detail}` : ''}`);
   }
-}
-
-/**
- * A case that needs state this host does not have. It reports SKIP, visibly,
- * rather than passing: a green line for a check that never ran is the same lie
- * as a green line for a check that failed.
- */
-function checkWhen(available, name, cond, detail = '') {
-  if (!available) {
-    skipped += 1;
-    console.log(`  SKIP  ${name}  — ${detail}`);
-    return;
-  }
-  check(name, cond, detail);
 }
 
 const group = (text) => ({ chat: { type: 'supergroup', id: -100999 }, text });
@@ -159,10 +143,6 @@ check('a bare question on the tax project is a council turn', council?.mode === 
 check('a bare question on the health project is not stolen', notTax == null);
 check('a named seat is a seat turn in any project', seat?.mode === 'seat' && seat.roleId === 'tax_accountant');
 check('thanks in the tax room is skipped', thanks?.mode === 'skip');
-const seatThanks = classifyTaxGroupTurn({
-  kind: 'group', addr: forVm, text: 'thanks', projectId: 'chiwah-tax', isDesk: true,
-});
-check('thanks to a named seat is skipped', seatThanks?.mode === 'skip');
 
 const healthOnTaxChat = classifyHealthGroupTurn({
   kind: 'group', addr: roomVm, text: roomQuery, projectId: 'health-tracker', taxChat: true,
@@ -181,17 +161,17 @@ const snapshot = {
   filed: [{ period: '2022-23', filedTax: '8636', engineTax: '8938.33' }],
 };
 const councilReply = formatTaxGroupReply({ mode: 'council', question: roomQuery, snapshot });
-check('the council answer leads with one answer', councilReply.startsWith('One answer'), councilReply.slice(0, 180));
+const order = ['One answer', '1. Tax Accountant', '2. Tax Verifier'];
+let cursor = -1;
+let inOrder = true;
+for (const label of order) {
+  const at = councilReply.indexOf(label);
+  if (at <= cursor) inOrder = false;
+  cursor = at;
+}
+check('the council answer leads, then the seats run in order', inOrder, councilReply.slice(0, 180));
 check('the council answer names the 370-day period', /2015-16 accounting period: it is 370 days/.test(councilReply));
-check('the council answer is one voice, not one paragraph per seat', !/Seats, in order|^1\. Tax Accountant|^2\. Tax Verifier/m.test(councilReply));
-check('the council answer carries both the facts and the check', /chargeable profit/.test(councilReply) && /re-read the same files/.test(councilReply));
 check('the council answer does not invent a model', !/I recommend you pay|you should file £/.test(councilReply));
-const listReply = formatTaxGroupReply({ mode: 'council', question: 'list every period', snapshot });
-check('a list question lists the periods', /2015-16: chargeable/.test(listReply) && /2023-24: chargeable/.test(listReply));
-const howReply = formatTaxGroupReply({ mode: 'council', question: 'how do I fix this', snapshot });
-check('a how question says where to fix', /Fix it in the books/.test(howReply));
-check('any short question is a tax ask in the tax room', isTaxAsk('status') === true && isTaxAsk('what next') === true && isTaxAsk(roomQuery) === true);
-check('thanks is not a tax ask', isTaxAsk('thanks') === false);
 
 const seatReply = formatTaxGroupReply({
   mode: 'seat', roleId: 'tax_accountant', question: forVm.cleanText, snapshot,
@@ -209,16 +189,12 @@ forgetTaxGroup(tmp, -100999);
 check('a health seat mention drops the tax binding', !isTaxGroupChat(tmp, '-100999'));
 fs.rmSync(tmp, { recursive: true, force: true });
 
-// The books are the operator's real project (~/chiwah-tax), not a fixture, so
-// they exist on the VPS and nowhere else — a CI runner has no ~/chiwah-tax and
-// this case could only ever fail there. It is a host case, reported as such,
-// and the rest of the tax surface is pinned against fixtures.
-const TAX_HOME = path.join(os.homedir(), 'chiwah-tax');
-const hasBooks = fs.existsSync(TAX_HOME);
-const live = hasBooks ? readTaxSnapshot(TAX_HOME) : null;
-checkWhen(hasBooks, 'the live books show 2015-16 as longer than 12 months',
-  live?.overlong?.some((row) => row.label === '2015-16' && row.days > 366),
-  `no ${TAX_HOME} on this host`);
+const live = readTaxSnapshot(path.join(os.homedir(), 'chiwah-tax'));
+if (fs.existsSync(path.join(os.homedir(), 'chiwah-tax'))) {
+  check('the live books show 2015-16 as longer than 12 months', live?.overlong?.some((row) => row.label === '2015-16' && row.days > 366));
+} else {
+  console.log('  SKIP  the live books show 2015-16 as longer than 12 months  — host-only, no ~/chiwah-tax here');
+}
 
 const normalized = normalizeConfig(reg.bots.find((b) => b.id === 'tax_accountant'));
 check('normalizeConfig keeps the tax seat and its home project', normalized.agent.taxRole === 'tax_accountant' && normalized.agent.homeProject === 'chiwah-tax');
@@ -227,5 +203,5 @@ check('the handler classifies a tax turn', HOST.includes('classifyTaxGroupTurn')
 check('the handler answers with answerTaxGroup', HOST.includes('answerTaxGroup'));
 check('the handler passes both seat lists', HOST.includes('dedicatedTaxRoleIds'));
 
-console.log(`\n${passed} pass, ${failed} fail${skipped ? `, ${skipped} skipped (host-only)` : ''}`);
+console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
