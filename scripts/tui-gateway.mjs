@@ -491,6 +491,55 @@ const BOOTSTRAP_BUGS = [
 ].join("\n");
 
 /**
+ * Cold-start page for the meta shell (META-1 P4). Same exchange shape as
+ * BOOTSTRAP_BUGS, but bot-agnostic: the button URL carries ?bot= (every bot
+ * serves the shell), and without one the page says so instead of guessing.
+ */
+const BOOTSTRAP_APP = [
+  '<!doctype html>',
+  '<html lang="en"><head><meta charset="utf-8">',
+  '<meta name="viewport" content="width=device-width,initial-scale=1">',
+  '<title>Mini App</title>',
+  '<script src="https://telegram.org/js/telegram-web-app.js"></script>',
+  '<style>html,body{margin:0;height:100%;background:#0b1220;color:#f8fafc;',
+  'font:14px system-ui;display:flex;align-items:center;justify-content:center;',
+  'text-align:center;padding:24px}</style>',
+  '</head><body><div id="m">opening the mini app\u2026</div>',
+  '<script>',
+  '(function () {',
+  '  var m = document.getElementById("m");',
+  '  var attempts = 0;',
+  '  function tryProceed() {',
+  '    attempts++;',
+  '    var bot = (typeof location !== "undefined" && location.search && new URLSearchParams(location.search).get("bot")) || "";',
+  '    var initData = "";',
+  '    if (typeof Telegram !== "undefined" && Telegram && Telegram.WebApp) {',
+  '      if (Telegram.WebApp.ready) Telegram.WebApp.ready();',
+  '      if (Telegram.WebApp.expand) Telegram.WebApp.expand();',
+  '      if (Telegram.WebApp.initData) initData = Telegram.WebApp.initData;',
+  '    }',
+  '    if (initData) {',
+  '      if (!bot) {',
+  '        if (m) m.textContent = "no bot \u2014 open this from a bot button in Telegram";',
+  '        return;',
+  '      }',
+  '      if (typeof location !== "undefined" && location.replace) {',
+  '        location.replace("/app/?bot=" + encodeURIComponent(bot) + "&initData=" + encodeURIComponent(initData));',
+  '      }',
+  '      return;',
+  '    }',
+  '    if (attempts < 20 && typeof setTimeout !== "undefined") {',
+  '      setTimeout(tryProceed, 100);',
+  '      return;',
+  '    }',
+  '    if (m) m.textContent = "no initData \u2014 open this from a bot button in Telegram";',
+  '  }',
+  '  tryProceed();',
+  '})();',
+  '</script></body></html>',
+].join("\n");
+
+/**
  * Transparent upstream proxy (packet bug-board-miniapp, Node 5). Forwards
  * method/headers/body to the app server and streams the response back. The
  * target host is fixed (boardUpstream); only the path+query come from the
@@ -1645,6 +1694,72 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         'cache-control': 'no-store',
       });
       return res.end();
+    }
+
+    // Meta shell (META-1 P4). Same door as /bugs/: exchange here, then the
+    // token admits /app/app, which proxies the built shell (dist/app.html)
+    // from the app upstream. No bot default — the button carries ?bot=.
+    if (url.pathname === '/app/' || url.pathname === '/app' || url.pathname === '/app/index.html') {
+      const initData = url.searchParams.get('initData') || '';
+      if (!initData) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(BOOTSTRAP_APP);
+      }
+      let botId = url.searchParams.get('bot') || '';
+      let verdict = botId ? validateInitData(initData, tokenFor(botId, env)) : { ok: false, reason: 'no bot in URL — open this from a bot button in Telegram' };
+      if (!verdict.ok && (verdict.reason === 'hash mismatch' || verdict.reason === 'missing initData or bot token')) {
+        for (const [k, raw] of Object.entries(env)) {
+          if (!k.startsWith('TUI_BOT_TOKEN_')) continue;
+          const val = String(raw || '').trim();
+          if (!val) continue;
+          const candidateBot = k.slice('TUI_BOT_TOKEN_'.length).toLowerCase();
+          if (candidateBot === botId) continue;
+          const v = validateInitData(initData, val);
+          if (v.ok) {
+            log(`app landing bot=${botId} was ${verdict.reason}, auto-matched bot=${candidateBot}`);
+            botId = candidateBot;
+            verdict = v;
+            break;
+          }
+        }
+      }
+      if (!verdict.ok) {
+        log(`app landing refused (${verdict.reason}) for bot=${botId} (tokens for: ${configuredTokenBots(env).join(',') || 'none'}); got ${describeInitData(initData)}`);
+        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
+        return res.end(`<!doctype html><meta charset=utf-8><body style="font:14px system-ui;background:#0b1220;color:#f8fafc;padding:24px">
+          <h1>refused</h1><p>${escapeHtml(verdict.reason)}</p></body>`);
+      }
+      const token = issueToken({ botId, chatId: verdict.chatId, secret, ttlSec: ttl });
+      log(`app admitted bot=${botId} ${verdict.boundBy}=${verdict.chatId}`);
+      res.writeHead(302, {
+        'location': `/app/app?token=${encodeURIComponent(token)}`,
+        'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+        'cache-control': 'no-store',
+      });
+      return res.end();
+    }
+
+    if (url.pathname === '/app/app') {
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`shell refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      try {
+        const up = await fetch(boardUpstream(env) + '/app.html', { headers: { 'accept-encoding': 'identity' } });
+        if (up.status === 404) {
+          res.writeHead(503, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'shell not built on app upstream (vite build has no app.html input yet)' }));
+        }
+        const body = Buffer.from(await up.arrayBuffer());
+        res.writeHead(up.status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(body);
+      } catch (err) {
+        logGatewayError(err);
+        res.writeHead(502, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'shell upstream unreachable' }));
+      }
     }
 
     if (url.pathname === '/bugs/app') {

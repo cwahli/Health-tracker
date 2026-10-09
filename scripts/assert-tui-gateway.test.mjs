@@ -1348,5 +1348,38 @@ console.log('assert-tui-gateway:');
   }
 }
 
+// 18. The meta shell landing (META-1 P4): bot-agnostic exchange into
+//     /app/app, served from the app upstream build. No bot default —
+//     without ?bot= the bootstrap says so instead of guessing.
+{
+  const botToken = '123456789:ABCdefGHIjklMNOpqrSTUvwxYZ';
+  const secret = 'gateway-test-secret-12345';
+  const env = { TUI_GATEWAY_SECRET: secret, TUI_BOT_TOKEN_VM: botToken };
+  const handle = createGateway({ env });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const bare = await fetch(`${base}/app/`, { redirect: 'manual' });
+    assert.equal(bare.status, 200);
+    assert.ok((await bare.text()).includes('opening the mini app'));
+
+    const botKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+    const validInitData = makeInitData(fresh(), { secretKey: botKey });
+    const good = await fetch(`${base}/app/?bot=vm&initData=${encodeURIComponent(validInitData)}`, { redirect: 'manual' });
+    assert.equal(good.status, 302);
+    assert.ok((good.headers.get('location') || '').startsWith('/app/app?token='));
+
+    const badInitData = validInitData.replace(/hash=[a-f0-9]{10}/, 'hash=deadbeef00');
+    const bad = await fetch(`${base}/app/?bot=vm&initData=${encodeURIComponent(badInitData)}`, { redirect: 'manual' });
+    assert.equal(bad.status, 401);
+
+    const noapp = await fetch(`${base}/app/app`);
+    assert.equal(noapp.status, 401);
+  } finally {
+    server.close();
+  }
+}
+
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
