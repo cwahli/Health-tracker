@@ -30,5 +30,5 @@ continuation below was measured, not reasoned:
 Rule for next time: a packet whose P1 premise is "files do not exist" must
 be re-checked against main at BUILD time, not just at plan time. #652
 landing first made every P1 continuation a rewrite by definition, and no
-amount of careful merging changes the meter — only a honestly-scoped
+amount of careful merging changes the meter — only an honestly-scoped
 follow-up packet (or a recorded operator override) does.
