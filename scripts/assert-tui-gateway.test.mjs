@@ -1369,6 +1369,10 @@ console.log('assert-tui-gateway:');
     const good = await fetch(`${base}/app/?bot=vm&initData=${encodeURIComponent(validInitData)}`, { redirect: 'manual' });
     assert.equal(good.status, 302);
     assert.ok((good.headers.get('location') || '').startsWith('/app/app?token='));
+    assert.ok((good.headers.get('location') || '').includes('bot=vm'), 'bot survives the exchange (else the shell shows No bot)');
+    const goodTab = await fetch(`${base}/app/?bot=vm&tab=fleet&initData=${encodeURIComponent(validInitData)}`, { redirect: 'manual' });
+    assert.equal(goodTab.status, 302);
+    assert.ok((goodTab.headers.get('location') || '').includes('tab=fleet'), 'tab survives the exchange');
 
     const badInitData = validInitData.replace(/hash=[a-f0-9]{10}/, 'hash=deadbeef00');
     const bad = await fetch(`${base}/app/?bot=vm&initData=${encodeURIComponent(badInitData)}`, { redirect: 'manual' });

@@ -1731,8 +1731,13 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       }
       const token = issueToken({ botId, chatId: verdict.chatId, secret, ttlSec: ttl });
       log(`app admitted bot=${botId} ${verdict.boundBy}=${verdict.chatId}`);
+      // The shell reads bot+tab from the query: a bare ?token= would land it
+      // on the "No bot" screen (live 2026-10-09: grok menu tap lost both).
+      const tab = url.searchParams.get('tab') || '';
+      const landingQuery = `?token=${encodeURIComponent(token)}&bot=${encodeURIComponent(botId)}` +
+        (tab ? `&tab=${encodeURIComponent(tab)}` : '');
       res.writeHead(302, {
-        'location': `/app/app?token=${encodeURIComponent(token)}`,
+        'location': `/app/app${landingQuery}`,
         'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
         'cache-control': 'no-store',
       });
