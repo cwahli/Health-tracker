@@ -5,6 +5,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { openBugRows } from './lib/bug-open-list.mjs';
 
 import { TelegramApi, TelegramError, isSendableMedia } from './lib/tg-api.mjs';
 import { chunkForTelegram } from './lib/tg-copy-code.mjs';
@@ -2811,9 +2812,10 @@ function rolesFileInUse() {
  * list" with 4 cards from its own chat history while the store held 15,
  * because the read is a tool call the model may skip and a stale session may
  * never re-issue. The /bugs reply is code, so its number cannot be bypassed:
- * it quotes the live read's `count` and `generated_at`, then one line per
- * card in public_n order. A stale session can be wrong about phrasing, but
- * not about this number.
+ * it quotes the open-card count (the board's default active filter) and
+ * `generated_at`, then one line per open card in public_n order. Closed and
+ * declined rows stay in the API and in `bugctl list`. A stale session can be
+ * wrong about phrasing, but not about this number.
  */
 export function formatBugsListText(parsed) {
   const rows = Array.isArray(parsed?.rows) ? parsed.rows : null;
@@ -2821,11 +2823,17 @@ export function formatBugsListText(parsed) {
     const err = String(parsed?.error || '').slice(0, 160);
     return `Bug store unreachable (bug API down or not local to this host). /bugs needs the store — retry later.${err ? ` ${err}` : ''}`;
   }
-  const count = Number(parsed?.count ?? rows.length);
+  const open = openBugRows(rows);
+  const hidden = rows.length - open.length;
+  const count = open.length;
   const at = String(parsed?.generated_at || '').trim();
-  const head = `🐛 *Bug queue* — ${count} card${count === 1 ? '' : 's'}${at ? ` (live read ${at})` : ''}.`;
+  const hiddenNote = hidden
+    ? ` ${hidden} closed or declined hidden (board Done filter, or bugctl list).`
+    : '';
+  const head = `🐛 *Bug queue* — ${count} card${count === 1 ? '' : 's'}${at ? ` (live read ${at})` : ''}.${hiddenNote}`;
   if (!rows.length) return `${head}\nThe queue is empty — no tickets on the store.`;
-  const sorted = [...rows].sort((a, b) => Number(a?.public_n ?? 0) - Number(b?.public_n ?? 0));
+  if (!open.length) return `${head}\nNo open cards. Closed and declined cards stay on the board's Done filter and in bugctl list.`;
+  const sorted = open;
   // Telegram caps a message at 4096 chars; ~40 cards fit, the rest live behind
   // the board button in the same message.
   const MAX_ROWS = 40;
@@ -4930,6 +4938,31 @@ export function stickyModelAfterTurn({ chatModel, answeredModel, answered }) {
 }
 
 /**
+ * Freebuff has no headless run. A chat already set to freebuff/… still takes
+ * the turn, on the bot's OpenCode model and the existing OpenCode session.
+ * The pref stays Freebuff until the turn answers; sticky then keeps Freebuff
+ * as autoSwitchedFrom. If the registry default is also Freebuff, refuse —
+ * there is nothing to attach to. The keyboard tap does not store Freebuff.
+ */
+export function redirectFreebuffTurn({ model, hostModel } = {}) {
+  const requested = String(model || '');
+  if (!/^freebuff\//i.test(requested)) {
+    return { redirect: false, refuse: false, model: requested, from: null, note: null };
+  }
+  const host = String(hostModel || '').trim();
+  if (!host || /^freebuff\//i.test(host)) {
+    return { redirect: false, refuse: true, model: requested, from: requested, note: null };
+  }
+  return {
+    redirect: true,
+    refuse: false,
+    model: host,
+    from: requested,
+    note: `Freebuff runs in the terminal — this chat turn is on ${host} and the same OpenCode session. Your Freebuff choice stays until this turn answers.`,
+  };
+}
+
+/**
  * Execution ref for a configured model. The OpenCode `google/` provider is
  * unavailable on hosts without a wired OpenCode google credential (live VPS:
  * every `google/gemini-*` attempt ends `Model unavailable`), while
@@ -6556,18 +6589,27 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   }).claimed;
 
   // Lane preflight, before the turn starts (plan/TG_TOOL_SURFACE.md M4).
-  // Freebuff is terminal-only (laneSupports('freebuff','headless') === false):
-  // the model keyboard must not start a headless turn. Cline cannot load the
-  // opencode `/do-*` skill library. Each is one recorded refusal: no session
-  // is burned and no turn runs. Gemini `/do-*` is run as a normal prompt.
+  // A Freebuff keyboard tap must not store that lane (the handler above).
+  // A chat that is already on freebuff/… is not refused: this turn runs on
+  // the bot's OpenCode model and the same OpenCode session. The pref stays
+  // Freebuff until the answer sticks, with Freebuff kept as autoSwitchedFrom.
+  // If the registry default is also Freebuff, there is nothing to attach to
+  // and the turn is refused. Cline cannot load the opencode `/do-*` library.
+  let freebuffKept = null;
   {
-    const laneEff = effective(config, prefs, chatId);
-    const laneRef = parseModelRef(laneEff.model);
+    const laneRef = parseModelRef(eff.model);
     const lane = laneRef.surface === 'cline' ? 'cline' : laneRef.surface === 'gemini' ? 'gemini' : 'opencode';
-    if (/^freebuff\//i.test(String(laneEff.model || ''))) {
+    const fb = redirectFreebuffTurn({ model: eff.model, hostModel: config.agent?.model });
+    if (fb.refuse) {
       try { releaseFiles(claimed, claimId); } catch {}
       await api.sendMessage(chatId, 'Freebuff runs in the terminal — it cannot take a headless turn from chat. No session was started and nothing was spent. Pick another lane with /model_free.');
       return;
+    }
+    if (fb.redirect) {
+      freebuffKept = fb.from;
+      eff.model = fb.model;
+      eff.pool = null;
+      await api.sendMessage(chatId, fb.note).catch(() => {});
     }
     if (lane === 'cline' && /^\/do[-_][a-z]/i.test(String(text || '').trim())) {
       try { releaseFiles(claimed, claimId); } catch {}
@@ -7346,16 +7388,19 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       // reset. The previous choice is kept as autoSwitchedFrom for a one-tap
       // switchback after renewal. Bookkeeping must never break delivery.
       const stickTo = stickyModelAfterTurn({
-        chatModel: eff.model,
+        chatModel: freebuffKept || eff.model,
         answeredModel: lastAttemptModel,
         answered: Boolean(String(result?.finalText || '').trim()),
       });
       const usageText = await noteUsage({ chatId, result, eff: stickTo ? { ...eff, model: stickTo } : eff, config, caches, totals, lastUsage });
       if (stickTo) {
         try {
-          setPref(prefs, chatId, { model: stickTo, autoSwitchedFrom: eff.model, autoSwitchedAt: new Date().toISOString() });
+          const stuckFrom = freebuffKept || eff.model;
+          const patch = { model: stickTo, autoSwitchedFrom: stuckFrom, autoSwitchedAt: new Date().toISOString() };
+          if (freebuffKept) patch.pool = null;
+          setPref(prefs, chatId, patch);
           savePrefs(config.id, prefs);
-          console.log(`[${config.id}] chat ${chatId} stuck to ${stickTo} (was ${eff.model})`);
+          console.log(`[${config.id}] chat ${chatId} stuck to ${stickTo} (was ${stuckFrom})`);
         } catch {
           // fall through to delivery
         }

@@ -56,7 +56,7 @@ OpenCode master **self-serves** meal-audit via shared skill `meal-audit-engine` 
 | Grok Build CLI | headless grok with the task as the prompt | No new files means failure. |
 | Antigravity `agy` | do not call | `User location is not supported`. Set allowance status so `pick-tool` skips it. |
 
-No parallel fan-out. One checkout, one coder. A failed attempt reverts only paths that appeared after `snapshot_workspace`.
+No parallel fan-out onto one checkout. Each coder gets its own worktree (`node scripts/agent-worktree.mjs new <slug>`). A failed attempt reverts only paths that appeared after `snapshot_workspace`.
 
 ### Interactive doors (not in the QA loop)
 
@@ -66,7 +66,7 @@ No parallel fan-out. One checkout, one coder. A failed attempt reverts only path
 
 1. The person messages the matching QA bot.
 2. That bot writes four lines (page, observed, expected, screenshot path), starts `run-coding-dispatch.sh` without `--foreground`, and stops.
-3. The script takes `~/.hermes/dispatch_lock` or waits 180 seconds.
+3. The coder works in its own worktree (`node scripts/agent-worktree.mjs new <slug>`). `~/.hermes/dispatch_lock` does not reserve the repo. Per-file locks warn on hub files.
 4. OpenCode with the free default (`nemotron-3.5-lightning-free`), then once with the free fallback `space-bunny-free` on failure. Then Cline. Then Grok. Skip Antigravity. Never paid models — zen balance is depleted.
 5. Done for a coder means new porcelain lines since the snapshot and `npx tsc --noEmit` exit 0. Then commit those paths and `git push origin main`.
 6. Sleep 45 seconds. Run `node scripts/qa-runner.mjs --journey=<category>`. Post the screenshot to that QA profile.
