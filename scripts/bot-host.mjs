@@ -3827,6 +3827,26 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'app': {
+      // Meta shell (META-1 P2). Same web_app button + initData door as the
+      // other minis: served by the gateway under /app/. Bot-agnostic — every
+      // bot-host bot serves it, the button carries ?bot=<this bot>, and the
+      // burger inside switches tabs without new buttons.
+      const appGatewayUrl = readTuiUrl();
+      if (!appGatewayUrl) {
+        await api.sendMessage(chatId, '▦ Mini-app shell is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /app again.');
+        return;
+      }
+      const appUrl = `${appGatewayUrl}/app/?bot=${config.id}`;
+      await api.sendMessage(chatId, [
+        '▦ *Mini Apps*',
+        'Bugs, Fleet, Review, Terminal and more behind one burger menu. In a browser instead? Open the same link and sign in with Google.',
+      ].join('\n'), {
+        reply_markup: { inline_keyboard: [[{ text: '▦ Open Mini Apps', web_app: { url: appUrl } }]] },
+      });
+      return;
+    }
+
     case 'review': {
       // Human review queue (Mini App). Same web_app button + initData door
       // as /fleet, served by the gateway under /review/. Unlike the fleet

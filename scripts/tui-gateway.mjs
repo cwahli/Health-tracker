@@ -1762,6 +1762,49 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       }
     }
 
+    // Browser login for the shell (META-1): a real browser has no Telegram
+    // initData, but Firebase Google sign-in works there (same project as the
+    // website, so the same account). The client posts the Firebase ID token
+    // from signInWithPopup; verified here with firebase-admin (projectId
+    // only — verification fetches Google's certs, no key file), then
+    // exchanged for the gateway cookie. Never log the token.
+    if (url.pathname === '/app/auth/firebase' && req.method === 'POST') {
+      const parsed = await readJsonBody(req);
+      if (!parsed.ok) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: parsed.error }));
+      }
+      const idToken = String(parsed.json?.idToken || '').trim();
+      if (!idToken) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'idToken required' }));
+      }
+      let decoded = null;
+      try {
+        const adminApp = await import('firebase-admin/app');
+        const adminAuth = await import('firebase-admin/auth');
+        const projectId = String(env.FIREBASE_PROJECT_ID || 'health-tracker-b04dd').trim();
+        try {
+          adminApp.getApp();
+        } catch {
+          adminApp.initializeApp({ projectId });
+        }
+        decoded = await adminAuth.getAuth().verifyIdToken(idToken);
+      } catch (err) {
+        log(`firebase exchange refused (${err?.code || err?.message || 'verify failed'})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'invalid Firebase token' }));
+      }
+      const token = issueToken({ botId: 'web', chatId: `firebase:${decoded.uid}`, secret, ttlSec: ttl });
+      log(`firebase exchange admitted uid=${decoded.uid}`);
+      res.writeHead(200, {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+        'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+      });
+      return res.end(JSON.stringify({ ok: true }));
+    }
+
     if (url.pathname === '/bugs/app') {
       const verdict = verifyAnyToken(req, url, secret);
       if (!verdict.ok) {

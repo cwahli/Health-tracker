@@ -1381,5 +1381,32 @@ console.log('assert-tui-gateway:');
   }
 }
 
+// 19. Browser Firebase exchange (META-1): missing body is 400, a bogus
+//     token is 401 without reaching Google (fails local decode). The live
+//     verify path is exercised on VPS throwaway with a real session.
+{
+  const secret = 'gateway-test-secret-12345';
+  const env = { TUI_GATEWAY_SECRET: secret, TUI_BOT_TOKEN_VM: '123456789:ABCdefGHIjklMNOpqrSTUvwxYZ' };
+  const handle = createGateway({ env });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const empty = await fetch(`${base}/app/auth/firebase`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    });
+    assert.equal(empty.status, 400);
+
+    const bogus = await fetch(`${base}/app/auth/firebase`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ idToken: 'garbage' }),
+    });
+    assert.equal(bogus.status, 401);
+    assert.equal((await bogus.json()).ok, false);
+  } finally {
+    server.close();
+  }
+}
+
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
