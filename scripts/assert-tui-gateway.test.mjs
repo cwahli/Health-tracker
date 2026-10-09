@@ -4,6 +4,9 @@
 // Run: node scripts/assert-tui-gateway.test.mjs
 import crypto from 'node:crypto';
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal, isWebStatic, verifyWithRefererFallback, tgtgUpstream, tgtgHost, isTgtgHost, agendaUpstream, agendaHost, isAgendaHost } from './tui-gateway.mjs';
 
@@ -1258,6 +1261,91 @@ console.log('assert-tui-gateway:');
   check('the agenda api on the tgtg host stays on its own branch',
     aseen.length === an);
   agenda.close();
+}
+
+// 17. The TUI session browser (META-1 P3.6): read-only list plus the one
+//     snapshot write, both bot-bound. Fixture state root — no tmux, no VPS.
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tui-sessions-'));
+  const now = Date.now();
+  const vm = path.join(tmp, 'vm');
+  fs.mkdirSync(vm, { recursive: true });
+  fs.writeFileSync(path.join(vm, 'sessions.json'), JSON.stringify({
+    '111': 'ses_AAA',
+    '222': 'WS\u0000ses_BBB',
+  }));
+  fs.writeFileSync(path.join(vm, 'cline-sessions.json'), JSON.stringify({ '333': '1700000000_ab12' }));
+  fs.writeFileSync(path.join(vm, 'prefs.json'), JSON.stringify({
+    '111': { model: 'opencode/m1' },
+    '333': { model: 'cline:cline-free/m2' },
+  }));
+  fs.writeFileSync(path.join(vm, 'leases.json'), JSON.stringify({ '111': { startedAt: now } }));
+  fs.writeFileSync(path.join(vm, 'tui-open.json'), JSON.stringify({
+    chatId: '222', surface: 'opencode', model: 'opencode/m1',
+    sessionId: 'ses_BBB', workspace: 'WS', at: new Date(now).toISOString(),
+  }));
+  fs.writeFileSync(path.join(vm, 'tui-lease.json'), JSON.stringify({
+    session: 'ses_AAA', heartbeat: now, pane: 'VM-tui', bot: 'vm', clients: 1, since: 0,
+  }));
+
+  const senv = { TUI_GATEWAY_SECRET: SECRET, TUI_BOT_TOKEN_VM: TOKEN, TUI_STATE_ROOT: tmp };
+  const shandle = createGateway({ env: senv, log: () => {} });
+  const server = http.createServer(shandle);
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const sbase = `http://127.0.0.1:${server.address().port}`;
+  const stoken = issueToken({ botId: 'vm', chatId: '111', secret: SECRET, ttlSec: 900 });
+  const scookie = `${COOKIE_NAME}=${encodeURIComponent(stoken)}`;
+  try {
+    const list = await (await fetch(`${sbase}/tui/api/sessions?bot=vm`, { headers: { cookie: scookie } })).json();
+    check('the list admits a same-bot token and shows every lane',
+      list.ok === true && Array.isArray(list.chats) && list.chats.length === 3);
+    const byId = Object.fromEntries((list.chats || []).map((c) => [c.chatId, c]));
+    check('an opencode row carries its session and a held lease',
+      byId['111']?.surface === 'opencode' && byId['111']?.sessionId === 'ses_AAA' && byId['111']?.leaseHeld === true);
+    check('a workspace-scoped row splits workspace from session',
+      byId['222']?.sessionId === 'ses_BBB' && byId['222']?.workspace === 'WS');
+    check('a cline row follows the live lane, not the snapshot',
+      byId['333']?.surface === 'cline' && byId['333']?.sessionId === '1700000000_ab12');
+    check('a fresh heartbeat reads as open now',
+      list.openNow?.pane === 'VM-tui');
+
+    const open = await (await fetch(`${sbase}/tui/api/open?bot=vm`, {
+      method: 'POST', headers: { cookie: scookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ chat: '111' }),
+    })).json();
+    check('open snapshots the chat the map resolves',
+      open.ok === true && open.chatId === '111' && open.sessionId === 'ses_AAA');
+    const written = JSON.parse(fs.readFileSync(path.join(vm, 'tui-open.json'), 'utf8'));
+    check('the snapshot lands on disk in the /tui shape',
+      written.chatId === '111' && written.surface === 'opencode' && typeof written.at === 'string');
+
+    const miss = await fetch(`${sbase}/tui/api/open?bot=vm`, {
+      method: 'POST', headers: { cookie: scookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ chat: '999' }),
+    });
+    check('a sessionless opencode chat refuses instead of a blank row',
+      miss.status === 409);
+
+    const cross = await fetch(`${sbase}/tui/api/sessions?bot=vm2`, { headers: { cookie: scookie } });
+    check('a token bound to another bot cannot read this map',
+      cross.status === 401);
+    const anon = await fetch(`${sbase}/tui/api/sessions?bot=vm`);
+    check('the list refuses without a token',
+      anon.status === 401);
+    const nobot = await fetch(`${sbase}/tui/api/sessions`, { headers: { cookie: scookie } });
+    check('the list requires the bot',
+      nobot.status === 400);
+
+    const page = await fetch(`${sbase}/tui/sessions`, { headers: { cookie: scookie } });
+    check('the browser page serves behind the door',
+      page.status === 200 && (await page.text()).includes('Terminal sessions'));
+    const pageAnon = await fetch(`${sbase}/tui/sessions`);
+    check('the browser page refuses without a token',
+      pageAnon.status === 401);
+  } finally {
+    server.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 console.log(`\n${passed} pass, ${failed} fail`);

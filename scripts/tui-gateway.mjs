@@ -884,6 +884,139 @@ export function isReviewTestAuth(env = process.env) {
   return String(env.REVIEW_TEST_AUTH || env.FLEET_TEST_AUTH || '').trim() === '1';
 }
 
+/**
+ * TUI session browser (META-1 P3.6, read side). The gateway never owned the
+ * bot state maps; it reads them here, read-only, using bot-host's own
+ * layout (`$HOME/.local/state/bot-host/<bot>/`). Writes stay in exactly one
+ * place (`snapshotTuiOpen` below mirrors bot-host's `/tui` write shape, so
+ * `tui-attach.sh` resolution cannot tell who recorded the row).
+ */
+export function tuiStateRoot(env = process.env) {
+  const override = String(env.TUI_STATE_ROOT || '').trim();
+  if (override) return override;
+  return path.join(process.env.HOME || '/root', '.local', 'state', 'bot-host');
+}
+
+function readTuiJson(root, bot, name) {
+  try {
+    const raw = fs.readFileSync(path.join(root, bot, name), 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+const TUI_SCOPE_SEP = '\u0000';
+
+function unscopeSessionId(value) {
+  const s = String(value ?? '');
+  const cut = s.indexOf(TUI_SCOPE_SEP);
+  return cut === -1
+    ? { workspace: '', sessionId: s.trim() }
+    : { workspace: s.slice(0, cut), sessionId: s.slice(cut + 1).trim() };
+}
+
+function surfaceForModelRef(model) {
+  const raw = String(model || '').trim().toLowerCase();
+  if (raw.startsWith('cline:')) return 'cline';
+  if (raw.startsWith('gemini:')) return 'gemini';
+  return 'opencode';
+}
+
+function leaseHeldFor(chatLeases, chatId, maxAgeSec = 1800, now = Date.now()) {
+  const entry = chatLeases?.[String(chatId)];
+  if (!entry || typeof entry !== 'object') return false;
+  const ts = Number(entry.startedAt ?? entry.heartbeat ?? NaN);
+  // A corrupt timestamp fails safe to HELD (same rule as tui-attach.sh):
+  // delay, never corrupt a live turn.
+  if (!Number.isFinite(ts) || ts <= 0) return true;
+  return now - ts <= maxAgeSec * 1000;
+}
+
+/**
+ * One row per chat with a session on any lane. Pure read — safe to call
+ * from the endpoint and from the sensor with a fixture root.
+ */
+export function listTuiSessions({ env = process.env, root = null, bot = '', now = Date.now() } = {}) {
+  const dir = root || tuiStateRoot(env);
+  const sessions = readTuiJson(dir, bot, 'sessions.json');
+  const clineSessions = readTuiJson(dir, bot, 'cline-sessions.json');
+  const prefs = readTuiJson(dir, bot, 'prefs.json');
+  const leases = readTuiJson(dir, bot, 'leases.json');
+  const tuiOpen = readTuiJson(dir, bot, 'tui-open.json');
+  const tuiLease = readTuiJson(dir, bot, 'tui-lease.json');
+  const chatIds = new Set([
+    ...Object.keys(sessions),
+    ...Object.keys(clineSessions),
+    ...Object.keys(prefs).filter((k) => k !== '__meta'),
+  ]);
+  const rows = [];
+  for (const chatId of chatIds) {
+    const prefModel = String(prefs[chatId]?.model || '');
+    const snapshot = tuiOpen.chatId === chatId ? tuiOpen : null;
+    const model = prefModel || String(snapshot?.model || '');
+    const surface = snapshot?.surface || surfaceForModelRef(model);
+    const map = surface === 'cline' ? clineSessions : sessions;
+    const { workspace, sessionId } = unscopeSessionId(map[chatId]);
+    if (!sessionId && !snapshot?.sessionId) continue;
+    rows.push({
+      chatId: String(chatId),
+      surface,
+      model,
+      sessionId: sessionId || String(snapshot?.sessionId || ''),
+      workspace: workspace || String(snapshot?.workspace || ''),
+      leaseHeld: leaseHeldFor(leases, chatId, 1800, now),
+      lastOpenAt: snapshot?.at || '',
+    });
+  }
+  const hb = Number(tuiLease.heartbeat || 0);
+  const openNow = hb > 0 && now - hb <= 60000 ? tuiLease : null;
+  return { chats: rows, openNow };
+}
+
+/**
+ * Record which chat opened the terminal (the `/tui` write shape, mirrored).
+ * Resolves the session exactly like the open path: live map row first,
+ * snapshot fallback never. Returns the row or null when there is nothing
+ * shared to attach to (the attach script refuses those the same way).
+ */
+export function snapshotTuiOpen({ env = process.env, root = null, bot = '', chatId = '', now = Date.now() } = {}) {
+  const dir = root || tuiStateRoot(env);
+  const cleanChat = String(chatId || '').trim();
+  if (!cleanChat) return null;
+  const sessions = readTuiJson(dir, bot, 'sessions.json');
+  const clineSessions = readTuiJson(dir, bot, 'cline-sessions.json');
+  const prefs = readTuiJson(dir, bot, 'prefs.json');
+  const prev = readTuiJson(dir, bot, 'tui-open.json');
+  const prefModel = String(prefs[cleanChat]?.model || '');
+  const model = prefModel || (prev.chatId === cleanChat ? String(prev.model || '') : '');
+  const surface = (prev.chatId === cleanChat && prev.surface) || surfaceForModelRef(model);
+  const map = surface === 'cline' ? clineSessions : sessions;
+  const { workspace, sessionId } = unscopeSessionId(map[cleanChat]);
+  const sid = sessionId || (prev.chatId === cleanChat ? String(prev.sessionId || '') : '');
+  const ws = workspace || (prev.chatId === cleanChat ? String(prev.workspace || '') : '');
+  // Shared-session lanes with no session are a refusal, not a blank row
+  // (live 2026-10-04: a null snapshot reads as a broken record afterwards).
+  if (surface === 'opencode' && !sid) return null;
+  if (surface === 'gemini') return null;
+  const row = {
+    chatId: cleanChat,
+    surface,
+    model,
+    sessionId: sid,
+    workspace: ws,
+    at: new Date(now).toISOString(),
+  };
+  try {
+    fs.mkdirSync(path.join(dir, bot), { recursive: true });
+    fs.writeFileSync(path.join(dir, bot, 'tui-open.json'), JSON.stringify(row));
+  } catch {
+    return null;
+  }
+  return row;
+}
+
 export async function getReviewItems(opts = {}) {
   return getReviewItemsStatus(opts);
 }
@@ -1990,6 +2123,66 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       return res.end(JSON.stringify(out));
     }
 
+    // TUI session browser (META-1 P3.6). Read-only list plus the one
+    // snapshot write bot-host's /tui already performs — tui-attach.sh
+    // cannot tell who recorded the row. The token must be bound to the
+    // same bot it reads/writes (cross-bot map access refused: same class
+    // as the token/path isolation on the terminal routes).
+    if (url.pathname === '/tui/api/sessions') {
+      const bot = String(url.searchParams.get('bot') || '').trim();
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok || !bot) {
+        res.writeHead(!bot ? 400 : 401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: !bot ? 'bot required' : verdict.reason }));
+      }
+      if (verdict.botId !== bot) {
+        log(`tui sessions refused (token is for bot=${verdict.botId}, asked bot=${bot})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'token is for another bot' }));
+      }
+      const list = listTuiSessions({ env, bot });
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ok: true, bot, ...list }));
+    }
+
+    if (url.pathname === '/tui/api/open' && req.method === 'POST') {
+      const bot = String(url.searchParams.get('bot') || '').trim();
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok || !bot) {
+        res.writeHead(!bot ? 400 : 401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: !bot ? 'bot required' : verdict.reason }));
+      }
+      if (verdict.botId !== bot) {
+        log(`tui open refused (token is for bot=${verdict.botId}, asked bot=${bot})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'token is for another bot' }));
+      }
+      const parsed = await readJsonBody(req);
+      if (!parsed.ok) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: parsed.error }));
+      }
+      const row = snapshotTuiOpen({ env, bot, chatId: parsed.json?.chat });
+      if (!row) {
+        res.writeHead(409, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'nothing shared to attach to — send the bot a message first' }));
+      }
+      log(`tui browser open bot=${bot} chat=${row.chatId} surface=${row.surface}`);
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ok: true, ...row }));
+    }
+
+    // TUI session browser page (META-1 P3.6): the list + open buttons.
+    if (url.pathname === '/tui/sessions') {
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(TUI_BROWSER_HTML);
+    }
+
     // One-click bot forge. The gateway owns the hostname and the initData
     // door, so the forge is mounted here under /forge rather than published on
     // its own port; the page and the create API are the same handler the CLI's
@@ -2004,6 +2197,131 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     return res.end(JSON.stringify({ ok: false, error: 'not found' }));
   };
 }
+
+/**
+ * TUI session browser page (META-1 P3.6). Served bytes, same pattern as the
+ * BOOTSTRAP pages above: inline so the page needs no build step and no new
+ * route file. Vanilla JS, query passthrough, no server-only imports.
+ */
+const TUI_BROWSER_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TUI sessions</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 0 0 24px 0; background: #0f172a; color: #e2e8f0;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%; line-height: 1.5; }
+  .masthead { position: sticky; top: 0; z-index: 30; display: flex; align-items: center;
+    justify-content: space-between; gap: 10px; background: #0f172a;
+    padding: 8px 14px; border-bottom: 1px solid #334155; }
+  h1 { color: #f8fafc; font-size: 17px; margin: 0; }
+  .btn { background: #1e293b; border: 1px solid #334155; color: #93c5fd;
+    border-radius: 6px; padding: 4px 10px; font-size: 13px; cursor: pointer; }
+  .row { border: 1px solid #334155; border-radius: 8px; background: #1e293b;
+    margin: 10px 14px; padding: 10px 12px; }
+  .row .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .chat { font-family: "SF Mono", Consolas, monospace; color: #7dd3fc; font-size: 13px; }
+  .meta { font-size: 12px; color: #94a3b8; margin-top: 4px; overflow-wrap: anywhere; }
+  .badge { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 9999px;
+    font-size: 11px; font-weight: 600; }
+  .b-open { background: #065f46; color: #a7f3d0; border: 1px solid #059669; }
+  .b-busy { background: #854d0e; color: #fef08a; border: 1px solid #ca8a04; }
+  .b-idle { background: #334155; color: #cbd5e1; border: 1px solid #475569; }
+  .empty { text-align: center; color: #94a3b8; padding: 32px 14px; }
+</style>
+</head>
+<body>
+<div class="masthead">
+  <h1>Terminal sessions</h1>
+  <button class="btn" id="btn-refresh" type="button">Refresh</button>
+</div>
+<div id="list"><div class="empty">Loading…</div></div>
+<script>
+(function () {
+  try {
+    var tg = window.Telegram && window.Telegram.WebApp;
+    if (tg) {
+      if (tg.ready) tg.ready();
+      if (tg.expand) tg.expand();
+      if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
+    }
+  } catch (e) {}
+  var query = location.search || '';
+  var bot = '';
+  try { bot = new URLSearchParams(query).get('bot') || ''; } catch (e) {}
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function render(data) {
+    var box = document.getElementById('list');
+    if (!data || !data.ok || !data.chats || !data.chats.length) {
+      box.innerHTML = '<div class="empty">No chat sessions recorded yet.<br>Send the bot a message first, then reopen this.</div>';
+      return;
+    }
+    box.innerHTML = data.chats.map(function (c, i) {
+      var badge = c.leaseHeld
+        ? '<span class="badge b-busy">turn running</span>'
+        : (data.openNow ? '<span class="badge b-open">open now</span>' : '<span class="badge b-idle">idle</span>');
+      return '<div class="row"><div class="top"><span class="chat">' + esc(c.chatId) + '</span>' + badge + '</div>' +
+        '<div class="meta">' + esc(c.surface) + ' · ' + esc(c.model || '—') + '</div>' +
+        (c.workspace ? '<div class="meta">' + esc(c.workspace) + '</div>' : '') +
+        '<div style="margin-top:8px"><button class="btn" type="button" data-i="' + i + '">Open terminal</button></div></div>';
+    }).join('');
+    box.querySelectorAll('button[data-i]').forEach(function (b) {
+      b.addEventListener('click', function () { openChat(data.chats[Number(b.getAttribute('data-i'))]); });
+    });
+  }
+
+  function openChat(c) {
+    if (!c) return;
+    fetch('/tui/api/open' + query, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat: c.chatId }),
+    }).then(function (res) { return res.json().then(function (j) { return { status: res.status, body: j }; }); })
+      .then(function (r) {
+        if (r.status === 200 && r.body && r.body.ok) {
+          // Back to the terminal landing with the same query (bot + token):
+          // the cookie or ?token= admits, and the attach resolves the chat
+          // this snapshot just recorded.
+          location.href = '/' + query;
+        } else {
+          alert((r.body && r.body.error) || ('open failed (' + r.status + ')'));
+        }
+      })
+      .catch(function () { alert('open failed: network'); });
+  }
+
+  function fetchState() {
+    fetch('/tui/api/sessions' + query, { headers: { Accept: 'application/json' } })
+      .then(function (res) { return res.json(); })
+      .then(render)
+      .catch(function () {
+        document.getElementById('list').innerHTML = '<div class="empty">Could not load sessions.</div>';
+      });
+  }
+
+  document.getElementById('btn-refresh').addEventListener('click', function () { fetchState(); });
+  if (!bot) {
+    document.getElementById('list').innerHTML = '<div class="empty">No bot — open this from a bot button in Telegram.</div>';
+    return;
+  }
+  fetchState();
+  setInterval(function () {
+    if (document.visibilityState === 'visible') fetchState();
+  }, 30000);
+})();
+</script>
+</body>
+</html>
+`;
 
 /**
  * Build the forge route the gateway mounts, or null when this host cannot forge
