@@ -60,3 +60,4 @@ a02318e4  no Author/Agent trailer: [queue-sync] bot commit pushed straight to ma
 ae821f9a  no Author trailer: R-14.1 card-3 landing (1 of 3 duplicate merges) without trailer; shared history, not rewritten; authored 2026-10-08; recorded 2026-10-08
 fd801199  no Author trailer: R-14.1 card-3 landing (2 of 3 duplicate merges) without trailer; shared history, not rewritten; authored 2026-10-08; recorded 2026-10-08
 21febc0c  no Author trailer: R-14.1 card-3 landing (3 of 3 duplicate merges) without trailer; shared history, not rewritten; authored 2026-10-08; recorded 2026-10-08
+69194691  no Author/Agent trailer: [queue-sync] bot commit pushed straight to main by github-actions[bot], refreshing WORK_QUEUE.md only; a range gate judges what a change ADDS and a bot push adds the commit without passing through a PR, so it was never judged, and a GitHub Actions identity cannot carry an Author trailer; authored 2026-10-09; recorded 2026-10-09
