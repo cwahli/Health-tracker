@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal, isWebStatic, verifyWithRefererFallback } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal, isWebStatic, verifyWithRefererFallback, tgtgUpstream, tgtgHost, isTgtgHost } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -1118,6 +1118,80 @@ console.log('assert-tui-gateway:');
   check('proxied html clears site caches so no stale shell survives',
     planted.h['clear-site-data'] === '"cache"');
   serve.close();
+}
+
+// 15. The bag-audit host (META-1 P3.4): the whole host proxies to the
+//     standalone :8892 app behind the shared door — never a sub-path,
+//     because the app's /api/* paths are absolute and a sub-path mount
+//     would break every call. Upstream auth (?k=/cookie/tgauth) untouched.
+{
+  const hostOf = (h) => ({ host: h });
+  check('the tgtg host matches, case-insensitively, port stripped',
+    isTgtgHost({ headers: hostOf('TGTG.Test:443') }, { TGTG_HOST: 'tgtg.test' }) === true);
+  check('the tui host is not the tgtg host',
+    isTgtgHost({ headers: hostOf('tui.health-tracker.co.uk') }, { TGTG_HOST: 'tgtg.test' }) === false);
+  check('no host header is not the tgtg host',
+    isTgtgHost({ headers: {} }, {}) === false);
+  check('the default tgtg host is the served one',
+    tgtgHost({}) === 'tgtg.health-tracker.co.uk');
+  check('the default upstream is the same-box bag service',
+    tgtgUpstream({}) === 'http://127.0.0.1:8892');
+
+  // Through the handler against a stub bag app: the stub records the exact
+  // URL it received, so passthrough (not rewriting) is proven.
+  const seen = [];
+  const bags = http.createServer((rq, rs) => {
+    let body = '';
+    rq.on('data', (c) => { body += c; });
+    rq.on('end', () => {
+      seen.push({ url: rq.url, cookie: rq.headers.cookie || '' });
+      rs.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      rs.end('{"ok":true,"bags":[]}');
+    });
+  });
+  await new Promise((r) => bags.listen(0, '127.0.0.1', r));
+  const bport = bags.address().port;
+  const benv = {
+    TUI_GATEWAY_SECRET: SECRET,
+    TUI_BOT_TOKEN_VM: TOKEN,
+    TGTG_HOST: 'tgtg.test',
+    TGTG_UPSTREAM: `http://127.0.0.1:${bport}`,
+  };
+  const bhandle = createGateway({ env: benv, log: () => {} });
+  const call = (url, headers) => new Promise((resolve) => {
+    const req = {
+      method: 'GET', url, headers: headers || {},
+      [Symbol.asyncIterator]: async function* () {},
+    };
+    const res = {};
+    let code = 0; let hh = {}; const chunks = [];
+    res.writeHead = (c, h) => { code = c; hh = h || {}; };
+    res.write = (c) => { chunks.push(Buffer.from(c)); return true; };
+    res.end = (body) => { if (body) chunks.push(Buffer.from(body)); resolve({ code, h: hh, body: Buffer.concat(chunks).toString('utf8') }); };
+    bhandle(req, res).catch(() => resolve({ code: -1 }));
+    setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+  });
+  const btoken = issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+
+  const refused = await call('/api/bags', { host: 'tgtg.test' });
+  check('the tgtg host without a token is refused, never proxied',
+    refused.code === 401 && seen.length === 0);
+
+  const page = await call('/?k=abc123', { host: 'tgtg.test', cookie: `${COOKIE_NAME}=${encodeURIComponent(btoken)}` });
+  check('a cookied token on the tgtg host reaches the bag app',
+    page.code === 200 && page.body.includes('"bags"'));
+  check('the viewer key passes through untouched (upstream auth owns it)',
+    seen.some((s) => s.url === '/?k=abc123'));
+
+  const api = await call(`/api/bags?token=${encodeURIComponent(btoken)}`, { host: 'tgtg.test' });
+  check('absolute api paths survive the proxy with a query token',
+    api.code === 200 && seen.some((s) => s.url === `/api/bags?token=${encodeURIComponent(btoken)}`));
+
+  const n = seen.length;
+  await call('/api/bags', { host: 'tui.health-tracker.co.uk', cookie: `${COOKIE_NAME}=${encodeURIComponent(btoken)}` });
+  check('the same path on the tui host never reaches the bag app',
+    seen.length === n);
+  bags.close();
 }
 
 console.log(`\n${passed} pass, ${failed} fail`);

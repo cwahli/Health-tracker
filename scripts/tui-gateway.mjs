@@ -394,6 +394,26 @@ export function webUiAuthHeader(env = process.env) {
 }
 
 /**
+ * Upstream bag-audit app (standalone `:8892` on the same box). The app keeps
+ * its own `?k=` / cookie / `/api/tgauth` posture untouched — this gateway
+ * only decides who reaches it, behind the shared Telegram door.
+ */
+export function tgtgUpstream(env = process.env) {
+  return String(env.TGTG_UPSTREAM || 'http://127.0.0.1:8892').replace(/\/+$/, '');
+}
+
+/** Host header the bag app is served on; requests there take the tgtg branch. */
+export function tgtgHost(env = process.env) {
+  return String(env.TGTG_HOST || 'tgtg.health-tracker.co.uk').trim().toLowerCase();
+}
+
+export function isTgtgHost(req, env = process.env) {
+  const raw = req?.headers?.host || req?.headers?.[':authority'] || '';
+  const host = String(raw).split(':')[0].trim().toLowerCase();
+  return host !== '' && host === tgtgHost(env);
+}
+
+/**
  * Cold-start page for the bug board mini app (packet bug-board-miniapp,
  * Node 5). Same shape as BOOTSTRAP: Telegram hands initData to the page, the
  * page puts it in the query, the server exchanges it — the HMAC never runs
@@ -602,6 +622,49 @@ async function proxyWebUi(req, res, url, env, { ttlSec = 900 } = {}) {
     logGatewayError(err);
     if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'board upstream unreachable' }));
+  }
+}
+
+/**
+ * Transparent proxy to the bag-audit upstream. Unlike proxyWebUi there is no
+ * credential to substitute and no shim to inject: the app authenticates
+ * itself (`?k=`, its own cookie, `/api/tgauth`). The gateway door above
+ * already admitted the caller; this only moves bytes. The full search string
+ * passes through untouched so `?k=` keeps working; the query is never logged.
+ */
+async function proxyTgtg(req, res, url, env) {
+  const target = `${tgtgUpstream(env)}${url.pathname}${url?.search || ''}`;
+  try {
+    const headers = {};
+    for (const [k, v] of Object.entries(req.headers || {})) {
+      if (['host', 'connection', 'content-length'].includes(String(k).toLowerCase())) continue;
+      headers[k] = v;
+    }
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const body = Buffer.concat(chunks);
+    const up = await fetch(target, {
+      method: req.method,
+      headers,
+      body: ['GET', 'HEAD'].includes(String(req.method)) || body.length === 0 ? undefined : body,
+      duplex: 'half',
+    });
+    const outHeaders = { 'cache-control': 'no-store' };
+    const ct = up.headers.get('content-type');
+    if (ct) outHeaders['content-type'] = ct;
+    const sc = typeof up.headers.getSetCookie === 'function' ? up.headers.getSetCookie() : [];
+    if (sc && sc.length) outHeaders['set-cookie'] = sc;
+    res.writeHead(up.status, outHeaders);
+    if (up.body) {
+      for await (const c of up.body) {
+        if (!res.write(c)) await new Promise((r) => res.once('drain', r));
+      }
+    }
+    res.end();
+  } catch (err) {
+    logGatewayError(err);
+    if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'bag upstream unreachable' }));
   }
 }
 
@@ -1090,6 +1153,26 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     const url = new URL(req.url, 'http://localhost');
     // Never log the query: it carries the raw initData.
     log(`${req.method} ${url.pathname}`);
+
+    // Bag audit host: the whole host proxies to the standalone app behind
+    // the shared door — placed before every path route (including `/`),
+    // because on this host even `/` belongs to the bag app, not the TUI.
+    // A sub-path mount would break the app's absolute `/api/*` calls
+    // without HTML rewriting, which this gateway never does. Upstream auth
+    // (`?k=` / cookie / `/api/tgauth`) untouched; never log the query.
+    if (isTgtgHost(req, env)) {
+      let tgtgVerdict = verifyAnyToken(req, url, secret);
+      if (!tgtgVerdict.ok) {
+        const rt = refererToken(req);
+        if (rt) tgtgVerdict = verifyToken(rt, secret);
+      }
+      if (!tgtgVerdict.ok) {
+        log(`tgtg refused (${tgtgVerdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: tgtgVerdict.reason }));
+      }
+      return proxyTgtg(req, res, url, env);
+    }
 
     // The Mini App's landing URL. It carries initData, which is exchanged for
     // a session token that goes into an HttpOnly cookie — so the token never
