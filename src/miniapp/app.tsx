@@ -54,6 +54,72 @@ function readQuery(): { bot: string; tab: string } {
   }
 }
 
+// Public Firebase client config (same project as the website:
+// health-tracker-b04dd). Client keys are public by design; the check
+// happens server-side on the ID token.
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyDZg5M8omX-VLax-s-Ti3KdiThMO9AkdNM',
+  authDomain: 'health-tracker-b04dd.firebaseapp.com',
+  projectId: 'health-tracker-b04dd',
+};
+
+/**
+ * Browser login (META-1): a real browser has no Telegram initData, but
+ * Google sign-in works there — same Firebase project as the website, so
+ * the same account. The ID token is exchanged server-side for the gateway
+ * cookie; only a non-sensitive marker stays in sessionStorage.
+ */
+function BrowserLogin({ onDone }: { onDone: () => void }) {
+  const [state, setState] = useState<'idle' | 'working' | 'error'>('idle');
+  const login = async () => {
+    if (state === 'working') return;
+    setState('working');
+    try {
+      const app = await import('firebase/app');
+      const authMod = await import('firebase/auth');
+      const fbApp = app.getApps().length
+        ? app.getApps()[0]
+        : app.initializeApp(FIREBASE_CONFIG);
+      const auth = authMod.getAuth(fbApp);
+      const cred = await authMod.signInWithPopup(auth, new authMod.GoogleAuthProvider());
+      const idToken = await cred.user.getIdToken();
+      const res = await fetch('/app/auth/firebase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      const body = await res.json().catch(() => null);
+      if (res.ok && body && body.ok) {
+        try {
+          window.sessionStorage.setItem('fbauth', '1');
+        } catch {
+          /* private mode — cookie still holds the session */
+        }
+        onDone();
+        return;
+      }
+      setState('error');
+    } catch {
+      setState('error');
+    }
+  };
+  return (
+    <div style={{ padding: 24, textAlign: 'center' }}>
+      <h2 style={{ margin: '0 0 8px' }}>Mini Apps</h2>
+      <p style={{ opacity: 0.7 }}>
+        You opened this in a browser. Sign in with the same Google account
+        you use on the Health Tracker website.
+      </p>
+      <button type="button" onClick={login} disabled={state === 'working'}>
+        {state === 'working' ? 'Signing in…' : 'Continue with Google'}
+      </button>
+      {state === 'error' && (
+        <p style={{ opacity: 0.7 }}>Sign-in failed — try again.</p>
+      )}
+    </div>
+  );
+}
+
 function resolveDef(tab: string): MiniAppDef {
   const list = enabledMiniApps();
   const hit = tab ? miniAppById(tab) : undefined;
@@ -166,8 +232,18 @@ function Shell() {
   const [query] = useState(readQuery);
   const [tab, setTab] = useState(() => resolveDef(readQuery().tab).id);
   const [drawer, setDrawer] = useState(false);
+  const [fbAuthed, setFbAuthed] = useState(() => {
+    try {
+      return window.sessionStorage.getItem('fbauth') === '1';
+    } catch {
+      return false;
+    }
+  });
   const apps = enabledMiniApps();
   const def = resolveDef(tab);
+  // Inside Telegram the initData door owns auth (?bot= required). Outside
+  // (plain browser) the Firebase Google branch owns it instead.
+  const inTelegram = !!tg();
 
   useEffect(() => {
     telegramChrome();
@@ -200,12 +276,16 @@ function Shell() {
     }
   }, [drawer]);
 
-  if (!query.bot) {
+  if (!query.bot && inTelegram) {
     return (
       <div style={{ padding: 24, textAlign: 'center' }}>
         No bot — open this from a bot button in Telegram.
       </div>
     );
+  }
+
+  if (!query.bot && !inTelegram && !fbAuthed) {
+    return <BrowserLogin onDone={() => setFbAuthed(true)} />;
   }
 
   return (
