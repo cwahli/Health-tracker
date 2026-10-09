@@ -1,0 +1,22 @@
+{
+  "schema": "meal-audit-request/1",
+  "mealId": "meal_1791393517716",
+  "name": "Caesar Salad with Croutons and Cheese, Bean and Vegetable Wrap, and Mango Lassi Yogurt Drink",
+  "provenance": "debug_payload",
+  "photos": [
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791393517716/photos/sha256_3b059099b6177f112967b6f5f5142385de2333a5a7d6838120e4098329b04d40.jpg",
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791393517716/photos/sha256_752524b3e1a1f26fe26a5c75b7c2b90e2796b427e39146c98568d00faa2ca7e3.jpg",
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791393517716/photos/sha256_f267af82d05388d46803a6bc417f8c21fc12641587901f78483dd0aced64441f.jpg"
+  ],
+  "skeleton": "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791393517716/flow_skeleton.json",
+  "requestedAt": "2026-10-08T11:17:05.776Z",
+  "requestedBy": "meal-audit-loop",
+  "status": "pending",
+  "instructions": [
+    "Audit this meal and produce a ground-truth bundle.",
+    "For each dish: dishName, weightGrams, boundingBox2D (0-1000, required because photos exist), and all 32 nutrient keys.",
+    "Weight must come from the catalog (scripts/meal-audit-assist.mjs api:<query>) or a scale, never an eyeball estimate.",
+    "Run scripts/generate-meal-result.mjs to write meal_result.json, then report the bundle path with `complete`.",
+    "If the catalog cannot source a nutrient, the audit is INCOMPLETE: say so rather than filling zeros."
+  ]
+}
