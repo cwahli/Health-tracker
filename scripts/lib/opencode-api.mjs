@@ -98,3 +98,78 @@ export async function opencodeApi(operationId, {
     throw new Error(`opencode ${operationId} returned output that is not JSON`);
   }
 }
+
+/**
+ * The model catalog, as `{ id, variants, context }` rows.
+ *
+ * WHY NOT `opencode models --verbose`
+ * -----------------------------------
+ * That flag does not exist. The installed CLI rejects it outright —
+ * "Unrecognized flag: --verbose in command opencode models" (v2.0.24, verified
+ * 2026-10-08) — and exits, so every caller of the old path got no catalog at all.
+ * That is the whole of `/thinking`: with no catalog there are no variants, so the
+ * keyboard could not be built and the command looked dead.
+ *
+ * `opencode api model.list` is the supported RPC surface and carries what the
+ * old flag was scraped for: `variants` (which thinking levels the model actually
+ * accepts) and `limit.context`.
+ *
+ * The shape differs from the old parser's expectation in a way that would have
+ * silently produced zero variants: `variants` arrives as an ARRAY of
+ * `{ id, settings }` objects, not an object keyed by level. An object-keyed read
+ * yields `[]` — the exact "this model has no thinking levels" answer, with no
+ * error anywhere. Hence `variantIds` below.
+ *
+ * Rows are keyed `provider/model`, the same string the fleet stores as
+ * `eff.model`, so a lookup by the chat's current model matches.
+ */
+export function normalizeModelCatalog(data) {
+  const rows = Array.isArray(data) ? data : [];
+  const out = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const provider = String(row.providerID || '').trim();
+    const model = String(row.modelID || row.id || '').trim();
+    if (!provider || !model) continue;
+    out.push({
+      id: `${provider}/${model}`,
+      variants: variantIds(row.variants),
+      context: Number(row.limit?.context) || 0,
+    });
+  }
+  return out;
+}
+
+/**
+ * The thinking levels one catalog row offers.
+ *
+ * Tolerates both shapes seen in the wild: an array of `{ id }` (current CLI) and
+ * an object keyed by level (the format the removed `--verbose` flag emitted).
+ */
+export function variantIds(variants) {
+  if (Array.isArray(variants)) {
+    return variants
+      .map((v) => (typeof v === 'string' ? v : v?.id))
+      .map((v) => String(v ?? '').trim())
+      .filter(Boolean);
+  }
+  if (variants && typeof variants === 'object') {
+    return Object.keys(variants).map((v) => String(v).trim()).filter(Boolean);
+  }
+  return [];
+}
+
+/**
+ * Read the catalog, or `null` when the host cannot answer.
+ *
+ * Never throws: a `/thinking` that reports "this host cannot tell me the levels"
+ * is useful, and one that dies on a missing binary is not. Callers fall back to
+ * the plain model list for names.
+ */
+export async function listModelCatalog(opts = {}) {
+  try {
+    return normalizeModelCatalog(await opencodeApi('model.list', opts));
+  } catch {
+    return null;
+  }
+}

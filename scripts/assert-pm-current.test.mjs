@@ -20,6 +20,7 @@ import {
   linkedTree,
   markdownTable,
   matchPr,
+  ownerFor,
   prAuthor,
   specAuthor,
   specFileFor,
@@ -88,6 +89,37 @@ test('the packet file is found by frontmatter id', () => {  const files = {
   assert.equal(specFileFor('/missing', 'F-13', { ...io, list: () => { throw new Error('gone'); } }), '');
 });
 
+test('owner is the worker, never the assigner', () => {
+  const item = (owner) => ({ owner });
+  assert.equal(
+    ownerFor(item(''), 'deepseek-v4-flash (max) Mac 2026-09-29'),
+    'deepseek-v4-flash (max) Mac 2026-09-29',
+    'spec author doing the work wins over blank',
+  );
+  assert.equal(
+    ownerFor(item('orchestrator'), 'Space Bunny Free (high) VM 2026-10-01'),
+    'Space Bunny Free (high) VM 2026-10-01',
+    'worker author replaces the assigner',
+  );
+  assert.equal(ownerFor(item('orchestrator'), ''), '', 'bare orchestrator is not an owner');
+  assert.equal(
+    ownerFor(item('orchestrator'), 'orchestrator via unresolved'),
+    '',
+    'an orchestrator-derived author is still the assigner',
+  );
+  assert.equal(
+    ownerFor(item('qa_meal'), ''),
+    'qa_meal',
+    'a genuine worker assignee survives when no author is recorded',
+  );
+  assert.equal(ownerFor(item(''), ''), '', 'unknown stays blank, never guessed');
+  assert.equal(
+    ownerFor(item(''), 'Your Name 2026-09-17'),
+    '',
+    'a git-config placeholder is not a worker',
+  );
+});
+
 test('a current row is the declared layout with author, github, tree', () => {
   const item = {
     key: 'card:t', kind: 'card', id: '#8', state: 'new', blocked: false,
@@ -102,6 +134,29 @@ test('a current row is the declared layout with author, github, tree', () => {
   assert.equal(row[FLEET_COLUMNS.indexOf('goal')], 'go');
   assert.equal(row[FLEET_COLUMNS.indexOf('todo')], 'do');
   assert.equal(row[FLEET_COLUMNS.indexOf('built_at')], 'T');
+});
+
+test('a current row carries the resolved owner, falling back to the projection', () => {
+  const item = {
+    key: 'card:t', kind: 'card', id: '#8', state: 'new', blocked: false,
+    stallReason: '', owner: 'qa_meal', source: 'bugctl', branch: '', note: '', worktree: '', live: null,
+  };
+  const oi = FLEET_COLUMNS.indexOf('owner');
+  assert.equal(
+    fleetRow(item, { owner: 'worker agent' })[oi],
+    'worker agent',
+    'explicit resolved owner wins',
+  );
+  assert.equal(
+    fleetRow(item, { owner: '' })[oi],
+    '',
+    'a resolved blank stays blank, never falls back to the assigner',
+  );
+  assert.equal(
+    fleetRow(item, {})[oi],
+    'qa_meal',
+    'without one the projection owner survives',
+  );
 });
 
 test('goal is ten words from the packet goal, title, or ticket', () => {
