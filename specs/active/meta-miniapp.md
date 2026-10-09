@@ -17,6 +17,7 @@ allowed_files:
   - src/miniapp/bugs.tsx
   - src/miniapp/fleet.html
   - src/miniapp/review.html
+  - src/components/bug-board/BugBoard.tsx
   - plan/ROADMAP.md
 frozen_files:
   - src/App.tsx
