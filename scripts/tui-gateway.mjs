@@ -1699,6 +1699,25 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // Meta shell (META-1 P4). Same door as /bugs/: exchange here, then the
     // token admits /app/app, which proxies the built shell (dist/app.html)
     // from the app upstream. No bot default — the button carries ?bot=.
+    // Token renewal for the shell (META-1): the 900s page token dies
+    // while the tab stays open, and initData is single-use. Same shape as
+    // /web/token — grace-bound renewal with the absolute session cliff.
+    if (url.pathname === '/app/token') {
+      const verdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace, maxAgeSec: sessionMax });
+      if (!verdict.ok) {
+        log(`app/token refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const fresh = issueToken({ botId: verdict.botId, chatId: verdict.chatId, secret, ttlSec: ttl, issuedAt: verdict.iat });
+      res.writeHead(200, {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+        'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(fresh)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+      });
+      return res.end(JSON.stringify({ ok: true, token: fresh }));
+    }
+
     if (url.pathname === '/app/' || url.pathname === '/app' || url.pathname === '/app/index.html') {
       const initData = url.searchParams.get('initData') || '';
       if (!initData) {
