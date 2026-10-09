@@ -94,6 +94,57 @@ async function fetchLive(path: string): Promise<Response> {
   return res;
 }
 
+function queryToken(): string {
+  try {
+    return new URLSearchParams(window.location.search || '').get('token') || '';
+  } catch {
+    return '';
+  }
+}
+
+function tgInitData(): string {
+  try {
+    return tg()?.initData || '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Same-gateway tabs render INSIDE the shell (burger stays put) via iframe.
+ * Each door gets exactly what it accepts, nothing more:
+ * - fleet/review/terminal: ?token= (their API doors read the query token)
+ * - forge: ?initData= (its door takes initData header-or-query only)
+ * The iframe has no Telegram bridge, so nothing here depends on it.
+ */
+function frameSrc(def: MiniAppDef, bot: string): string | null {
+  if (def.id === 'bugs') return null;
+  if (def.kind === 'tty') {
+    const tok = queryToken();
+    return tok ? `/?bot=${encodeURIComponent(bot)}&token=${encodeURIComponent(tok)}` : null;
+  }
+  if (def.id === 'fleet' || def.id === 'review') {
+    const tok = queryToken();
+    const base = def.id === 'fleet' ? '/fleet/app' : '/review/app';
+    return tok ? `${base}?token=${encodeURIComponent(tok)}` : null;
+  }
+  if (def.id === 'forge') {
+    const init = tgInitData();
+    return init ? `/forge/?initData=${encodeURIComponent(init)}` : null;
+  }
+  return null;
+}
+
+function Frame({ src, title }: { src: string; title: string }) {
+  return (
+    <iframe
+      src={src}
+      title={title}
+      style={{ flex: '1 1 auto', minHeight: 0, width: '100%', border: 0, background: '#0b1220' }}
+    />
+  );
+}
+
 function readQuery(): { bot: string; tab: string } {
   try {
     const q = new URLSearchParams(window.location.search || '');
@@ -296,6 +347,9 @@ function Shell() {
   const [query] = useState(readQuery);
   const [tab, setTab] = useState(() => resolveDef(readQuery().tab).id);
   const [drawer, setDrawer] = useState(false);
+  // Bumped whenever the page token is (re)minted after first render, so
+  // iframe tabs reload with a live credential instead of 401-polling.
+  const [queryEpoch, setQueryEpoch] = useState(0);
   const [fbAuthed, setFbAuthed] = useState(() => {
     try {
       return window.sessionStorage.getItem('fbauth') === '1';
@@ -311,6 +365,18 @@ function Shell() {
 
   useEffect(() => {
     telegramChrome();
+    // Frames need ?token= in their own query. Cookie-only sessions (fresh
+    // browser login, swallowed query) mint one here so tabs open live.
+    try {
+      const q = new URLSearchParams(window.location.search || '');
+      if (!q.get('token')) {
+        renewToken().then((ok) => {
+          if (ok) setQueryEpoch((n) => n + 1);
+        });
+      }
+    } catch {
+      /* history unavailable — tabs report honestly when refused */
+    }
   }, []);
 
   useEffect(() => {
@@ -393,6 +459,8 @@ function Shell() {
       <main style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {def.id === 'bugs' ? (
           <BugsTab />
+        ) : frameSrc(def, query.bot) ? (
+          <Frame key={`${def.id}:${queryEpoch}`} title={def.title as string} src={frameSrc(def, query.bot) as string} />
         ) : def.kind === 'tty' ? (
           <TtyTab def={def} />
         ) : (
