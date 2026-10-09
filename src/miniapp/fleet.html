@@ -213,6 +213,8 @@
     try {
       window.Telegram.WebApp.ready();
       window.Telegram.WebApp.expand();
+      // A vertical drag must scroll the table, not collapse the Mini App.
+      if (window.Telegram.WebApp.disableVerticalSwipes) window.Telegram.WebApp.disableVerticalSwipes();
     } catch (e) {}
   }
 
@@ -416,10 +418,17 @@
   // Initial fetch
   fetchState();
 
-  // SSE setup
-  if (typeof EventSource !== 'undefined') {
+  // SSE setup. The socket lives only while the page is visible: a hidden
+  // WebView holds no screen to update, and a dead socket that never closes
+  // is how terminals leak. Reconnect on return, then refresh once.
+  var sse = null;
+  function connectSse() {
+    try { if (sse) sse.close(); } catch (e) {}
+    sse = null;
+    if (document.visibilityState !== 'visible') return;
+    if (typeof EventSource === 'undefined') return;
     try {
-      var sse = new EventSource('/fleet/api/events' + location.search);
+      sse = new EventSource('/fleet/api/events' + location.search);
       sse.addEventListener('state', function (e) {
         try { applyState(JSON.parse(e.data)); } catch (err) {}
       });
@@ -459,8 +468,13 @@
         var ind = document.getElementById('live-indicator');
         if (ind) ind.style.background = '#10b981';
       };
-    } catch (e) {}
+    } catch (e) { sse = null; }
   }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') { connectSse(); fetchState(); }
+    else { try { if (sse) sse.close(); } catch (e) {} sse = null; }
+  });
+  connectSse();
 
   // Backup poll every 15s (only when page is visible)
   setInterval(function () {
