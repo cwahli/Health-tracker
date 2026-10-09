@@ -350,6 +350,61 @@ console.log('assert-tui-fixes-landed:');
   check('and the gate says the ref was not in the checkout', r.out.includes('not in this checkout'), r.out);
 }
 
+function mergeNoFf(dir, branch, message, hoursAgo) {
+  const when = `${Math.floor(Date.now() / 1000) - hoursAgo * 3600} +0000`;
+  execFileSync('git', ['merge', '-q', '--no-ff', branch, '-m', message], {
+    cwd: dir,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when },
+  });
+}
+
+{
+  // A branch that only merged an older main, then main moved on. The merge
+  // commit is old and touches watched files, but every watched blob came from
+  // main. That is not an unlanded fix.
+  const dir = makeRepo();
+  cleanup.push(dir);
+  git(dir, 'checkout', '-q', '-b', 'agent/collab-bug-intake');
+  writeFileSync(join(dir, OTHER_FILE), 'export const o = 2;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'feat: bug snapshot only', { hoursAgo: 30 });
+  git(dir, 'checkout', '-q', 'main');
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 2;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'fix(tui): landed on main', { hoursAgo: 28 });
+  git(dir, 'checkout', '-q', 'agent/collab-bug-intake');
+  mergeNoFf(dir, 'main', 'chore: pick up main so base gates re-run', 26);
+  git(dir, 'checkout', '-q', 'main');
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 3;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'fix(tui): main moved on', { hoursAgo: 1 });
+  const r = runGate(dir);
+  check('a merge that only picked up main is not stranded', r.code === 0, r.out);
+}
+
+{
+  // The same merge shape, but the side branch has its own old TUI edit.
+  // Picking up main must not hide that edit.
+  const dir = makeRepo();
+  cleanup.push(dir);
+  git(dir, 'checkout', '-q', '-b', 'agent/real-tui-edit');
+  writeFileSync(join(dir, TRAIL), 'unlanded trail\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'fix(tui): the side edit', { hoursAgo: 30 });
+  git(dir, 'checkout', '-q', 'main');
+  writeFileSync(join(dir, TUI_FILE), 'export const v = 2;\n');
+  git(dir, 'add', '-A');
+  commit(dir, 'fix(tui): landed on main', { hoursAgo: 28 });
+  git(dir, 'checkout', '-q', 'agent/real-tui-edit');
+  mergeNoFf(dir, 'main', 'chore: pick up main beside a real edit', 26);
+  git(dir, 'checkout', '-q', 'main');
+  const r = runGate(dir);
+  check('a merge that keeps a side edit still fails', r.code === 1, r.out);
+  check('the side edit is named', r.out.includes('the side edit'), r.out);
+}
+
 for (const dir of cleanup) rmSync(dir, { recursive: true, force: true });
 
 console.log(`\n${passed} pass, ${failed} fail`);
