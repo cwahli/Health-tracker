@@ -151,6 +151,39 @@ const blobAt = (ref, file) => {
   return out ? out.trim() : null;
 };
 
+const gitOk = (...argv) => {
+  try {
+    execFileSync('git', argv, { cwd: REPO, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// A merge that only copies watched bytes from a parent already in the base is
+// a branch catching up. `git show` on a merge lists no files, so the byte
+// check never sees them, and the branch tip then disagrees with current main
+// because main moved on. The bytes have to come from a parent that is an
+// ancestor of the base. A merge that keeps a side branch's own edit still fails.
+const copiedFromLandedParent = (hash) => {
+  const line = git('rev-list', '--parents', '-n', '1', hash);
+  if (!line) return false;
+  const parents = line.trim().split(/\s+/).slice(1);
+  if (parents.length < 2) return false;
+  const watched = [...new Set(
+    (git('diff-tree', '--no-commit-id', '--name-only', '-r', '-m', hash) || '')
+      .split('\n')
+      .map((f) => f.trim())
+      .filter((f) => TUI_PATHS.includes(f)),
+  )];
+  if (!watched.length) return false;
+  return watched.every((file) => {
+    const blob = blobAt(hash, file);
+    if (!blob) return false;
+    return parents.some((parent) => blobAt(parent, file) === blob && gitOk('merge-base', '--is-ancestor', parent, BASE));
+  });
+};
+
 log('assert-tui-fixes-landed:');
 
 if (!git('rev-parse', '--verify', '--quiet', BASE)) {
@@ -291,6 +324,10 @@ for (const s of stranded) {
   const same = files.length > 0
     && files.every((f) => blobAt(BASE, f) && blobAt(s.branch, f) === blobAt(BASE, f));
   if (same) {
+    waived += 1;
+    continue;
+  }
+  if (copiedFromLandedParent(s.hash)) {
     waived += 1;
     continue;
   }
