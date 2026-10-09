@@ -77,8 +77,11 @@ function GoButton({ def, target, label, health }: { def: MiniAppDef; target: str
   const go = () => {
     if (state === 'checking') return;
     const check = health !== undefined ? health : def.health || '';
-    if (!health.startsWith('/')) {
-      openInGateway(target);
+    if (!check.startsWith('/')) {
+      // Absolute target (another host/app): navigate bare, in-WebView so the
+      // Telegram session (and its initData for the target's own door) stays.
+      // The gateway query token is NOT forwarded cross-host.
+      window.location.href = target;
       return;
     }
     setState('checking');
@@ -140,8 +143,8 @@ function PendingTab({ def }: { def: MiniAppDef }) {
     <div style={{ padding: 24, textAlign: 'center' }}>
       <h2 style={{ margin: '0 0 8px' }}>{def.title}</h2>
       <p style={{ opacity: 0.7 }}>
-        Migrates into this shell in P3. Until then the standalone page below
-        is the live view — same door, same data.
+        This app opens on its own page below — same Telegram session,
+        same door.
       </p>
       <GoButton def={def} target={def.route} label={`Open ${def.title}`} />
     </div>
