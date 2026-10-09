@@ -414,6 +414,28 @@ export function isTgtgHost(req, env = process.env) {
 }
 
 /**
+ * Upstream agenda webapp (standalone `:8895` on the same box: tax calendar,
+ * agenda, hostel scout). Same whole-host pattern as the bag app — its
+ * `/api/*` paths are absolute. The app has no auth of its own (loopback
+ * only), so the shared door is its only public gate: nothing on this host
+ * serves anonymously.
+ */
+export function agendaUpstream(env = process.env) {
+  return String(env.AGENDA_UPSTREAM || 'http://127.0.0.1:8895').replace(/\/+$/, '');
+}
+
+/** Host header the agenda app is served on; requests there take its branch. */
+export function agendaHost(env = process.env) {
+  return String(env.AGENDA_HOST || 'agenda.health-tracker.co.uk').trim().toLowerCase();
+}
+
+export function isAgendaHost(req, env = process.env) {
+  const raw = req?.headers?.host || req?.headers?.[':authority'] || '';
+  const host = String(raw).split(':')[0].trim().toLowerCase();
+  return host !== '' && host === agendaHost(env);
+}
+
+/**
  * Cold-start page for the bug board mini app (packet bug-board-miniapp,
  * Node 5). Same shape as BOOTSTRAP: Telegram hands initData to the page, the
  * page puts it in the query, the server exchanges it — the HMAC never runs
@@ -626,14 +648,14 @@ async function proxyWebUi(req, res, url, env, { ttlSec = 900 } = {}) {
 }
 
 /**
- * Transparent proxy to the bag-audit upstream. Unlike proxyWebUi there is no
- * credential to substitute and no shim to inject: the app authenticates
- * itself (`?k=`, its own cookie, `/api/tgauth`). The gateway door above
- * already admitted the caller; this only moves bytes. The full search string
- * passes through untouched so `?k=` keeps working; the query is never logged.
+ * Transparent proxy to a same-box upstream app. Unlike proxyWebUi there is no
+ * credential to substitute and no shim to inject: each app authenticates
+ * itself (or, like the agenda app, has none and relies on this door). The
+ * gateway door above already admitted the caller; this only moves bytes. The
+ * full search string passes through untouched; the query is never logged.
  */
-async function proxyTgtg(req, res, url, env) {
-  const target = `${tgtgUpstream(env)}${url.pathname}${url?.search || ''}`;
+async function proxyHostUpstream(req, res, url, upstream, downError) {
+  const target = `${String(upstream).replace(/\/+$/, '')}${url.pathname}${url?.search || ''}`;
   try {
     const headers = {};
     for (const [k, v] of Object.entries(req.headers || {})) {
@@ -664,7 +686,7 @@ async function proxyTgtg(req, res, url, env) {
   } catch (err) {
     logGatewayError(err);
     if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: false, error: 'bag upstream unreachable' }));
+    res.end(JSON.stringify({ ok: false, error: downError || 'upstream unreachable' }));
   }
 }
 
@@ -1171,7 +1193,25 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: tgtgVerdict.reason }));
       }
-      return proxyTgtg(req, res, url, env);
+      return proxyHostUpstream(req, res, url, tgtgUpstream(env), 'bag upstream unreachable');
+    }
+
+    // Agenda host: tax calendar, agenda, hostel scout behind the same door.
+    // Same whole-host pattern (absolute `/api/*` paths). Unlike the bag app
+    // there is no upstream auth to preserve — the app is loopback-only, so
+    // this door is its only public gate and nothing serves anonymously.
+    if (isAgendaHost(req, env)) {
+      let agendaVerdict = verifyAnyToken(req, url, secret);
+      if (!agendaVerdict.ok) {
+        const rt = refererToken(req);
+        if (rt) agendaVerdict = verifyToken(rt, secret);
+      }
+      if (!agendaVerdict.ok) {
+        log(`agenda refused (${agendaVerdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: agendaVerdict.reason }));
+      }
+      return proxyHostUpstream(req, res, url, agendaUpstream(env), 'agenda upstream unreachable');
     }
 
     // The Mini App's landing URL. It carries initData, which is exchanged for

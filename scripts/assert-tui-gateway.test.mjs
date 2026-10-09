@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal, isWebStatic, verifyWithRefererFallback, tgtgUpstream, tgtgHost, isTgtgHost } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal, isWebStatic, verifyWithRefererFallback, tgtgUpstream, tgtgHost, isTgtgHost, agendaUpstream, agendaHost, isAgendaHost } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -1192,6 +1192,72 @@ console.log('assert-tui-gateway:');
   check('the same path on the tui host never reaches the bag app',
     seen.length === n);
   bags.close();
+}
+
+// 16. The agenda host (META-1 P3.5: calendar/agenda/stays): same whole-host
+//     pattern. The app has no auth of its own, so the door is the only gate.
+{
+  const hostOf = (h) => ({ host: h });
+  check('the agenda host matches, case-insensitively, port stripped',
+    isAgendaHost({ headers: hostOf('Agenda.Test:443') }, { AGENDA_HOST: 'agenda.test' }) === true);
+  check('the tui host is not the agenda host',
+    isAgendaHost({ headers: hostOf('tui.health-tracker.co.uk') }, { AGENDA_HOST: 'agenda.test' }) === false);
+  check('the tgtg host is not the agenda host',
+    isAgendaHost({ headers: hostOf('tgtg.health-tracker.co.uk') }, { AGENDA_HOST: 'agenda.test', TGTG_HOST: 'tgtg.health-tracker.co.uk' }) === false);
+  check('no host header is not the agenda host',
+    isAgendaHost({ headers: {} }, {}) === false);
+  check('the default agenda host is the served one',
+    agendaHost({}) === 'agenda.health-tracker.co.uk');
+  check('the default upstream is the same-box agenda service',
+    agendaUpstream({}) === 'http://127.0.0.1:8895');
+
+  const aseen = [];
+  const agenda = http.createServer((rq, rs) => {
+    let body = '';
+    rq.on('data', (c) => { body += c; });
+    rq.on('end', () => {
+      aseen.push({ url: rq.url });
+      rs.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      rs.end('{"ok":true,"events":[]}');
+    });
+  });
+  await new Promise((r) => agenda.listen(0, '127.0.0.1', r));
+  const aport = agenda.address().port;
+  const aenv = {
+    TUI_GATEWAY_SECRET: SECRET,
+    TUI_BOT_TOKEN_VM: TOKEN,
+    AGENDA_HOST: 'agenda.test',
+    AGENDA_UPSTREAM: `http://127.0.0.1:${aport}`,
+  };
+  const ahandle = createGateway({ env: aenv, log: () => {} });
+  const acall = (url, headers) => new Promise((resolve) => {
+    const req = {
+      method: 'GET', url, headers: headers || {},
+      [Symbol.asyncIterator]: async function* () {},
+    };
+    const res = {};
+    let code = 0; let hh = {}; const chunks = [];
+    res.writeHead = (c, h) => { code = c; hh = h || {}; };
+    res.write = (c) => { chunks.push(Buffer.from(c)); return true; };
+    res.end = (body) => { if (body) chunks.push(Buffer.from(body)); resolve({ code, h: hh, body: Buffer.concat(chunks).toString('utf8') }); };
+    ahandle(req, res).catch(() => resolve({ code: -1 }));
+    setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+  });
+  const atoken = issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+
+  const arefused = await acall('/api/agenda', { host: 'agenda.test' });
+  check('the agenda host without a token is refused, never proxied',
+    arefused.code === 401 && aseen.length === 0);
+
+  const agendaPage = await acall('/api/agenda', { host: 'agenda.test', cookie: `${COOKIE_NAME}=${encodeURIComponent(atoken)}` });
+  check('a cookied token on the agenda host reaches the agenda app',
+    agendaPage.code === 200 && agendaPage.body.includes('"events"') && aseen.some((s) => s.url === '/api/agenda'));
+
+  const an = aseen.length;
+  await acall('/api/agenda', { host: 'tgtg.test', cookie: `${COOKIE_NAME}=${encodeURIComponent(atoken)}` });
+  check('the agenda api on the tgtg host stays on its own branch',
+    aseen.length === an);
+  agenda.close();
 }
 
 console.log(`\n${passed} pass, ${failed} fail`);
