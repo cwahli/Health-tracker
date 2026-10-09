@@ -23,8 +23,8 @@ hosts, and the retirement sequence.
 | 10 | Relay-staging on co.uk (`/relay-staging/*` → `:8891` in the co.uk block) | after this PR merges (additive Caddy handle + doc updates) |
 | 7 | Console checks: Supabase redirect allowlist, Google OAuth consent links, Health Connect callback | HUMAN (dashboards) |
 | 8 | Retirement: remove duckdns Caddy blocks after access logs go quiet | after step 6 + soak — **but §5.2's log gate cannot see two of the hosts, see rows 11–12** |
-| 11 | DNS: `mc` / `agenda` A records → `51.254.217.163` (DNS-only) | **NOT STARTED** — `mc.health-tracker.co.uk` does not resolve (verified 2026-10-09); these two hosts were never in this plan |
-| 12 | Caddy blocks for `mc.` and `agenda.` (each **with a `log` block**) | **NOT STARTED** — runbook, evidence and gates: [`MC_DOMAIN_CUTOVER.md`](./MC_DOMAIN_CUTOVER.md) |
+| 11 | DNS: `mc` / `agenda` A records → `51.254.217.163` (DNS-only) | `mc.` DONE (resolves live 2026-10-09); `agenda` pending human DNS |
+| 12 | Caddy blocks for `mc.` and `agenda.` (each **with a `log` block**) | `mc.` DONE (`mc.health-tracker.co.uk` active with TLS + log; duckdns block retired); `agenda.` pending |
 
 ## 1. Target layout
 
