@@ -35,9 +35,9 @@ gate:
 
 # Packet: meta mini-app — one shell, ten toggleable TG apps
 
-**Go recorded 2026-10-09. Do not ask the user.** R-14.1 is closed, which was this packet's own gate. R-16, BOT-24, and BOT-26 are cleared and are not a sequencing stop. An open PR on `plan/ROADMAP.md` blocks that file only.
+**Go recorded 2026-10-09 (P1); whole-work go recorded 2026-10-09 by operator ("do the whole work"). Do not ask the user.** R-14.1 is closed, which was this packet's own gate. R-16, BOT-24, and BOT-26 are cleared and are not a sequencing stop. An open PR on `plan/ROADMAP.md` blocks that file only.
 
-This go is **P1 only**: create `src/miniapp/miniapp-registry.ts` and `scripts/lib/tg-oauth.mjs`. Zero hub edits. Zero behavior change. The other paths in `allowed_files` are the later phases. Do not edit `scripts/bot-host.mjs`, `scripts/lib/free-lanes.mjs`, `scripts/lib/work-session.mjs`, `scripts/tui-gateway.mjs`, `vite.config.ts`, or the existing mini-app pages in this go.
+P1 landed on main via #652 (registry + htk exchange) — see learning `meta-p1-stale-premise-20261009`. This go covers **P2+P3+P4**: shell, per-tab migration, single host. P5 (decommission) needs its live phone proof before any delete. Still forbidden: `scripts/lib/free-lanes.mjs`, `scripts/lib/work-session.mjs`, `bots/registry.json`; `bot-host.mjs` / `tui-gateway.mjs` only where a P3 node names them.
 
 ## Journey
 
@@ -172,4 +172,4 @@ endpoint unification (`bug-board-miniapp.md:40` — separate packet),
 ## Stop and come back
 
 Two repairs fail · Frozen file in the diff · New class appears · Live Gemini
-requested · A diff that touches a hub file under this P1 go.
+requested · A diff outside the node under execution.
