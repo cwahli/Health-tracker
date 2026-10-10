@@ -557,13 +557,16 @@ function Shell() {
       return false;
     }
   });
+  // Dead-session trip: set alongside setFbAuthed(false) so recovery always
+  // re-renders, even when fbAuthed is already false (token-only deep link).
+  const [authDeadTrip, setAuthDeadTrip] = useState(false);
   const apps = enabledMiniApps();
   const def = resolveDef(tab);
   // Inside Telegram the initData door owns auth (?bot= required). Outside
   // (plain browser) the Firebase Google branch owns it instead, and the
   // session runs as bot 'web' (the Firebase exchange mints exactly that).
   const inTelegram = inTelegramClient();
-  const authed = inTelegram || fbAuthed || !!queryToken();
+  const authed = !authDeadTrip && (inTelegram || fbAuthed || !!queryToken());
   const bot = query.bot || (!inTelegram && fbAuthed ? 'web' : '');
 
   useEffect(() => {
@@ -634,6 +637,7 @@ function Shell() {
       /* storage/history unavailable — the state flip below still logs out */
     }
     setFbAuthed(false);
+    setAuthDeadTrip(true);
   };
 
   // Framed tabs host their own in-header burger (fleet/review/terminal/bag
