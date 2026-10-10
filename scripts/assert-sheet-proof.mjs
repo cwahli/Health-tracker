@@ -55,6 +55,35 @@ export function proofFolderId(proof) {
   return m ? m[1] : '';
 }
 
+/** Trailing ticket number from Ref ("Bug-2" -> "2", "Meal-35" -> "35"). */
+export function refNumberOf(ref) {
+  const m = String(ref || '').match(/(\d+)\s*$/);
+  return m ? m[1] : '';
+}
+
+/** Card number a filename claims ("Bug-53-fleet.png" -> "53", "" when none). */
+export function fileCardNumber(name) {
+  const m = String(name || '').match(/(?:bug|card)[-_ ]?(\d+)/i);
+  return m ? m[1] : '';
+}
+
+/** Meal-proof gate: the row contracts the input->output + job-cited standard. */
+export function isMealGate(gate) {
+  return /meal-live-proof|analysis view|input.*output/i.test(String(gate || ''));
+}
+
+export function hasInputMarker(names) {
+  return names.some((n) => /entry|input|refile|composer|meal.?log|photo|picture/i.test(n));
+}
+
+export function hasOutputMarker(names) {
+  return names.some((n) => /analysis|decomposition|result|after|output|nutrient|micros/i.test(n));
+}
+
+export function citesJob(text) {
+  return /job[_-][0-9a-z_]+/i.test(String(text || ''));
+}
+
 /**
  * Raw cell by header name. The review projection (`mapReviewRow`) carries
  * only the columns the review app renders — `state` is not among them —
@@ -92,9 +121,26 @@ export function verdictForRow(item, listed, folderNameById = new Map(), rowKeys 
     }
     // Evidence link: followable, claimed by no other row. Rule 1 decides.
   }
+  const names = images.map((im) => im.name || '');
+  // Curated folder: no shot may claim another ticket's number.
+  const refNum = refNumberOf(item.ref);
+  for (const n of names) {
+    const fn = fileCardNumber(n);
+    if (refNum && fn && fn !== refNum) {
+      return { ok: false, reason: `shot ${n} claims card ${fn} but this row is ${item.ref}` };
+    }
+  }
   if (isReviewStatus(item.status) || isDoneState(item.state)) {
     if (!listed || !listed.ok) return { ok: false, reason: `proof listing failed for key ${item.key}` };
     if (!images.length) return { ok: false, reason: `Status=${item.status} state=${item.state} but zero proof images for key ${item.key}` };
+    // Meal-proof contract (opted in by gate text): input->output coverage
+    // plus a cited job, so the human never repeats these verdicts.
+    if (isMealGate(item.gate)) {
+      if (!hasInputMarker(names)) return { ok: false, reason: `meal gate but no input/entry shot for ${item.key}` };
+      if (!hasOutputMarker(names)) return { ok: false, reason: `meal gate but no output/analysis shot for ${item.key}` };
+      const hay = [item.originalRequest, item.workDone, item.proof, ...names].join('\n');
+      if (!citesJob(hay)) return { ok: false, reason: `meal gate but no job cited for ${item.key}` };
+    }
   }
   return { ok: true, reason: '' };
 }
@@ -166,6 +212,43 @@ check('proofFolderId is empty for bare names', proofFolderId('cards-17-15-14-13-
   const v = verdictForRow(item, { ok: true, images: [], folderId: '' });
   check('raw-row done with no proof fails end to end', !v.ok, v.reason);
 }
+{
+  // Curation + meal-contract fixtures: the human's 2026-10-10 verdicts.
+  const stray = {
+    key: 'card:tag_muwyto2i_lv3uyw', ref: 'Bug-2', status: 'review', state: 'packed',
+    proof: '', gate: 'Pack complete', originalRequest: '', workDone: '',
+  };
+  const vs = verdictForRow(stray, { ok: true, images: [{ name: 'Bug-53-fleet-bots.png' }, { name: 'bug2-pack-check.png' }], folderId: 'F' });
+  check('shot claiming another card fails curation', !vs.ok, vs.reason);
+  const own = verdictForRow(stray, { ok: true, images: [{ name: 'bug2-pack-check.png' }, { name: 'shot.png' }], folderId: 'F' });
+  check('own-number and unnumbered shots pass curation', own.ok, own.reason);
+
+  const mealBase = {
+    key: 'card:tag_muwyto2i_lv3uyw', ref: 'Bug-2', status: 'review', state: 'packed',
+    proof: '', gate: 'Pack complete + meal-live-proof: job cited, input->output',
+    originalRequest: 'Incorrect nutrition label', workDone: 're-filed live',
+  };
+  const imgs = (ns) => ({ ok: true, images: ns.map((name) => ({ name })), folderId: 'F' });
+  const noIn = verdictForRow(mealBase, imgs(['bug2-after-micros-job.png']));
+  check('meal gate without input shot fails', !noIn.ok, noIn.reason);
+  const noOut = verdictForRow(mealBase, imgs(['bug2-live-refile-foodhistory.png']));
+  check('meal gate without output shot fails', !noOut.ok, noOut.reason);
+  const noJob = verdictForRow(mealBase, imgs(['bug2-entry.png', 'bug2-analysis.png']));
+  check('meal gate without cited job fails', !noJob.ok, noJob.reason);
+  const full = verdictForRow(
+    { ...mealBase, workDone: 're-filed live job_1786701466257_np41t5gpa' },
+    imgs(['bug2-entry.png', 'bug2-live-analysis-mg-ca.png']),
+  );
+  check('meal gate with input + output + job passes', full.ok, full.reason);
+  const packGate = verdictForRow(
+    { ...mealBase, gate: 'Pack complete + pack --check green' },
+    imgs(['bug2-queue-row.png']),
+  );
+  check('non-meal gate skips the meal contract', packGate.ok, packGate.reason);
+}
+check('refNumberOf reads trailing numbers', refNumberOf('Bug-2') === '2' && refNumberOf('Meal-35') === '35' && refNumberOf('Health-01') === '01' && refNumberOf('noref') === '');
+check('fileCardNumber reads claimed cards', fileCardNumber('Bug-53-fleet-bots.png') === '53' && fileCardNumber('card35-1-loop.png') === '35' && fileCardNumber('shot.png') === '');
+check('isMealGate matches contract gates', isMealGate('x meal-live-proof y') && isMealGate('show analysis view fixed') && !isMealGate('Pack complete'));
 
 // ---------------------------------------------------------------------------
 // 2. Live — the real `current` tab, read-only. Skips without an identity.
