@@ -396,6 +396,18 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   line or teach the guard — needs human call. No silent deletes;
   sheet_row now refuses the key until collapsed.
 
+## Correction + T10e: earn-review, no closures (2026-10-10 ~21:50 UTC)
+
+- User correction stands: no closing rows without per-row approval.
+  Past closed_noise rows stay as reversible audit rows (reopen on
+  request). Triage default back to LIVE-or-BLOCKED, never NOISE.
+- Single agent (agent/t10e-review) working ten in order, learning
+  loop in its note (per-row lessons + running rules-earned section):
+  Health-03..08 spec family, Bug-01 (proof owed), Sheet-03 (stale
+  #606 text + TG cycle), Board-02 (screenshot owed), Domain-01
+  (retirement proof). Review ONLY on green+proof; blocked rows come
+  back named, never faked, never closed.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
