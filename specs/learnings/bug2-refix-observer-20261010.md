@@ -373,6 +373,29 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   already-noise (6 card rows + Fleet-06/Req-12). Next batch:
   Health-03..08 locked spec family (6) + remainder.
 
+## T10 batch closes (2026-10-10 ~21:40 UTC) + sweeper collision
+
+- t10a (Bug-01/Sheet-03/Board-02, PR #712): all LIVE, pointers
+  verified (ancestors, #606 merged, done/ status). No flips, correct.
+- t10c (Sync-06/07 live w/ proposals, Sync-04 noise-closed, PR #713):
+  PRs #654/#676 confirmed merged, states verified on-sheet.
+- t10d (Bug-54/Card-19, PR #714): Bug-54 VERIFIED to review —
+  44/44 PNG seen, proof cell held a bare key so manager fixed it
+  to the folder link (guard-checked), sensor now PASS (28/1).
+  Card-19 RED confirmed structural (assert-spec-diff reads
+  active-only; packet in done/) — queued fix is real and likely
+  affects other done packets: sweep candidate.
+- t10b (Auto-01/Domain-01, PR #715): verified (#583 merged, both
+  folders corroborate the sensor FAILs exactly). Auto-01 noise,
+  Domain-01 live with retirement todo pending.
+- COLLISION (load-bearing): cron pending_sweep.rb --apply re-created
+  the stale Auto-01 row at 20:30 UK from its snapshot (logs prove
+  it: archive-then-recreate), racing the triager's 21:29 fix. Two
+  same-key rows now stand (R7 fixed, R10 stale). Sweeper has no
+  killswitch and no closed_noise respect. Proposed: pause that cron
+  line or teach the guard — needs human call. No silent deletes;
+  sheet_row now refuses the key until collapsed.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
