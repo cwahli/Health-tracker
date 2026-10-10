@@ -32,10 +32,12 @@
  *   TUI_SESSION_TTL_SEC   default 900
  */
 import crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
+import { tmuxNameFor } from './tui-bot-plumbing.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..');
@@ -1822,6 +1824,54 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       return res.end(JSON.stringify({ ok: true, ttys }));
     }
 
+    // Operator-only terminal kill for the shell's terminal tab (memory
+    // saver). A TUI agent holds ~150-1000MB while its tmux session lives;
+    // killing the session frees it, and the next terminal open re-attaches
+    // (tui-attach.sh uses `tmux new-session -d -A`) resuming the same agent
+    // session id — so this frees RAM without losing the conversation.
+    // Operator-only like the cross-view page routes: any viewer listing
+    // sessions must not be able to kill them. The target must be a bot the
+    // route table serves, so the tmux name is allowlisted, never free-form.
+    // Off-box bots (e.g. the grok TG router backend) have no local tmux
+    // session: the kill reports killed:false honestly instead of failing.
+    if (url.pathname === '/api/ttys/kill') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'POST only' }));
+      }
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`ttys kill refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      if (verdict.botId !== 'webop') {
+        log(`ttys kill refused (not operator: ${verdict.botId})`);
+        res.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'operator only' }));
+      }
+      const parsed = await readJsonBody(req);
+      const target = parsed.ok ? String((parsed.json && parsed.json.bot) || '').trim() : '';
+      const known = target !== '' && Object.values(ttydRoutes(env)).some((r) => r && r.bot === target);
+      if (!known) {
+        res.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'unknown terminal' }));
+      }
+      const name = tmuxNameFor(target);
+      let killed = false;
+      try {
+        await new Promise((resolve, reject) => {
+          execFile('tmux', ['kill-session', '-t', name], { timeout: 10000 }, (err) => (err ? reject(err) : resolve()));
+        });
+        killed = true;
+      } catch {
+        killed = false;
+      }
+      log(`ttys kill bot=${target} tmux=${name} killed=${killed}`);
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ok: true, bot: target, tmux: name, killed }));
+    }
+
     if (url.pathname === '/app/' || url.pathname === '/app' || url.pathname === '/app/index.html') {
       const initData = url.searchParams.get('initData') || '';
       if (!initData) {
@@ -2696,17 +2746,21 @@ async function loadForgeRoute({ env, log }) {
  *   browser default 8px shows as a frame around the terminal.
  * - touch-action on the xterm viewport: lets one-finger vertical pans scroll
  *   the scrollback instead of fighting the canvas.
+ * - overscroll-behavior:none on the document AND the viewport: a drag that
+ *   scrolls a transcript is the same direction as pull-to-refresh, and
+ *   `contain` does not disable the refresh — `none` does, while still
+ *   allowing the inner scroll itself.
  */
 export const VIEWPORT_HEAD_TAGS = [
   '<meta name="viewport" content="width=device-width, initial-scale=1">',
   '<style>html,body{margin:0!important;padding:0!important;height:100%!important;'
-    + 'width:100%!important;overflow:hidden!important;background:#000!important}'
+    + 'width:100%!important;overflow:hidden!important;overscroll-behavior:none!important;background:#000!important}'
     + '#terminal-container{width:100%!important;max-width:100%!important;margin:0!important;'
     + 'padding:0!important;height:100%!important}'
     + '#terminal-container .terminal,.terminal{padding:0!important;height:100%!important;'
     + 'width:100%!important;box-sizing:border-box!important}'
     + '.xterm{height:100%!important;width:100%!important}'
-    + '.xterm .xterm-viewport{touch-action:pan-y!important;overscroll-behavior:contain!important}</style>',
+    + '.xterm .xterm-viewport{touch-action:pan-y!important;overscroll-behavior:none!important}</style>',
 ].join('');
 
 export function withPhoneViewport(html) {
@@ -2887,7 +2941,7 @@ export const TOUCH_SCROLL_JS = [
   '// here. Treat cline-side granularity as unproven until someone tries it.',
   'var LINE_UP="y",LINE_DOWN="e",HALF_UP="u",HALF_DOWN="d",',
   'MAX_LINE_KEYS=6;',
-  'var t=null,y0=0,acc=0,v=0,v0=0,last=0,active=0,lastDir=0,lastKeyAt=0;',
+  'var t=null,y0=0,x0=0,acc=0,cumY=0,cumX=0,v=0,v0=0,last=0,active=0,lastDir=0,lastKeyAt=0;',
   'function screen(){return document.querySelector(".xterm-screen")||document.querySelector(".xterm");}',
   'function keys(){return document.querySelector(".xterm-helper-textarea")||screen();}',
   'function now(){try{return performance.now();}catch(e){return Date.now();}}',
@@ -2982,12 +3036,17 @@ export const TOUCH_SCROLL_JS = [
   '}',
   'function down(e){',
   'if(active||!e.touches||e.touches.length!==1)return;',
-  't=e.touches[0];y0=t.clientY;v=0;v0=0;acc=0;last=now();',
+  't=e.touches[0];y0=t.clientY;x0=(t.clientX||0);v=0;v0=0;acc=0;cumY=0;cumX=0;last=now();',
   '}',
   'function move(e){',
   'if(!t||!e.touches||e.touches.length!==1)return;',
   'var y=e.touches[0].clientY,dy=y0-y,n=now();',
   'y0=y;',
+  '// Contain the gesture before the scroll threshold: a vertical-dominant',
+  '// drag is ours from 10px, so pull-to-refresh never sees its head. Below',
+  '// that a tap still types and a nudge still belongs to the page.',
+  'cumY+=dy;cumX+=((e.touches[0].clientX||0)-x0);x0=(e.touches[0].clientX||0);',
+  'if(!active&&Math.abs(cumY)>=10&&Math.abs(cumY)>=Math.abs(cumX)){try{e.preventDefault();}catch(err){}}',
   // A drag becomes a scroll at ONE LINE of travel, not one page-key worth: the',
   '// gesture has to be unambiguous (a tap still types) without demanding a',
   '// whole eighth-screen before anything moves.',

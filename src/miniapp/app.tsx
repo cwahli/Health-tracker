@@ -554,6 +554,11 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   const [picked, setPicked] = useState('');
   const [epoch, setEpoch] = useState(0);
   const [offline, setOffline] = useState('');
+  // The frame loads directly (no second click), but stays mounted only
+  // while open: Close unmounts it without killing anything, Kill frees the
+  // backend session's RAM (next Open re-attaches and resumes it).
+  const [open, setOpen] = useState(true);
+  const [killMsg, setKillMsg] = useState('');
   const frameRef = useRef<HTMLIFrameElement | null>(null);
 
   const deadRef = useRef(false);
@@ -603,6 +608,44 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   const tok = queryToken();
   const src = pickedRoute && tok ? `${pickedRoute.path}?token=${encodeURIComponent(tok)}` : null;
 
+  // Frees the picked terminal's backend RAM (operator only). The attach
+  // script recreates the tmux session on next open, resuming the same
+  // agent session — memory freed, conversation kept.
+  const killSession = async () => {
+    setKillMsg('Stopping…');
+    const send = () => fetch('/api/ttys/kill' + currentQuery(), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ bot: picked }),
+    });
+    let res: Response | null = null;
+    try {
+      res = await send();
+    } catch {
+      res = null;
+    }
+    if (res && res.status === 401 && (await renewToken())) {
+      try {
+        res = await send();
+      } catch {
+        res = null;
+      }
+    }
+    const body = res ? await res.json().catch(() => null) : null;
+    if (res && res.status === 403) {
+      setKillMsg('Operator only — Kill needs the operator sign-in.');
+      return;
+    }
+    if (!body || body.ok !== true) {
+      setKillMsg('Could not stop the session.');
+      return;
+    }
+    setOpen(false);
+    setKillMsg(body.killed
+      ? `Stopped ${picked} — memory freed. Open restarts it.`
+      : `No live ${picked} session — nothing was running.`);
+  };
+
   // The refusal JSON can arrive after onLoad fires, so an empty read
   // resolves nothing — only a refusal sets the strip, only terminal HTML
   // clears it. Scheduled 3x per frame birth below.
@@ -625,7 +668,7 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   };
 
   return (
-    <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+    <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overscrollBehavior: 'none' }}>
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderBottom: '1px solid #1e293b', background: '#0b1220' }}>
         <label htmlFor="tty-session" style={{ fontSize: 12, color: '#94a3b8' }}>Session</label>
         <select
@@ -635,6 +678,7 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
           onChange={(e) => {
             setPicked(e.target.value);
             setOffline('');
+            setKillMsg('');
             renewToken().then((ok) => { setEpoch((n) => n + 1); if (!ok) checkFrame(); loadTtys(); });
           }}
           style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 8px', fontSize: 13 }}
@@ -645,6 +689,24 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
             <option key={r.bot} value={r.bot}>{r.bot}</option>
           ))}
         </select>
+        {open ? (
+          <button type="button" onClick={() => setOpen(false)}
+            style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>
+            Close
+          </button>
+        ) : (
+          <button type="button" onClick={() => { setKillMsg(''); setOffline(''); setOpen(true); setEpoch((n) => n + 1); }}
+            style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>
+            Open
+          </button>
+        )}
+        <button type="button" onClick={killSession}
+          style={{ background: '#1e293b', color: '#f0abfc', border: '1px solid #334155', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>
+          Kill
+        </button>
+        {killMsg && (
+          <span style={{ fontSize: 12, color: '#94a3b8' }}>{killMsg}</span>
+        )}
         {loadError && (
           <span style={{ fontSize: 12, color: '#f0abfc' }}>
             {loadError}{' '}
@@ -664,7 +726,7 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
           </span>
         )}
       </div>
-      {src ? (
+      {src && open ? (
         <iframe
           ref={frameRef}
           key={`${picked}:${epoch}`}
@@ -672,10 +734,14 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
           title={def.title as string}
           allow="clipboard-read; clipboard-write"
           onLoad={() => { [1500, 4000, 8000].forEach((ms) => setTimeout(checkFrame, ms)); }}
-          style={{ flex: '1 1 auto', minHeight: 0, width: '100%', border: 0, background: '#0b1220' }}
+          style={{ flex: '1 1 auto', minHeight: 0, width: '100%', border: 0, background: '#0b1220', overscrollBehavior: 'none' }}
         />
-      ) : (
+      ) : open ? (
         <div style={{ padding: 24, textAlign: 'center', opacity: 0.7 }}>Preparing session…</div>
+      ) : (
+        <div style={{ padding: 24, textAlign: 'center', opacity: 0.7 }}>
+          Terminal closed{killMsg ? '' : ' — Open loads it only when needed'}.
+        </div>
       )}
     </div>
   );
@@ -828,7 +894,7 @@ function Shell() {
   // opening this drawer via postMessage — so it can neither cover tab
   // content nor be covered by it. Fallback cards carry an inline burger.
   return (
-    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overscrollBehavior: 'none' }}>
       {drawer && (
         <div role="presentation" onClick={() => setDrawer(false)}
           style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(2,6,23,0.6)' }}>
@@ -844,7 +910,7 @@ function Shell() {
           </nav>
         </div>
       )}
-      <main style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <main style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overscrollBehavior: 'none' }}>
         {def.id === 'bugs' ? (
           <BugsTab onMenu={() => setDrawer(true)} />
         ) : def.id === 'tui' ? (
@@ -861,6 +927,16 @@ function Shell() {
       </main>
     </div>
   );
+}
+
+// Pull-to-refresh lock for the shell document itself: a transcript drag is
+// the same direction as the browser's reload gesture, so the outer page must
+// never overscroll into a refresh. Runs everywhere, not just Telegram.
+try {
+  document.documentElement.style.overscrollBehavior = 'none';
+  document.body.style.overscrollBehavior = 'none';
+} catch {
+  /* non-DOM render — nothing to lock */
 }
 
 telegramChrome();
