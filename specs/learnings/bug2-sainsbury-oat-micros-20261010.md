@@ -109,3 +109,41 @@ Proof-only; no code, no canonical card changes, no self-verify.
 - Sheet: C7 gate appended with the meal-proof contract, C2/C3 appended after
   both human stamps (untouched), Status review / state packed kept,
   last_activity refreshed to UK shape.
+
+## Round 3 (human verdict 3): pixel-dedupe the review set
+
+Proof-only; no code, no canonical card changes, no self-verify.
+
+Perceptual-hash matrix (dhash-256 hamming / ahash-256 hamming, PIL 12.1.1)
+over the 9 top-level shots of `Work done/card:tag_muwyto2i_lv3uyw`:
+
+- bvitamins vs fe-zn: 11 / 0 — near-identical.
+- bvitamins vs mg-ca: 11 / 0 — near-identical.
+- fe-zn vs mg-ca: 4 / 0 — near-identical (same table reframed).
+- before-job vs after-job: 39 / 21 — same template, values differ
+  (red REPRODUCED + Ca 39/Mg 72.8/Fe 2.08/Zn 2.6 + D/B12/C/A at 0
+  vs green FIXED + Ca 132.1/Mg 350.2/Fe 10.8/Zn 9.23). Intentional pair.
+- All other pairs: dhash >= 57 (entry 57+, decomposition 82+,
+  refile-history 110+, pack-check 64+) — distinct captures.
+
+Single-wide-shot attempt FAILED cleanly: at 1400 px viewport the app still
+renders its max-w-md mobile column (verified: wrong-meal chicken analysis
+rendered full-width tables fine, but content column stays ~500 px), so the
+1360 px micro table always needs h-scroll — one frame cannot hold
+Mg+Ca+Fe+Zn (column order Salt,Mg,Ca,…,Fe,Zn,Se,I from the two crops; Mg→Zn
+span exceeds the ~350 px container). No vision re-file spent on the
+disproven premise (2nd live run avoided); line closed after one setup-error
+attempt + decisive layout evidence.
+
+Collapse (delete nothing — losers to `superseded/`):
+- KEPT bug2-live-analysis-fe-zn.png — only frame with fix minerals
+  Fe+Zn (+Ca/Se/I) nonzero in-app; max fix-mineral coverage of any crop.
+- MOVED bug2-live-analysis-mg-ca.png — Mg fact survives numerically in the
+  after-job panel (Mg 350.2, brand_label_data); crop lookalike (dhash 4).
+- MOVED bug2-live-analysis-bvitamins.png — vitamin coverage is contextual,
+  not fix evidence (fix enriched Ca/Mg/Fe/Zn only); lookalike (ahash 0).
+Top-level now 7 images + superseded/ (6): pack-check (pack gate),
+before-job (defect + job), after-job (fix + job, values differ),
+entry-composer (INPUT), refile-foodhistory (filed live),
+decomposition (G2 split), fe-zn (OUTPUT micros). Each keeper proves a
+unique fact; no two prove the same fact.
