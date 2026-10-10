@@ -264,16 +264,16 @@ check('proofFolderId is empty for bare names', proofFolderId('cards-17-15-14-13-
     imgs(['meal35-redo-1-input-stub-ground-truth.png', 'meal35-redo-2-refusal-zero-cards.png']),
   );
   check('bundle name alone (no comparison) still fails', !halfTarget.ok, halfTarget.reason);
-  const refusal = verdictForRow(
-    { ...mealBase, workDone: 'loop refuses, job_1786701466257_np41t5gpa, 0 cards' },
-    imgs(['meal35-redo-1-input-stub-ground-truth.png', 'meal35-redo-2-refusal-zero-cards.png']),
-  );
-  check('refusal-holds proof passes as output (Meal-35 shape)', refusal.ok, refusal.reason);
   const full = verdictForRow(
     { ...mealBase, workDone: 're-filed live job_1786701466257_np41t5gpa' },
     imgs(['bug2-entry.png', 'bug2-live-analysis-mg-ca.png']),
   );
   check('meal gate with input + output + job passes', full.ok, full.reason);
+  const refusal = verdictForRow(
+    { ...mealBase, workDone: 'loop refuses, job_1786701466257_np41t5gpa, 0 cards' },
+    imgs(['meal35-redo-1-input-stub-ground-truth.png', 'meal35-redo-2-refusal-zero-cards.png']),
+  );
+  check('refusal-holds proof passes as output (Meal-35 shape)', refusal.ok, refusal.reason);
   const packGate = verdictForRow(
     { ...mealBase, gate: 'Pack complete + pack --check green' },
     imgs(['bug2-queue-row.png']),
