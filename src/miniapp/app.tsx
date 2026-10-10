@@ -215,7 +215,7 @@ function MenuButton({ children }: { children: (close: () => void) => ReactNode }
       {menu && (
         <>
           <span role="presentation" onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 78 }} />
-          <span style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 79, minWidth: 230, maxWidth: '78vw', maxHeight: '70dvh', overflowY: 'auto', background: '#0f172a', border: '1px solid #334155', borderRadius: 12, padding: 6, display: 'flex', flexDirection: 'column', gap: 2, overscrollBehavior: 'none' }}>
+          <span style={{ position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 79, minWidth: 230, maxWidth: '78vw', maxHeight: '70dvh', overflowY: 'auto', background: '#0f172a', border: '1px solid #334155', borderRadius: 12, padding: 6, display: 'flex', flexDirection: 'column', gap: 2, overscrollBehavior: 'none' }}>
             {children(close)}
           </span>
         </>
@@ -243,7 +243,6 @@ function ExternalFrame({ src, def, onMenu }: { src: string; def: MiniAppDef; onM
   return (
     <>
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderBottom: '1px solid #1e293b', background: '#0b1220' }}>
-        <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 600, flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</span>
         <MenuButton>
           {(close) => (
             <>
@@ -253,6 +252,7 @@ function ExternalFrame({ src, def, onMenu }: { src: string; def: MiniAppDef; onM
             </>
           )}
         </MenuButton>
+        <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 600, flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</span>
       </div>
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
         {!loaded && (
@@ -748,20 +748,6 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   return (
     <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overscrollBehavior: 'none' }}>
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderBottom: '1px solid #1e293b', background: '#0b1220' }}>
-        <label htmlFor="tty-session" style={{ fontSize: 12, color: '#94a3b8' }}>Session</label>
-        <select
-          id="tty-session"
-          value={picked}
-          disabled={!routes}
-          onChange={(e) => viewBot(e.target.value)}
-          style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 8px', fontSize: 13, flex: '1 1 auto', minWidth: 0 }}
-        >
-          {routes === null && <option value="">Loading…</option>}
-          {routes !== null && routes.length === 0 && <option value="">No sessions</option>}
-          {(routes || []).map((r) => (
-            <option key={r.bot} value={r.bot}>{r.bot}</option>
-          ))}
-        </select>
         <MenuButton>
           {(close) => (
             <>
@@ -805,6 +791,20 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
             </>
           )}
         </MenuButton>
+        <label htmlFor="tty-session" style={{ fontSize: 12, color: '#94a3b8' }}>Session</label>
+        <select
+          id="tty-session"
+          value={picked}
+          disabled={!routes}
+          onChange={(e) => viewBot(e.target.value)}
+          style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 8px', fontSize: 13, flex: '1 1 auto', minWidth: 0 }}
+        >
+          {routes === null && <option value="">Loading…</option>}
+          {routes !== null && routes.length === 0 && <option value="">No sessions</option>}
+          {(routes || []).map((r) => (
+            <option key={r.bot} value={r.bot}>{r.bot}</option>
+          ))}
+        </select>
         {loadError && (
           <span style={{ fontSize: 12, color: '#f0abfc' }}>
             {loadError}{' '}
