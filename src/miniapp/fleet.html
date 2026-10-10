@@ -488,7 +488,7 @@
 </script>
 <script>(function(){
 var b=document.getElementById("shell-burger");if(!b)return;
-function q(k){try{return new URLSearchParams(window.location.search||"").get(k)||""}catch(e){return""}
+function q(k){try{return new URLSearchParams(window.location.search||"").get(k)||""}catch(e){return""}}
 b.addEventListener("click",function(){
 try{if(window.self!==window.top){window.parent.postMessage({type:"shell:menu"},"*");return}}catch(e){}
 var init="";try{init=(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initData)||""}catch(e){}
