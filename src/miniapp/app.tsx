@@ -126,9 +126,10 @@ function tgInitData(): string {
   }
 }
 
-/** Shell frames every tab (burger stays put), each door getting exactly what
- * it accepts: fleet/review ?token=&framed=1, terminal ?token= (`/` deep-link
- * 302s to this bot's ttyd page), forge ?initData=, web ?token= on its host,
+/** Shell frames every tab (no shell bar: each tab hosts its own in-header
+ * burger, which postMessages the shell to open the drawer), each door getting
+ * exactly what it accepts: fleet/review ?token=, terminal ?token= (`/`
+ * deep-link 302s to this bot's ttyd page), forge ?initData=, web ?token= on its host,
  * tgtg the bag app's own initData door via the URL hash (telegram-web-app.js
  * reads tgWebAppData from its own window's hash; the bag validator checks
  * HMAC + user only, its Lax cookie is same-site across our hosts). */
@@ -350,7 +351,7 @@ function GoButton({ def, target, label, health }: { def: MiniAppDef; target: str
   );
 }
 
-function BugsTab() {
+function BugsTab({ onMenu }: { onMenu: () => void }) {
   const board = useBugBoard({ isOpen: true, language: 'en' });
   return (
     <BugBoard
@@ -358,14 +359,21 @@ function BugsTab() {
       onClose={() => tg()?.close?.()}
       language="en"
       embedded
+      onMenu={onMenu}
     />
   );
 }
 
-function PendingTab({ def }: { def: MiniAppDef }) {
+function PendingTab({ def, onMenu }: { def: MiniAppDef; onMenu: () => void }) {
   return (
     <div style={{ padding: 24, textAlign: 'center' }}>
-      <h2 style={{ margin: '0 0 8px' }}>{def.title}</h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, margin: '0 0 8px' }}>
+        <button type="button" aria-label="Menu" onClick={onMenu}
+          style={{ width: 32, height: 32, borderRadius: 8, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 16, cursor: 'pointer' }}>
+          ☰
+        </button>
+        <h2 style={{ margin: 0 }}>{def.title}</h2>
+      </div>
       <p style={{ opacity: 0.7 }}>
         This app opens on its own page below — same Telegram session,
         same door. Use the bot&apos;s menu button (bottom-left) to come
@@ -376,10 +384,16 @@ function PendingTab({ def }: { def: MiniAppDef }) {
   );
 }
 
-function TtyTab({ def }: { def: MiniAppDef }) {
+function TtyTab({ def, onMenu }: { def: MiniAppDef; onMenu: () => void }) {
   return (
     <div style={{ padding: 24, textAlign: 'center' }}>
-      <h2 style={{ margin: '0 0 8px' }}>{def.title}</h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, margin: '0 0 8px' }}>
+        <button type="button" aria-label="Menu" onClick={onMenu}
+          style={{ width: 32, height: 32, borderRadius: 8, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 16, cursor: 'pointer' }}>
+          ☰
+        </button>
+        <h2 style={{ margin: 0 }}>{def.title}</h2>
+      </div>
       <p style={{ opacity: 0.7 }}>
         A real terminal attaches to this chat&apos;s session. It opens on the
         gateway landing (`/` keeps the bot + token query) so the socket token
@@ -468,6 +482,21 @@ function Shell() {
     }
   }, [drawer]);
 
+  // Framed tabs host their own in-header burger (fleet/review/terminal/bag
+  // page headers, BugBoard header): it postMessages the shell to open the
+  // drawer. The shell renders no bar of its own, so nothing can overlap.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      try {
+        if (e && e.data && (e.data as any).type === 'shell:menu') setDrawer(true);
+      } catch {
+        /* malformed message — ignore */
+      }
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
   if (!authed) {
     return (
       <BrowserLogin
@@ -495,22 +524,12 @@ function Shell() {
     );
   }
 
-  // Integrated shell header bar (in-flow, never floating): the burger
-  // lives in the navigation of every tab, so it can neither cover tab
-  // content nor be covered by it. Each tab keeps its single original title
-  // below the bar; the bar names the current tab next to the burger.
+  // No shell header bar: the burger lives inside each tab's own header
+  // (BugBoard header, fleet/review mastheads, terminal chrome, bag topbar),
+  // opening this drawer via postMessage — so it can neither cover tab
+  // content nor be covered by it. Fallback cards carry an inline burger.
   return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}>
-      <header style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: '#0f172a', borderBottom: '1px solid #334155', minHeight: 52 }}>
-        <button type="button" aria-label="Menu" onClick={() => setDrawer((v) => !v)}
-          style={{ width: 36, height: 36, borderRadius: 10, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}>
-          ☰
-        </button>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>Mini Apps</div>
-          <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.2 }}>{def.title}</div>
-        </div>
-      </header>
       {drawer && (
         <div role="presentation" onClick={() => setDrawer(false)}
           style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(2,6,23,0.6)' }}>
@@ -528,7 +547,7 @@ function Shell() {
       )}
       <main style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {def.id === 'bugs' ? (
-          <BugsTab />
+          <BugsTab onMenu={() => setDrawer(true)} />
         ) : frameSrc(def, bot) ? (
           def.id === 'tgtg' || def.id === 'web' ? (
             <ExternalFrame key={`${def.id}:${queryEpoch}`} def={def} src={frameSrc(def, bot) as string} />
@@ -536,9 +555,9 @@ function Shell() {
             <Frame key={`${def.id}:${queryEpoch}`} title={def.title as string} src={frameSrc(def, bot) as string} />
           )
         ) : def.kind === 'tty' ? (
-          <TtyTab def={def} />
+          <TtyTab def={def} onMenu={() => setDrawer(true)} />
         ) : (
-          <PendingTab def={def} />
+          <PendingTab def={def} onMenu={() => setDrawer(true)} />
         )}
       </main>
     </div>

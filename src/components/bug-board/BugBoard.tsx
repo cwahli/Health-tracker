@@ -27,6 +27,7 @@ import {
   Minimize2,
   Clock,
   Play,
+  Menu,
 } from 'lucide-react';
 import { FlagIssueForm, CATEGORY_OPTIONS, saveBugTrackerCache } from '../FlagIssueModal';
 import { BugCategory } from '../../utils/issueBacklog';
@@ -80,9 +81,11 @@ export type BugBoardProps = ReturnType<typeof useBugBoard> & {
   onClose: () => void;
   onViewJob?: (jobId: string) => void;
   language?: string;
-  // Shell tab: render inline (no portal overlay) so the shell keeps its own
-  // header/burger. Modal default unchanged.
+  // Shell tab: render inline (no portal overlay). Modal default unchanged.
   embedded?: boolean;
+  // Shell tab: Mini Apps drawer toggle, rendered as the first item inside
+  // this header (in-flow, never floating). Absent everywhere else.
+  onMenu?: () => void;
 };
 
 export function BugBoard({
@@ -209,16 +212,28 @@ export function BugBoard({
   onViewJob,
   language,
   embedded,
+  onMenu,
 }: BugBoardProps) {
   const frameClass = embedded
     ? 'flex flex-col w-full h-full min-h-0 p-0 text-[#f8fafc] font-sans antialiased overflow-hidden select-text bg-[#0b1220]'
     : 'fixed inset-0 z-[10050] bg-[#0b1220] flex flex-col w-full h-full p-0 text-[#f8fafc] font-sans antialiased overflow-hidden select-text';
   const frame = (
         <div className={frameClass}>
-          {/* Top Header — embedded leaves room for the shell's floating
-              burger, so the board keeps its single original title. */}
-          <header className={embedded ? "pl-14 pr-3 sm:pr-5 py-2.5 flex items-center justify-between gap-x-3 gap-y-2 flex-wrap bg-[#111827]/80 backdrop-blur shrink-0 border-b border-white/5" : "px-3 sm:px-5 py-2.5 flex items-center justify-between gap-x-3 gap-y-2 flex-wrap bg-[#111827]/80 backdrop-blur shrink-0 border-b border-white/5"}>
+          {/* Top Header — the shell's burger lives here, first inside the
+              header (in-flow with the title, never floating over it). */}
+          <header className="px-3 sm:px-5 py-2.5 flex items-center justify-between gap-x-3 gap-y-2 flex-wrap bg-[#111827]/80 backdrop-blur shrink-0 border-b border-white/5">
             <div className="flex items-center gap-2 min-w-0">
+              {onMenu && (
+                <button
+                  type="button"
+                  onClick={onMenu}
+                  aria-label="Menu"
+                  title="Mini apps menu"
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/80 transition-colors cursor-pointer shrink-0"
+                >
+                  <Menu className="w-4 h-4" />
+                </button>
+              )}
               <div className="min-w-0">
                 <h1 className="text-base font-bold tracking-tight flex items-center gap-1.5">
                   <span>Bug queue</span>
