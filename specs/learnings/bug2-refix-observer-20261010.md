@@ -296,6 +296,19 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   merged 10-03); Req-12 gate is literally "0".
 - Sheet-04 state cell repaired (note moved to Work-done, state=open).
 
+## Wave 4 dispatched (2026-10-10, all 4 approvals archived Done)
+
+- Archive confirmed: Meal-35 + Merge-01 + Main-01 + Forge-01 all Done
+  via review-miniapp. Review queue back to zero.
+- Next 10 named: Health-02, Health-09, Health-10, Fleet-09, Meal-36,
+  Meal-37 (agent-advancing now) + Sync-08, Sync-09, Fleet-06,
+  Spec-01 (need owner calls first). Deferred: Req-12, Req-18
+  (phone), Health-01 (creds), Sheet-04 (owner prose).
+- Wave 4: agent/wave4-hermetic (bot-host hermeticity fix → Health-02/
+  09 green; Health-10 bot-host half only, no flip) +
+  agent/wave4-mealproof (Meal-36/37 full 6-step live proof, prior
+  44/44 claim re-run not trusted). Max 2 concurrent, disjoint areas.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
