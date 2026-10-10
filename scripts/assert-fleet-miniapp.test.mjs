@@ -34,6 +34,7 @@ import {
   getFleetTickets as getStatusTickets,
   getFleetBots as getStatusBots,
   driveFileIdFrom,
+  absoluteImageUrlFrom,
   ticketFromRow,
 } from './lib/fleet-status.mjs';
 
@@ -632,4 +633,34 @@ test('a row projects from either current-tab layout, not just the curated one', 
   // No proof column in the projected layout, so the cell stays text, not a guess.
   assert.equal(b.proofFileId, '');
   assert.equal(b.completionProof, '—');
+});
+
+test('an absolute https image URL (CLI-filed R2 picture) becomes a renderable image, not text', () => {
+  // Bug-53 (BUG_INTAKE_VISIBILITY, collab): a CLI-filed bug picture lives on R2
+  // as a public absolute URL. The Tickets tab must render it as an image —
+  // the Drive file-ID proxy path is for private Drive files only.
+  const R2 = 'https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/bugs/foodcart/tag_muxcn960_px5wm4/reports/iss_muxcn9dy_1js7rv/shot-01.png';
+  assert.equal(absoluteImageUrlFrom(R2), R2);
+  assert.equal(absoluteImageUrlFrom(R2 + '?x=1'), R2 + '?x=1');
+  // Drive links stay on the proxy path, never the absolute path.
+  assert.equal(absoluteImageUrlFrom('https://drive.google.com/file/d/162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM/view'), '');
+  // Folders, keys, prose, and embedded URLs stay text.
+  assert.equal(absoluteImageUrlFrom('https://drive.google.com/drive/folders/1kY6Z2TDoNM5s0vuRiv_rXE_k145cDMnj'), '');
+  assert.equal(absoluteImageUrlFrom('https://example.com/a/b/c'), '');
+  assert.equal(absoluteImageUrlFrom('see https://example.com/a/b.png for detail'), '');
+  assert.equal(absoluteImageUrlFrom(''), '');
+  assert.equal(absoluteImageUrlFrom('—'), '');
+
+  const reader = (row) => (n) => String(row[n] ?? '').trim();
+  const t = ticketFromRow(reader({ key: 'card:tag_muxcn960_px5wm4', 'Completion proof': R2, Status: 'Assigned', Owner: 'x' }), 0);
+  assert.equal(t.proofFileId, '', 'R2 URL is not a Drive file');
+  assert.equal(t.proofImageUrl, R2, 'R2 URL maps to the absolute image field');
+
+  const d = ticketFromRow(reader({ key: 'k', 'Completion proof': 'https://drive.google.com/file/d/162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM/view', Status: 'Assigned', Owner: 'x' }), 0);
+  assert.equal(d.proofFileId, '162xmQqnKFMd8z9G9BTZmadAeQBPsiEjM');
+  assert.equal(d.proofImageUrl, '', 'Drive path takes precedence; never both');
+
+  const f = ticketFromRow(reader({ key: 'k', 'Completion proof': 'https://drive.google.com/drive/folders/1kY6Z2TDoNM5s0vuRiv_rXE_k145cDMnj', Status: 'Assigned', Owner: 'x' }), 0);
+  assert.equal(f.proofFileId, '');
+  assert.equal(f.proofImageUrl, '', 'folders stay text');
 });
