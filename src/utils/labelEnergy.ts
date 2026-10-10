@@ -17,8 +17,14 @@
 import { parseLabelCalories } from '../../server_budget_reconcile.js';
 import { parseServingGramsFromLabel } from '../../server_portion_clarify.js';
 
-/** Agreement below this counts as "the macros already reflect the label". */
-export const LABEL_ENERGY_TOLERANCE = 0.15;
+/** A label/derived gap at or below this is rounding dust both checks accept.
+ * Matches the ledger's trial-balance tolerance (±5 kcal, goldenLedger): a gap
+ * the ledger would flag must be actionable here, or the two checks can never
+ * agree. Live (Bug-3, card #3): printed 300 kcal vs derived ~286 — 13 kcal of
+ * label-backed drift the old 15%-only rule let through. */
+export const LABEL_ENERGY_MIN_GAP_KCAL = 5;
+/** Relative floor so large meals don't churn on sub-2% macro rounding. */
+export const LABEL_ENERGY_MIN_GAP_RATIO = 0.02;
 
 export interface LabelEnergyInput {
   /** Scout-printed panel, strings allowed ("54 kcal", "783 kJ / 187 kcal"). */
@@ -85,8 +91,11 @@ export function resolveLabelEnergyKcal(input: LabelEnergyInput): LabelEnergyResu
 /**
  * Should the derived figure be replaced by the label's? True only when the label
  * is on a declared basis, the derived figure is non-zero (so a placeholder is
- * never "corrected" into existence here), and the two disagree by more than the
- * tolerance. The caller keeps ownership of an explicit `calories` lock.
+ * never "corrected" into existence here), and the two disagree by more than
+ * BOTH the absolute floor (the ledger's ±5 kcal trial-balance tolerance — a
+ * gap the ledger flags must be actionable here) and the relative floor (2%,
+ * against macro-rounding churn on large meals). The caller keeps ownership of
+ * an explicit `calories` lock.
  */
 export function shouldPreferLabelEnergy(args: {
   derivedKcal: number | null | undefined;
@@ -97,6 +106,8 @@ export function shouldPreferLabelEnergy(args: {
   const derived = Number(args?.derivedKcal);
   if (!Number.isFinite(labelKcal) || labelKcal <= 0) return false;
   if (!Number.isFinite(derived) || derived <= 0) return false;
-  const tolerance = args?.tolerance ?? LABEL_ENERGY_TOLERANCE;
-  return Math.abs(derived - labelKcal) / labelKcal > tolerance;
+  const gap = Math.abs(derived - labelKcal);
+  if (gap <= LABEL_ENERGY_MIN_GAP_KCAL) return false;
+  const tolerance = args?.tolerance ?? LABEL_ENERGY_MIN_GAP_RATIO;
+  return gap / labelKcal > tolerance;
 }
