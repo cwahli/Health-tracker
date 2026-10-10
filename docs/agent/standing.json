@@ -367,7 +367,8 @@
         "scripts/assert-sheet-proof.mjs": [
           "fileCardNumber",
           "hasInputMarker",
-          "citesJob"
+          "citesJob",
+          "citesReplayTarget"
         ]
       }
     }

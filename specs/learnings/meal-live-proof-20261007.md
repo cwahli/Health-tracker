@@ -36,7 +36,10 @@ A meal ticket is not reviewable until all three hold:
 1. **job_id cited visibly.** The proof names the job it replays
    (`job_id cited visibly` on the panels or captions, e.g.
    `job_1786701466257_np41t5gpa`), so a reviewer can trace every shot
-   back to the filed job without opening the card.
+   back to the filed job without opening the card. Where no live job
+   exists (prebuilt benchmark fixture), cite the replay target instead:
+   bundle identity + comparison identity + exact command — and the bare
+   sentence "no job" without the target fails the check on purpose.
 2. **input (entry picture+text) through output (analysis view).** The
    shot set covers the full flow: the meal ENTRY as entered (initial
    picture plus the text, when there is any) and the OUTPUT (analysis
