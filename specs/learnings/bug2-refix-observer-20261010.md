@@ -309,6 +309,24 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   agent/wave4-mealproof (Meal-36/37 full 6-step live proof, prior
   44/44 claim re-run not trusted). Max 2 concurrent, disjoint areas.
 
+## Wave 4 meals closed (2026-10-10, verifier pass ~20:10 UTC)
+
+- Meal agent (agent/wave4-mealproof, PR #707 draft): diff is one
+  learnings note, tree clean, zero code touched. Prior 44/44 claim
+  re-run (44/44 green) and 8/8 gate re-run — trusted nothing.
+- Meal-36 REVIEW-READY: live re-file job_1791658212211_v4rx3al2v on
+  zero-diff dev server, both ledger rows carry boxes. Proof seen:
+  input panel labels the entry reconstructed (originals aged out),
+  output shows both dishes rendered, job on every strip.
+- Meal-37 REVIEW-READY with stated gap: same class-level re-file,
+  panel + row both state scoutToLedgerDishDrop.test.ts was never
+  landed and not invented. Gap disclosed, not hidden.
+- Sensors: rows 3 + 26 PASS. Recommend approve on both; Meal-37's
+  Done additionally needs the human's call on the absent test file.
+- Side observation: Health-02 (R18) + Health-09 (R21) already flipped
+  to review by the still-running hermetic agent, sensors green —
+  final verification (PNGs seen, branch/PR) waits for its report.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
