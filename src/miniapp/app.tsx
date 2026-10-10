@@ -451,7 +451,9 @@ function TerminalTab({ def, bot, inTelegram, onMenu }: { def: MiniAppDef; bot: s
     try {
       const text = (frameRef.current?.contentDocument?.body?.innerText || '').trim();
       if (!text) return;
-      if (text.startsWith('{"ok":false')) {
+      // Chrome pretty-prints served JSON (newlines/spaces), so gate on the
+      // whitespace-stripped form; JSON.parse still reads the message.
+      if (text.replace(/\s+/g, '').startsWith('{"ok":false')) {
         let msg = 'terminal refused';
         try { msg = (JSON.parse(text) as { error?: string }).error || msg; } catch { /* raw text */ }
         setOffline(msg);
