@@ -408,6 +408,26 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   (retirement proof). Review ONLY on green+proof; blocked rows come
   back named, never faked, never closed.
 
+## T10e closes: 7 endorsed, 3 honestly back (2026-10-10 ~22:25 UTC)
+
+- Agent (agent/t10e-review, PR #716 draft, learnings-only, tree
+  clean) ran ten in order with per-row lessons. Verifier viewed all
+  7 gate PNGs (captioned command+exit, condensation disclosed with
+  full logs retained — honest framing, accepted).
+- SYSTEMATIC FIX (second occurrence): agent wrote bare keys into
+  all 7 proof cells instead of folder links (same as Bug-54's
+  agent). Manager fixed all 7 guard-checked; sensors now 35/1 (the
+  1 is Domain-01, correctly red). Brief template must say "proof
+  cell = full Drive folder URL, never the bare key" — sensor
+  already guards it, which is how both got caught.
+- ENDORSED (recommend approve): Health-03/04/05/06/07, Bug-01,
+  Board-02. BACK: Health-08 RED (bot-host flake recurs on main —
+  fix queued as draft #706, unmerged; merge then re-run),
+  Domain-01 RED (retirement work pending; evidence filed, no review
+  claimed — correct), Sheet-03 BLOCKED (row archived by sweeper
+  20:30, confirmed absent; plus open flag that #712's 21:26
+  "Sheet-03" write may have mistargeted after the archive shift).
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
