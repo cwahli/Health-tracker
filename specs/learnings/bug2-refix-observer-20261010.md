@@ -247,6 +247,19 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   Meal-37 triage) + agent/wave2-phantoms (Stew-01, Bug-59/58/57/56/55
   investigate-file-or-close). Max 2 concurrent, non-overlapping areas.
 
+## Wave 3: gate-sweep (2026-10-10, user challenged the refusal)
+
+- User listed 24 Assigned rows asking why a subagent can't clean them
+  into review. Answer: it can — by earning, not marking. Dispatched
+  agent/gate-sweep (ses_ed909b45) for the 15 non-card rows: run each
+  Completion gate verbatim → capture → per-key folder → flip ONLY on
+  green. Code changes forbidden (RED = finding for later wave).
+  Wave-2 card agents already own the other 9. All 24 covered, zero
+  overlap by construction.
+- Stated expectation: rows with meaningless gates (Req-12 "0", vague
+  sync prose) CANNOT go to review and will come back honestly blocked.
+  Review count grows by evidence, not by request.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
