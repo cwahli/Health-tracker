@@ -1378,6 +1378,22 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         const rt = refererToken(req);
         if (rt) tgtgVerdict = verifyToken(rt, secret);
       }
+      const bagViewKey = String(env.TGTG_VIEW_KEY || '').trim();
+      if (!tgtgVerdict.ok && bagViewKey) {
+        // The bag keeps its own credential, and the page loads direct from
+        // Caddy today — refusing here would break the live TG button. A
+        // valid viewer cookie, or the Telegram auth exchange itself (the
+        // bag's initData allowlist stays intact inside), admits without a
+        // gateway token. Constant-time compare; an unset key never matches.
+        const presentedCookie = String(cookieValue(req, 'tgtg_view') || '');
+        if (presentedCookie &&
+            presentedCookie.length === bagViewKey.length &&
+            crypto.timingSafeEqual(Buffer.from(presentedCookie), Buffer.from(bagViewKey))) {
+          tgtgVerdict = { ok: true, botId: '', chatId: '', via: 'bag-cookie' };
+        } else if (url.pathname === '/api/tgauth' && req.method === 'POST') {
+          tgtgVerdict = { ok: true, botId: '', chatId: '', via: 'bag-tgauth' };
+        }
+      }
       if (!tgtgVerdict.ok) {
         log(`tgtg refused (${tgtgVerdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
@@ -1389,12 +1405,9 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       // (env TGTG_VIEW_KEY, same value as the bag service's own VIEW_KEY).
       // Telegram sessions keep the native tgauth path, so the bag's
       // per-user allowlist still applies to every Telegram session.
-      if (tgtgVerdict.botId === 'web') {
-        const bagViewKey = String(env.TGTG_VIEW_KEY || '').trim();
-        if (bagViewKey) {
-          const prevCookie = String(req.headers.cookie || '').trim();
-          req.headers.cookie = prevCookie ? `${prevCookie}; tgtg_view=${bagViewKey}` : `tgtg_view=${bagViewKey}`;
-        }
+      if (tgtgVerdict.botId === 'web' && bagViewKey) {
+        const prevCookie = String(req.headers.cookie || '').trim();
+        req.headers.cookie = prevCookie ? `${prevCookie}; tgtg_view=${bagViewKey}` : `tgtg_view=${bagViewKey}`;
       }
       return proxyHostUpstream(req, res, url, tgtgUpstream(env), 'bag upstream unreachable');
     }
