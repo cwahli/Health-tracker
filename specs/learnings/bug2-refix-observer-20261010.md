@@ -279,6 +279,23 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   replay-target (bundle + comparison) is. Sensor + doc + standing
   updated same turn, fixtures both directions.
 
+## Wave 3 closed (2026-10-10, verifier pass ~19:15 UTC)
+
+- Gate-sweep agent (agent/gate-sweep, PR #705 draft): diff is one
+  learnings note, tree clean, no code touched. Verifier re-checked:
+  rows 22/23/26 review with per-key folders, sensor PASS on all
+  three, one proof PNG per row viewed by verifier eyes (captioned
+  command + EXIT:0, loaded content, no spinners).
+- Review queue now 4 (Meal-35 + Merge-01 + Main-01 + Forge-01).
+- 12 rows honestly held back: 4 RED with named causes, 8
+  UNVERIFIABLE with reasons. Later-wave findings, no action taken:
+  bot-host vitest non-hermetic (blocks Health-02/09/10);
+  assert-google-store no-PUT assertion contradicts merged #510
+  (Health-10); Fleet-09 guard spec_not_locked (spec completed on
+  main, guard wants locked); Fleet-06 premise stale (#491/#495/#500
+  merged 10-03); Req-12 gate is literally "0".
+- Sheet-04 state cell repaired (note moved to Work-done, state=open).
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
