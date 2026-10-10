@@ -263,15 +263,22 @@
       var idStr = String(t.id || '').replace(/^#/, '');
       // A Drive file id in the proof cell means "this is a screenshot": show the
       // picture, not the link. The gateway streams the bytes (a Drive file is
-      // private, the browser cannot fetch it itself). Everything else — a
-      // folder link, a key, prose — stays the text it always was.
+      // private, the browser cannot fetch it itself). An absolute https image
+      // URL (a CLI-filed R2 picture) is public, so the browser loads it
+      // directly. Everything else — a folder link, a key, prose — stays text.
       var proofCell = t.proofFileId
         ? '<a href="' + esc(proofLink(t.proofFileId)) + '" target="_blank" rel="noopener">' +
             '<img src="' + esc(proofSrc(t.proofFileId)) + '" alt="completion proof screenshot" ' +
             'loading="lazy" style="max-width:220px;max-height:150px;border-radius:6px;border:1px solid #334155;cursor:zoom-in" ' +
             'onerror="this.closest(\'td\').textContent=\'image unavailable\'">' +
           '</a>'
-        : esc(t.completionProof);
+        : (t.proofImageUrl
+          ? '<a href="' + esc(t.proofImageUrl) + '" target="_blank" rel="noopener">' +
+              '<img src="' + esc(t.proofImageUrl) + '" alt="completion proof screenshot" ' +
+              'loading="lazy" style="max-width:220px;max-height:150px;border-radius:6px;border:1px solid #334155;cursor:zoom-in" ' +
+              'onerror="this.closest(\'td\').textContent=\'image unavailable\'">' +
+            '</a>'
+          : esc(t.completionProof));
       return '<tr id="ticket-row-' + esc(idStr) + '" data-ticket-id="' + esc(idStr) + '">' +
         '<td>' + esc(t.originalRequest) + '</td>' +
         '<td>' + esc(t.owner) + '</td>' +

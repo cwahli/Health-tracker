@@ -52,6 +52,23 @@ export function driveFileIdFrom(value) {
   return q ? q[1] : '';
 }
 
+/**
+ * An absolute https? image URL inside a proof cell, or '' when there is none.
+ *
+ * A CLI-filed bug picture lives on R2 (e.g. `https://pub-….r2.dev/…/shot-01.png`):
+ * it is public, so the browser fetches it directly — no gateway proxy. A Drive
+ * link is private (handled by `driveFileIdFrom` + `/fleet/api/proof`), and a
+ * folder / bare key / prose is not an image at all. Only a single trimmed URL
+ * ending in an image extension counts; embedded URLs inside prose never do.
+ */
+export function absoluteImageUrlFrom(value) {
+  const s = String(value || '').trim();
+  if (!/^https?:\/\/\S+$/i.test(s)) return '';
+  if (/drive\.google\.com/i.test(s)) return '';
+  if (!/\.(png|jpe?g|gif|webp)(\?[^\s]*)?(#[^\s]*)?$/i.test(s)) return '';
+  return s;
+}
+
 /** Directory where local beats are persisted. */
 export function fleetBeatsDir() {
   const dir = path.join(os.homedir(), '.local', 'state', 'fleet-beats');
@@ -475,6 +492,10 @@ export function ticketFromRow(getByName, idx = 0) {
   const idVal = getByName('key') || getByName('id') || getByName('#') || String(idx + 1);
   const proof = getByName('Completion proof') || getByName('proof') || '—';
   const proofShot = driveFileIdFrom(proof);
+  // A CLI-filed R2 picture is public: the browser loads the absolute URL
+  // itself. Drive files stay on the gateway proxy (private). Folders/keys/
+  // prose stay text. Drive takes precedence; the two never both fire.
+  const proofImageUrl = proofShot ? '' : absoluteImageUrlFrom(proof);
   return {
     id: idVal,
     originalRequest: getByName('Original request') || getByName('goal') || getByName('title') || '—',
@@ -486,6 +507,7 @@ export function ticketFromRow(getByName, idx = 0) {
     // URL. Anything else (a folder, a key, prose) stays text.
     completionProof: proofShot ? '' : proof,
     proofFileId: proofShot,
+    proofImageUrl,
     completionProofText: proofShot ? proof : '',
     completionGate: getByName('Completion gate') || getByName('gate') || getByName('stall_reason') || '—',
     lastActivity: getByName('last_activity') || getByName('last activity') || getByName('Last activity') || getByName('built_at') || '—',
