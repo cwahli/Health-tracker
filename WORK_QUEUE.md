@@ -1,27 +1,24 @@
-# Work queue (generated 2026-10-09T12:32:48Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
+# Work queue (generated 2026-10-10T11:53:15Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
 
-## Ready to merge (1)
+## Ready to merge (5)
 
-- #659 `agent/domain-mc-cutover` — docs(infra): record mc. cutover completed and verified live (V-17b) (owner: Antigravity 2.0 (High) Mac; behind main: 3)
+- #672 `agent/sheet-cleanup-observer` — docs: sheet-cleanup review-queue pilot observer notes (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 17)
+- #677 `agent/deploy-version-bump` — chore(deploy): refresh generated git-version stamp for 4e52f33c (owner: MiMo Flash (high) VM; behind main: 12)
+- #686 `agent/bug2-refix` — Bug-2 refix: micro-poor sainsbury canonical fed oat-micros wall (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 7)
+- #694 `feat/unified-model-switch` — Unified model switch for bots + box workers, and worker notifications playbook (owner: (no trailer); behind main: 13)
+- #695 `agent/bug3-pack` — Bug-3 pack repair: trial-balance defect posted + row corrected (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 0)
 
 ## In flight (0)
 
 _Empty — everything open is unblocked._
 
-## Unowned carry-over (9)
+## Unowned carry-over (3)
 
-- plan/ROADMAP.md#current-work-sequence-closed-on-the-vm-fleet-2026-10-09 (named by merged #652; live notes)
-- docs/agents/bot_work.md (named by merged #650; live notes)
-- docs/agents/bot_work.md (named by merged #648; live notes)
-- plan/ROADMAP.md#current-work-sequence-closed-on-the-vm-fleet-2026-10-09 (named by merged #647; live notes)
-- agent/deploy-drift-sensor (named by merged #646; branch gone, no follow-up)
-- agent/deploy-drift-sensor (named by merged #645; branch gone, no follow-up)
-- plan/ROADMAP.md (named by merged #644; live notes)
-- agent/tui-session-fixes-v2 (named by merged #643; branch gone, no follow-up)
-- plan/ROADMAP.md (named by merged #642; live notes)
+- agent/meta-shell-fix (named by merged #676; branch gone, no follow-up)
+- agent/meta-iframe-tabs (named by merged #675; branch gone, no follow-up)
+- agent/meta-renew-back (named by merged #674; branch gone, no follow-up)
 
-## Dangling pointers (2)
+## Dangling pointers (0)
 
-- #649 (named by merged #656; resolves to nothing)
-- (none) (named by merged #651; resolves to nothing)
+_None._
 
