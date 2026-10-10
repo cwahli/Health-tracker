@@ -1443,7 +1443,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       // (env TGTG_VIEW_KEY, same value as the bag service's own VIEW_KEY).
       // Telegram sessions keep the native tgauth path, so the bag's
       // per-user allowlist still applies to every Telegram session.
-      if (tgtgVerdict.botId === 'web' && bagViewKey) {
+      if ((tgtgVerdict.botId === 'web' || tgtgVerdict.botId === 'webop') && bagViewKey) {
         const prevCookie = String(req.headers.cookie || '').trim();
         req.headers.cookie = prevCookie ? `${prevCookie}; tgtg_view=${bagViewKey}` : `tgtg_view=${bagViewKey}`;
       }
@@ -1668,7 +1668,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       // auth_request instead, which is why /authz is left strict. The referer
       // channel joins here too (same grace): parser-fired and worker clients
       // that never see a cookie still repair through it.
-      const verdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace, botId: tokenBot, maxAgeSec: sessionMax });
+      const verdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace, maxAgeSec: sessionMax });
       if (!verdict.ok) {
         log(`token refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
@@ -1685,7 +1685,10 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         headers['set-cookie'] = `${COOKIE_NAME}=${encodeURIComponent(fresh)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`;
         log(`token renewed bot=${verdict.botId} chat=${verdict.chatId} (expired ${Math.round((Date.now() - verdict.exp) / 1000)}s ago, grace ${renewGrace}s, session age ${Math.round(verdict.iat ? (Date.now() - verdict.iat) / 1000 : 0)}s)`);
       }
-      if (verdict.botId !== tokenBot && !(tokenBot === 'vm' && verdict.botId !== 'vm2')) {
+      if (verdict.botId === 'webop' && verdict.botId !== tokenBot) {
+        log(`operator cross-view token route bot=${tokenBot}`);
+      }
+      if (verdict.botId !== tokenBot && !(tokenBot === 'vm' && verdict.botId !== 'vm2') && verdict.botId !== 'webop') {
         log(`token refused (token is for bot=${verdict.botId}, path is for bot=${tokenBot})`);
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: 'token is for another bot' }));
@@ -1704,13 +1707,16 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // the vm2 terminal and land in another bot's conversation map.
     const route = ttydRoutes(env)[url.pathname];
     if (route) {
-      const verdict = verifyWithRefererFallback(req, url, secret, { botId: route.bot, maxAgeSec: sessionMax });
+      const verdict = verifyWithRefererFallback(req, url, secret, { maxAgeSec: sessionMax });
       if (!verdict.ok) {
         log(`page refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
       }
-      if (verdict.botId !== route.bot && !(route.bot === 'vm' && verdict.botId !== 'vm2')) {
+      if (verdict.botId === 'webop' && verdict.botId !== route.bot) {
+        log(`operator cross-view page route bot=${route.bot}`);
+      }
+      if (verdict.botId !== route.bot && !(route.bot === 'vm' && verdict.botId !== 'vm2') && verdict.botId !== 'webop') {
         log(`page refused (token is for bot=${verdict.botId}, path is for bot=${route.bot})`);
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: 'token is for another bot' }));
@@ -1788,6 +1794,31 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(fresh)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
       });
       return res.end(JSON.stringify({ ok: true, token: fresh }));
+    }
+
+    // Terminal session list for the shell picker. Same ttydRoutes table the
+    // page routes serve (trailing-slash entries only, first wins per bot),
+    // so the picker can never name a path the gateway does not serve.
+    // The list itself is deployment shape, not session data; any valid
+    // token reads it. Opening another bot's terminal additionally needs an
+    // operator ('webop') token at the page/token routes below.
+    if (url.pathname === '/api/ttys') {
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`ttys refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const seen = new Set();
+      const ttys = [];
+      for (const [routePath, route] of Object.entries(ttydRoutes(env))) {
+        if (!routePath.endsWith('/') || seen.has(route.bot)) continue;
+        seen.add(route.bot);
+        ttys.push({ bot: route.bot, path: routePath });
+      }
+      ttys.sort((a, b) => String(a.bot).localeCompare(String(b.bot)));
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ok: true, ttys }));
     }
 
     if (url.pathname === '/app/' || url.pathname === '/app' || url.pathname === '/app/index.html') {
@@ -1913,8 +1944,17 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: 'invalid Firebase token' }));
       }
-      const token = issueToken({ botId: 'web', chatId: `firebase:${decoded.uid}`, secret, ttlSec: ttl });
-      log(`firebase exchange admitted uid=${decoded.uid}`);
+      // Operator gate for terminal cross-viewing: any Google account may
+      // use the shell (bot 'web', as today), but only the operator's own
+      // Google address mints bot 'webop', the one token the ttyd page/token
+      // routes admit across bots. Without this, any Gmail could type into
+      // the bots' live sessions. Env FIREBASE_OPERATOR_EMAILS, comma list.
+      const allowed = String(env.FIREBASE_OPERATOR_EMAILS || '').split(',')
+        .map((s) => s.trim().toLowerCase()).filter(Boolean);
+      const who = String(decoded.email || '').trim().toLowerCase();
+      const operator = who !== '' && allowed.includes(who);
+      const token = issueToken({ botId: operator ? 'webop' : 'web', chatId: `firebase:${decoded.uid}`, secret, ttlSec: ttl });
+      log(`firebase exchange admitted uid=${decoded.uid}${operator ? ' (operator)' : ''}`);
       res.writeHead(200, {
         'content-type': 'application/json',
         'cache-control': 'no-store',
