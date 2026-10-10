@@ -133,10 +133,12 @@ export function workerPrompt(action, key) {
 }
 
 /** Prompt + lock for one event: answers get an acting worker (per-ticket
- *  lock), comments get a read-only triage (global lock). */
+ *  lock), comments get a read-only triage (global lock). Chat todos get a
+ *  chat-scoped triage prompt (match the free text to a row/card). */
 export function planFor(action, key) {
   const act = String(action || '').replace(/^review_/, '');
   if (act === 'answer') return { worker: true, prompt: workerPrompt(act, key), lock: lockFor(key), title: `sheet-todo worker ${key.slice(0, 40)}` };
+  if (act === 'chat_todo') return { worker: false, prompt: chatTriagePrompt(key), lock: LOCK_PATH, title: `sheet-todo triage ${key.slice(0, 40)}` };
   return { worker: false, prompt: triagePrompt(act, key), lock: LOCK_PATH, title: `sheet-todo triage ${key.slice(0, 40)}` };
 }
 /**
@@ -601,5 +603,55 @@ export function notifyTodoEvent(action, key, env = process.env, deps = {}) {
   if (!VALID_ACTIONS.has(act)) return { ok: false, reason: `bad action ${act || '(empty)'}` };
   if (!k) return { ok: false, reason: 'missing key' };
   return recordAndSpawn({ inboxType: `review_${act}`, key: k, source: 'gateway-hook', env, deps });
+}
+
+/**
+ * CHAT prompt (free-text todos filed from chat): match the text to a sheet
+ * row or bugctl card, then assess like a triage. Landed from
+ * agent/sheet-cleanup-observer (ported onto the evolved recordAndSpawn).
+ */
+export function chatTriagePrompt(text) {
+  return [
+    'TRIAGE ONLY — read-only assessment, no fixes, no writes, no commits, no messages.',
+    `The human filed a todo from chat: ${text.slice(0, 500)}.`,
+    'Do exactly this: (1) match it to a sheet row (spreadsheet 10oPI9AsHaKpb9xRR8XcTm6JyH1gYyykUFBNqeqg2SM0, tab current) or a bugctl card (`bugctl list --json`, match by title/number);',
+    ' (2) state what is actually wrong vs what the todo claims (quote the row/card);',
+    ' (3) run scripts/assert-sheet-proof.mjs and scripts/assert-sheet-canonical-parity.mjs from /home/ubuntu/src/Health-tracker IF present (skip with a note if absent — never fail for that);',
+    ` (4) append one JSON line to ${TRIAGE_LOG} with {at, action: "todo", text, match, sensors, needs_go, reason}.`,
+    'End with one line: TRIAGE OK (nothing to do) or TRIAGE NEEDS-GO (what fix to authorize).',
+  ].join(' ');
+}
+
+/**
+ * Fire-and-forget chat entry: validate free text, then record + fan out
+ * through the standard lanes (chat-scoped triage prompt via planFor).
+ */
+export function notifyTodoText(text, env = process.env, deps = {}) {
+  const t = String(text || '').trim();
+  if (!t) return { ok: false, reason: 'empty todo' };
+  if (t.length > 2000) return { ok: false, reason: 'todo over 2000 chars' };
+  return recordAndSpawn({ inboxType: 'chat_todo', key: t.slice(0, 120), source: 'todo-chat', env, deps });
+}
+
+export function todoStatusText(inboxLines, triageLines) {
+  const pending = (Array.isArray(inboxLines) ? inboxLines : []).filter(Boolean);
+  if (!pending.length) return 'Todo inbox is empty — nothing filed since the baseline.';
+  const head = pending.slice(-8).map((l) => {
+    try {
+      const e = JSON.parse(l);
+      return `• ${e.at || '?'} ${e.type || '?'} ${e.key || e.ref || ''}`.trim();
+    } catch {
+      return `• ${String(l).slice(0, 100)}`;
+    }
+  });
+  const tail = (Array.isArray(triageLines) ? triageLines : []).filter(Boolean).slice(-1).map((l) => {
+    try {
+      const e = JSON.parse(l);
+      return `Last triage: ${e.at || '?'} → ${e.needs_go ? `NEEDS-GO (${e.reason || 'see log'})` : 'OK'}`;
+    } catch {
+      return null;
+    }
+  }).filter(Boolean);
+  return ['Todo inbox (latest last):', ...head, ...tail].join('\n');
 }
 
