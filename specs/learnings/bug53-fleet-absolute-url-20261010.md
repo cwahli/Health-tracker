@@ -107,3 +107,19 @@ canonical artifacts (defect+repro+plan stand, no self-verify):
   recaptured with new bytes (input 31239→37040B, fleet 60065→74487B, board
   86384→101741B). Nothing deleted. Sheet Work-done appended, Status stays
   review, last_activity `17:27 - 10 oct (UK)`.
+
+## Fresh content (2026-10-10 ~17:31 UTC, proof only — no code change)
+
+Verifier: round-2 asserts prove the pipeline renders the filed bytes, but the
+filed bytes themselves are a loading-screen capture — proof pixels
+indistinguishable from bug state. Filed a NEW distinguishable picture through
+the genuine CLI path (`bugctl create --screenshot`, screenshot ok:true): a
+live-rendered fix-summary board (text UI, zero spinner pixels) → card #56
+`tag_mv2m23s7_dock7h`, report `iss_mv2m242v_cxu4hn`, R2 HEAD 200 image/png
+61667B, sha-identical to the filed file, dims 1280x900. Left #56 standalone
+(no duplicate_of — #53's artifacts untouched). Rendered the new R2 URL in the
+fixed fleet staging with load assert `fresh-r2: complete=true
+naturalWidth=1280` (in-shot READY banner; naturalWidth matches filed dims).
+New file `bug53-fresh-content-fleet-board.png` (101386B) in #53's folder top
+level; moved nothing else, deleted nothing. Sheet appended, Status review,
+last_activity `17:31 - 10 oct (UK)`.
