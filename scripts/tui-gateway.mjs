@@ -913,6 +913,7 @@ import {
   verifyProofFile as verifyProofFileStatus,
   resetReviewState as resetReviewStateStatus,
 } from './lib/review-status.mjs';
+import { notifyTodoEvent } from './lib/todo-notify.mjs';
 
 export { FLEET_CACHE_TTL_MS };
 
@@ -2408,6 +2409,9 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
           (state) => broadcastReviewEvent('state', state),
           () => {},
         );
+        // Event-driven todo wake-up: the human's tap triages read-only.
+        // No-op unless TODO_AGENT_NOTIFY=1 (never in tests).
+        try { notifyTodoEvent('answer', parsed.json?.key, env); } catch { /* notify must never fail the answer */ }
       }
       res.writeHead(out.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify(out));
@@ -2434,6 +2438,8 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
           (state) => broadcastReviewEvent('state', state),
           () => {},
         );
+        // Event-driven todo wake-up (see /answer above).
+        try { notifyTodoEvent(url.pathname === '/review/api/approve' ? 'approve' : 'comment', data.key, env); } catch { /* notify must never fail the verdict */ }
       }
       res.writeHead(out.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify(out));

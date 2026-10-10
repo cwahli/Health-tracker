@@ -352,6 +352,23 @@
           "verify:deployed"
         ]
       }
+    },
+    {
+      "id": "meal_proof_cited_curated_flowing",
+      "label": "Meal proof cites the job number, shows input (entry picture+text) through output (analysis view), and the folder holds only this ticket's shots",
+      "asked": "repeated",
+      "files_must_contain": {
+        "specs/learnings/meal-live-proof-20261007.md": [
+          "job_id cited visibly",
+          "input (entry picture+text) through output (analysis view)",
+          "superseded/"
+        ],
+        "scripts/assert-sheet-proof.mjs": [
+          "fileCardNumber",
+          "hasInputMarker",
+          "citesJob"
+        ]
+      }
     }
   ],
   "sibling_pairs": [

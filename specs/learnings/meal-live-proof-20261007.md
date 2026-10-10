@@ -28,3 +28,24 @@ counts, and the screenshot must show the result as the user sees it.
 Terminal-only evidence (vitest, assert scripts, `tsc`) proves the code;
 only the 6-step live meal run proves the fix. A `done`/`Done` without
 the PNGs is invalid and must be reopened and redone.
+
+## Proof presentation rules (standing — repeated human verdicts, 2026-10-10)
+
+A meal ticket is not reviewable until all three hold:
+
+1. **job_id cited visibly.** The proof names the job it replays
+   (`job_id cited visibly` on the panels or captions, e.g.
+   `job_1786701466257_np41t5gpa`), so a reviewer can trace every shot
+   back to the filed job without opening the card.
+2. **input (entry picture+text) through output (analysis view).** The
+   shot set covers the full flow: the meal ENTRY as entered (initial
+   picture plus the text, when there is any) and the OUTPUT (analysis
+   view with the fixed nutrient info as the user sees it). Input-only
+   or output-only proof goes back for the missing half. Reconstructed
+   entry states are allowed only when labeled as reconstructed.
+3. **Curated folder.** Before submitting for review, the ticket's
+   folder holds only this ticket's shots: irrelevant files are moved
+   out (another ticket's shots to that ticket's folder), superseded
+   revisions move to a `superseded/` subfolder (the review app lists
+   top-level images only, so they stay out of review without being
+   deleted). Nothing is deleted.
