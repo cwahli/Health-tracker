@@ -77,7 +77,7 @@ export function hasInputMarker(names) {
 }
 
 export function hasOutputMarker(names) {
-  return names.some((n) => /analysis|decomposition|result|after|output|nutrient|micros/i.test(n));
+  return names.some((n) => /analysis|decomposition|result|after|output|nutrient|micros|refus|zero-cards|no-cards/i.test(n));
 }
 
 export function citesJob(text) {
@@ -240,6 +240,11 @@ check('proofFolderId is empty for bare names', proofFolderId('cards-17-15-14-13-
     imgs(['bug2-entry.png', 'bug2-live-analysis-mg-ca.png']),
   );
   check('meal gate with input + output + job passes', full.ok, full.reason);
+  const refusal = verdictForRow(
+    { ...mealBase, workDone: 'loop refuses, job_1786701466257_np41t5gpa, 0 cards' },
+    imgs(['meal35-redo-1-input-stub-ground-truth.png', 'meal35-redo-2-refusal-zero-cards.png']),
+  );
+  check('refusal-holds proof passes as output (Meal-35 shape)', refusal.ok, refusal.reason);
   const packGate = verdictForRow(
     { ...mealBase, gate: 'Pack complete + pack --check green' },
     imgs(['bug2-queue-row.png']),
