@@ -76,8 +76,12 @@ describe('shouldPreferLabelEnergy', () => {
     expect(shouldPreferLabelEnergy({ derivedKcal: 88, labelKcal: 238 })).toBe(true);
   });
 
-  it('agrees within tolerance — macro figure is fine, no churn', () => {
-    expect(shouldPreferLabelEnergy({ derivedKcal: 230, labelKcal: 238 })).toBe(false);
+  it('ledger-aligned: an 8 kcal label gap is actionable (the ±5 kcal trial balance would flag it), 2 kcal dust is not', () => {
+    // Bug-3 (card #3): the old 15%-only rule blessed 230-vs-238 as "no churn"
+    // while the ledger flags any scout-vs-saved gap above 5 kcal — the two
+    // checks could never agree. Gaps the ledger flags must be actionable here.
+    expect(shouldPreferLabelEnergy({ derivedKcal: 230, labelKcal: 238 })).toBe(true);
+    expect(shouldPreferLabelEnergy({ derivedKcal: 236, labelKcal: 238 })).toBe(false);
     expect(shouldPreferLabelEnergy({ derivedKcal: 240, labelKcal: 238 })).toBe(false);
   });
 
