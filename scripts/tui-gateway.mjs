@@ -1872,6 +1872,46 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       return res.end(JSON.stringify({ ok: true, bot: target, tmux: name, killed }));
     }
 
+    // Live/dormant flags for the shell's per-bot session rows. Same door as
+    // the list (deployment shape + liveness, no session data); killing stays
+    // operator-only. One `tmux has-session` per served bot, allowlisted names
+    // only; off-box backends (no local tmux session) report live:false.
+    if (url.pathname === '/api/ttys/status') {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'GET only' }));
+      }
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`ttys status refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const seen = new Set();
+      const bots = [];
+      for (const route of Object.values(ttydRoutes(env))) {
+        if (!route || seen.has(route.bot)) continue;
+        seen.add(route.bot);
+        bots.push(route.bot);
+      }
+      bots.sort();
+      const status = [];
+      for (const b of bots) {
+        let live = false;
+        try {
+          await new Promise((resolve, reject) => {
+            execFile('tmux', ['has-session', '-t', tmuxNameFor(b)], { timeout: 5000 }, (err) => (err ? reject(err) : resolve()));
+          });
+          live = true;
+        } catch {
+          live = false;
+        }
+        status.push({ bot: b, live });
+      }
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ok: true, status }));
+    }
+
     if (url.pathname === '/app/' || url.pathname === '/app' || url.pathname === '/app/index.html') {
       const initData = url.searchParams.get('initData') || '';
       if (!initData) {

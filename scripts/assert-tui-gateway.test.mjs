@@ -629,6 +629,48 @@ console.log('assert-tui-gateway:');
     idle.code === 200 && idleBody.ok === true && idleBody.killed === false && idleBody.tmux === 'VM-tui-testkill');
   const get = await kill('webop', 'testkill', 'GET');
   check('the kill route is POST only', get.code === 405);
+
+  // 12a9. Per-bot liveness for the shell rows: dormant by default, live
+  //       while a real tmux session exists, dormant again after the kill.
+  const status = async (botId) => {
+    const env = { TUI_GATEWAY_SECRET: SECRET, TUI_ROUTE_TESTKILL_PATH: '/ttykill/' };
+    const token = issueToken({ botId, chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+    const handle = createGateway({ env, log: () => {} });
+    return new Promise((resolve, reject) => {
+      let code = 0; let body = '';
+      const res = { writeHead: (c) => { code = c; }, end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+      handle({ method: 'GET', url: '/api/ttys/status',
+        headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` } }, res).catch(reject);
+    });
+  };
+  const row = (code, body, bot) => {
+    if (code !== 200) return 'http' + code;
+    const j = JSON.parse(body || '{}');
+    const r = (j.status || []).find((s) => s.bot === bot);
+    return r ? (r.live ? 'live' : 'dormant') : 'missing';
+  };
+  check('a dormant bot reports dormant', row(...await (async () => { const r = await status('webop'); return [r.code, r.body]; })(), 'testkill') === 'dormant');
+  const { execFileSync } = await import('node:child_process');
+  execFileSync('tmux', ['new-session', '-d', '-s', 'VM-tui-testkill', 'sleep 300']);
+  const sLive = await status('webop');
+  check('a bot with a live tmux session reports live', row(sLive.code, sLive.body, 'testkill') === 'live');
+  await kill('webop', 'testkill');
+  const sDead = await status('webop');
+  check('the kill flips it back to dormant', row(sDead.code, sDead.body, 'testkill') === 'dormant');
+  try { execFileSync('tmux', ['kill-session', '-t', 'VM-tui-testkill']); } catch {}
+  // The status door matches the list door (any valid token): liveness is
+  // deployment shape, not session data. Killing stays operator-only above.
+  const sVm = await status('vm');
+  check('any valid token reads the status (same door as the list)',
+    sVm.code === 200 && JSON.parse(sVm.body || '{}').status.some((s) => s.bot === 'testkill'));
+  const bare = await new Promise((resolve, reject) => {
+    const env = { TUI_GATEWAY_SECRET: SECRET, TUI_ROUTE_TESTKILL_PATH: '/ttykill/' };
+    const handle = createGateway({ env, log: () => {} });
+    let code = 0;
+    const res = { writeHead: (c) => { code = c; }, end: () => resolve(code) };
+    handle({ method: 'GET', url: '/api/ttys/status', headers: {} }, res).catch(reject);
+  });
+  check('no token gets no status', bare === 401);
 }
 
 // 12b. The bootstrap we do serve is ours, so it is executed with stubs.
