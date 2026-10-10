@@ -77,6 +77,27 @@ docs/agent/standing.json or journey-guard.
   prefix strip, approve window) each arrived with a regression fixture —
   that discipline is what kept verifier trust.
 
+## Rework round (human verdict → agent → verifier, 2026-10-10 ~08:30 UTC)
+
+- Human answered via the comment path (text-only, no upload — mechanics
+  verified: stamp, append-only, last_activity refresh, queue retention).
+- Same agent reworked in the same branch (additive commit 4baaa839,
+  docs-only, no code — canonical artifacts untouched, parent verify
+  stands). Proof-only rework done right: no attempt row, no self-verify.
+- All three demands met and independently seen: job number heads the
+  revised panels; exact meal re-filed live (PROOF #54, G2 photos +
+  verbatim prompt, 509 kcal, zero residue, folded duplicate_of #2);
+  analysis-view shots show the fixed nutrients in-app (Mg 65.1, Ca 169.5,
+  Fe 2, Zn 1, Se 4.1, B6/B1/B2/B3 nonzero). Folder 5 → 12 files, zero
+  deletions. Sensors: Bug-2 passes both.
+- Nits for the next loop (not verdict-blockers): the micros table shots
+  are horizontally cropped with dead gray space — values visible but
+  ugly; implementer appends didn't refresh last_activity (still the
+  human's 08:53 stamp); commit author name reads QA Bot (trailer, the
+  CI-checked part, is correct).
+- O5 holds again: the verdict's three numbered demands got three
+  evidenced answers. Checkable orders produce checkable work.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
