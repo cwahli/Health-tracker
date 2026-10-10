@@ -422,36 +422,40 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   const [offline, setOffline] = useState('');
   const frameRef = useRef<HTMLIFrameElement | null>(null);
 
+  const deadRef = useRef(false);
+  const loadTtys = async () => {
+    setLoadError('');
+    let res: Response | null = null;
+    try {
+      res = await fetchLive('/api/ttys');
+    } catch {
+      res = null;
+    }
+    if (deadRef.current) return;
+    if (res && res.status === 401) {
+      // Session dead past renewal (cookie gone, stale marker/token left):
+      // back to Google sign-in, not an empty picker. Runs on mount and on
+      // every session switch, so no path strands.
+      onAuthDead();
+      return;
+    }
+    const body = res ? await res.json().catch(() => null) : null;
+    if (deadRef.current) return;
+    if (!body || body.ok !== true || !Array.isArray(body.ttys)) {
+      setLoadError('Could not load sessions.');
+      setRoutes([]);
+      return;
+    }
+    const list = body.ttys as TtyRoute[];
+    setRoutes(list);
+    setPicked((cur) => cur || (list.some((r) => r.bot === 'web') ? 'web' : (list[0]?.bot || '')));
+  };
+
   useEffect(() => {
     if (inTelegram) return;
-    let dead = false;
-    (async () => {
-      setLoadError('');
-      let res: Response | null = null;
-      try {
-        res = await fetchLive('/api/ttys');
-      } catch {
-        res = null;
-      }
-      if (dead) return;
-      if (res && res.status === 401) {
-        // Session dead past renewal (cookie gone, stale marker/token left):
-        // back to Google sign-in, not an empty picker.
-        onAuthDead();
-        return;
-      }
-      const body = res ? await res.json().catch(() => null) : null;
-      if (dead) return;
-      if (!body || body.ok !== true || !Array.isArray(body.ttys)) {
-        setLoadError('Could not load sessions.');
-        setRoutes([]);
-        return;
-      }
-      const list = body.ttys as TtyRoute[];
-      setRoutes(list);
-      setPicked((cur) => cur || (list.some((r) => r.bot === 'web') ? 'web' : (list[0]?.bot || '')));
-    })();
-    return () => { dead = true; };
+    deadRef.current = false;
+    loadTtys();
+    return () => { deadRef.current = true; };
   }, [inTelegram, reloadKey]);
 
   if (inTelegram) {
@@ -497,7 +501,7 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
           onChange={(e) => {
             setPicked(e.target.value);
             setOffline('');
-            renewToken().then((ok) => { setEpoch((n) => n + 1); if (!ok) checkFrame(); });
+            renewToken().then((ok) => { setEpoch((n) => n + 1); if (!ok) checkFrame(); loadTtys(); });
           }}
           style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 8px', fontSize: 13 }}
         >
