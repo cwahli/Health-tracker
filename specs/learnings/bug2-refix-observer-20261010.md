@@ -114,6 +114,21 @@ docs/agent/standing.json or journey-guard.
   round 2's gate text opted the row into the stricter checks, which
   then passed on real evidence. Repeat-yourself loop closed.
 
+## Round 3 (dedupe, 2026-10-10 ~11:45 UTC)
+
+- Same agent, additive commit 48786de5, docs-only. Folder 9 → 7
+  top-level + 6 in `superseded/`, zero deleted, verified by id.
+- Verifier recomputed dhashes independently (8x8): mg-ca/fe-zn = 1,
+  mg-ca/bvitamins = 2, fe-zn/bvitamins = 1 (moved, correct);
+  before/after-job = 10 (kept pair, values visibly differ);
+  micros-vs-panels = 31-35 (distinct). Agent's absolute numbers
+  differ (different hash size) but every keep/move verdict agrees.
+- Single-shot attempt failed clean on layout evidence (max-w-md
+  column always h-scrolls) — documented, one setup try only. Right
+  call: stop after decisive negative evidence, not after N retries.
+- Sensors green on row 43 (meal contract still passing on 7 files).
+  Nits: lowercase `(uk)` again; agent's subfolder-id typo (round 2).
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
