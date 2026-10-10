@@ -2854,6 +2854,12 @@ export const LAYOUT_JS = [
  * cadence would feel like a stall rather than motion). MAX_LINE_KEYS per
  * touchmove bounds a fast flick without throttling it outright, and the fling
  * decays the same way at line granularity.
+ *
+ * Wheel twin (desktop browsers): a wheel over an alt-screen TUI moves nothing
+ * natively — same measurement as above, viewport scrollHeight == clientHeight
+ * — so wheel deltas become the same fine steps the drag emits. Where xterm
+ * HAS scrollback (plain shells) native scrolling wins and the handler stands
+ * aside; ctrl/meta+wheel (zoom) is never touched.
  */
 export const TOUCH_SCROLL_JS = [
   '(function(){',
@@ -3016,6 +3022,30 @@ export const TOUCH_SCROLL_JS = [
   'try{requestAnimationFrame(tick);}catch(e){}',
   '}',
   '}',
+  '// Wheel: the desktop-browser twin of the drag above. Alt-screen TUIs have',
+  '// no scrollback for the browser to move, so wheel deltas become fine steps;',
+  '// plain shells keep their native scroll (stand aside, no preventDefault).',
+  'var wacc=0;',
+  'function nativeScrollable(){',
+  'try{',
+  'var vp=document.querySelector(".xterm-viewport");',
+  'return !!(vp&&(vp.scrollHeight-vp.clientHeight>4));',
+  '}catch(e){return true;}',
+  '}',
+  'function wheel(e){',
+  'try{',
+  'if(!e||e.ctrlKey||e.metaKey)return;',
+  'var d=typeof e.deltaY==="number"?e.deltaY:0;',
+  'if(e.deltaMode===1)d*=16;',
+  'if(!d)return;',
+  'if(nativeScrollable())return;',
+  'wacc+=d;',
+  'var s=40,n=0;',
+  'while(wacc>=s&&n<MAX_LINE_KEYS){wacc-=s;emitFine(1);n++;}',
+  'while(wacc<=-s&&n<MAX_LINE_KEYS){wacc+=s;emitFine(-1);n++;}',
+  'try{e.preventDefault();}catch(err){}',
+  '}catch(err){}',
+  '}',
   'var h={touchstart:down,touchmove:move,touchend:up,touchcancel:up};',
   'var bound=null,tries=0;',
   'function arm(){',
@@ -3026,11 +3056,13 @@ export const TOUCH_SCROLL_JS = [
   'if(bound){',
   '["touchstart","touchmove","touchend","touchcancel"].forEach(function(t){',
   'try{bound.removeEventListener(t,h[t]);}catch(e){}});',
+  'try{bound.removeEventListener("wheel",wheel);}catch(e){}',
   '}',
   'el.addEventListener("touchstart",h.touchstart,{passive:true});',
   'el.addEventListener("touchmove",h.touchmove,{passive:false});',
   'el.addEventListener("touchend",h.touchend,{passive:true});',
   'el.addEventListener("touchcancel",h.touchcancel,{passive:true});',
+  'el.addEventListener("wheel",wheel,{passive:false});',
   'bound=el;',
   'return true;',
   '}catch(e){return false;}',
