@@ -175,6 +175,24 @@ docs/agent/standing.json or journey-guard.
   unseen hand — proof sensor dropped from 4 fails to 3. Remaining:
   Auto-01, Domain-01 cross-links, Meal-36 done-no-proof.
 
+## Batch cleanup protocol (standing process, 2026-10-10)
+
+10 card rows (Meal-35/36/37, Stew-01, Bug-59/58/57/56/55/53) triaged by
+parent BEFORE dispatch: 9 phantom (absent from bugctl), 1 live (#53),
+1 invalid done (Meal-36), 2 proof folders (Meal-35 terminal-only,
+Bug-53 fresh). Wave stockage: max 2 concurrent fix agents, separate
+worktrees/branches, non-overlapping defect areas (claim-guard checked
+up front), rest queued explicitly. Manager loop per ticket: brief with
+exact commands + standing rules → agent runs → parent verifies
+(canonical + gates + PNGs seen + sensors) → human reviews in /review.
+Violations iterate with the rule cited, then the rule gets encoded
+(sensor/standing) so the next ticket can't repeat it. Sheet writes by
+agents: append-only, stamps byte-intact, never Done, last_activity
+UK-fresh. Phantom handling: investigate-then-file-or-close with
+recorded reasoning — never invent canonical records, never claim done.
+Wave 1: agent/bug53-fix (full pipeline, ses_ed968b77) +
+agent/meal35-redo (live-proof redo, ses_ed968b75).
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
