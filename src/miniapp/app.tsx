@@ -780,6 +780,12 @@ function Shell() {
           // A sign-in (button or silent restore) recovers from a tripped
           // dead session — without this the wall stays up forever.
           setAuthDeadTrip(false);
+          // The gateway cookie is brand new here but ?token= is absent, and
+          // the mount/tab renew effects already ran while the wall was up
+          // (no cookie then, tab unchanged since) — so nothing else will
+          // mint it. Renew now or token tabs strand on "Preparing
+          // session…" with a loaded picker and no frame.
+          renewToken().then((ok) => { if (ok) setQueryEpoch((n) => n + 1); });
         }}
       />
     );
