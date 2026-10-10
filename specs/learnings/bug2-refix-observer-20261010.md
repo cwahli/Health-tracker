@@ -341,6 +341,20 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   Concurrent with wave4-hermetic = 5 running. All findings come back
   as proposals for human approval, never edits.
 
+## Keep-going executed (2026-10-10 ~21:00 UTC, reversible only)
+
+- Health-02/09 FULLY ENDORSED: hermetic fix is one line
+  (`liveModels: () => null` — a real injection param meaning
+  "catalog unreachable, use cache"; the function it tests is
+  untouched, assertion count identical at 286). 286/286 seen on
+  both rows' panels, sensors green. Recommend approve on both.
+- Fleet-06 + Req-12 → closed_noise by manager (wave-5 evidence
+  appended to each row, Status untouched, never Done, rows kept
+  for audit). Human Done-tap archives whenever ready.
+- STAGED, not executed (need the specific confirms already asked):
+  Health-10 narrowing, Fleet-09 close-flow, Sync-09 gate adoption,
+  Sync-08 option, Spec-01 gate+runner, Sheet-04 gate text.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
