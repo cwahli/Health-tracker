@@ -3034,11 +3034,15 @@ export const FULLSCREEN_WIDGET_JS = [
   // top-level it returns to the shell (Telegram via the initData door with
   // the page's own ?bot=, browsers via the token they already carry).
   "try{",
-  "if(!document.getElementById('shell-burger')&&document.createElement&&document.body){",
-  "var sb=document.createElement('button');",
+  "var sb=document.getElementById('shell-burger');",
+  "if(!sb&&document.createElement&&document.body){",
+  "sb=document.createElement('button');",
   "sb.id='shell-burger';sb.setAttribute('aria-label','Menu');sb.textContent='\\u2630';",
   "sb.style.cssText='position:fixed;top:8px;left:8px;z-index:9999;width:40px;height:40px;'+",
   "'border-radius:20px;border:1px solid #555;background:rgba(20,20,20,.7);color:#eee;font-size:20px;line-height:1;cursor:pointer;';",
+  "document.body.appendChild(sb);",
+  "}",
+  "if(sb&&sb.addEventListener){",
   "sb.addEventListener('click',function(){",
   "try{if(window.self!==window.top){window.parent.postMessage({type:'shell:menu'},'*');return;}}catch(e){}",
   "var si='';try{si=(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initData)||'';}catch(e){}",
@@ -3046,8 +3050,8 @@ export const FULLSCREEN_WIDGET_JS = [
   "if(si){var sbot=sq('bot')||'vm';window.location.href='/app/?bot='+encodeURIComponent(sbot)+'&initData='+encodeURIComponent(si);return;}",
   "var st=sq('token');window.location.href=st?('/app/app?token='+encodeURIComponent(st)+'&tab=tui'):('/app/login?tab=tui');",
   "});",
-  "document.body.appendChild(sb);",
-  "}}catch(e){}",
+  "}",
+  "}catch(e){}",
   '}catch(e){}',
   '})();',
 ].join('\n');
