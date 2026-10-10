@@ -217,6 +217,24 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   live with PNGs). Human moves it to review → approve, closing the
   7-Oct stall_reason for good.
 
+## Bug-53 full cycle closed (2026-10-10 ~evening UTC)
+
+- Pack → fix → gates (18/18 re-run green) → proof failed verifier on
+  loading-state pixels → recapture with load asserts → failed again on
+  evidence-subject indistinguishability → fresh-content re-file through
+  the genuine CLI path → human-distinguishable render verified by
+  verifier eyes → verify posted green → card #53 done. Each round
+  narrowed the gap: process → technique → subject.
+- #56 (fresh-content PROOF card) folded duplicate_of #53, same as
+  #54→#2 and #55→#3. The duplicate command prints a STOP/advisory
+  wrapper but lands the fold — verified in packet, not assumed.
+- Sensors: Bug-53 passes both (parity via approve window). Proof fails
+  now only the 3 pre-existing debts.
+- Standing earned: loaded-content rule already encoded from this run;
+  folded-PROOF-card convention (#54/#55/#56) works — propose it as the
+  documented PROOF-card lifecycle (file live → fold into parent →
+  never standalone-close).
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
