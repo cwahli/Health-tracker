@@ -327,6 +327,20 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   to review by the still-running hermetic agent, sensors green —
   final verification (PNGs seen, branch/PR) waits for its report.
 
+## Wave 5: wide investigations, narrow flips (2026-10-10)
+
+- User asked for 10 at once. Answer given honestly: review-flipping
+  work stays max-2 (rate limits already bitten; verification is the
+  binding constraint — ten simultaneous landings is the original sin).
+  Report-only investigations can't pollute the queue, so they go
+  wide: 4 agents, 8 rows, disjoint scopes, no status flips allowed.
+- agent/wave5-health10 (PUT both-sides, change nothing),
+  agent/wave5-fleet09 (spec_not_locked paths, change nothing),
+  agent/wave5-sync (Sync-08/09 why-unrunnable + dry-run drafts),
+  agent/wave5-gates (Fleet-06/Spec-01/Req-12/Sheet-04 verdicts).
+  Concurrent with wave4-hermetic = 5 running. All findings come back
+  as proposals for human approval, never edits.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
