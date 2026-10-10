@@ -228,13 +228,118 @@ const FIREBASE_CONFIG = {
 };
 
 /**
+ * The login marker lives in localStorage (survives tab close + browser
+ * restart) with sessionStorage as a legacy fallback: sessionStorage alone
+ * forced a Google sign-in on every fresh tab even with a live Firebase
+ * user + live gateway cookie. The marker is only a hint — the gateway
+ * cookie (and the silent Firebase re-exchange below) is the real session.
+ */
+function readFbMarker(): boolean {
+  try {
+    if (window.localStorage.getItem('fbauth') === '1') return true;
+  } catch {
+    /* storage unavailable — fall through to sessionStorage */
+  }
+  try {
+    return window.sessionStorage.getItem('fbauth') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeFbMarker() {
+  try {
+    window.localStorage.setItem('fbauth', '1');
+  } catch {
+    /* private mode — sessionStorage below still holds the hint */
+  }
+  try {
+    window.sessionStorage.setItem('fbauth', '1');
+  } catch {
+    /* private mode — cookie still holds the session */
+  }
+}
+
+function clearFbMarker() {
+  try {
+    window.localStorage.removeItem('fbauth');
+  } catch {
+    /* already gone */
+  }
+  try {
+    window.sessionStorage.removeItem('fbauth');
+  } catch {
+    /* already gone */
+  }
+}
+
+/**
+ * Silent re-login from the Firebase persisted user (LOCAL persistence
+ * survives tab close + browser restart for months). Exchanges a fresh ID
+ * token for the gateway cookie without any popup — so a returning browser
+ * never sees the Google button when it is already signed in. Returns true
+ * when the session was restored.
+ */
+async function restoreFirebaseSession(): Promise<boolean> {
+  try {
+    const app = await import('firebase/app');
+    const authMod = await import('firebase/auth');
+    const fbApp = app.getApps().length
+      ? app.getApps()[0]
+      : app.initializeApp(FIREBASE_CONFIG);
+    const auth = authMod.getAuth(fbApp);
+    try {
+      await authMod.setPersistence(auth, authMod.browserLocalPersistence);
+    } catch {
+      /* persistence already set or unavailable — continue with default */
+    }
+    const user = auth.currentUser || await new Promise<unknown>((resolve) => {
+      let done = false;
+      const finish = (u: unknown) => { if (!done) { done = true; resolve(u); } };
+      try {
+        const unsub = authMod.onAuthStateChanged(auth, (u) => { try { unsub(); } catch { /* noop */ } finish(u); });
+        setTimeout(() => finish(null), 3000);
+      } catch {
+        finish(null);
+      }
+    });
+    if (!user) return false;
+    const idToken = await (user as { getIdToken: () => Promise<string> }).getIdToken();
+    const res = await fetch('/app/auth/firebase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken }),
+    });
+    const body = await res.json().catch(() => null);
+    if (res.ok && body && body.ok) {
+      writeFbMarker();
+      return true;
+    }
+  } catch {
+    /* no persisted user or exchange failed — fall through to the button */
+  }
+  return false;
+}
+
+/**
  * Browser login (META-1): a real browser has no Telegram initData, but
  * Google sign-in works there — same Firebase project as the website, so
  * the same account. The ID token is exchanged server-side for the gateway
- * cookie; only a non-sensitive marker stays in sessionStorage.
+ * cookie; only a non-sensitive marker stays in localStorage.
  */
 function BrowserLogin({ onDone }: { onDone: () => void }) {
-  const [state, setState] = useState<'idle' | 'working' | 'error'>('idle');
+  const [state, setState] = useState<'restoring' | 'idle' | 'working' | 'error'>('restoring');
+  useEffect(() => {
+    let dead = false;
+    // Already signed in (Firebase persisted user)? Restore the gateway
+    // session silently — no popup, no click.
+    restoreFirebaseSession().then((ok) => {
+      if (dead) return;
+      if (ok) onDone();
+      else setState('idle');
+    });
+    return () => { dead = true; };
+  }, []);
   const login = async () => {
     if (state === 'working') return;
     setState('working');
@@ -245,6 +350,11 @@ function BrowserLogin({ onDone }: { onDone: () => void }) {
         ? app.getApps()[0]
         : app.initializeApp(FIREBASE_CONFIG);
       const auth = authMod.getAuth(fbApp);
+      try {
+        await authMod.setPersistence(auth, authMod.browserLocalPersistence);
+      } catch {
+        /* persistence already set or unavailable — continue with default */
+      }
       const cred = await authMod.signInWithPopup(auth, new authMod.GoogleAuthProvider());
       const idToken = await cred.user.getIdToken();
       const res = await fetch('/app/auth/firebase', {
@@ -254,11 +364,7 @@ function BrowserLogin({ onDone }: { onDone: () => void }) {
       });
       const body = await res.json().catch(() => null);
       if (res.ok && body && body.ok) {
-        try {
-          window.sessionStorage.setItem('fbauth', '1');
-        } catch {
-          /* private mode — cookie still holds the session */
-        }
+        writeFbMarker();
         onDone();
         return;
       }
@@ -274,9 +380,13 @@ function BrowserLogin({ onDone }: { onDone: () => void }) {
         You opened this in a browser. Sign in with the same Google account
         you use on the Health Tracker website.
       </p>
-      <button type="button" onClick={login} disabled={state === 'working'}>
-        {state === 'working' ? 'Signing in…' : 'Continue with Google'}
-      </button>
+      {state === 'restoring' ? (
+        <p style={{ opacity: 0.7 }}>Signing you back in…</p>
+      ) : (
+        <button type="button" onClick={login} disabled={state === 'working'}>
+          {state === 'working' ? 'Signing in…' : 'Continue with Google'}
+        </button>
+      )}
       {state === 'error' && (
         <p style={{ opacity: 0.7 }}>Sign-in failed — try again.</p>
       )}
@@ -554,13 +664,7 @@ function Shell() {
   // Bumped whenever the page token is (re)minted after first render, so
   // iframe tabs reload with a live credential instead of 401-polling.
   const [queryEpoch, setQueryEpoch] = useState(0);
-  const [fbAuthed, setFbAuthed] = useState(() => {
-    try {
-      return window.sessionStorage.getItem('fbauth') === '1';
-    } catch {
-      return false;
-    }
-  });
+  const [fbAuthed, setFbAuthed] = useState(() => readFbMarker());
   // Dead-session trip: set alongside setFbAuthed(false) so recovery always
   // re-renders, even when fbAuthed is already false (token-only deep link).
   const [authDeadTrip, setAuthDeadTrip] = useState(false);
@@ -633,7 +737,7 @@ function Shell() {
   // slate instead of stranding tabs on empty states.
   const handleAuthDead = () => {
     try {
-      window.sessionStorage.removeItem('fbauth');
+      clearFbMarker();
       const q = new URLSearchParams(window.location.search || '');
       q.delete('token');
       window.history.replaceState(null, '', `?${q.toString()}`);
@@ -673,6 +777,9 @@ function Shell() {
             /* history unavailable — bot default below still applies */
           }
           setFbAuthed(true);
+          // A sign-in (button or silent restore) recovers from a tripped
+          // dead session — without this the wall stays up forever.
+          setAuthDeadTrip(false);
         }}
       />
     );
