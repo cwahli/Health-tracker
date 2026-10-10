@@ -260,6 +260,25 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   sync prose) CANNOT go to review and will come back honestly blocked.
   Review count grows by evidence, not by request.
 
+## Wave 2 closed (2026-10-10)
+
+- Meals agent (agent/wave2-meals, PR #704 draft): Meal-35 genuinely
+  green after the loophole fix (replay-target, not denial prose) —
+  recommend approve. Meal-36 reopened Assigned/in_fix with trace
+  (journal #20, card aged out, gates claimed 44/44, proof still owed —
+  stays open). Meal-37 traced (journal #19, PR #441 merged, missing
+  gate test named) — stays open. No code touched, diff is one
+  learnings note.
+- Phantoms agent (agent/wave2-phantoms, PR #703 draft): all six
+  closed-as-noise with per-ticket origin + reasoning on rows, no rows
+  deleted, no Done, no review claims, no bugctl writes (count 14 =
+  pre-existing growth), no Drive moves. Bug-55's fix verified in
+  history (e68acc71). Rows stay for audit; parity still flags the
+  missing keys, which is accurate.
+- Rule earned mid-wave: denial prose ("no job") is not citation;
+  replay-target (bundle + comparison) is. Sensor + doc + standing
+  updated same turn, fixtures both directions.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
