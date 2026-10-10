@@ -191,11 +191,35 @@ function Frame({ src, title }: { src: string; title: string }) {
 }
 
 /** Cross-host tabs (bags, web) frame their own app with its own door, so the
- * burger never unloads. The full-screen link is the honest escape hatch. */
+ * burger never unloads. The full-screen link is the honest escape hatch.
+ * A spinner covers the frame until its own load event: the serve SPA ships
+ * a large bundle, so without it the tab reads as a dead blank page while
+ * it loads (live report 2026-10-10). */
 function ExternalFrame({ src, def }: { src: string; def: MiniAppDef }) {
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => { setLoaded(false); }, [src]);
   return (
     <>
-      <Frame src={src} title={def.title as string} />
+      <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        {!loaded && (
+          <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, background: '#0b1220', color: '#94a3b8', fontSize: 13 }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="#334155" strokeWidth="3" />
+              <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="#7dd3fc" strokeWidth="3" strokeLinecap="round">
+                <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite" />
+              </path>
+            </svg>
+            <span>Loading {def.title}…</span>
+          </div>
+        )}
+        <iframe
+          src={src}
+          title={def.title as string}
+          onLoad={() => setLoaded(true)}
+          allow="clipboard-read; clipboard-write"
+          style={{ flex: '1 1 auto', minHeight: 0, width: '100%', border: 0, background: '#0b1220', display: loaded ? undefined : 'none' }}
+        />
+      </div>
       <div style={{ flex: '0 0 auto', textAlign: 'center', padding: '4px 8px', borderTop: '1px solid #1e293b' }}>
         <button
           type="button"
