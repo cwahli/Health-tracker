@@ -81,7 +81,21 @@ export function hasOutputMarker(names) {
 }
 
 export function citesJob(text) {
-  return /job[_-][0-9a-z_]+/i.test(String(text || ''));
+  // A real job token starts with a digit (job_1786701466257_...). The bare
+  // word "job_id" (as in "no live job_id exists") must NOT satisfy this —
+  // 2026-10-10: a denial phrase passed the old regex and faked a green.
+  return /job[_-][0-9][0-9a-z_]*/i.test(String(text || ''));
+}
+
+/**
+ * Replay-target citation for benchmark fixtures with no live job: bundle
+ * identity PLUS comparison identity. Either half alone fails — a bundle
+ * name without the comparison (or vice versa) doesn't trace the run.
+ */
+export function citesReplayTarget(text) {
+  const s = String(text || '');
+  return /bundle\s*=\s*[A-Za-z0-9_.\/-]+/i.test(s) &&
+    /comparedAt|siteSha|turn_mismatch|DIVERGED/i.test(s);
 }
 
 /**
@@ -139,7 +153,7 @@ export function verdictForRow(item, listed, folderNameById = new Map(), rowKeys 
       if (!hasInputMarker(names)) return { ok: false, reason: `meal gate but no input/entry shot for ${item.key}` };
       if (!hasOutputMarker(names)) return { ok: false, reason: `meal gate but no output/analysis shot for ${item.key}` };
       const hay = [item.originalRequest, item.workDone, item.proof, ...names].join('\n');
-      if (!citesJob(hay)) return { ok: false, reason: `meal gate but no job cited for ${item.key}` };
+      if (!citesJob(hay) && !citesReplayTarget(hay)) return { ok: false, reason: `meal gate but neither job nor replay target cited for ${item.key}` };
     }
   }
   return { ok: true, reason: '' };
@@ -235,6 +249,21 @@ check('proofFolderId is empty for bare names', proofFolderId('cards-17-15-14-13-
   check('meal gate without output shot fails', !noOut.ok, noOut.reason);
   const noJob = verdictForRow(mealBase, imgs(['bug2-entry.png', 'bug2-analysis.png']));
   check('meal gate without cited job fails', !noJob.ok, noJob.reason);
+  const denial = verdictForRow(
+    { ...mealBase, workDone: 'no live job_id exists for this refusal' },
+    imgs(['bug2-entry.png', 'bug2-analysis.png']),
+  );
+  check('denial phrase without target fails (no fake green)', !denial.ok, denial.reason);
+  const replay = verdictForRow(
+    { ...mealBase, workDone: 'loop --bundle=Meal-prawn-ham-01 --dry-run => ungrounded_no_cards, DIVERGED/turn_mismatch/24, comparedAt 2026-10-01, siteSha 150e36c4, no live job_id exists' },
+    imgs(['meal35-redo-1-input-stub-ground-truth.png', 'meal35-redo-2-refusal-zero-cards.png']),
+  );
+  check('bundle+comparison citation passes without job token', replay.ok, replay.reason);
+  const halfTarget = verdictForRow(
+    { ...mealBase, workDone: 'loop --bundle=Meal-prawn-ham-01, no live job_id exists' },
+    imgs(['meal35-redo-1-input-stub-ground-truth.png', 'meal35-redo-2-refusal-zero-cards.png']),
+  );
+  check('bundle name alone (no comparison) still fails', !halfTarget.ok, halfTarget.reason);
   const full = verdictForRow(
     { ...mealBase, workDone: 're-filed live job_1786701466257_np41t5gpa' },
     imgs(['bug2-entry.png', 'bug2-live-analysis-mg-ca.png']),
