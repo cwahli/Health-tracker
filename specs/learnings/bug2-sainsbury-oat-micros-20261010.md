@@ -52,3 +52,42 @@ gates green: `server_nutrient_aggregation` + `server_food_db` +
   pipeline numbers) + live-app food-history frame, all in Drive
   `Work done/card:tag_muwyto2i_lv3uyw`; Bug-53 strays moved to
   `card:tag_muxcn960_px5wm4`.
+
+## Rework 10 Oct (human verdict): live proof with job number + analysis view
+
+Proof-only rework — NO code changed, no canonical card artifacts touched
+(#2 stays parent-verified done; no attempt row, no re-verify by implementer).
+
+1. **Job cited.** `job_1786701466257_np41t5gpa` (card current_evidence +
+   commits) now heads both panels visibly:
+   `bug2-before-micros-job.png`, `bug2-after-micros-job.png`.
+2. **Exact meal re-filed live** (meal-live-proof step-2 fallback — card
+   photo_urls empty since intake). PROOF card #54
+   (`tag_mv23u9zz_0ggxi7`, G2 mug photo attached) created, then the G2 meal
+   filed through the live app UI: both G2 photos
+   (`PXL_20260810_090417151.jpg`, `PXL_20260810_105056448.jpg`) + verbatim
+   prompt `I added 60g of Sainsbury oat in my late + fruits` → live Gemini
+   chain analyzed it: `Oatmeal with Milk 261 kcal` (Sainsbury Oat 60g 174 +
+   Milk 160g 87, separate lines — G2-correct) + `Mixed Fresh Fruits 248` =
+   509 kcal grand total.
+3. **Analysis-view shots** (as the user sees it), all in Drive
+   `Work done/card:tag_muwyto2i_lv3uyw` (12 files, all Bug-2):
+   `bug2-live-refile-foodhistory.png` (filed meal live),
+   `bug2-live-analysis-decomposition.png` (oats/milk/fruit lines),
+   `bug2-live-analysis-mg-ca.png` (Mg 65.1 mg, Ca 169.6 mg),
+   `bug2-live-analysis-fe-zn.png` (Ca 169.5 mg, Fe 2 mg, Zn 1 mg,
+   Se 4.1 mcg, I 25.8 mcg),
+   `bug2-live-analysis-bvitamins.png` (A, B6 0.3, B1 0.2, B2 0.3, B3 2.1).
+   Note: these are the live meal's own weights/values, NOT the 260 g
+   sensor-scenario figures (Ca 132.1 etc.) in the before/after panels —
+   provenance `brand_label_data` is asserted by the sensor + after-json,
+   not displayed in-app.
+4. **Cleanup.** Demo store is session-scoped: fresh session shows no
+   oatmeal row and food-search has no 10-10 meal — zero app residue, nothing
+   to delete. PROOF #54 annotated (evidence op) and duplicate-folded into
+   #2 (`duplicate_of` set, journal 54.jsonl create+duplicate); #2
+   occurrences still 1, state still done.
+5. **Tool note.** `bugctl` (shim → deploy checkout) pack/repro/plan/verify
+   round-trips succeed server-side but do not append to the worktree's
+   `specs/bug-journal/2.jsonl` (stale, older card) — journal mirror gap,
+   store remains canonical. Left for the pipeline owners, not this turn.
