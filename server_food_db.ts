@@ -225,7 +225,10 @@ export const CANONICAL_BASE_FOODS: Record<string, { calories: number; protein: n
   chickpeas: { calories: 164, protein: 8.86, totalFat: 2.59, saturatedFat: 0.27, transFat: 0, carbohydrates: 27.42, sugar: 4.8, sodium: 24, potassium: 291, totalFibre: 7.6, iron: 2.89, calcium: 49, magnesium: 48, foodType: 'legume' },
   fried_ring_doughnut: { calories: 426, protein: 5.7, totalFat: 22.9, saturatedFat: 5.8, transFat: 0, carbohydrates: 50.8, sugar: 26.7, sodium: 387, potassium: 115, totalFibre: 1.5, calcium: 87, foodType: 'processed' },
   pomegranate_seeds_brand: { calories: 83, protein: 1.67, totalFat: 1.17, saturatedFat: 0.15, transFat: 0, carbohydrates: 18.7, sugar: 13.67, sodium: 3, potassium: 236, totalFibre: 4.0, vitaminC: 10.2, calcium: 10, foodType: 'fruit' },
-  sainsbury_rolled_oats: { calories: 370, protein: 11.0, totalFat: 6.0, saturatedFat: 1.0, transFat: 0, carbohydrates: 60.0, sugar: 1.0, sodium: 10, potassium: 350, totalFibre: 9.0, foodType: 'grain' },
+  // Bug-2: grain minerals inherited from rolled_oats, scaled by energy ratio
+  // (370/379) — lower-bound DB truth so oat-with-milk imputation never
+  // publishes foodtype_estimate filler or a wall of explicit 0s.
+  sainsbury_rolled_oats: { calories: 370, protein: 11.0, totalFat: 6.0, saturatedFat: 1.0, transFat: 0, carbohydrates: 60.0, sugar: 1.0, sodium: 10, potassium: 350, totalFibre: 9.0, calcium: 50.8, magnesium: 134.7, iron: 4.15, zinc: 3.55, foodType: 'grain' },
 
   tartar_sauce: { calories: 211, protein: 1.0, totalFat: 21.0, saturatedFat: 3.4, transFat: 0, carbohydrates: 4.4, sugar: 1.0, sodium: 730, potassium: 50, totalFibre: 1.0, foodType: 'ultra_processed' },
   wheat_flour: { calories: 364, protein: 10.33, totalFat: 0.98, saturatedFat: 0.15, transFat: 0, carbohydrates: 76.31, sugar: 0.27, sodium: 2, potassium: 107, totalFibre: 2.7, foodType: 'grain' },
