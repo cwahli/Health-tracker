@@ -98,6 +98,22 @@ docs/agent/standing.json or journey-guard.
 - O5 holds again: the verdict's three numbered demands got three
   evidenced answers. Checkable orders produce checkable work.
 
+## Round 2 (curate + full flow, 2026-10-10 ~11:15 UTC)
+
+- Same agent, additive commit 98226634, docs-only again. Folder 12 → 9
+  top-level + `superseded/` (4 moved, zero deleted, verified by id);
+  no other-ticket files found. Entry shot PERFORMED pre-submit (both G2
+  thumbnails + verbatim text visible, nothing sent). Gate now cites the
+  full meal-proof contract — the sensor's meal checks fired live on
+  Bug-2 for the first time and passed (input + output + job all green).
+- Nits (not blockers): agent misreported the subfolder id in its
+  summary (Drive reality verified correct); last_activity written
+  lowercase `(uk)` vs sheet convention `(UK)`; entry text field
+  scrolled but readable. Your stamps untouched (count verified: 2).
+- Standing row + sensor + doc from the previous turn did their job:
+  round 2's gate text opted the row into the stricter checks, which
+  then passed on real evidence. Repeat-yourself loop closed.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
