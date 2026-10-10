@@ -444,10 +444,14 @@ function TerminalTab({ def, bot, inTelegram, onMenu }: { def: MiniAppDef; bot: s
   const tok = queryToken();
   const src = pickedRoute && tok ? `${pickedRoute.path}?token=${encodeURIComponent(tok)}` : null;
 
+  // The refusal JSON can arrive after onLoad fires, so an empty read
+  // resolves nothing — only a refusal sets the strip, only terminal HTML
+  // clears it. Scheduled 3x per frame birth below.
   const checkFrame = () => {
     try {
-      const text = frameRef.current?.contentDocument?.body?.innerText || '';
-      if (text.trim().startsWith('{"ok":false')) {
+      const text = (frameRef.current?.contentDocument?.body?.innerText || '').trim();
+      if (!text) return;
+      if (text.startsWith('{"ok":false')) {
         let msg = 'terminal refused';
         try { msg = (JSON.parse(text) as { error?: string }).error || msg; } catch { /* raw text */ }
         setOffline(msg);
@@ -455,7 +459,7 @@ function TerminalTab({ def, bot, inTelegram, onMenu }: { def: MiniAppDef; bot: s
         setOffline('');
       }
     } catch {
-      setOffline('');
+      /* cross-origin or unreadable — leave the strip as-is */
     }
   };
 
@@ -497,7 +501,7 @@ function TerminalTab({ def, bot, inTelegram, onMenu }: { def: MiniAppDef; bot: s
           src={src}
           title={def.title as string}
           allow="clipboard-read; clipboard-write"
-          onLoad={() => setTimeout(checkFrame, 1500)}
+          onLoad={() => { [1500, 4000, 8000].forEach((ms) => setTimeout(checkFrame, ms)); }}
           style={{ flex: '1 1 auto', minHeight: 0, width: '100%', border: 0, background: '#0b1220' }}
         />
       ) : (
