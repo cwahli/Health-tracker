@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useState } from 'react';
+import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { enabledMiniApps, miniAppById, type MiniAppDef } from './miniapp-registry';
 import { BugBoard } from '../components/bug-board/BugBoard';
@@ -199,7 +199,7 @@ function ExternalFrame({ src, def }: { src: string; def: MiniAppDef }) {
       <div style={{ flex: '0 0 auto', textAlign: 'center', padding: '4px 8px', borderTop: '1px solid #1e293b' }}>
         <button
           type="button"
-          onClick={() => { window.location.href = def.route; }}
+          onClick={() => { window.location.href = src; }}
           style={{ background: 'none', border: 0, color: '#7dd3fc', fontSize: 12, cursor: 'pointer' }}
         >
           Blank page? Open {def.title} full-screen ↗
@@ -404,6 +404,109 @@ function TtyTab({ def, onMenu }: { def: MiniAppDef; onMenu: () => void }) {
   );
 }
 
+type TtyRoute = { bot: string; path: string };
+
+/**
+ * Terminal tab. One tab, every session: a compact in-flow picker switches
+ * between the gateway's ttyd routes (Telegram keeps its single terminal —
+ * TG tokens open exactly their own bot's route by design, so no picker
+ * there). Frames are same-origin, so a refused/dead route reads back its
+ * honest JSON instead of a blank page, with a retry.
+ */
+function TerminalTab({ def, bot, inTelegram, onMenu }: { def: MiniAppDef; bot: string; inTelegram: boolean; onMenu: () => void }) {
+  const [routes, setRoutes] = useState<TtyRoute[] | null>(null);
+  const [picked, setPicked] = useState('');
+  const [epoch, setEpoch] = useState(0);
+  const [offline, setOffline] = useState('');
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+
+  useEffect(() => {
+    if (inTelegram) return;
+    let dead = false;
+    fetchLive('/api/ttys').then(async (res) => {
+      const body = await res.json().catch(() => null);
+      if (dead) return;
+      const list = body && body.ok && Array.isArray(body.ttys) ? body.ttys as TtyRoute[] : [];
+      setRoutes(list);
+      setPicked((cur) => cur || (list.some((r) => r.bot === 'web') ? 'web' : (list[0]?.bot || '')));
+    }).catch(() => { if (!dead) setRoutes([]); });
+    return () => { dead = true; };
+  }, [inTelegram]);
+
+  if (inTelegram) {
+    const tok = queryToken();
+    const landing = tok ? `/?bot=${encodeURIComponent(bot)}&token=${encodeURIComponent(tok)}` : null;
+    if (!landing) return <TtyTab def={def} onMenu={onMenu} />;
+    return <Frame key={`tg:${epoch}`} title={def.title as string} src={landing} />;
+  }
+
+  const pickedRoute = (routes || []).find((r) => r.bot === picked);
+  const tok = queryToken();
+  const src = pickedRoute && tok ? `${pickedRoute.path}?token=${encodeURIComponent(tok)}` : null;
+
+  const checkFrame = () => {
+    try {
+      const text = frameRef.current?.contentDocument?.body?.innerText || '';
+      if (text.trim().startsWith('{"ok":false')) {
+        let msg = 'terminal refused';
+        try { msg = (JSON.parse(text) as { error?: string }).error || msg; } catch { /* raw text */ }
+        setOffline(msg);
+      } else {
+        setOffline('');
+      }
+    } catch {
+      setOffline('');
+    }
+  };
+
+  return (
+    <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderBottom: '1px solid #1e293b', background: '#0b1220' }}>
+        <label htmlFor="tty-session" style={{ fontSize: 12, color: '#94a3b8' }}>Session</label>
+        <select
+          id="tty-session"
+          value={picked}
+          disabled={!routes}
+          onChange={(e) => {
+            setPicked(e.target.value);
+            setOffline('');
+            renewToken().then((ok) => { setEpoch((n) => n + 1); if (!ok) checkFrame(); });
+          }}
+          style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 8px', fontSize: 13 }}
+        >
+          {routes === null && <option value="">Loading…</option>}
+          {routes !== null && routes.length === 0 && <option value="">No sessions</option>}
+          {(routes || []).map((r) => (
+            <option key={r.bot} value={r.bot}>{r.bot}</option>
+          ))}
+        </select>
+        {offline && (
+          <span style={{ fontSize: 12, color: '#f0abfc' }}>
+            {offline}{' '}
+            <button type="button" onClick={() => { setOffline(''); setEpoch((n) => n + 1); }}
+              style={{ background: 'none', border: 0, color: '#7dd3fc', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+              Retry
+            </button>
+          </span>
+        )}
+      </div>
+      {src ? (
+        <iframe
+          ref={frameRef}
+          key={`${picked}:${epoch}`}
+          src={src}
+          title={def.title as string}
+          allow="clipboard-read; clipboard-write"
+          onLoad={() => setTimeout(checkFrame, 1500)}
+          style={{ flex: '1 1 auto', minHeight: 0, width: '100%', border: 0, background: '#0b1220' }}
+        />
+      ) : (
+        <div style={{ padding: 24, textAlign: 'center', opacity: 0.7 }}>Preparing session…</div>
+      )}
+    </div>
+  );
+}
+
 function Shell() {
   const [query] = useState(readQuery);
   const [tab, setTab] = useState(() => resolveDef(readQuery().tab).id);
@@ -548,14 +651,14 @@ function Shell() {
       <main style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {def.id === 'bugs' ? (
           <BugsTab onMenu={() => setDrawer(true)} />
+        ) : def.id === 'tui' ? (
+          <TerminalTab def={def} bot={bot} inTelegram={inTelegram} onMenu={() => setDrawer(true)} />
         ) : frameSrc(def, bot) ? (
           def.id === 'tgtg' || def.id === 'web' ? (
             <ExternalFrame key={`${def.id}:${queryEpoch}`} def={def} src={frameSrc(def, bot) as string} />
           ) : (
             <Frame key={`${def.id}:${queryEpoch}`} title={def.title as string} src={frameSrc(def, bot) as string} />
           )
-        ) : def.kind === 'tty' ? (
-          <TtyTab def={def} onMenu={() => setDrawer(true)} />
         ) : (
           <PendingTab def={def} onMenu={() => setDrawer(true)} />
         )}
