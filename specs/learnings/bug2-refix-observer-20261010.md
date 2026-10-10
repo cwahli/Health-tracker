@@ -193,6 +193,30 @@ recorded reasoning — never invent canonical records, never claim done.
 Wave 1: agent/bug53-fix (full pipeline, ses_ed968b77) +
 agent/meal35-redo (live-proof redo, ses_ed968b75).
 
+## Meal-35 redo verified: REFUSAL HOLDS (2026-10-10 ~16:25 UTC)
+
+- Claim TRUE. Verifier reproduced the exact combination (new code +
+  audited bundle): exit 1, outcome ungrounded_no_cards, null tickets.
+  Evidence genuine (qa-evidence matches real run shape; panel states
+  the full command). Sensor 12/12, journal 35.jsonl exists, sheet
+  honest (Assigned, no Done), folder 6 files nothing deleted, branch
+  clean, PR #699 draft. Refusal holds on current main — no bug, no fix.
+- F1 (new rule): the learnings' "re-run the one command" FAILS in the
+  agent's own tree (needs_audit — its bundle lacks meal_result.json).
+  Proof depended on another tree's audited data without saying so.
+  Rule from here: every proof run states code-tree + data-path +
+  verbatim command, and the re-run instruction must work verbatim
+  where stated. Reproducibility is part of proof.
+- F2 (LIVE RISK, escalated not touched): agent/meal-qa-remaining runs
+  pre-beb82e09 loop code (0 grounding matches; version 0c7d5b0d).
+  Verifier dry-run there: tickets.posted 24. A live run from that
+  tree files ungrounded cards — the Meal-35 failure recurring. Dirty
+  active tree, another area: report, don't enter. Owner must rebase
+  past beb82e09 or stop running the loop there.
+- Recommendation: Meal-35's redo satisfies its gate (refusal proven
+  live with PNGs). Human moves it to review → approve, closing the
+  7-Oct stall_reason for good.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
