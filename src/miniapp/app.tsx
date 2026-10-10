@@ -33,6 +33,22 @@ function tg() {
   }
 }
 
+/**
+ * The telegram-web-app.js script defines window.Telegram.WebApp even in a
+ * plain browser (empty initData), so object presence alone is not proof of
+ * a Telegram client. Require live initData or the native bridge instead —
+ * otherwise a real browser is misread as Telegram and never sees login.
+ */
+function inTelegramClient(): boolean {
+  try {
+    const w = window as any;
+    if (w?.Telegram?.WebApp?.initData) return true;
+    return !!w?.TelegramWebviewProxy;
+  } catch {
+    return false;
+  }
+}
+
 function telegramChrome() {
   const t = tg();
   if (!t) return;
@@ -134,7 +150,7 @@ function frameSrc(def: MiniAppDef, bot: string): string | null {
   if (def.id === 'fleet' || def.id === 'review') {
     const tok = queryToken();
     const base = def.id === 'fleet' ? '/fleet/app' : '/review/app';
-    return tok ? `${base}?token=${encodeURIComponent(tok)}&framed=1` : null;
+    return tok ? `${base}?token=${encodeURIComponent(tok)}` : null;
   }
   if (def.id === 'forge') {
     const init = tgInitData();
@@ -148,11 +164,18 @@ function frameSrc(def: MiniAppDef, bot: string): string | null {
     return tok ? `${base}?token=${encodeURIComponent(tok)}` : null;
   }
   const init = tgInitData();
-  if (!init) return null;
-  const t = tg();
-  const ver = t?.version ? String(t.version) : '8.0';
-  const plat = t?.platform ? String(t.platform) : 'unknown';
-  return `${base}#tgWebAppData=${encodeURIComponent(init)}&tgWebAppVersion=${encodeURIComponent(ver)}&tgWebAppPlatform=${encodeURIComponent(plat)}`;
+  if (init) {
+    const t = tg();
+    const ver = t?.version ? String(t.version) : '8.0';
+    const plat = t?.platform ? String(t.platform) : 'unknown';
+    return `${base}#tgWebAppData=${encodeURIComponent(init)}&tgWebAppVersion=${encodeURIComponent(ver)}&tgWebAppPlatform=${encodeURIComponent(plat)}`;
+  }
+  // Real browser (Firebase session): no initData exists. The gateway door
+  // admits the frame on ?token= — the page plus its same-origin /api calls
+  // (Referer fallback) — and presents the bag viewer credential upstream
+  // itself for Firebase sessions, so the tab loads directly, no 2nd click.
+  const tok = queryToken();
+  return tok ? `${base}?token=${encodeURIComponent(tok)}` : null;
 }
 
 function Frame({ src, title }: { src: string; title: string }) {
@@ -384,8 +407,11 @@ function Shell() {
   const apps = enabledMiniApps();
   const def = resolveDef(tab);
   // Inside Telegram the initData door owns auth (?bot= required). Outside
-  // (plain browser) the Firebase Google branch owns it instead.
-  const inTelegram = !!tg();
+  // (plain browser) the Firebase Google branch owns it instead, and the
+  // session runs as bot 'web' (the Firebase exchange mints exactly that).
+  const inTelegram = inTelegramClient();
+  const authed = inTelegram || fbAuthed || !!queryToken();
+  const bot = query.bot || (!inTelegram && fbAuthed ? 'web' : '');
 
   useEffect(() => {
     telegramChrome();
@@ -420,12 +446,12 @@ function Shell() {
     try {
       const q = new URLSearchParams(window.location.search || '');
       q.set('tab', def.id);
-      if (query.bot) q.set('bot', query.bot);
+      if (bot) q.set('bot', bot);
       window.history.replaceState(null, '', `?${q.toString()}`);
     } catch {
       /* history unavailable — tab state stays in memory */
     }
-  }, [def.id, query.bot]);
+  }, [def.id, bot]);
 
   useEffect(() => {
     const t = tg();
@@ -442,7 +468,26 @@ function Shell() {
     }
   }, [drawer]);
 
-  if (!query.bot && inTelegram) {
+  if (!authed) {
+    return (
+      <BrowserLogin
+        onDone={() => {
+          try {
+            const q = new URLSearchParams(window.location.search || '');
+            if (!q.get('bot')) {
+              q.set('bot', 'web');
+              window.history.replaceState(null, '', `?${q.toString()}`);
+            }
+          } catch {
+            /* history unavailable — bot default below still applies */
+          }
+          setFbAuthed(true);
+        }}
+      />
+    );
+  }
+
+  if (!bot && inTelegram) {
     return (
       <div style={{ padding: 24, textAlign: 'center' }}>
         No bot — open this from a bot button in Telegram.
@@ -450,20 +495,22 @@ function Shell() {
     );
   }
 
-  if (!query.bot && !inTelegram && !fbAuthed) {
-    return <BrowserLogin onDone={() => setFbAuthed(true)} />;
-  }
-
-  // No shell header bar: each tab keeps its single original title and one
-  // floating burger (top-left, above everything incl. iframes) opens the
-  // drawer on every tab. Framed pages shift their mastheads after it
-  // (?framed=1); the native board leaves room via its embedded padding.
+  // Integrated shell header bar (in-flow, never floating): the burger
+  // lives in the navigation of every tab, so it can neither cover tab
+  // content nor be covered by it. Each tab keeps its single original title
+  // below the bar; the bar names the current tab next to the burger.
   return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}>
-      <button type="button" aria-label="Menu" onClick={() => setDrawer((v) => !v)}
-        style={{ position: 'fixed', top: 10, left: 10, zIndex: 60, width: 40, height: 40, borderRadius: 12, background: 'rgba(15,23,42,0.88)', border: '1px solid #334155', color: '#e2e8f0', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        ☰
-      </button>
+      <header style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: '#0f172a', borderBottom: '1px solid #334155', minHeight: 52 }}>
+        <button type="button" aria-label="Menu" onClick={() => setDrawer((v) => !v)}
+          style={{ width: 36, height: 36, borderRadius: 10, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}>
+          ☰
+        </button>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>Mini Apps</div>
+          <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.2 }}>{def.title}</div>
+        </div>
+      </header>
       {drawer && (
         <div role="presentation" onClick={() => setDrawer(false)}
           style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(2,6,23,0.6)' }}>
@@ -482,11 +529,11 @@ function Shell() {
       <main style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {def.id === 'bugs' ? (
           <BugsTab />
-        ) : frameSrc(def, query.bot) ? (
+        ) : frameSrc(def, bot) ? (
           def.id === 'tgtg' || def.id === 'web' ? (
-            <ExternalFrame key={`${def.id}:${queryEpoch}`} def={def} src={frameSrc(def, query.bot) as string} />
+            <ExternalFrame key={`${def.id}:${queryEpoch}`} def={def} src={frameSrc(def, bot) as string} />
           ) : (
-            <Frame key={`${def.id}:${queryEpoch}`} title={def.title as string} src={frameSrc(def, query.bot) as string} />
+            <Frame key={`${def.id}:${queryEpoch}`} title={def.title as string} src={frameSrc(def, bot) as string} />
           )
         ) : def.kind === 'tty' ? (
           <TtyTab def={def} />

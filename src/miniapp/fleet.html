@@ -112,12 +112,10 @@
   .clickable-row { cursor: pointer; }
   .clickable-row:hover td { background: #233554 !important; }
   .empty-cell { color: #64748b; }
-  /* META-1 shell: when framed inside the shell (?framed=1) the floating
-     burger sits top-left, so the masthead title starts after it. The shell
-     carries no title of its own — this h1 stays the single title. */
-  html.framed .tabbar .masthead { padding-left: 56px; }
+  /* META-1 shell: the burger lives in the shell's own in-flow header
+     bar, never over content — framed pages need no shift. Each tab keeps
+     its single original title. */
 </style>
-<script>try{if(new URLSearchParams(location.search).get('framed')){document.documentElement.className+=' framed';}}catch(e){}</script>
 </head>
 <body>
 <div class="wrap">
