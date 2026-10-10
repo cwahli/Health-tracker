@@ -76,6 +76,13 @@
                 background: #000; border-radius: 8px; border: 1px solid #1e293b; }
   .answer figcaption { font-size: 13px; color: #e2e8f0; margin-top: 5px; white-space: pre-wrap; }
   .answer figcaption.where { font-size: 10.5px; color: #64748b; }
+  /* The Request tab is the point of truth: the request first, then the
+     result screenshot directly below it, so the reader never has to hold
+     the words in memory while swiping. Same image bytes as the stage. */
+  .result { margin: 14px 0 0; }
+  .result img { width: 100%; max-height: 52vh; object-fit: contain; display: block;
+                background: #000; border-radius: 8px; border: 1px solid #1e293b; }
+  .view .none { color: #64748b; font-size: 13px; }
 
   /* --- image stage: pinch, pan, swipe, all gestures are ours --------- */
   .stage { position: relative; flex: 1 1 auto; min-height: 0; background: #000; overflow: hidden; }
@@ -216,7 +223,7 @@
     }
   } catch (e) {}
 
-  var state = { items: [], idx: 0, tab: 'proof', infoOpen: false, target: 'left', busy: false, pending: null };
+  var state = { items: [], idx: 0, tab: 'request', infoOpen: false, target: 'left', busy: false, pending: null };
   var query = location.search || '';
   var builtKey = null;      // item key currently in the DOM — the blink guard
   var view = null;          // per-item picture view: slides, zoom, gestures
@@ -515,9 +522,18 @@
       + '<div class="kv"><h3>Proof</h3><p>' + (proofs.length ? proofs.map(function (p) { return esc(p.name); }).join('\n') : 'none filed') + '</p></div>'
       + '</div>';
     // The two column tabs name the sheet column they show, so a reader can
-    // never be guessing which cell is on screen.
+    // never be guessing which cell is on screen. Request is the point of
+    // truth: the request text first, then the result screenshot directly
+    // below it (first proof shot, same bytes as the stage) — see the
+    // request and see the result, no tab-hopping.
+    var firstProof = proofs.length ? proofs[0] : null;
     views += '<div class="view scroll text" data-view="request">'
-      + '<div class="colname">Original request</div><div id="pane-request">' + esc(it.originalRequest) + '</div></div>';
+      + '<div class="colname">Original request</div><div id="pane-request">' + esc(it.originalRequest) + '</div>'
+      + (firstProof
+        ? '<figure class="result"><div class="colname">Result</div>'
+          + '<img src="' + proofUrl(it.key, firstProof.id) + '" alt="result screenshot" loading="lazy"></figure>'
+        : '<p class="none">No proof screenshots filed.</p>')
+      + '</div>';
     views += '<div class="view scroll text" data-view="todo">'
       + '<div class="colname">What\u2019s left to do</div><div id="pane-todo">'
       + (it.whatsLeft ? esc(it.whatsLeft) : '<span style="color:#475569">the What\u2019s left to do column is empty</span>')
@@ -824,7 +840,9 @@
     }
     var it = state.items[state.idx];
     if (builtKey !== it.key) { clearAttachment(); build(it); }
-    showProof();
+    // Land on Request: the request plus the result screenshot below it is
+    // the point of truth every review starts from.
+    showText('request');
   }
 
   document.getElementById('btn-prev').addEventListener('click', function () {

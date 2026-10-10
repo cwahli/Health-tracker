@@ -10,6 +10,8 @@
  * was correct and only the *transition* was wrong. These checks drive the page
  * and assert on live DOM state:
  *
+ *   0. landing: the Request tab opens first with the request text and
+ *      the result screenshot below it (the point of truth)
  *   1. the proof `<img>` node is the SAME node across a tab round-trip (no
  *      rebuild, so no reload blink)
  *   2. the image owns the majority of the screen (stage taller than the info card)
@@ -144,13 +146,30 @@ async function withPage(fn) {
 
   try {
     await page.goto(`${base}/review/app?token=x`);
-    await page.waitForSelector('.stage img');
+    // Landing contract: Request opens first — request text with the result
+    // screenshot directly below it.
+    await page.waitForSelector('.view[data-view="request"].on');
     return await fn({ page, base, posts, answers, proofFetches });
   } finally {
     await browser.close();
     server.close();
   }
 }
+
+test('landing opens Request with the request text and the result below it', async (t) => {
+  const ran = await withPage(async ({ page, proofFetches }) => {
+    const on = await page.$$eval('#tabs button', (bs) => bs.filter((b) => b.classList.contains('on')).map((b) => b.getAttribute('data-tab')));
+    assert.deepEqual(on, ['request'], 'Request reads on at landing, nothing else');
+    const req = await page.textContent('.view[data-view="request"]');
+    assert.match(req, /Original request/, 'the request column is on screen');
+    assert.match(req, /Build the thing/, 'with the request words');
+    const src = await page.$eval('.view[data-view="request"] .result img', (img) => img.getAttribute('src') || '');
+    assert.match(src, /\/review\/api\/proof/, 'the result screenshot rides below the request');
+    assert.match(src, /file=file-0/, 'it is the first proof shot');
+    assert.ok(proofFetches.includes('file-0'), 'and it is fetched through the guarded proof route');
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
 
 test('tab taps do not rebuild the image node (the blink)', async (t) => {
   const ran = await withPage(async ({ page }) => {
@@ -381,8 +400,11 @@ test('the heart confirms once, then archives', async (t) => {
       approves += 1;
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
     });
-    // On the landing (image) view the heart is the one-tap done action.
+    // The heart lives on the proof stage: from the Request landing, one
+    // Info tap opens the stage, and the heart there is the one-tap done.
     assert.equal(await page.textContent('#pos'), '1/2', 'two items to start');
+    await page.click('#tabs button[data-tab="info"]');
+    await page.waitForSelector('.stage:not([hidden])');
     await page.click('#heart');
     await page.waitForTimeout(250);
     assert.equal(approves, 1, 'one tap on the image view archives');
