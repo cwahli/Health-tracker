@@ -42,12 +42,16 @@
 #   freebuff : out of Freebucks = QUOTA (same status-line discipline);
 #              "working..." / "Thinking" = alive. The session-end box is
 #              handled by auto-continue above, not as QUOTA.
-# On QUOTA: stamp the lane depleted in the ledger (same JSON shape as the
-# router's markDepleted auto-capture) and print which lane.
-# --auto-failover: on QUOTA (or DIED/STALLED) relaunch the same prompt on the
-#   next available lane (same family first, then next by pref, freebuff last
-#   resort) via ht-run and keep watching; exit only on DONE, all lanes
-#   depleted (FAILOVER_EXHAUSTED), or TIMEOUT.
+# On QUOTA (model-parity 2026-10-10): stamp the ledger through the shared
+# quota switch (scripts/lib/model-switch.mjs — one reset-timer policy and one
+# shared-bucket stamp, the same the router and ht-allowance-watch use) and
+# relaunch the SAME prompt on the NEXT model IN THE SAME POOL via ht-run, in
+# the same tmux tab. Only when the whole pool is empty does the watcher exit
+# QUOTA (and wake the PM). This is the bot's own rule: "a quota hit moves
+# inside this pool only".
+# --auto-failover: on DIED/STALLED relaunch the same prompt on the next
+#   available lane of the SAME pool via ht-run and keep watching; exit only on
+#   DONE, all lanes depleted (FAILOVER_EXHAUSTED), or TIMEOUT.
 #
 # The detection/stamp/lane-choice/auto-continue logic lives in the shared,
 # unit-tested core
@@ -63,6 +67,8 @@
 #   HT_OC_ZEN_SILENCE_MS (core 180000) zen-lane silence override (ADDENDUM #8)
 #   HT_OC_LOG_PATH               opencode.log override (tests)
 #   HT_RUN_BIN (ht-run path)     launcher used by --auto-failover
+#   HT_WORKSPACE (worker checkout) HT_BIN_DIR (sibling scripts dir)
+#   HT_TOOL_REPO / HT_SWITCH_PATH  shared tool repo / model-switch module
 #   HT_ROUTER_DIR                router dir (ledger) override for tests
 #   HT_AC_LOGS_DIR / HT_LOG_DIR (sidecar/log dir; default /workspace/logs)
 #   HT_WATCH_NO_TG (0)           1 = never send Telegram messages (tests)
@@ -77,6 +83,14 @@ SESSION_STATE="$ROUTER_DIR/state/session.json"
 CORE="${HT_CORE_PATH:-$WORKSPACE/tools/telegram-provider-router/src/allowance-watch-core.cjs}"
 [ -f "$CORE" ] || CORE="$ROUTER_DIR/src/allowance-watch-core.cjs"
 [ -f "$CORE" ] || { echo "FATAL: allowance-watch-core.cjs not found"; exit 1; }
+# The shared model-switch module. Resolved separately from HT_WORKSPACE (which
+# names the WORKER's checkout and must keep that meaning).
+TOOL_REPO="${HT_TOOL_REPO:-}"
+if [ -z "$TOOL_REPO" ] || [ ! -f "$TOOL_REPO/scripts/lib/model-switch.mjs" ]; then
+  if [ -f "$WORKSPACE/scripts/lib/model-switch.mjs" ]; then TOOL_REPO="$WORKSPACE"; else TOOL_REPO=/workspace/biomarker-and-nutrient-tracker; fi
+fi
+SWITCH="${HT_SWITCH_PATH:-$TOOL_REPO/scripts/lib/model-switch.mjs}"
+[ -f "$SWITCH" ] || { echo "FATAL: model-switch.mjs not found (set HT_TOOL_REPO or HT_SWITCH_PATH)"; exit 1; }
 RUN_BIN="${HT_RUN_BIN:-${HT_BIN_DIR:-/home/box/bin}/ht-run}"
 LOGS_DIR="${HT_AC_LOGS_DIR:-${HT_LOG_DIR:-/workspace/logs}}"
 POLL="${HT_WATCH_POLL_SECS:-60}"
@@ -97,7 +111,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ -n "$s" ] && [ -n "$r" ] || { echo "usage: ht-watch <session> <report-file> [max-hours] [--auto-failover] [--then \"<cmd>\"] [--detach]"; exit 1; }
-max=$(( maxh * 3600 )); t0=$(date +%s)
+max=$(awk -v h="$maxh" 'BEGIN{v=int(h*3600); if(v<600) v=600; print v}'); t0=$(date +%s)   # fractional hours ok (2026-10-10)
 idle=0; last=""; same=0; blank=0; lastTool=""; lastModel=""; lastPromptFile=""
 
 META="$LOGS_DIR/$s.meta"
@@ -140,7 +154,11 @@ finish() { # <verdict> — EVERY terminal exit goes through here
   echo "$1" > "$LOGS_DIR/$s.wake"
   echo "$(date '+%F %T') EXIT $1" >> "$LOGS_DIR/$s.watch.log"
   rm -f "$PIDF"
+  # ht-revive (2026-09-30): IDLE/STALLED are handled silently by the reviver
+  if [ "${HT_WATCH_REVIVE:-0}" = 1 ] && { [ "${1%%:*}" = IDLE ] || [ "${1%%:*}" = STALLED ]; }; then exit 0; fi
   tg_notify "🤖 worker $s: $1"
+  WAKE_BIN="${HT_WAKE_BIN:-${HT_BIN_DIR:-/home/box/bin}/ht-wake-grok}"
+  [ -x "$WAKE_BIN" ] && "$WAKE_BIN" "$s" "$1" >/dev/null 2>&1 &   # wake the Browser agent (2026-09-30)
   # --then: chain the next job after DONE (ht-keeper parity, ADDENDUM #6)
   if [ -n "$then_cmd" ] && [ "${1%%:*}" = DONE ]; then
     echo "$(date '+%F %T') then: $then_cmd" >> "$LOGS_DIR/$s.watch.log"
@@ -161,15 +179,16 @@ core_const() { # <FREEBUFF_..._MS | CAP | MAX_FAILS> -> number (fallbacks keep t
 
 # ---- which tool/model is running in this session (ht-run .meta sidecar) ----
 read_meta() {
-  lastTool=""; lastModel=""; lastPromptFile=""
+  lastTool=""; lastModel=""; lastPromptFile=""; lastWorkspace=""
   local mf="$META" out
   [ -f "$mf" ] || return 0
   out=$(HT_META="$mf" node -e '
 const m=(()=>{try{return JSON.parse(require("fs").readFileSync(process.env.HT_META,"utf8"))}catch{return{}}})();
-process.stdout.write([m.tool||"",m.model||"",m.prompt_file||""].join("\t"));')
+process.stdout.write([m.tool||"",m.model||"",m.prompt_file||"",m.workspace||""].join("\t"));')
   lastTool=$(printf '%s' "$out" | awk -F'\t' 'NR==1{print $1}')
   lastModel=$(printf '%s' "$out" | awk -F'\t' 'NR==1{print $2}')
   lastPromptFile=$(printf '%s' "$out" | awk -F'\t' 'NR==1{print $3}')
+  lastWorkspace=$(printf '%s' "$out" | awk -F'\t' 'NR==1{print $4}')
   return 0
 }
 
@@ -264,68 +283,64 @@ let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{
   process.stdout.write(out||"");});'
 }
 
-# ---- lane stamping: same shape as the router's markDepleted auto-capture ----
-# args: <provider> <model> <reason-text>
-stamp_lane_depleted() {
-  local provider="$1" model="$2" reason="$3"
-  HT_CORE="$CORE" ROUTER_TABLE="$TABLE" ROUTER_STATE="$SESSION_STATE" \
-  STAMP_PROVIDER="$provider" STAMP_MODEL="$model" STAMP_REASON="$reason" node -e '
-const fs=require("fs");const core=require(process.env.HT_CORE);
-const rj=(p)=>{try{return JSON.parse(fs.readFileSync(p,"utf8"))}catch{return null}};
-const wj=(p,o)=>{const t=p+".tmp."+process.pid;try{fs.writeFileSync(t,JSON.stringify(o,null,2));fs.renameSync(t,p)}catch{try{fs.writeFileSync(p,JSON.stringify(o,null,2))}catch{}}};
-const tbl=rj(process.env.ROUTER_TABLE), sess=rj(process.env.ROUTER_STATE)||{};
-if(!tbl){console.log("stamp: no free-lane-table.json");process.exit(0)}
-const p=process.env.STAMP_PROVIDER,m=process.env.STAMP_MODEL,reason=process.env.STAMP_REASON;
-const tail=(x)=>String(x).replace(/^[^/]+\//,"").replace(/:free$/i,"");
-const lm=(l)=>{const lp=String(l.provider||""),pp=String(p);if(lp&&pp&&lp!==pp)return false;const lmv=String(l.model||""),mv=String(m);return lmv===mv||tail(lmv)===tail(mv)};
-const lane=(tbl.lanes||[]).find(lm);
-if(!lane){console.log("stamp: no lane matching "+p+"/"+m);process.exit(0)}
-const now=Date.now();
-// ONE policy for every stamper (core): CF 4006 daily exhaustion → next 00:00
-// UTC; vendor countdown honoured; rate-limit 45m; unknown 6h.
-const d=core.depletionUntilFromText(reason,now);
-const until=d.until;
-const kind=d.kind;
-const bid=core.sharedBucketIdFor(lane);
-const lanes=bid?(tbl.lanes||[]).filter((l)=>core.sharedBucketIdFor(l)===bid):[lane];
-core.stampDepleted(tbl,sess,lanes,bid,{until,hint:d.hint,kind,lastError:reason,source:"ht-watch auto-capture from vendor limit text"});
-tbl.updatedAt=core.isoZ(now);
-wj(process.env.ROUTER_TABLE,tbl);wj(process.env.ROUTER_STATE,sess);
-console.log("stamped "+(bid?("bucket:"+bid):(p+"/"+m))+" depleted until "+core.isoZ(until));'
+# ---- the shared quota switch (model-parity 2026-10-10) ----------------------
+# model-switch.applyQuotaHit is the ONE implementation of "a quota hit moves
+# inside this pool only": it stamps the lane/bucket with the shared core's
+# reset-timer policy (CF 4006 -> next 00:00 UTC, vendor countdown honoured,
+# rate-limit 45m, unknown 6h) and returns the next usable lane of the SAME
+# pool. Nothing about the switch is decided in this script.
+# args: <provider> <model> <reason>
+# stdout: nextTool|nextModel|pool|untilIso|exhausted|soonestLabel|laneFound
+quota_switch() {
+  HT_SWITCH="$SWITCH" HT_TABLE="$TABLE" HT_SESSION="$SESSION_STATE" \
+  Q_PROVIDER="$1" Q_MODEL="$2" Q_REASON="$3" node -e '
+const ms=require(process.env.HT_SWITCH);
+const plan=ms.applyQuotaHit({tablePath:process.env.HT_TABLE,sessionPath:process.env.HT_SESSION,provider:process.env.Q_PROVIDER,model:process.env.Q_MODEL,reason:process.env.Q_REASON});
+const n=plan.next||{};
+process.stdout.write([n.tool||"",n.model||"",plan.pool||"",plan.untilIso||"",plan.exhausted?"1":"0",(plan.soonest&&plan.soonest.label)||"",plan.laneFound?"1":"0"].join("|"));'
 }
 
-# ---- next available lane for a tool (same family first, then pref; freebuff last) ----
-# args: <tool> <depleted-model> -> prints "<provider>|<model>" or empty
-next_lane() {
-  HT_CORE="$CORE" ROUTER_TABLE="$TABLE" ROUTER_STATE="$SESSION_STATE" \
-  WANT_TOOL="$1" DEPLETED_MODEL="$2" node -e '
-const fs=require("fs");const core=require(process.env.HT_CORE);
+# ---- next lane in the SAME pool for a NON-quota failure (DIED/STALLED under
+# ---- --auto-failover). stdout: "provider|model|tool", empty when pool is dry.
+next_pool_lane() { # <model>
+  HT_SWITCH="$SWITCH" HT_TABLE="$TABLE" HT_SESSION="$SESSION_STATE" \
+  N_MODEL="$1" node -e '
+const fs=require("fs");
+const ms=require(process.env.HT_SWITCH);
 const rj=(p)=>{try{return JSON.parse(fs.readFileSync(p,"utf8"))}catch{return null}};
-const tbl=rj(process.env.ROUTER_TABLE), sess=rj(process.env.ROUTER_STATE)||{};
-const out=core.nextLane(tbl,sess,process.env.WANT_TOOL,process.env.DEPLETED_MODEL);
-if(out)process.stdout.write(out);'
+const tbl=rj(process.env.HT_TABLE),sess=rj(process.env.HT_SESSION)||{};
+const n=ms.nextPoolLane({table:tbl,session:sess,model:String(process.env.N_MODEL||"")});
+if(n)process.stdout.write(n.provider+"|"+n.model+"|"+n.tool);'
 }
 
 launch() { # <tool> <model-or-empty> <prompt-file> <session>
+  # 2026-10-10 switch fix: relaunch in the JOB's dir (meta workspace, else the
+  # prompt file's dir) — never the default repo checkout — and propagate
+  # ht-run's exit code (it now fails when the prompt was not submitted).
   local tool="$1" model="$2" pf="$3" sess="$4"
+  local ws="${lastWorkspace:-$(dirname "$pf")}"
+  [ -d "$ws" ] || ws="$(dirname "$pf")"
   if [ -n "$model" ]; then
-    "$RUN_BIN" "$tool" "$sess" "$pf" "$model" >/dev/null 2>&1
+    (cd "$ws" && HT_WORKSPACE="$ws" "$RUN_BIN" "$tool" "$sess" "$pf" "$model") >> "$LOGS_DIR/$sess.relaunch.out" 2>&1
   else
-    "$RUN_BIN" "$tool" "$sess" "$pf" >/dev/null 2>&1
+    (cd "$ws" && HT_WORKSPACE="$ws" "$RUN_BIN" "$tool" "$sess" "$pf") >> "$LOGS_DIR/$sess.relaunch.out" 2>&1
   fi
 }
 
 failover() { # returns 0 if relaunched
   local fromTool="$1" fromModel="$2"
   [ -n "$lastPromptFile" ] || { echo "FAILOVER_BLOCKED: no prompt file recorded for this session"; return 1; }
-  local nl
-  nl=$(next_lane "$fromTool" "$fromModel")
-  if [ -z "$nl" ]; then echo "FAILOVER_EXHAUSTED: no available lane left"; return 1; fi
-  local ntool="${nl%%|*}" nmodel="${nl#*|}"
-  # freebuff has no model arg; same prompt, same session name
-  launch "$ntool" "$nmodel" "$lastPromptFile" "$s"
-  lastTool="$ntool"; lastModel="$nmodel"
-  echo "FAILOVER: relaunching on $ntool ${nmodel:-(default lane)}"
+  local nl np nm nt
+  nl=$(next_pool_lane "$fromModel")
+  if [ -z "$nl" ]; then echo "FAILOVER_EXHAUSTED: no lane left in this pool"; return 1; fi
+  IFS='|' read -r np nm nt <<EOF
+$nl
+EOF
+  [ -n "$nm" ] || { echo "FAILOVER_EXHAUSTED: no lane left in this pool"; return 1; }
+  # same pool, same prompt, same session name (same tmux tab)
+  launch "$nt" "$nm" "$lastPromptFile" "$s"
+  lastTool="$nt"; lastModel="$nm"
+  echo "FAILOVER: relaunching on $nt $nm (same pool)"
   idle=0; same=0; blank=0; last=""
   return 0
 }
@@ -500,7 +515,32 @@ ac_attempt() { # -> 0 keep watching silently, 1 retry next poll, 2 exit now
 # ---------- main loop ----------
 read_meta
 while true; do
-  [ -f "$r" ] && report_done
+  # A worker writing PARTIAL progress (line 1 "STATUS: IN PROGRESS"/"PARTIAL")
+  # is not finishing: do not gate/reject it (2026-10-10, ideate3 burnt its 3
+  # gate attempts on progress notes).
+  if [ -f "$r" ] && head -1 "$r" | grep -qiE 'STATUS: *(IN[ _-]?PROGRESS|PARTIAL|WIP)'; then
+    :
+  elif [ -f "$r" ]; then
+    # ---- finish gate (2026-09-30, user: "worker must do the full test itself before pinging"):
+    # ---- if <ticket-dir>/GATE.sh exists, it must exit 0 before any DONE ping. A failure is sent
+    # ---- straight back to the worker (no ping), REPORT.md is set aside, and watching continues.
+    gate="$(dirname "$r")/GATE.sh"
+    if [ -x "$gate" ]; then
+      gout=$(cd "$(dirname "$r")" && timeout 600 "$gate" 2>&1); grc=$?
+      echo "$(date '+%F %T') gate rc=$grc" >> "$LOGS_DIR/$s.watch.log"
+      if [ "$grc" -ne 0 ]; then
+        gf=$(( $(cat "$LOGS_DIR/$s.gatefails" 2>/dev/null || echo 0) + 1 )); echo "$gf" > "$LOGS_DIR/$s.gatefails"
+        mv -f "$r" "${r%.md}.rejected-$gf.md"
+        printf '%s\n' "$gout" | tail -40 > "$(dirname "$r")/GATE-FAIL.txt"
+        [ "$gf" -ge 3 ] && finish "GATE_FAILED: 3 finish-gate failures, see $(dirname "$r")/GATE-FAIL.txt"
+        tmux send-keys -t "$s" -l "FINISH GATE FAILED (attempt $gf/3): GATE.sh exited $grc, your REPORT.md was rejected and renamed. Read $(dirname "$r")/GATE-FAIL.txt, fix the cause, run GATE.sh yourself until it exits 0, and only then write REPORT.md again. Do not claim done otherwise."
+        sleep 1; tmux send-keys -t "$s" Enter
+        sleep "$POLL"; continue
+      fi
+      rm -f "$LOGS_DIR/$s.gatefails"
+    fi
+    report_done
+  fi
   if ! tmux has-session -t "$s" 2>/dev/null; then
     [ "$auto" = 1 ] && failover "$lastTool" "$lastModel" && { sleep "$POLL"; read_meta; continue; }
     finish "DIED: tmux session $s is gone"
@@ -561,12 +601,30 @@ try{const st=fs.statSync(process.env.OC_QUIET_LOG);process.stdout.write(String(M
       cand=$(HT_TABLE="$TABLE" HT_MODEL="$ocModel" node -e 'const fs=require("fs");try{const t=JSON.parse(fs.readFileSync(process.env.HT_TABLE,"utf8"));const id=process.env.HT_MODEL;const norm=(x)=>String(x).replace(/^[^/]+\//,"").replace(/:free$/i,"");const hit=(t.lanes||[]).find(l=>String(l.provider)==="opencode"&&(l.model===id||norm(l.model)===norm(id)));if(hit)console.log(hit.model)}catch{}' 2>/dev/null)
       [ -n "$cand" ] && modl="$cand"
     fi
-    [ -n "$modl" ] && stamp_lane_depleted "$prov" "$modl" "$quota" || echo "stamp: no model known — skipped"
-    if [ "$auto" = 1 ]; then
-      failover "$prov" "$modl" || finish "QUOTA ($quota) — no lane left"
+    if [ -z "$modl" ] || [ -z "$lastPromptFile" ]; then
+      finish "QUOTA ($quota) — cannot switch (model/prompt unknown)"
+    fi
+    # ONE implementation of the switch (model-switch.applyQuotaHit): stamp with
+    # the router's reset-timer policy, then take the next model in the SAME
+    # pool. The pool being empty is the ONLY reason to exit QUOTA.
+    qs=$(quota_switch "$prov" "$modl" "$quota")
+    ntool=""; nmodel=""; npool=""; nuntil=""; nexh=""; nsoon=""; nfound=""
+    IFS='|' read -r ntool nmodel npool nuntil nexh nsoon nfound <<EOF
+$qs
+EOF
+    if [ -n "$nmodel" ] && [ -n "$ntool" ]; then
+      nuntil_local=$(date -d "$nuntil" '+%F %T %Z' 2>/dev/null || echo "$nuntil")
+      echo "$(date '+%F %T') quota switch: stamped until $nuntil_local ($nuntil) (pool $npool) -> $ntool $nmodel" >> "$LOGS_DIR/$s.watch.log"
+      if ! launch "$ntool" "$nmodel" "$lastPromptFile" "$s"; then
+        finish "QUOTA ($quota) — relaunch on $ntool $nmodel failed"
+      fi
+      lastTool="$ntool"; lastModel="$nmodel"
+      idle=0; same=0; blank=0; last=""
       sleep "$POLL"; continue
     fi
-    finish "QUOTA ($quota)"
+    soonmsg=""
+    [ -n "$nsoon" ] && soonmsg=" — soonest reset $nsoon"
+    finish "QUOTA ($quota) — pool ${npool:-unknown} empty${soonmsg}"
   fi
 
   # ---- alive / idle / stalled (ADDENDUM #2: blank-or-unchanged pane = STALLED;

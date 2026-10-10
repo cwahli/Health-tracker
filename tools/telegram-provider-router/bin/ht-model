@@ -1,0 +1,17 @@
+#!/bin/bash
+# ht-model — CLI for the shared model-pool tools (model-parity, 2026-10-10).
+#
+# Thin wrapper: every decision is made by the repo's shared modules
+# (scripts/ht-model.mjs over scripts/lib/model-switch.mjs — the same code the
+# Telegram bots and the box scripts run). Resolution order:
+#   1. HT_WORKSPACE/scripts/ht-model.mjs (an explicit checkout)
+#   2. the repo root this script lives in (tools/telegram-provider-router/bin)
+set -u
+for CLI in \
+  "${HT_WORKSPACE:-}/scripts/ht-model.mjs" \
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." 2>/dev/null && pwd)/scripts/ht-model.mjs"
+do
+  [ -n "$CLI" ] && [ -f "$CLI" ] && exec node "$CLI" "$@"
+done
+echo "ht-model: scripts/ht-model.mjs not found (set HT_WORKSPACE)" >&2
+exit 1
