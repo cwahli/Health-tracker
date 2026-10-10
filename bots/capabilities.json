@@ -206,7 +206,6 @@
         "tax": false,
         "location": false,
         "tell": false,
-        "todo": false,
         "tui": true,
         "bugs": false,
         "forge": false,

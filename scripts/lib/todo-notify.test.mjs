@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { wakeEnabled, triagePrompt, notifyTodoEvent, notifyTodoText, todoStatusText } from './todo-notify.mjs';
+import { wakeEnabled, triagePrompt, notifyTodoEvent } from './todo-notify.mjs';
 
 const tmpState = () => fs.mkdtempSync(path.join(os.tmpdir(), 'todo-notify-'));
 
@@ -75,40 +75,4 @@ test('enabled gate spawns one detached triage run with a read-only prompt', () =
   assert.ok(String(opts.env.PATH).includes('.local/bin'));
   const recorded = JSON.parse(fs.readFileSync(inboxPath, 'utf8').trim());
   assert.equal(recorded.type, 'review_approve');
-});
-
-test('chat todo files free text and spawns with the message in the prompt', () => {
-  const dir = tmpState();
-  const inboxPath = path.join(dir, 'inbox.jsonl');
-  let prompt = '';
-  const r = notifyTodoText('card #3 still shows new after packing', { TODO_AGENT_NOTIFY: '1' }, {
-    exists: () => false,
-    mkdir: () => {},
-    append: (l) => fs.appendFileSync(inboxPath, l + '\n'),
-    openLog: () => 'ignore',
-    spawnFn: (cmd, args) => { prompt = args[args.length - 1]; return { unref: () => {} }; },
-  });
-  assert.equal(r.ok, true);
-  assert.match(prompt, /TRIAGE ONLY/);
-  assert.match(prompt, /card #3 still shows new/);
-  const recorded = JSON.parse(fs.readFileSync(inboxPath, 'utf8').trim());
-  assert.equal(recorded.type, 'chat_todo');
-  assert.equal(recorded.source, 'todo-chat');
-});
-
-test('empty or oversized chat todos are refused with nothing recorded', () => {
-  const lines = [];
-  assert.equal(notifyTodoText('   ', {}, { append: (l) => lines.push(l) }).ok, false);
-  assert.equal(notifyTodoText('x'.repeat(2001), {}, { append: (l) => lines.push(l) }).ok, false);
-  assert.deepEqual(lines, []);
-});
-
-test('todo status renders inbox lines plus the last triage verdict', () => {
-  assert.match(todoStatusText([], []), /empty/);
-  const out = todoStatusText(
-    ['{"at":"t1","type":"chat_todo","key":"fix the thing"}', 'not-json{{{'],
-    ['{"at":"t2","needs_go":true,"reason":"pack missing"}'],
-  );
-  assert.match(out, /chat_todo/);
-  assert.match(out, /NEEDS-GO \(pack missing\)/);
 });

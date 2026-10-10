@@ -41,7 +41,6 @@ export const BOT_COMMANDS = [
   { command: 'tax', description: 'Chiwah LTD tax: /tax snapshot | sweep | status | deadlines | saving | doc' },
   { command: 'location', description: 'Show or switch active compute location / pool' },
   { command: 'tell', description: 'Send one bounded message to another seat (/tell <bot> <text> --ref <ticket>)' },
-  { command: 'todo', description: 'File a todo for the agent queue (/todo <text> | /todo status)' },
   { command: 'notify', description: 'Finish alerts for runs started elsewhere on|off|status (web UI, TUI)' },
 ];
 
@@ -128,15 +127,6 @@ export const HELP_USAGE = {
   tax: { args: '[sub]', text: 'Chiwah LTD tax: snapshot · sweep · status · deadlines · saving · doc' },
   location: { args: '[name]', text: 'show or switch compute location / quota pool' },
   notify: { args: '[on|off|status]', text: 'finish alerts for runs started outside Telegram (web UI, TUI)' },
-  todo: {
-    args: '<text> | status',
-    text: [
-      'file a todo for the agent queue — a triage session picks it up read-only',
-      '  /todo card #3 still shows new after packing',
-      '  /todo status shows unfiled inbox events',
-      '  senders are already gated to allowed users; fixes still need a go',
-    ].join('\n'),
-  },
 };
 
 /** Payload for Telegram `setMyCommands` (strips nothing — already valid). */

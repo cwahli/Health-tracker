@@ -187,7 +187,6 @@ import {
   extractMedia,
   extractCodeBlocks,
 } from './lib/commands.mjs';
-import { notifyTodoText, todoStatusText, INBOX_PATH, TRIAGE_LOG } from './lib/todo-notify.mjs';
 import {
   buildStatusSnapshot,
   formatStatusPlain,
@@ -3934,35 +3933,6 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       await api.sendMessage(chatId, on
         ? '🔔 Finish alerts are on for this chat. `/notify off` silences them.'
         : '🔕 Finish alerts are off for this chat. `/notify on` brings them back.');
-      return;
-    }
-
-    case 'todo': {
-      // Direct chat → agent-queue bridge. Senders are already gated to
-      // allowedUserIds before handleCommand, so no second identity check.
-      // Files to the todo inbox; a triage session wakes read-only under
-      // the same guards as review verdicts. Fixes still need a go.
-      const text = String(cmd.args || '').trim();
-      if (!text) {
-        await api.sendMessage(chatId, 'Usage: `/todo <text>` files a todo for the agent queue (a triage session picks it up read-only). `/todo status` shows the inbox.');
-        return;
-      }
-      if (text.toLowerCase() === 'status') {
-        let inbox = [];
-        let triaged = [];
-        try { inbox = fs.readFileSync(INBOX_PATH, 'utf8').split('\n'); } catch { /* no inbox yet */ }
-        try { triaged = fs.readFileSync(TRIAGE_LOG, 'utf8').split('\n'); } catch { /* no triage yet */ }
-        await api.sendMessage(chatId, todoStatusText(inbox, triaged));
-        return;
-      }
-      const res = notifyTodoText(text, process.env);
-      if (!res.ok && /empty|2000/.test(res.reason || '')) {
-        await api.sendMessage(chatId, `❌ Todo not filed: ${res.reason}.`);
-        return;
-      }
-      await api.sendMessage(chatId, res.ok
-        ? '✅ Todo filed — a triage session is on it (read-only assessment). Fixes still need your go.'
-        : `✅ Todo filed to the inbox. Agent wake-up skipped (${res.reason}) — it will be picked up on the next check.`);
       return;
     }
 
