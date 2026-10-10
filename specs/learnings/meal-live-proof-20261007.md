@@ -49,3 +49,8 @@ A meal ticket is not reviewable until all three hold:
    revisions move to a `superseded/` subfolder (the review app lists
    top-level images only, so they stay out of review without being
    deleted). Nothing is deleted.
+4. **Captured loaded, not loading.** Every shot is taken after its
+   content renders: all `<img>` complete with nonzero dimensions, no
+   spinners, skeletons, or placeholders. The capture script asserts
+   loaded state (network idle + per-image complete) before shooting;
+   a loading-state capture is not proof and goes back for re-capture.
