@@ -152,6 +152,29 @@ docs/agent/standing.json or journey-guard.
   under live public numbers, and the shim resolves REPO_ROOT into the
   deploy tree, scattering uncommitted lines where reset eats them.
 
+## Bug-3 full resolution verified (2026-10-10 ~15:30 UTC)
+
+- Same agent, worktree agent/bug3-pack, draft PR #695. Repro confirmed
+  pre-fix (exit 1, root cause named before code), fix in labelEnergy.ts
+  (5 kcal + 2% dual gate), sensor 3/3 + labelEnergy 11/11 re-run green
+  by verifier, tsc clean. No overlap with #686. No verify posted by
+  implementer — parent posted green → card #3 done.
+- Live proof meets the standing rules: job cited on panels, entry shot
+  (full verbatim text readable this time), live 629 kcal refile,
+  before/after from real pipeline runs. Folder 6 files, all #3's,
+  nothing deleted. PROOF #55 folded. Sheet: stamps intact, Status
+  review, gate cites meal contract.
+- Adjudication (flagged tension): agent mirrored canonical `packed`
+  against the brief's `in_fix`. Agent was RIGHT — the sheet must never
+  declare a state the store doesn't derive (the original design sin).
+  Parity sensor agrees (packed==packed, PASS). Standing holds.
+- Residuals: live meal carries no OCR panel (gate inert there by
+  design — disclosed); full-breakdown shot skipped to avoid showing
+  Bug-2's still-open micros defect (correct scoping).
+- Side observation: Bug-53's mislinked proof cell got fixed by an
+  unseen hand — proof sensor dropped from 4 fails to 3. Remaining:
+  Auto-01, Domain-01 cross-links, Meal-36 done-no-proof.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
