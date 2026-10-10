@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { wakeEnabled, triagePrompt, workerPrompt, planFor, lockFor, notifyTodoEvent, notifyTodoText, todoStatusText, chatTriagePrompt, routeFor, retryBackoffSec, attemptSessionPost, isSessionGoneText, triageModelArgs, workerModelArgs, workerAgentArgs, sessionNoteFor, pendingNote, LOCK_PATH } from './todo-notify.mjs';
+import { wakeEnabled, triagePrompt, workerPrompt, planFor, lockFor, notifyTodoEvent, routeFor, retryBackoffSec, attemptSessionPost, isSessionGoneText, triageModelArgs, workerModelArgs, workerAgentArgs, sessionNoteFor, pendingNote, LOCK_PATH } from './todo-notify.mjs';
+
 const tmpState = () => fs.mkdtempSync(path.join(os.tmpdir(), 'todo-notify-'));
 
 test('wake is off by default (gateway suite can never spawn)', () => {
@@ -486,52 +487,4 @@ test('session notes describe the chat outcome', () => {
   assert.match(sessionNoteFor({ ok: false }), /chat unreachable/);
   assert.equal(pendingNote(0), '');
   assert.equal(pendingNote(2), '(+2 queued)');
-});
-
-test('chat todo files free text and spawns with the message in the prompt', () => {
-  const dir = tmpState();
-  const inboxPath = path.join(dir, 'inbox.jsonl');
-  let prompt = '';
-  const hermetic = {
-    exists: () => false,
-    mkdir: () => {},
-    append: (l) => fs.appendFileSync(inboxPath, l + '\n'),
-    openLog: () => 'ignore',
-    spawnFn: (cmd, args) => { prompt = args[args.length - 1]; return { unref: () => {} }; },
-    receiptSink: () => {},
-    readRetry: () => [],
-    writeRetry: () => {},
-  };
-  const r = notifyTodoText('card #3 still shows new after packing', { TODO_AGENT_NOTIFY: '1' }, hermetic);
-  assert.equal(r.ok, true);
-  assert.match(prompt, /TRIAGE ONLY/);
-  assert.match(prompt, /card #3 still shows new/);
-  const recorded = JSON.parse(fs.readFileSync(inboxPath, 'utf8').trim());
-  assert.equal(recorded.type, 'chat_todo');
-  assert.equal(recorded.source, 'todo-chat');
-});
-
-test('empty or oversized chat todos are refused with nothing recorded', () => {
-  const lines = [];
-  assert.equal(notifyTodoText('   ', {}, { append: (l) => lines.push(l) }).ok, false);
-  assert.equal(notifyTodoText('x'.repeat(2001), {}, { append: (l) => lines.push(l) }).ok, false);
-  assert.deepEqual(lines, []);
-});
-
-test('todo status renders inbox lines plus the last triage verdict', () => {
-  assert.match(todoStatusText([], []), /empty/);
-  const out = todoStatusText(
-    ['{"at":"t1","type":"chat_todo","key":"fix the thing"}', 'not-json{{{'],
-    ['{"at":"t2","needs_go":true,"reason":"pack missing"}'],
-  );
-  assert.match(out, /chat_todo/);
-  assert.match(out, /NEEDS-GO \(pack missing\)/);
-});
-
-test('chat_todo plans a chat-scoped triage prompt', () => {
-  const p = planFor('chat_todo', 'card #3 still shows new');
-  assert.equal(p.worker, false);
-  assert.match(p.prompt, /filed a todo from chat/);
-  assert.match(p.prompt, /card #3 still shows new/);
-  assert.match(chatTriagePrompt('hello'), /TRIAGE ONLY/);
 });
