@@ -85,3 +85,25 @@ Named gates green; `bugctl verify` NOT posted (parent verifies). Branch
 `agent/bug53-fix` pushed, draft PR opened, never merged, never pushed to main.
 Human checks in /review: row Bug-53 (Status review) with the 3 top-level proof
 shots — input R2 picture through fixed fleet/board outputs, report cited.
+
+## Rework (2026-10-10 ~17:25 UTC, proof only — no code change)
+
+Verifier read all three first-round shots as loading spinners. Cause: the filed
+bytes' subject IS a loading screen (CLI captured mid-load Oct 7; sha
+`357c854d…`, 390x844, identical on re-GET), and round 1 captured before
+network settled with no load assert. Reworked without touching code or
+canonical artifacts (defect+repro+plan stand, no self-verify):
+
+- Staging pages gained an in-DOM `#asserts` banner fed by per-`<img>`
+  `complete`/`naturalWidth` polling; headless Chrome captured with
+  `--virtual-time-budget=15000` and `--dump-dom` gated every shot.
+- Per-shot asserts: `fleet-r2: complete=true naturalWidth=390`;
+  `board-r2: complete=true naturalWidth=390 | board-artifacts: complete=true
+  naturalWidth=390`. naturalWidth=390 equals the filed PNG's true width, so
+  each `<img>` rendered the exact filed bytes with data (not placeholders).
+- Input panel rebuilt from freshly re-downloaded live bytes with sha/dims in
+  the caption (PIL composite — no browser loading involved).
+- Round-1 files moved to `superseded/` (now 5 there); same 3 filenames
+  recaptured with new bytes (input 31239→37040B, fleet 60065→74487B, board
+  86384→101741B). Nothing deleted. Sheet Work-done appended, Status stays
+  review, last_activity `17:27 - 10 oct (UK)`.
