@@ -559,6 +559,9 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   // backend session's RAM (next Open re-attaches and resumes it).
   const [open, setOpen] = useState(true);
   const [killMsg, setKillMsg] = useState('');
+  // Per-bot liveness (green = tmux session alive). Refreshed with the list
+  // and after every kill, so each row's Kill targets exactly that bot.
+  const [live, setLive] = useState<Record<string, boolean>>({});
   const frameRef = useRef<HTMLIFrameElement | null>(null);
 
   const deadRef = useRef(false);
@@ -590,10 +593,29 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     setPicked((cur) => cur || (list.some((r) => r.bot === 'web') ? 'web' : (list[0]?.bot || '')));
   };
 
+  const loadStatus = async () => {
+    let res: Response | null = null;
+    try {
+      res = await fetchLive('/api/ttys/status');
+    } catch {
+      res = null;
+    }
+    if (deadRef.current) return;
+    const body = res ? await res.json().catch(() => null) : null;
+    if (deadRef.current) return;
+    if (!body || body.ok !== true || !Array.isArray(body.status)) return;
+    const map: Record<string, boolean> = {};
+    for (const row of body.status as { bot: string; live: boolean }[]) {
+      if (row && typeof row.bot === 'string') map[row.bot] = row.live === true;
+    }
+    setLive(map);
+  };
+
   useEffect(() => {
     if (inTelegram) return;
     deadRef.current = false;
     loadTtys();
+    loadStatus();
     return () => { deadRef.current = true; };
   }, [inTelegram, reloadKey]);
 
@@ -608,15 +630,24 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   const tok = queryToken();
   const src = pickedRoute && tok ? `${pickedRoute.path}?token=${encodeURIComponent(tok)}` : null;
 
-  // Frees the picked terminal's backend RAM (operator only). The attach
-  // script recreates the tmux session on next open, resuming the same
-  // agent session — memory freed, conversation kept.
-  const killSession = async () => {
-    setKillMsg('Stopping…');
+  // Views one bot's terminal: selects it and (re)mounts the frame.
+  const viewBot = (bot: string) => {
+    setPicked(bot);
+    setOffline('');
+    setKillMsg('');
+    setOpen(true);
+    renewToken().then((ok) => { setEpoch((n) => n + 1); if (!ok) checkFrame(); loadTtys(); loadStatus(); });
+  };
+
+  // Frees exactly one bot's backend RAM (operator only). The attach script
+  // recreates that bot's tmux session on next open, resuming the same agent
+  // session — memory freed, conversation kept, other bots untouched.
+  const killSession = async (target: string) => {
+    setKillMsg(`Stopping ${target}…`);
     const send = () => fetch('/api/ttys/kill' + currentQuery(), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ bot: picked }),
+      body: JSON.stringify({ bot: target }),
     });
     let res: Response | null = null;
     try {
@@ -637,13 +668,14 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
       return;
     }
     if (!body || body.ok !== true) {
-      setKillMsg('Could not stop the session.');
+      setKillMsg(`Could not stop ${target}.`);
       return;
     }
-    setOpen(false);
+    if (target === picked) setOpen(false);
     setKillMsg(body.killed
-      ? `Stopped ${picked} — memory freed. Open restarts it.`
-      : `No live ${picked} session — nothing was running.`);
+      ? `Stopped ${target} — memory freed. View restarts it.`
+      : `No live ${target} session — nothing was running.`);
+    loadStatus();
   };
 
   // The refusal JSON can arrive after onLoad fires, so an empty read
@@ -670,17 +702,16 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   return (
     <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overscrollBehavior: 'none' }}>
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderBottom: '1px solid #1e293b', background: '#0b1220' }}>
+        <button type="button" aria-label="Menu" onClick={onMenu}
+          style={{ width: 28, height: 28, borderRadius: 8, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 15, cursor: 'pointer', flex: '0 0 auto' }}>
+          ☰
+        </button>
         <label htmlFor="tty-session" style={{ fontSize: 12, color: '#94a3b8' }}>Session</label>
         <select
           id="tty-session"
           value={picked}
           disabled={!routes}
-          onChange={(e) => {
-            setPicked(e.target.value);
-            setOffline('');
-            setKillMsg('');
-            renewToken().then((ok) => { setEpoch((n) => n + 1); if (!ok) checkFrame(); loadTtys(); });
-          }}
+          onChange={(e) => viewBot(e.target.value)}
           style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 8px', fontSize: 13 }}
         >
           {routes === null && <option value="">Loading…</option>}
@@ -700,10 +731,6 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
             Open
           </button>
         )}
-        <button type="button" onClick={killSession}
-          style={{ background: '#1e293b', color: '#f0abfc', border: '1px solid #334155', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>
-          Kill
-        </button>
         {killMsg && (
           <span style={{ fontSize: 12, color: '#94a3b8' }}>{killMsg}</span>
         )}
@@ -726,6 +753,38 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
           </span>
         )}
       </div>
+      {(routes || []).length > 0 && (
+        <div style={{ flex: '0 0 auto', display: 'flex', flexWrap: 'wrap', gap: 6, padding: '6px 10px', borderBottom: '1px solid #1e293b', background: '#0b1220' }}>
+          {(routes || []).map((r) => {
+            const watching = r.bot === picked && open;
+            const isLive = live[r.bot] === true;
+            return (
+              <span key={r.bot}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#1e293b', border: `1px solid ${watching ? '#7dd3fc' : '#334155'}`, borderRadius: 8, padding: '2px 4px 2px 8px', fontSize: 12, color: '#e2e8f0' }}>
+                <span title={isLive ? 'session live' : 'session dormant'}
+                  style={{ width: 8, height: 8, borderRadius: 4, background: isLive ? '#4ade80' : '#475569', flex: '0 0 auto' }} />
+                {r.bot}
+                {watching ? (
+                  <span style={{ color: '#7dd3fc', padding: '2px 6px' }}>watching</span>
+                ) : (
+                  <button type="button" onClick={() => viewBot(r.bot)}
+                    style={{ background: 'none', border: 0, color: '#7dd3fc', fontSize: 12, cursor: 'pointer', padding: '2px 6px' }}>
+                    View
+                  </button>
+                )}
+                <button type="button" onClick={() => killSession(r.bot)}
+                  style={{ background: 'none', border: 0, color: '#f0abfc', fontSize: 12, cursor: 'pointer', padding: '2px 6px' }}>
+                  Kill
+                </button>
+              </span>
+            );
+          })}
+          <button type="button" onClick={() => { loadTtys(); loadStatus(); }} title="Refresh sessions"
+            style={{ background: 'none', border: '1px solid #334155', borderRadius: 8, color: '#94a3b8', fontSize: 12, cursor: 'pointer', padding: '2px 8px' }}>
+            ↻
+          </button>
+        </div>
+      )}
       {src && open ? (
         <iframe
           ref={frameRef}
