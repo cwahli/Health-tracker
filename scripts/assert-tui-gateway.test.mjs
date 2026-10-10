@@ -587,7 +587,51 @@ console.log('assert-tui-gateway:');
   check('the readout flag keeps the session token first',
     landingLocationFor('vm2', 'TOK', { TUI_PAGE_DEBUG: '1' }) === '/tty2/?token=TOK&tui_measure=1');
 
-  // 12b. The bootstrap we do serve is ours, so it is executed with stubs.
+  // 12a8. Operator-only terminal kill (shell memory saver): a non-operator
+//       token is refused, an unknown terminal is a 400, and a known bot with
+//       no live tmux session reports killed:false honestly instead of failing
+//       (off-box backends such as the grok TG router have no local session).
+{
+  const kill = async (botId, target, method = 'POST') => {
+    const env = { TUI_GATEWAY_SECRET: SECRET, TUI_ROUTE_TESTKILL_PATH: '/ttykill/' };
+    const token = issueToken({ botId, chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+    const handle = createGateway({ env, log: () => {} });
+    return new Promise((resolve, reject) => {
+      let code = 0; let body = '';
+      const res = { writeHead: (c) => { code = c; }, end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+      const req = { method, url: '/api/ttys/kill',
+        headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}`, 'content-type': 'application/json' },
+        on: (ev, fn) => { if (ev === 'data') fn(JSON.stringify({ bot: target })); if (ev === 'end') fn(); } };
+      handle(req, res).catch(reject);
+    });
+  };
+  const list = async (botId) => {
+    const env = { TUI_GATEWAY_SECRET: SECRET, TUI_ROUTE_TESTKILL_PATH: '/ttykill/' };
+    const token = issueToken({ botId, chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+    const handle = createGateway({ env, log: () => {} });
+    return new Promise((resolve, reject) => {
+      let code = 0; let body = '';
+      const res = { writeHead: (c) => { code = c; }, end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+      handle({ method: 'GET', url: '/api/ttys',
+        headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` } }, res).catch(reject);
+    });
+  };
+  const listed = await list('webop');
+  check('the picker list admits a registered bot',
+    listed.code === 200 && JSON.parse(listed.body).ttys.some((r) => r.bot === 'testkill'));
+  const refused = await kill('vm', 'testkill');
+  check('a non-operator token cannot kill', refused.code === 403);
+  const unknown = await kill('webop', 'nosuchbot');
+  check('an unknown terminal is a 400, not a tmux name', unknown.code === 400);
+  const idle = await kill('webop', 'testkill');
+  const idleBody = JSON.parse(idle.body || '{}');
+  check('a known bot with no live session reports killed:false, not failure',
+    idle.code === 200 && idleBody.ok === true && idleBody.killed === false && idleBody.tmux === 'VM-tui-testkill');
+  const get = await kill('webop', 'testkill', 'GET');
+  check('the kill route is POST only', get.code === 405);
+}
+
+// 12b. The bootstrap we do serve is ours, so it is executed with stubs.
   const boot = await bootstrapThroughGateway();
   const scripts = [...boot.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]);
   check('the bootstrap has a script', scripts.length > 0);
