@@ -413,8 +413,10 @@ type TtyRoute = { bot: string; path: string };
  * there). Frames are same-origin, so a refused/dead route reads back its
  * honest JSON instead of a blank page, with a retry.
  */
-function TerminalTab({ def, bot, inTelegram, onMenu }: { def: MiniAppDef; bot: string; inTelegram: boolean; onMenu: () => void }) {
+function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAppDef; bot: string; inTelegram: boolean; onMenu: () => void; onAuthDead: () => void }) {
   const [routes, setRoutes] = useState<TtyRoute[] | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
   const [picked, setPicked] = useState('');
   const [epoch, setEpoch] = useState(0);
   const [offline, setOffline] = useState('');
@@ -423,15 +425,34 @@ function TerminalTab({ def, bot, inTelegram, onMenu }: { def: MiniAppDef; bot: s
   useEffect(() => {
     if (inTelegram) return;
     let dead = false;
-    fetchLive('/api/ttys').then(async (res) => {
-      const body = await res.json().catch(() => null);
+    (async () => {
+      setLoadError('');
+      let res: Response | null = null;
+      try {
+        res = await fetchLive('/api/ttys');
+      } catch {
+        res = null;
+      }
       if (dead) return;
-      const list = body && body.ok && Array.isArray(body.ttys) ? body.ttys as TtyRoute[] : [];
+      if (res && res.status === 401) {
+        // Session dead past renewal (cookie gone, stale marker/token left):
+        // back to Google sign-in, not an empty picker.
+        onAuthDead();
+        return;
+      }
+      const body = res ? await res.json().catch(() => null) : null;
+      if (dead) return;
+      if (!body || body.ok !== true || !Array.isArray(body.ttys)) {
+        setLoadError('Could not load sessions.');
+        setRoutes([]);
+        return;
+      }
+      const list = body.ttys as TtyRoute[];
       setRoutes(list);
       setPicked((cur) => cur || (list.some((r) => r.bot === 'web') ? 'web' : (list[0]?.bot || '')));
-    }).catch(() => { if (!dead) setRoutes([]); });
+    })();
     return () => { dead = true; };
-  }, [inTelegram]);
+  }, [inTelegram, reloadKey]);
 
   if (inTelegram) {
     const tok = queryToken();
@@ -486,6 +507,15 @@ function TerminalTab({ def, bot, inTelegram, onMenu }: { def: MiniAppDef; bot: s
             <option key={r.bot} value={r.bot}>{r.bot}</option>
           ))}
         </select>
+        {loadError && (
+          <span style={{ fontSize: 12, color: '#f0abfc' }}>
+            {loadError}{' '}
+            <button type="button" onClick={() => { setRoutes(null); setReloadKey((n) => n + 1); }}
+              style={{ background: 'none', border: 0, color: '#7dd3fc', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+              Retry
+            </button>
+          </span>
+        )}
         {offline && (
           <span style={{ fontSize: 12, color: '#f0abfc' }}>
             {offline}{' '}
@@ -591,6 +621,21 @@ function Shell() {
     }
   }, [drawer]);
 
+  // A 401 past renewal means the browser session is dead (900s cookie
+  // gone, stale marker/token left): drop back to Google sign-in with a clean
+  // slate instead of stranding tabs on empty states.
+  const handleAuthDead = () => {
+    try {
+      window.sessionStorage.removeItem('fbauth');
+      const q = new URLSearchParams(window.location.search || '');
+      q.delete('token');
+      window.history.replaceState(null, '', `?${q.toString()}`);
+    } catch {
+      /* storage/history unavailable — the state flip below still logs out */
+    }
+    setFbAuthed(false);
+  };
+
   // Framed tabs host their own in-header burger (fleet/review/terminal/bag
   // page headers, BugBoard header): it postMessages the shell to open the
   // drawer. The shell renders no bar of its own, so nothing can overlap.
@@ -658,7 +703,7 @@ function Shell() {
         {def.id === 'bugs' ? (
           <BugsTab onMenu={() => setDrawer(true)} />
         ) : def.id === 'tui' ? (
-          <TerminalTab def={def} bot={bot} inTelegram={inTelegram} onMenu={() => setDrawer(true)} />
+          <TerminalTab def={def} bot={bot} inTelegram={inTelegram} onMenu={() => setDrawer(true)} onAuthDead={handleAuthDead} />
         ) : frameSrc(def, bot) ? (
           def.id === 'tgtg' || def.id === 'web' ? (
             <ExternalFrame key={`${def.id}:${queryEpoch}`} def={def} src={frameSrc(def, bot) as string} />
