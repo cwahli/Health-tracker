@@ -91,3 +91,21 @@ Proof-only rework — NO code changed, no canonical card artifacts touched
    round-trips succeed server-side but do not append to the worktree's
    `specs/bug-journal/2.jsonl` (stale, older card) — journal mirror gap,
    store remains canonical. Left for the pipeline owners, not this turn.
+
+## Round 2 (human verdict 2): curate folder + input-side entry shot
+
+Proof-only; no code, no canonical card changes, no self-verify.
+
+- **Curated** `Work done/card:tag_muwyto2i_lv3uyw`: created `superseded/`
+  subfolder; moved 4 superseded shots there (pre-job panel revisions
+  `bug2-before/after-micros.png`, generic round-1 `bug2-live-food-history.png`,
+  old PACK-slice `bug2-queue-row.png`). Deleted nothing. No other-ticket
+  files found. Top-level now 9 images: pack-check, job-cited before/after,
+  live entry composer, re-file history, decomposition, 3 micro panels.
+- **Entry shot** `bug2-live-entry-composer.png`: PERFORMED (fresh playwright
+  run — Log Meal composer with both G2 photos attached + verbatim prompt in
+  the input), pre-submit, nothing sent, no duplicate meal filed. Real pixels,
+  provenance in filename + this note.
+- Sheet: C7 gate appended with the meal-proof contract, C2/C3 appended after
+  both human stamps (untouched), Status review / state packed kept,
+  last_activity refreshed to UK shape.
