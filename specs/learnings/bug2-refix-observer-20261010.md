@@ -51,9 +51,38 @@ docs/agent/standing.json or journey-guard.
 - P5: single-writer archive_done (review-app Done rows only;
   version-archivals to a history tab with source markers).
 
-## Pending (fills in when the agent reports back)
+## Outcome (filled 2026-10-10 ~07:45 UTC)
 
-- Did pack→repro→plan→implement→verify order hold? Where did it deviate?
-- Which instructions were followed / ignored? (Updates O5 with evidence.)
-- Sensor verdicts on completion + human /review verdict.
-- Promote recommendation: which of P1–P5 earned a standing row.
+- Order held: pack (`--check` green) → repro confirmed exit 1 → plan
+  (hypothesis + 2 files + 3 named gates) → implement → gates green.
+  No burned hypotheses, no loops, no painted fixtures. Zero deviations.
+- Instructions followed: heartbeat from the start, Drive per-key folder,
+  strays moved to a new Bug-53 folder, sheet honest throughout (never
+  Done; Status=review only at gate). The machine-checked items held;
+  this time the prose ones did too — difference from the original run:
+  the brief named exact commands (`pack --check`, repro bundle shape)
+  instead of phase names.
+- Verifier (parent, independent): sensor test 2/2, aggregation+food_db
+  39/39, bugAutoSpot.food 15/15, tsc clean — all re-run, all green.
+  `bugctl verify` posted green with command + evidence → card #2 done.
+  Sensors re-run: Bug-2 row passes proof + parity (approve-window rule
+  added for canonical-done/sheet-review with fixtures).
+- Residuals for the human (all disclosed, none blocking the verdict):
+  live food-history shot shows the app, not the oat item's micros
+  in-app; vitamins D/B12/C/A still 0 (dairy-merge follow-up, agent
+  disclosed); trial-balance line deliberately unpacked for a follow-up
+  card; exact-meal re-file impossible (no photo_urls at intake — G2
+  photos + verbatim prompt used instead).
+- O5 refined: checkable instructions hold. The sensor fixes (cellByName,
+  prefix strip, approve window) each arrived with a regression fixture —
+  that discipline is what kept verifier trust.
+
+## Promote recommendation
+
+- P1 (approve-guard) EARNED: the run proved proof-present review works;
+  approve with zero shots should now refuse. Small, safe, propose it.
+- P4 (wire the two sensors into prepush/CI) EARNED with the approve-window
+  refinement: parity is no longer red on legitimate transients.
+- P3 (tag-keyed journal) EARNED: journal/2.jsonl nearly misled the run.
+- P2 (dropdowns) and P5 (single-writer archive) PROPOSED but unproven by
+  this run — keep for a later promote with their own evidence.

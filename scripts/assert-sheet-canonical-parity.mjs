@@ -85,6 +85,15 @@ export function verdictForKey(item, canonByTag) {
   if (sheetRank === 5 && canonRank !== 5) {
     return { ok: false, reason: `sheet done but canonical state=${canon.state || '?'}`, checked: true };
   }
+  // Canonical done + sheet review = the approve window: the verifier closed
+  // the card and the human verdict is pending in /review. Legitimate, but
+  // worth naming so it doesn't read as drift.
+  if (canonRank === 5 && sheetRank !== 5) {
+    if (String(item.status || '').trim().toLowerCase() === 'review') {
+      return { ok: true, reason: 'canonical done, human approve pending in /review', checked: true };
+    }
+    return { ok: false, reason: `canonical done but sheet ${item.state || '?'} (not in review)`, checked: true };
+  }
   if (sheetRank === null || canonRank === null) return { ok: true, reason: '', checked: false };
   if (sheetRank !== canonRank) {
     return { ok: false, reason: `sheet ${item.state} but canonical ${canon.state}`, checked: true };
@@ -130,6 +139,14 @@ console.log('assert-sheet-canonical-parity:');
   const agree = { key: 'card:tag_muwyto2i_lv3uyw', state: 'in_fix' };
   const v4 = verdictForKey(agree, canon);
   check('matching states pass', v4.ok && v4.checked, v4.reason);
+
+  const window = { key: 'card:tag_muwyto2i_lv3uyw', state: 'packed', status: 'review' };
+  const v4b = verdictForKey(window, new Map([['tag_muwyto2i_lv3uyw', { state: 'done' }]]));
+  check('canonical done + sheet review passes as approve window', v4b.ok && v4b.checked, v4b.reason);
+
+  const windowBad = { key: 'card:tag_muwyto2i_lv3uyw', state: 'packed', status: 'Assigned' };
+  const v4c = verdictForKey(windowBad, new Map([['tag_muwyto2i_lv3uyw', { state: 'done' }]]));
+  check('canonical done + sheet not in review fails', !v4c.ok, v4c.reason);
 
   const spec = { key: 'spec:X-1', state: 'locked' };
   const v5 = verdictForKey(spec, canon);
