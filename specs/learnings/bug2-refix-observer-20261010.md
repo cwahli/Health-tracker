@@ -235,6 +235,18 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   documented PROOF-card lifecycle (file live → fold into parent →
   never standalone-close).
 
+## Wave 2 dispatched (2026-10-10, review queue at zero)
+
+- User asked for 10 in review with 0 legitimately reviewable (Bug-53
+  approved; Meal-35 missing job citation — verified in C2, sensor
+  would fail it). Refused to relabel: review means gate-met +
+  proof-present, else the queue becomes the original sin again.
+- Sensor learned the refusal-proof shape (output markers + fixture)
+  instead of bending. Meal-35's job citation is wave-2 item one.
+- Wave 2: agent/wave2-meals (Meal-35 job cite→review, Meal-36 reopen,
+  Meal-37 triage) + agent/wave2-phantoms (Stew-01, Bug-59/58/57/56/55
+  investigate-file-or-close). Max 2 concurrent, non-overlapping areas.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
