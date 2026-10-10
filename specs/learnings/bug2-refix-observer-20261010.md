@@ -129,6 +129,29 @@ docs/agent/standing.json or journey-guard.
 - Sensors green on row 43 (meal contract still passing on 7 files).
   Nits: lowercase `(uk)` again; agent's subfolder-id typo (round 2).
 
+## Bug-3 pack repair verified (2026-10-10 ~13:00 UTC)
+
+- Different agent, fresh worktree agent/bug3-pack, draft PR #695.
+  Canonical: ONE defect, class OPENING_DRIFT (own, sensor-derived —
+  Bug-2's framing deliberately not reused), state packed. Row: id
+  fixed #2→#3, state→packed, stamp intact, Status review with a
+  genuinely-met pack gate. Folder: 2 fresh shots, old ones DELETED.
+  Sensors: Bug-3 passes both (proof + parity agree).
+- Gap 1 (rule breach): the 2 stale PNGs were DELETED, not moved to
+  `superseded/`. Standing curation says nothing is deleted. Damage is
+  low (shots of an unperformed pack; this observer's baseline listings
+  preserve what was there) but the letter was broken — recorded so the
+  next curation brief states move-not-delete explicitly.
+- Gap 2 (evidence at risk → rescued): #3's pack op is journaled NOWHERE
+  on disk (P1 A+D wants the git mirror), and #54's create+duplicate
+  trail sat uncommitted in the auto-deploy tree (reset-wipe risk).
+  Rescued 54.jsonl verbatim into agent/bug2-refix (pushed). #3's pack
+  line still needs a proper journal write — flagged, not fabricated.
+- Standing P3 (tag-keyed journal) upgraded from proposed to URGENT:
+  journal/2.jsonl AND journal/3.jsonl both carry dead cards' history
+  under live public numbers, and the shim resolves REPO_ROOT into the
+  deploy tree, scattering uncommitted lines where reset eats them.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
