@@ -532,6 +532,14 @@ const BOOTSTRAP_APP = [
   '      setTimeout(tryProceed, 100);',
   '      return;',
   '    }',
+    // A real browser has no Telegram initData and never will: forward it to
+    // the ungated login entry instead of stranding it on a Telegram-only
+    // refusal. The shell there offers the Firebase Google branch (same
+    // project as the website); no session data rides this navigation.
+    '    if (typeof location !== "undefined" && location.replace) {',
+    '      location.replace("/app/login" + (bot ? "?bot=" + encodeURIComponent(bot) : ""));',
+    '      return;',
+    '    }',
   '    if (m) m.textContent = "no initData \u2014 open this from a bot button in Telegram";',
   '  }',
   '  tryProceed();',
@@ -1375,6 +1383,19 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: tgtgVerdict.reason }));
       }
+      // Browser (Firebase) sessions carry no Telegram initData for the bag
+      // app's own /api/tgauth, so the gateway presents the viewer credential
+      // upstream itself — per request, never to the browser, never logged
+      // (env TGTG_VIEW_KEY, same value as the bag service's own VIEW_KEY).
+      // Telegram sessions keep the native tgauth path, so the bag's
+      // per-user allowlist still applies to every Telegram session.
+      if (tgtgVerdict.botId === 'web') {
+        const bagViewKey = String(env.TGTG_VIEW_KEY || '').trim();
+        if (bagViewKey) {
+          const prevCookie = String(req.headers.cookie || '').trim();
+          req.headers.cookie = prevCookie ? `${prevCookie}; tgtg_view=${bagViewKey}` : `tgtg_view=${bagViewKey}`;
+        }
+      }
       return proxyHostUpstream(req, res, url, tgtgUpstream(env), 'bag upstream unreachable');
     }
 
@@ -1761,6 +1782,28 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         'cache-control': 'no-store',
       });
       return res.end();
+    }
+
+    // Ungated login entry for real browsers (no initData exists there).
+    // Serves the same built shell bytes; the HTML alone exposes no session
+    // data (every state/API route keeps its door). The shell shows the
+    // Firebase Google branch when no Telegram session is present, then the
+    // /app/auth/firebase exchange mints the cookie /app/token reads.
+    if (url.pathname === '/app/login') {
+      try {
+        const up = await fetch(boardUpstream(env) + '/app.html', { headers: { 'accept-encoding': 'identity' } });
+        if (up.status === 404) {
+          res.writeHead(503, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'shell not built on app upstream (vite build has no app.html input yet)' }));
+        }
+        const body = Buffer.from(await up.arrayBuffer());
+        res.writeHead(up.status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(body);
+      } catch (err) {
+        logGatewayError(err);
+        res.writeHead(502, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'shell upstream unreachable' }));
+      }
     }
 
     if (url.pathname === '/app/app') {
