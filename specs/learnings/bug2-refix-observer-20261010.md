@@ -355,6 +355,24 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   Health-10 narrowing, Fleet-09 close-flow, Sync-09 gate adoption,
   Sync-08 option, Spec-01 gate+runner, Sheet-04 gate text.
 
+## T10 protocol: triage batches of 10 (2026-10-10 ~21:05 UTC)
+
+- User ruling: most of the remainder is noise/invalid — run 10 at
+  a time, triage-led. All 4 prior approvals archived Done via
+  review-miniapp same turn. Standing updated: batch = 10 rows,
+  default action investigate→verdict (LIVE with runnable gate /
+  NOISE with evidence→closed_noise, rows kept for audit).
+  closed_noise is manager- or agent-set but NEVER Done; Done stays
+  a human tap. Review flips still need green gates + proof seen.
+- Batch 1 (10): t10a-board (Bug-01, Sheet-03, Board-02) +
+  t10b-links (Auto-01, Domain-01 cross-link resolution) +
+  t10c-sync (Sync-06, Sync-07, Sync-04; no mutations) +
+  t10d-specs (Bug-54, Card-19; review only on green+proof).
+  Excluded: staged-awaiting-confirms (Health-10, Fleet-09, Sync-08/
+  09, Spec-01, Sheet-04), phone/creds-blocked (Req-18, Health-01),
+  already-noise (6 card rows + Fleet-06/Req-12). Next batch:
+  Health-03..08 locked spec family (6) + remainder.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
