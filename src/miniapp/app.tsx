@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, useState } from 'react';
+import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { enabledMiniApps, miniAppById, type MiniAppDef } from './miniapp-registry';
 import { BugBoard } from '../components/bug-board/BugBoard';
@@ -157,12 +157,22 @@ function frameSrc(def: MiniAppDef, bot: string): string | null {
     const init = tgInitData();
     return init ? `/forge/?initData=${encodeURIComponent(init)}` : null;
   }
-  if (def.id !== 'web' && def.id !== 'tgtg') return null;
+  if (def.id !== 'web' && def.id !== 'tgtg' && def.id !== 'hotels' && def.id !== 'tax' && def.id !== 'agenda') return null;
   const base = absoluteBase(def.route);
   if (!base) return null;
-  if (def.id === 'web') {
+  // Agenda sections ride the same host with a section query (?tab=hostels /
+  // tax / agenda); absoluteBase drops it, so re-attach it after the token.
+  const section = (() => {
+    try {
+      const s = new URL(def.route).search;
+      return s ? `&${s.slice(1)}` : '';
+    } catch {
+      return '';
+    }
+  })();
+  if (def.id === 'web' || def.id === 'hotels' || def.id === 'tax' || def.id === 'agenda') {
     const tok = queryToken();
-    return tok ? `${base}?token=${encodeURIComponent(tok)}` : null;
+    return tok ? `${base}?token=${encodeURIComponent(tok)}${section}` : null;
   }
   const init = tgInitData();
   if (init) {
@@ -190,16 +200,60 @@ function Frame({ src, title }: { src: string; title: string }) {
   );
 }
 
-/** Cross-host tabs (bags, web) frame their own app with its own door, so the
- * burger never unloads. The full-screen link is the honest escape hatch.
- * A spinner covers the frame until its own load event: the serve SPA ships
- * a large bundle, so without it the tab reads as a dead blank page while
- * it loads (live report 2026-10-10). */
-function ExternalFrame({ src, def }: { src: string; def: MiniAppDef }) {
+/** One ☰ trigger per framed tab; everything else lives inside the popup, so
+ * normally the only permanent chrome is the trigger itself (+ the tab's own
+ * picker, if it has one). The backdrop closes on any outside tap. */
+function MenuButton({ children }: { children: (close: () => void) => ReactNode }) {
+  const [menu, setMenu] = useState(false);
+  const close = () => setMenu(false);
+  return (
+    <span style={{ position: 'relative', flex: '0 0 auto' }}>
+      <button type="button" aria-label="Menu" title="Menu" onClick={() => setMenu((v) => !v)}
+        style={{ width: 28, height: 28, borderRadius: 8, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 15, cursor: 'pointer' }}>
+        ☰
+      </button>
+      {menu && (
+        <>
+          <span role="presentation" onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 78 }} />
+          <span style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 79, minWidth: 230, maxWidth: '78vw', maxHeight: '70dvh', overflowY: 'auto', background: '#0f172a', border: '1px solid #334155', borderRadius: 12, padding: 6, display: 'flex', flexDirection: 'column', gap: 2, overscrollBehavior: 'none' }}>
+            {children(close)}
+          </span>
+        </>
+      )}
+    </span>
+  );
+}
+
+const menuItemStyle: Record<string, string | number> = { display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', background: 'none', border: 0, borderRadius: 8, color: '#e2e8f0', fontSize: 13, cursor: 'pointer' };
+
+function MenuDivider() {
+  return <span style={{ height: 1, background: '#1e293b', margin: '4px 2px' }} />;
+}
+
+/** Cross-host tabs (bags, web, agenda sections) frame their own app with its
+ * own door. Permanent chrome is one slim bar — title plus the tab menu, which
+ * holds Mini Apps, Reload and the full-screen escape hatch. A spinner covers
+ * the frame until its own load event: the serve SPA ships a large bundle, so
+ * without it the tab reads as a dead blank page while it loads (live report
+ * 2026-10-10). */
+function ExternalFrame({ src, def, onMenu }: { src: string; def: MiniAppDef; onMenu: () => void }) {
   const [loaded, setLoaded] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => { setLoaded(false); }, [src]);
   return (
     <>
+      <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderBottom: '1px solid #1e293b', background: '#0b1220' }}>
+        <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 600, flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</span>
+        <MenuButton>
+          {(close) => (
+            <>
+              <button type="button" onClick={() => { close(); onMenu(); }} style={menuItemStyle}>Mini Apps</button>
+              <button type="button" onClick={() => { setLoaded(false); setReloadKey((n) => n + 1); close(); }} style={menuItemStyle}>Reload</button>
+              <button type="button" onClick={() => { window.location.href = src; }} style={menuItemStyle}>Open {def.title} full-screen ↗</button>
+            </>
+          )}
+        </MenuButton>
+      </div>
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
         {!loaded && (
           <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, background: '#0b1220', color: '#94a3b8', fontSize: 13 }}>
@@ -213,21 +267,13 @@ function ExternalFrame({ src, def }: { src: string; def: MiniAppDef }) {
           </div>
         )}
         <iframe
+          key={reloadKey}
           src={src}
           title={def.title as string}
           onLoad={() => setLoaded(true)}
           allow="clipboard-read; clipboard-write"
           style={{ flex: '1 1 auto', minHeight: 0, width: '100%', border: 0, background: '#0b1220', display: loaded ? undefined : 'none' }}
         />
-      </div>
-      <div style={{ flex: '0 0 auto', textAlign: 'center', padding: '4px 8px', borderTop: '1px solid #1e293b' }}>
-        <button
-          type="button"
-          onClick={() => { window.location.href = src; }}
-          style={{ background: 'none', border: 0, color: '#7dd3fc', fontSize: 12, cursor: 'pointer' }}
-        >
-          Blank page? Open {def.title} full-screen ↗
-        </button>
       </div>
     </>
   );
@@ -702,17 +748,13 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   return (
     <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overscrollBehavior: 'none' }}>
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderBottom: '1px solid #1e293b', background: '#0b1220' }}>
-        <button type="button" aria-label="Menu" onClick={onMenu}
-          style={{ width: 28, height: 28, borderRadius: 8, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 15, cursor: 'pointer', flex: '0 0 auto' }}>
-          ☰
-        </button>
         <label htmlFor="tty-session" style={{ fontSize: 12, color: '#94a3b8' }}>Session</label>
         <select
           id="tty-session"
           value={picked}
           disabled={!routes}
           onChange={(e) => viewBot(e.target.value)}
-          style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 8px', fontSize: 13 }}
+          style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 8px', fontSize: 13, flex: '1 1 auto', minWidth: 0 }}
         >
           {routes === null && <option value="">Loading…</option>}
           {routes !== null && routes.length === 0 && <option value="">No sessions</option>}
@@ -720,20 +762,49 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
             <option key={r.bot} value={r.bot}>{r.bot}</option>
           ))}
         </select>
-        {open ? (
-          <button type="button" onClick={() => setOpen(false)}
-            style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>
-            Close
-          </button>
-        ) : (
-          <button type="button" onClick={() => { setKillMsg(''); setOffline(''); setOpen(true); setEpoch((n) => n + 1); }}
-            style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>
-            Open
-          </button>
-        )}
-        {killMsg && (
-          <span style={{ fontSize: 12, color: '#94a3b8' }}>{killMsg}</span>
-        )}
+        <MenuButton>
+          {(close) => (
+            <>
+              <button type="button" onClick={() => { close(); onMenu(); }} style={menuItemStyle}>Mini Apps</button>
+              <MenuDivider />
+              {open ? (
+                <button type="button" onClick={() => { setOpen(false); close(); }} style={menuItemStyle}>Close {picked || 'terminal'}</button>
+              ) : (
+                <button type="button" onClick={() => { setKillMsg(''); setOffline(''); setOpen(true); setEpoch((n) => n + 1); close(); }} style={menuItemStyle}>Open {picked || 'terminal'}</button>
+              )}
+              <MenuDivider />
+              {(routes || []).map((r) => {
+                const watching = r.bot === picked && open;
+                const isLive = live[r.bot] === true;
+                return (
+                  <span key={r.bot}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, fontSize: 13, color: '#e2e8f0', background: watching ? '#1e293b' : 'none' }}>
+                    <span title={isLive ? 'session live' : 'session dormant'}
+                      style={{ width: 8, height: 8, borderRadius: 4, background: isLive ? '#4ade80' : '#475569', flex: '0 0 auto' }} />
+                    <span style={{ flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.bot}</span>
+                    {watching ? (
+                      <span style={{ color: '#7dd3fc' }}>watching</span>
+                    ) : (
+                      <button type="button" onClick={() => { viewBot(r.bot); close(); }}
+                        style={{ background: 'none', border: 0, color: '#7dd3fc', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}>
+                        View
+                      </button>
+                    )}
+                    <button type="button" onClick={() => killSession(r.bot)}
+                      style={{ background: 'none', border: 0, color: '#f0abfc', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}>
+                      Kill
+                    </button>
+                  </span>
+                );
+              })}
+              <button type="button" onClick={() => { loadTtys(); loadStatus(); }}
+                style={{ ...menuItemStyle, color: '#94a3b8' }}>↻ Refresh sessions</button>
+              {killMsg && (
+                <span style={{ fontSize: 12, color: '#94a3b8', padding: '6px 10px' }}>{killMsg}</span>
+              )}
+            </>
+          )}
+        </MenuButton>
         {loadError && (
           <span style={{ fontSize: 12, color: '#f0abfc' }}>
             {loadError}{' '}
@@ -753,38 +824,6 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
           </span>
         )}
       </div>
-      {(routes || []).length > 0 && (
-        <div style={{ flex: '0 0 auto', display: 'flex', flexWrap: 'wrap', gap: 6, padding: '6px 10px', borderBottom: '1px solid #1e293b', background: '#0b1220' }}>
-          {(routes || []).map((r) => {
-            const watching = r.bot === picked && open;
-            const isLive = live[r.bot] === true;
-            return (
-              <span key={r.bot}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#1e293b', border: `1px solid ${watching ? '#7dd3fc' : '#334155'}`, borderRadius: 8, padding: '2px 4px 2px 8px', fontSize: 12, color: '#e2e8f0' }}>
-                <span title={isLive ? 'session live' : 'session dormant'}
-                  style={{ width: 8, height: 8, borderRadius: 4, background: isLive ? '#4ade80' : '#475569', flex: '0 0 auto' }} />
-                {r.bot}
-                {watching ? (
-                  <span style={{ color: '#7dd3fc', padding: '2px 6px' }}>watching</span>
-                ) : (
-                  <button type="button" onClick={() => viewBot(r.bot)}
-                    style={{ background: 'none', border: 0, color: '#7dd3fc', fontSize: 12, cursor: 'pointer', padding: '2px 6px' }}>
-                    View
-                  </button>
-                )}
-                <button type="button" onClick={() => killSession(r.bot)}
-                  style={{ background: 'none', border: 0, color: '#f0abfc', fontSize: 12, cursor: 'pointer', padding: '2px 6px' }}>
-                  Kill
-                </button>
-              </span>
-            );
-          })}
-          <button type="button" onClick={() => { loadTtys(); loadStatus(); }} title="Refresh sessions"
-            style={{ background: 'none', border: '1px solid #334155', borderRadius: 8, color: '#94a3b8', fontSize: 12, cursor: 'pointer', padding: '2px 8px' }}>
-            ↻
-          </button>
-        </div>
-      )}
       {src && open ? (
         <iframe
           ref={frameRef}
@@ -975,8 +1014,8 @@ function Shell() {
         ) : def.id === 'tui' ? (
           <TerminalTab def={def} bot={bot} inTelegram={inTelegram} onMenu={() => setDrawer(true)} onAuthDead={handleAuthDead} />
         ) : frameSrc(def, bot) ? (
-          def.id === 'tgtg' || def.id === 'web' ? (
-            <ExternalFrame key={`${def.id}:${queryEpoch}`} def={def} src={frameSrc(def, bot) as string} />
+          def.id === 'tgtg' || def.id === 'web' || def.id === 'hotels' || def.id === 'tax' || def.id === 'agenda' ? (
+            <ExternalFrame key={`${def.id}:${queryEpoch}`} def={def} src={frameSrc(def, bot) as string} onMenu={() => setDrawer(true)} />
           ) : (
             <Frame key={`${def.id}:${queryEpoch}`} title={def.title as string} src={frameSrc(def, bot) as string} />
           )
