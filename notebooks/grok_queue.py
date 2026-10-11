@@ -36,17 +36,24 @@ done
 '''
 
 def start():
+    key = url = auth = None
     try:
         from google.colab import userdata
         key = userdata.get("COLABQ_KEY"); url = userdata.get("HT_WAKE_WEBHOOK_URL"); auth = userdata.get("HT_WAKE_WEBHOOK_AUTH")
     except Exception as e:
-        print(f"• Grok queue: secrets not available ({e.__class__.__name__}), skipped."); return False
+        print(f"• Grok queue: secrets not readable here ({e.__class__.__name__}), trying saved files.")
+    home0 = os.path.expanduser("~")
+    if not (key and url and auth) and os.path.exists(f"{home0}/.grokq.env") and os.path.exists(f"{home0}/.ssh/colabq"):
+        return _launch(home0)
     if not (key and url and auth):
         print("• Grok queue: COLABQ_KEY / HT_WAKE_WEBHOOK_URL / HT_WAKE_WEBHOOK_AUTH missing, skipped."); return False
     home = os.path.expanduser("~"); os.makedirs(f"{home}/.ssh", exist_ok=True)
     with open(f"{home}/.ssh/colabq", "w") as f: f.write(key.strip() + "\n")
     os.chmod(f"{home}/.ssh/colabq", 0o600)
     with open(f"{home}/.grokq.env", "w") as f: f.write(f"WURL='{url.strip()}'\nWAUTH='{auth.strip()}'\n")
+    return _launch(home)
+
+def _launch(home):
     with open(f"{home}/grokq.sh", "w") as f: f.write(LOOP)
     subprocess.run("command -v ssh >/dev/null || (apt-get -qq update && apt-get -qq install -y openssh-client) >/dev/null 2>&1", shell=True)
     pidf = f"{home}/grokq.pid"
@@ -57,7 +64,7 @@ def start():
     log = open(f"{home}/grokq.log", "a")
     p = subprocess.Popen(["bash", f"{home}/grokq.sh"], stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True)
     open(pidf, "w").write(str(p.pid))
-    print("• Grok queue: runner started (log ~/grokq.log)."); return True
+    print(f"• Grok queue: runner started pid {p.pid} (log {home}/grokq.log).", flush=True); return True
 
 if __name__ == "__main__":
     start()

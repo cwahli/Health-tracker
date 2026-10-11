@@ -316,7 +316,7 @@ if __name__ == "__main__":
     print("=" * 60)
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else "/content/Health-tracker/notebooks")
-        import grok_queue; grok_queue.start()
+        import importlib, grok_queue; importlib.reload(grok_queue); grok_queue.start()
     except Exception as e:
         print(f"• Grok queue not started: {e}")
     polling_loop()
