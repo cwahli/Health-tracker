@@ -38,7 +38,7 @@
  *   {at, action, key, route, outcome, detail} where outcome ∈ spawned,
  *   spawn_skipped_locked, spawn_error, unknown_route, record_only,
  *   retry_queued, retry_ok, retry_requeued, retry_exhausted, posted,
- *   post_error, session_gone, sent, send_error, approved_no_fanout.
+ *   session_reopened, post_error, sent, send_error, approved_no_fanout.
  * - `spawned` is honest: a synchronous lock probe runs first, so a held
  *   lock receipts `spawn_skipped_locked` (and requeues) instead of a
  *   false `spawned`.
@@ -47,10 +47,10 @@
  *   action "worker"). Attempt receipt with no completion receipt inside
  *   TRIAGE_TIMEOUT_SEC = the child died silently — go read
  *   triage-spawn.log for that timestamp.
- * - session_gone is terminal: the target session id is closed or unknown
- *   (SessionNotFound / HTTP 404 — the CLI exits 0, so stdout must be
- *   inspected, not just the exit code). A gone session never reopens, so
- *   it is NOT retried; refresh TODO_NOTIFY_SESSION_ID instead.
+ * - session lane is self-healing: a gone or unset session id opens a
+ *   fresh session (`opencode api post /api/session`), posts there, and
+ *   persists the id to process.env + tui-gateway.env (receipt
+ *   `session_reopened`). Only true transient failures retry.
  * - TODO_TRIAGE_MODEL pins the model for `opencode run` triage children
  *   (format provider/model#variant, e.g. acme/worker#high). Unset means
  *   the box default. Set it when the default model is rate-limited: the
@@ -136,8 +136,8 @@ export function workerPrompt(action, key) {
  *  lock), comments get a read-only triage (global lock). */
 export function planFor(action, key) {
   const act = String(action || '').replace(/^review_/, '');
-  if (act === 'answer') return { prompt: workerPrompt(act, key), lock: lockFor(key), title: `sheet-todo worker ${key.slice(0, 40)}` };
-  return { prompt: triagePrompt(act, key), lock: LOCK_PATH, title: `sheet-todo triage ${key.slice(0, 40)}` };
+  if (act === 'answer') return { worker: true, prompt: workerPrompt(act, key), lock: lockFor(key), title: `sheet-todo worker ${key.slice(0, 40)}` };
+  return { worker: false, prompt: triagePrompt(act, key), lock: LOCK_PATH, title: `sheet-todo triage ${key.slice(0, 40)}` };
 }
 /**
  * Adjustable routing: who a triage event can reach. TODO_TRIAGE_ROUTE is a
@@ -148,9 +148,12 @@ export function planFor(action, key) {
  *   session. Comment events get a read-only triage (global lock);
  *   answer events get an acting worker that continues the ticket to
  *   `review` or the next question (per-ticket lock, so tickets run in
- *   parallel and one ticket never runs twice). Reaches the opencode
- *   agent surface owning this box's work. A pre-spawn lock probe keeps
- *   receipts honest: `spawn_skipped_locked`, never a false `spawned`.
+ *   parallel and one ticket never runs twice). Worker identity is env:
+ *   TODO_WORKER_MODEL (falls back to TODO_TRIAGE_MODEL) and
+ *   TODO_WORKER_AGENT — pin a free model to keep ticket work free.
+ *   Reaches the opencode agent surface owning this box's work. A
+ *   pre-spawn lock probe keeps receipts honest: `spawn_skipped_locked`,
+ *   never a false `spawned`.
  * - telegram: instant DM to TODO_NOTIFY_CHAT_ID via Telegram sendMessage
  *   (token TODO_NOTIFY_BOT_TOKEN, else TUI_BOT_TOKEN_VM). Reaches the
  *   operator's phone in real time — the push channel the opencode route
@@ -177,10 +180,28 @@ export function routeFor(env = process.env) {
   return { ok: true, lanes };
 }
 
-export function verdictText(action, key) {
+export function verdictText(action, key, extra = '') {
   const act = String(action || '').replace(/^review_/, '');
-  if (act === 'answer') return `Review answer: ${key} — worker continuing, trail in sheet-todo-watch.`;
-  return `Review ${act}: ${key} — triage assessing, trail in sheet-todo-watch.`;
+  const suffix = String(extra || '').trim();
+  const tail = suffix ? ` ${suffix}` : '';
+  if (act === 'answer') return `Review answer: ${key} — worker continuing, trail in sheet-todo-watch.${tail}`;
+  return `Review ${act}: ${key} — triage assessing, trail in sheet-todo-watch.${tail}`;
+}
+
+/** Lane note for the phone DM: says what happened to the chat post, so
+ *  `session_gone` never sits next to "work continues" unexplained. */
+export function sessionNoteFor(r) {
+  if (!r) return '';
+  if (r.ok && r.reopened) return `(chat reopened: ${String(r.id || '').slice(0, 12)}…)`;
+  if (r.ok) return '';
+  return '(chat unreachable — worker continues, follow this DM + the row)';
+}
+
+/** Queued-behind-the-lock note: answers while a worker is busy wait, then
+ *  run on the next event. Visible in chat so the batch is never silent. */
+export function pendingNote(n) {
+  const c = Number(n) || 0;
+  return c > 0 ? `(+${c} queued)` : '';
 }
 
 /**
@@ -203,6 +224,29 @@ export function triageModelArgs(env = process.env) {
   if (m.length > 120 || !m.includes('/')) return [];
   if (!/^[A-Za-z0-9_./#:@+~=-]+$/.test(m)) return [];
   return ['--model', m];
+}
+
+/**
+ * Worker identity, easily editable: TODO_WORKER_MODEL picks the model for
+ * answer workers (falls back to TODO_TRIAGE_MODEL, then the box default —
+ * pin a free model here to keep ticket work on the free tier), and
+ * TODO_WORKER_AGENT picks the opencode agent. Both allowlisted; invalid
+ * values are ignored. Triage assessments keep the box defaults.
+ */
+export function workerModelArgs(env = process.env) {
+  const raw = String(env.TODO_WORKER_MODEL || env.TODO_TRIAGE_MODEL || '').trim();
+  if (!raw) return [];
+  if (raw.length > 120 || !raw.includes('/')) return [];
+  if (!/^[A-Za-z0-9_./#:@+~=-]+$/.test(raw)) return [];
+  return ['--model', raw];
+}
+
+export function workerAgentArgs(env = process.env) {
+  const raw = String(env.TODO_WORKER_AGENT || '').trim();
+  if (!raw) return [];
+  if (raw.length > 60) return [];
+  if (!/^[A-Za-z0-9_.\-:#@+~]+$/.test(raw)) return [];
+  return ['--agent', raw];
 }
 
 export function retryBackoffSec(tries) {
@@ -248,25 +292,40 @@ function recordAndSpawn({ inboxType, key, source, env, deps }) {
     return { ok: true, reason: 'approve recorded, no fan-out' };
   }
   const plan = planFor(inboxType, key);
+  const pendingFor = (k) => {
+    try {
+      return readRetry().filter((e) => e && e.key === k).length;
+    } catch { return 0; }
+  };
+  const pending = pendingFor(key);
+  // Clarity first: when the phone DM goes out alongside a chat post, the
+  // chat runs first so the DM can say what happened to it (posted,
+  // reopened, or unreachable) instead of leaving session_gone next to
+  // "work continues" unexplained.
+  let sessionOutcome = null;
+  const doSession = () => {
+    const r = attemptSessionPost({ action: inboxType, key, env, deps, receipt, pending });
+    sessionOutcome = r;
+    if (!r.ok) enqueueRetry({ route: 'session', action: inboxType, key, tries: 0, now, readRetry, writeRetry, receipt });
+    return r;
+  };
+  const sessionFirst = route.lanes.includes('session') && route.lanes.includes('telegram');
+  if (sessionFirst) doSession();
   for (const lane of route.lanes) {
     if (lane === 'log') {
       receipt('record_only', 'lane=log');
       continue;
     }
     if (lane === 'telegram') {
-      dispatchTelegram({ action: inboxType, key, tries: 0, env, deps, receipt, readRetry, writeRetry, now });
+      dispatchTelegram({ action: inboxType, key, tries: 0, env, deps, receipt, readRetry, writeRetry, now, note: sessionNoteFor(sessionOutcome) });
       continue;
     }
     if (lane === 'session') {
-      const r = attemptSessionPost({ action: inboxType, key, env, deps, receipt });
-      // A gone session never reopens: terminal, no retry. Anything else
-      // transient keeps the bounded retry.
-      if (!r.ok && !r.gone) enqueueRetry({ route: lane, action: inboxType, key, tries: 0, now, readRetry, writeRetry, receipt });
+      if (!sessionOutcome) doSession();
       continue;
     }
     const r = attemptSpawn({ key, plan, env, deps, receipt });
     // Locked and crashed alike requeue bounded: the next event retries.
-    // Only the terminal session_gone (other lane) drops without retry.
     if (!r.ok) enqueueRetry({ route: lane, action: inboxType, key, tries: 0, now, readRetry, writeRetry, receipt });
   }
   drainRetries({ readRetry, writeRetry, now, receiptFor, attempt: (e) => redispatchEntry({ ...e, env, deps, receipt: receiptFor(e.key), readRetry, writeRetry, now }) });
@@ -274,38 +333,86 @@ function recordAndSpawn({ inboxType, key, source, env, deps }) {
 }
 
 /**
- * Posts the verdict into a live opencode session (the chat itself) via the
+ * Posts the verdict into an opencode session (the chat itself) via the
  * `opencode api` CLI, which carries its own server auth — the hook never
  * sees credentials. Synchronous, bounded (15s timeout): the CLI is local
- * and fast. Returns {ok} so failures enqueue retries like every lane.
+ * and fast.
+ *
+ * Self-healing: when the configured session is gone (or unset), a fresh
+ * session is opened (`opencode api post /api/session`) and the verdict
+ * goes there. The new id is written back to process.env (live for the
+ * running gateway) and persisted to tui-gateway.env (live after
+ * restarts) — no manual TODO_NOTIFY_SESSION_ID refresh. Returns
+ * {ok, reopened, id} so callers retry only true transient failures.
  */
-export function attemptSessionPost({ action, key, env, deps, receipt }) {
-  const { execSyncFn = execFileSync } = deps;
-  const sessionId = String(env.TODO_NOTIFY_SESSION_ID || '').trim();
-  if (!sessionId) {
-    receipt('post_error', 'no TODO_NOTIFY_SESSION_ID');
-    return { ok: false, reason: 'no session id' };
-  }
-  const text = `[verdict] ${verdictText(action, key)}`;
-  const gone = (detail) => {
-    receipt('session_gone', `session ${sessionId.slice(0, 12)}… gone — refresh TODO_NOTIFY_SESSION_ID (${detail})`.slice(0, 200));
-    return { ok: false, gone: true, reason: 'session gone' };
+export function attemptSessionPost({ action, key, env, deps, receipt, pending = 0 }) {
+  const { execSyncFn = execFileSync, persistFn = persistSessionId } = deps;
+  const configured = String(env.TODO_NOTIFY_SESSION_ID || '').trim();
+  const text = `[verdict] ${verdictText(action, key, pendingNote(pending))}`;
+  const postTo = (id) => {
+    const out = execSyncFn('opencode', ['api', 'post', `/api/session/${id}/prompt`, '--data', JSON.stringify({ text })],
+      { timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'] });
+    return out == null ? '' : String(out);
+  };
+  const fail = (detail) => {
+    receipt('post_error', String(detail).slice(0, 200));
+    return { ok: false, reason: String(detail).slice(0, 200) };
   };
   try {
-    const out = execSyncFn('opencode', ['api', 'post', `/api/session/${sessionId}/prompt`, '--data', JSON.stringify({ text })],
+    if (configured) {
+      let body = '';
+      try {
+        body = postTo(configured);
+      } catch (err) {
+        const parts = [err && err.message, err && err.stderr, err && err.stdout]
+          .map((p) => (p == null ? '' : String(p))).join('\n');
+        if (!isSessionGoneText(parts)) return fail((err && err.message) || err);
+        body = 'SessionNotFound';
+      }
+      if (!isSessionGoneText(body)) {
+        receipt('posted', `session ${configured.slice(0, 12)}…`);
+        return { ok: true, reopened: false, id: configured, reason: 'verdict posted to session' };
+      }
+    }
+    // Gone or unset: open a session and post there.
+    const created = execSyncFn('opencode', ['api', 'post', '/api/session', '--data', '{"title":"sheet-todo verdicts"}'],
       { timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'] });
-    const body = out == null ? '' : String(out);
-    if (isSessionGoneText(body)) return gone('SessionNotFound');
+    let fresh = '';
+    try {
+      fresh = String((JSON.parse(String(created)).data || {}).id || '').trim();
+    } catch { /* unparseable create output below */ }
+    if (!fresh) return fail('session open returned no id');
+    persistFn(fresh);
+    const body = postTo(fresh);
+    if (isSessionGoneText(body)) return fail('fresh session refused the post');
+    receipt('session_reopened', `session ${fresh.slice(0, 12)}… (was ${configured ? configured.slice(0, 12) + '…' : 'unset'})`);
+    return { ok: true, reopened: true, id: fresh, reason: 'verdict posted to reopened session' };
   } catch (err) {
-    const parts = [err && err.message, err && err.stderr, err && err.stdout]
-      .map((p) => (p == null ? '' : String(p))).join('\n');
-    if (isSessionGoneText(parts)) return gone('SessionNotFound');
-    const detail = String((err && err.message) || err).slice(0, 200);
-    receipt('post_error', detail);
-    return { ok: false, reason: detail };
+    return fail((err && err.message) || err);
   }
-  receipt('posted', `session ${sessionId.slice(0, 12)}…`);
-  return { ok: true, reason: 'verdict posted to session' };
+}
+
+/**
+ * Persists a reopened session id: live for the running gateway process
+ * immediately, and on disk for restarts. Failures never break the
+ * gateway path (the in-memory id still served this event).
+ */
+export function persistSessionId(id) {
+  const clean = String(id || '').trim();
+  if (!clean) return { memory: false, file: false };
+  try {
+    process.env.TODO_NOTIFY_SESSION_ID = clean;
+  } catch { /* non-writable env — file still persists */ }
+  try {
+    const p = path.join(os.homedir(), '.config', 'bot-host', 'tui-gateway.env');
+    let s = String(fs.readFileSync(p, 'utf8'));
+    if (/^TODO_NOTIFY_SESSION_ID=/m.test(s)) s = s.replace(/^TODO_NOTIFY_SESSION_ID=.*$/m, `TODO_NOTIFY_SESSION_ID=${clean}`);
+    else s += `${s.endsWith('\n') ? '' : '\n'}TODO_NOTIFY_SESSION_ID=${clean}\n`;
+    fs.writeFileSync(p, s);
+    return { memory: true, file: true };
+  } catch {
+    return { memory: true, file: false };
+  }
 }
 
 function telegramTarget(env = process.env) {  const token = String(env.TODO_NOTIFY_BOT_TOKEN || env.TUI_BOT_TOKEN_VM || '').trim();
@@ -320,7 +427,7 @@ function telegramTarget(env = process.env) {  const token = String(env.TODO_NOTI
  * Every outcome writes a receipt; failures re-enqueue (bounded, see
  * enqueueRetry). The token never appears in any receipt or log.
  */
-function dispatchTelegram({ action, key, tries, env, deps, receipt, readRetry, writeRetry, now }) {
+function dispatchTelegram({ action, key, tries, env, deps, receipt, readRetry, writeRetry, now, note = '' }) {
   const { fetchFn = fetch } = deps;
   const target = telegramTarget(env);
   if (!target.ok) {
@@ -328,7 +435,7 @@ function dispatchTelegram({ action, key, tries, env, deps, receipt, readRetry, w
     enqueueRetry({ route: 'telegram', action, key, tries, now, readRetry, writeRetry, receipt });
     return;
   }
-  const text = verdictText(String(action || '').replace(/^review_/, ''), key);
+  const text = verdictText(String(action || '').replace(/^review_/, ''), key, note);
   let settled = false;
   const fail = (detail) => {
     if (settled) return;
@@ -382,8 +489,10 @@ function attemptSpawn({ key, plan, env, deps, receipt }) {
     execSyncFn = execFileSync,
   } = deps;
   const home = os.homedir();
-  const modelArgs = triageModelArgs(env);
-  const modelFlag = modelArgs.length ? ` --model ${modelArgs[1]}` : '';
+  const modelArgs = plan.worker ? workerModelArgs(env) : triageModelArgs(env);
+  const agentArgs = plan.worker ? workerAgentArgs(env) : [];
+  const flagDetail = [...modelArgs, ...agentArgs].join(' ');
+  const modelFlag = flagDetail ? ` ${flagDetail}` : '';
   // Honest single-flight: probe the lock synchronously first. A held lock
   // receipts spawn_skipped_locked (bounded retry follows) instead of a
   // false spawned whose flock child would exit without doing anything.
@@ -398,7 +507,7 @@ function attemptSpawn({ key, plan, env, deps, receipt }) {
     const child = spawnFn(
       'flock',
       ['-n', plan.lock, 'timeout', String(TRIAGE_TIMEOUT_SEC),
-        'opencode', 'run', '--auto', ...modelArgs, '--title', plan.title, plan.prompt],
+        'opencode', 'run', '--auto', ...modelArgs, ...agentArgs, '--title', plan.title, plan.prompt],
       {
         detached: true,
         stdio: ['ignore', logFd, logFd],
@@ -464,12 +573,6 @@ function drainRetries({ readRetry, writeRetry, now, receiptFor, attempt }) {
   const rest = entries.filter((e) => e !== entry);
   const entryReceipt = receiptFor(entry.key);
   const r = attempt({ route: entry.route || 'opencode', key: entry.key, action: entry.action, tries: entry.tries });
-  if (r && r.gone) {
-    // Terminal: the target session is gone and never reopens. Drop the
-    // entry (the session_gone receipt is already written) — no requeue.
-    writeRetry(rest);
-    return;
-  }
   if (entry.route === 'telegram') {
     // Fire-and-forget: the entry is dropped now; async settle re-enqueues
     // itself on failure, or writes 'sent' on success.
