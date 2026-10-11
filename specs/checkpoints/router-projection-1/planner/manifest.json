@@ -1,0 +1,16 @@
+{
+  "slug": "router-projection-1",
+  "node": "planner",
+  "at": "2026-10-11T17:09:15.104Z",
+  "git": {
+    "head": "5dd5fe5e3cf8f3ad43282c4c23bf61ccdca5af51",
+    "stashCommit": null
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/router-projection-1.md"
+  ]
+}
