@@ -7,6 +7,11 @@ Communicates with your mobile Telegram app:
 - Multi-Project: /project <url> switches repository inside Colab
 - Model Switching: /switch qwen-3.8 or /switch muse-spark-1.3
 - Auto-shutdown: Shuts down after 20 minutes idle to preserve your 200 compute units
+
+Commits (main goes red without this): every `git commit` you make MUST end with one trailer line
+  Author: <model and version> (<level>) Colab
+e.g. Author: Grok 4.7 (High) Colab. `git pull --rebase origin main` before every push; prefer opening
+a PR over pushing main directly. Landed history is never rewritten, so get it right at commit time.
 """
 
 import os

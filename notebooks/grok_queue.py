@@ -28,6 +28,12 @@ Webhook ("Worker job finished") payloads: {"session": ..., "verdict": ...}
   session colab-pubkey  verdict "COLAB_PUBKEY <ssh-ed25519 ... colab-auto>"  (queue key rejected; authorize it)
   session colab-gpu     verdict "COLAB_GPU_READY ollama/<model>"  (local Ollama model registered in opencode)
                                 "COLAB_GPU_FAILED <reason>"
+
+Commits (main goes red without this): every `git commit` you make MUST end with one trailer line
+  Author: <model and version> (<level>) Colab
+e.g. Author: Grok 4.7 (High) Colab. `git pull --rebase origin main` before every push; prefer opening
+a PR over pushing main directly. Landed history is never rewritten — a missing trailer is recorded
+as debt instead, so get it right at commit time.
 """
 import os, subprocess, json
 
