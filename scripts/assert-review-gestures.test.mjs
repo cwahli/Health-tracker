@@ -216,7 +216,7 @@ async function withPage(fn) {
   const heights = () => page.evaluate(() => {
     const panel = document.getElementById('panel');
     const info = document.querySelector('.view[data-view="info"]');
-    const stage = document.querySelector('.stage');
+    const stage = document.querySelector('[data-view="proof"] .stage');
     return {
       panel: Math.round(panel.getBoundingClientRect().height),
       info: info && !info.hidden ? Math.round(info.getBoundingClientRect().height) : 0,
@@ -268,6 +268,24 @@ test('Request lands first with the result below; Info folds the card over the pi
     // And the tab read as off once folded, so a reader can see the state.
     const on = await page.$$eval('#tabs button', (bs) => bs.filter((b) => b.classList.contains('on')).length);
     assert.equal(on, 0);
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
+
+test('the request result zooms with the same gestures as the stage', async (t) => {
+  const ran = await withPage(async ({ page, pinch }) => {
+    // Still on the Request landing: pinch the result screenshot itself.
+    const before = await page.evaluate(() => {
+      const img = document.querySelector('[data-view="request"] .stage.req .slide img');
+      return new DOMMatrixReadOnly(getComputedStyle(img).transform).a;
+    });
+    await pinch(210, 430, 80, 320);
+    await page.waitForTimeout(120);
+    const after = await page.evaluate(() => {
+      const img = document.querySelector('[data-view="request"] .stage.req .slide img');
+      return new DOMMatrixReadOnly(getComputedStyle(img).transform).a;
+    });
+    assert.ok(after > before + 0.2, `request result must zoom: ${before} -> ${after}`);
   });
   if (ran === null) t.skip('playwright not installed');
 });
@@ -358,20 +376,20 @@ test('zooming never rebuilds the picture node (the blink stays fixed)', async (t
   const ran = await withPage(async ({ page, pinch, doubleTap, fullBleed }) => {
     await fullBleed();
     const kept = await page.evaluate(async () => {
-      const img = document.querySelector('.slide img');
+      const img = document.querySelector('#track .slide img');
       document.querySelector('#tabs button[data-tab="info"]').click();
       await new Promise((r) => setTimeout(r, 120));
       document.querySelector('#tabs button[data-tab="info"]').click();
       await new Promise((r) => setTimeout(r, 120));
-      return document.querySelector('.slide img') === img;
+      return document.querySelector('#track .slide img') === img;
     });
     assert.equal(kept, true, 'the Info toggle must not rebuild the image');
     await pinch(210, 430, 80, 300);
     await page.waitForTimeout(120);
     await doubleTap(210, 430);
     await page.waitForTimeout(120);
-    const nodes = await page.evaluate(() => document.querySelectorAll('.slide img').length);
-    assert.equal(nodes, 3, 'all three shots stay in the DOM across gestures');
+    const nodes = await page.evaluate(() => document.querySelectorAll('#track .slide img').length);
+    assert.equal(nodes, 3, 'all three stage shots stay in the DOM across gestures');
   });
   if (ran === null) t.skip('playwright not installed');
 });

@@ -202,7 +202,7 @@ test('the image owns the majority of the screen on every tab', async (t) => {
       await page.waitForTimeout(80);
       const h = await page.evaluate(() => {
         const info = document.querySelector('.view[data-view="info"]');
-        const stage = document.querySelector('.stage');
+        const stage = document.querySelector('[data-view="proof"] .stage');
         return {
           info: info ? info.getBoundingClientRect().height : 0,
           stage: stage ? stage.getBoundingClientRect().height : 0,
@@ -384,7 +384,7 @@ test('multiple shots per item: one fetch each, and the counter follows the swipe
   const ran = await withPage(async ({ page, proofFetches }) => {
     const count = await page.textContent('#imgcount');
     assert.equal(count, '1/3');
-    assert.equal(await page.$$eval('.stage img', (i) => i.length), 3, 'all three shots are in the DOM');
+    assert.equal(await page.$$eval('[data-view="proof"] .stage img', (i) => i.length), 3, 'all three stage shots are in the DOM');
     assert.ok(proofFetches.includes('file-0'), 'shot 1 fetched');
     assert.ok(proofFetches.includes('file-2'), 'shot 3 fetched');
 
@@ -413,7 +413,7 @@ test('the heart confirms once, then archives', async (t) => {
     // Info tap opens the stage, and the heart there is the one-tap done.
     assert.equal(await page.textContent('#pos'), '1/2', 'two items to start');
     await page.click('#tabs button[data-tab="info"]');
-    await page.waitForSelector('.stage:not([hidden])');
+    await page.waitForSelector('[data-view="proof"] .stage:not([hidden])');
     await page.click('#heart');
     await page.waitForTimeout(250);
     assert.equal(approves, 1, 'one tap on the image view archives');
