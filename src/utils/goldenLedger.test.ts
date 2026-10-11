@@ -135,4 +135,37 @@ macroTotals={"calories":982}
       false
     );
   });
+
+  it('prefers post-foundation scout nutrients over a stale estimatedCalories guess (miso ramen)', () => {
+    // Class: a computed meal copies foundation nutrients back onto the scout
+    // (mergeFinalScoutItems), leaving estimatedCalories superseded. The trial
+    // balance must read the current math, not the stale guess: NEW food, not
+    // this card's dishes, no FDC numbers.
+    const scout = [
+      { keyword: 'Miso ramen', estimatedCalories: 200, nutrients: { calories: 500 }, preCalcNutrients: { calories: 500 } },
+      { keyword: 'Seaweed side', estimatedCalories: 50, nutrients: { calories: 90 } },
+    ];
+    const books = extractLedgerBooks({
+      scout,
+      foodLog: { nutrients: { calories: 590 } },
+    });
+    expect(books.find((b) => b.id === 'scout_est')?.kcal).toBe(590);
+    const imbalances = detectLedgerImbalances({
+      scout,
+      foodLog: { nutrients: { calories: 590 } },
+    });
+    expect(imbalances.some((i) => i.id === 'ledger_scout_est_vs_saved_table')).toBe(false);
+  });
+
+  it('still flags a pre-foundation scout guess with no nutrients (miso ramen control)', () => {
+    const scout = [
+      { keyword: 'Miso ramen', estimatedCalories: 200 },
+      { keyword: 'Seaweed side', estimatedCalories: 50 },
+    ];
+    const imbalances = detectLedgerImbalances({
+      scout,
+      foodLog: { nutrients: { calories: 590 } },
+    });
+    expect(imbalances.some((i) => i.id === 'ledger_scout_est_vs_saved_table')).toBe(true);
+  });
 });

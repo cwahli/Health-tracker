@@ -20,6 +20,12 @@ export function extractLedgerBooks(opts: {
   const logText = opts.logText || '';
 
   // 1. Scout opening
+  // Hierarchy: printed label (ground truth) > post-foundation scout
+  // nutrients (current math) > estimatedCalories (superseded LLM guess).
+  // mergeFinalScoutItems copies foundation nutrients back onto the scout, so
+  // once a meal is computed the stale top-level guess must not outrank them:
+  // flagging it as trial-balance drift turns every estimated meal red even
+  // when foundation, reconcile, payload and saved table all agree.
   if (opts.scout && Array.isArray(opts.scout) && opts.scout.length > 0) {
     let scoutKcal = 0;
     for (const s of opts.scout) {
@@ -28,8 +34,13 @@ export function extractLedgerBooks(opts: {
         if (match) {
           scoutKcal += parseFloat(match[1]);
         }
-      } else if (typeof s.estimatedCalories === 'number') {
-        scoutKcal += s.estimatedCalories;
+      } else {
+        const cand = s?.nutrients?.calories ?? s?.preCalcNutrients?.calories;
+        if (cand != null && (cand as unknown) !== '' && Number.isFinite(Number(cand))) {
+          scoutKcal += Number(cand);
+        } else if (typeof s.estimatedCalories === 'number') {
+          scoutKcal += s.estimatedCalories;
+        }
       }
     }
     books.push({
