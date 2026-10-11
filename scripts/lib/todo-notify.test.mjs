@@ -108,14 +108,15 @@ const harness = (env = { TODO_AGENT_NOTIFY: '1' }) => {
 
 test('route defaults to opencode (the starter route)', () => {
   assert.equal(routeFor({}).ok, true);
-  assert.equal(routeFor({}).name, 'opencode');
-  assert.equal(routeFor({ TODO_TRIAGE_ROUTE: '  ' }).name, 'opencode');
-  assert.equal(routeFor({ TODO_TRIAGE_ROUTE: 'log' }).name, 'log');
+  assert.deepEqual(routeFor({}).lanes, ['opencode']);
+  assert.deepEqual(routeFor({ TODO_TRIAGE_ROUTE: '  ' }).lanes, ['opencode']);
+  assert.deepEqual(routeFor({ TODO_TRIAGE_ROUTE: 'log' }).lanes, ['log']);
+  assert.deepEqual(routeFor({ TODO_TRIAGE_ROUTE: 'opencode,telegram' }).lanes, ['opencode', 'telegram']);
 });
 
 test('unknown route fails closed with a receipt, spawns nothing', () => {
   const h = harness();
-  const r = notifyTodoEvent('comment', 'card:tag_z', { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'telegram' }, h.deps);
+  const r = notifyTodoEvent('comment', 'card:tag_z', { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'carrier-pigeon' }, h.deps);
   assert.equal(r.ok, false);
   assert.equal(h.spawns.length, 0);
   assert.equal(h.inbox.length, 1);
@@ -176,4 +177,61 @@ test('backoff grows then caps', () => {
   assert.equal(retryBackoffSec(1), 60);
   assert.equal(retryBackoffSec(3), 180);
   assert.equal(retryBackoffSec(99), 900);
+});
+
+test('telegram lane sends a verdict DM without secrets in receipts', async () => {
+  const h = harness();
+  const calls = [];
+  h.deps.fetchFn = async (url, opts) => {
+    calls.push([url, opts]);
+    return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 42 } }) };
+  };
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'telegram', TODO_NOTIFY_BOT_TOKEN: 'tok', TODO_NOTIFY_CHAT_ID: '99' };
+  const r = notifyTodoEvent('comment', 'card:tag_t', env, h.deps);
+  assert.equal(r.ok, true);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0][0], /^https:\/\/api\.telegram\.org\/bottok\/sendMessage$/);
+  const body = JSON.parse(calls[0][1].body);
+  assert.equal(body.chat_id, '99');
+  assert.match(body.text, /comment/);
+  assert.match(body.text, /card:tag_t/);
+  await new Promise((res) => setTimeout(res, 20));
+  assert.deepEqual(h.receipts.map((x) => x.outcome), ['sent']);
+  assert.equal(h.receipts[0].detail, 'message_id 42');
+  assert.ok(!JSON.stringify(h.receipts).includes('tok'));
+});
+
+test('telegram without chat id fails closed with receipt and retry', async () => {
+  const h = harness();
+  let fetched = 0;
+  h.deps.fetchFn = async () => { fetched += 1; return { ok: true }; };
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'telegram', TODO_NOTIFY_BOT_TOKEN: 'tok' };
+  notifyTodoEvent('approve', 'card:tag_c', env, h.deps);
+  await new Promise((res) => setTimeout(res, 20));
+  assert.equal(fetched, 0);
+  assert.deepEqual(h.receipts.map((x) => x.outcome), ['send_error', 'retry_queued']);
+  assert.equal(h.queued().length, 1);
+  assert.equal(h.queued()[0].route, 'telegram');
+});
+
+test('telegram send failure requeues with backoff', async () => {
+  const h = harness();
+  h.deps.fetchFn = async () => { throw new Error('net down'); };
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'telegram', TODO_NOTIFY_BOT_TOKEN: 'tok', TODO_NOTIFY_CHAT_ID: '99' };
+  notifyTodoEvent('comment', 'card:tag_f', env, h.deps);
+  await new Promise((res) => setTimeout(res, 20));
+  assert.deepEqual(h.receipts.map((x) => x.outcome), ['send_error', 'retry_queued']);
+  assert.equal(h.queued()[0].tries, 1);
+});
+
+test('opencode+telegram lanes fan out together', async () => {
+  const h = harness();
+  h.deps.fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) });
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'opencode,telegram', TODO_NOTIFY_BOT_TOKEN: 'tok', TODO_NOTIFY_CHAT_ID: '99' };
+  const r = notifyTodoEvent('answer', 'card:tag_b', env, h.deps);
+  assert.equal(r.ok, true);
+  assert.equal(h.spawns.length, 1);
+  await new Promise((res) => setTimeout(res, 20));
+  const outcomes = h.receipts.map((x) => x.outcome).sort();
+  assert.deepEqual(outcomes, ['sent', 'spawned']);
 });

@@ -81,14 +81,30 @@ export function triagePrompt(action, key) {
 }
 
 /**
- * Adjustable routing: who a triage event can reach. The env value selects
- * a key from ROUTES — it is never interpolated into a command. Unknown
- * values fail closed (recorded, nothing spawned).
+ * Adjustable routing: who a triage event can reach. TODO_TRIAGE_ROUTE is a
+ * comma list; each name must be a known lane, else the whole event fails
+ * closed (recorded, nothing fired). Names are never interpolated into a
+ * shell command. Lanes:
+ * - opencode (default starter): flock single-flight `opencode run` triage
+ *   session. Reaches the opencode agent surface owning this box's work.
+ * - telegram: instant DM to TODO_NOTIFY_CHAT_ID via Telegram sendMessage
+ *   (token TODO_NOTIFY_BOT_TOKEN, else TUI_BOT_TOKEN_VM). Reaches the
+ *   operator's phone in real time — the push channel the opencode route
+ *   lacks. Text carries action + key only, never secrets.
+ * - log: record-only. No spawn, no send; inbox + receipt still written.
  */
+export const KNOWN_LANES = new Set(['opencode', 'telegram', 'log']);
 export function routeFor(env = process.env) {
-  const name = String(env.TODO_TRIAGE_ROUTE || 'opencode').trim().toLowerCase() || 'opencode';
-  if (name === 'opencode' || name === 'log') return { ok: true, name };
-  return { ok: false, name, reason: `unknown TODO_TRIAGE_ROUTE ${name}` };
+  const names = String(env.TODO_TRIAGE_ROUTE || 'opencode').split(',')
+    .map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const lanes = names.length ? names : ['opencode'];
+  const bad = lanes.filter((n) => !KNOWN_LANES.has(n));
+  if (bad.length) return { ok: false, lanes, reason: `unknown TODO_TRIAGE_ROUTE lane(s): ${bad.join(',')}` };
+  return { ok: true, lanes };
+}
+
+export function verdictText(action, key) {
+  return `Review ${action}: ${key} — triage assessing, trail in sheet-todo-watch.`;
 }
 
 export function retryBackoffSec(tries) {
@@ -115,24 +131,94 @@ function recordAndSpawn({ inboxType, key, prompt, source, env, deps }) {
   mkdir(STATE_DIR);
   append(JSON.stringify({ at: new Date().toISOString(), type: inboxType, key, source }));
   const receiptFor = (k) => (outcome, detail = '') => {
-    receiptSink({ at: new Date().toISOString(), key: k, route: route.name, outcome, detail });
+    receiptSink({ at: new Date().toISOString(), key: k, route: route.lanes.join('+'), outcome, detail });
   };
   const receipt = receiptFor(key);
   if (!gate.ok) return { ok: false, reason: gate.reason };
   const route = routeFor(env);
   if (!route.ok) {
-    receipt('unknown_route', route.reason);
+    receiptSink({ at: new Date().toISOString(), key, route: '', outcome: 'unknown_route', detail: route.reason });
     return { ok: false, reason: route.reason };
   }
-  if (route.name === 'log') {
-    receipt('record_only', 'TODO_TRIAGE_ROUTE=log');
-    drainRetries({ readRetry, writeRetry, now, receiptFor, attempt: (e) => attemptSpawn({ ...e, env, deps, receipt }) });
-    return { ok: true, reason: 'recorded (log route, no spawn)' };
+  for (const lane of route.lanes) {
+    if (lane === 'log') {
+      receipt('record_only', 'lane=log');
+      continue;
+    }
+    if (lane === 'telegram') {
+      dispatchTelegram({ action: inboxType, key, tries: 0, env, deps, receipt, readRetry, writeRetry, now });
+      continue;
+    }
+    const r = attemptSpawn({ key, prompt, env, deps, receipt });
+    if (!r.ok) enqueueRetry({ route: lane, action: inboxType, key, tries: 0, now, readRetry, writeRetry, receipt });
   }
-  const r = attemptSpawn({ key, prompt, env, deps, receipt });
-  if (!r.ok) enqueueRetry({ action: inboxType, key, now, readRetry, writeRetry, receipt });
-  drainRetries({ readRetry, writeRetry, now, receiptFor, attempt: (e) => attemptSpawn({ ...e, env, deps, receipt }) });
-  return { ok: true, reason: 'triage spawn attempted (see receipts)' };
+  drainRetries({ readRetry, writeRetry, now, receiptFor, attempt: (e) => redispatchEntry({ ...e, env, deps, prompt, receipt: receiptFor(e.key), readRetry, writeRetry, now }) });
+  return { ok: true, reason: 'triage event fanned out (see receipts)' };
+}
+
+function telegramTarget(env = process.env) {
+  const token = String(env.TODO_NOTIFY_BOT_TOKEN || env.TUI_BOT_TOKEN_VM || '').trim();
+  const chatId = String(env.TODO_NOTIFY_CHAT_ID || '').trim();
+  if (!token) return { ok: false, reason: 'no bot token (TODO_NOTIFY_BOT_TOKEN nor TUI_BOT_TOKEN_VM)' };
+  if (!chatId) return { ok: false, reason: 'no TODO_NOTIFY_CHAT_ID' };
+  return { ok: true, token, chatId };
+}
+
+/**
+ * Fire-and-forget Telegram send: validates synchronously, settles async.
+ * Every outcome writes a receipt; failures re-enqueue (bounded, see
+ * enqueueRetry). The token never appears in any receipt or log.
+ */
+function dispatchTelegram({ action, key, tries, env, deps, receipt, readRetry, writeRetry, now }) {
+  const { fetchFn = fetch } = deps;
+  const target = telegramTarget(env);
+  if (!target.ok) {
+    receipt('send_error', target.reason);
+    enqueueRetry({ route: 'telegram', action, key, tries, now, readRetry, writeRetry, receipt });
+    return;
+  }
+  const text = verdictText(String(action || '').replace(/^review_/, ''), key);
+  let settled = false;
+  const fail = (detail) => {
+    if (settled) return;
+    settled = true;
+    receipt('send_error', String(detail).slice(0, 200));
+    enqueueRetry({ route: 'telegram', action, key, tries, now, readRetry, writeRetry, receipt });
+  };
+  let res;
+  try {
+    res = fetchFn(`https://api.telegram.org/bot${target.token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: target.chatId, text }),
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch (err) {
+    fail((err && err.message) || err);
+    return;
+  }
+  Promise.resolve(res).then(
+    async (r) => {
+      if (!r || !r.ok) return fail(`telegram HTTP ${r ? r.status : 'no-response'}`);
+      let mid = '';
+      try {
+        const body = await r.json();
+        mid = String((body && body.result && body.result.message_id) || '');
+      } catch { /* id is nice-to-have */ }
+      if (settled) return;
+      settled = true;
+      receipt('sent', mid ? `message_id ${mid}` : 'ok');
+    },
+    (err) => fail((err && err.message) || err),
+  );
+}
+
+function redispatchEntry({ route, action, key, prompt, tries, env, deps, receipt, readRetry, writeRetry, now }) {
+  if (route === 'telegram') {
+    dispatchTelegram({ action, key, tries, env, deps, receipt, readRetry, writeRetry, now });
+    return undefined;
+  }
+  return attemptSpawn({ key, prompt: prompt || triagePrompt(String(action || '').replace(/^review_/, ''), key), env, deps, receipt });
 }
 
 function attemptSpawn({ key, prompt, env, deps, receipt }) {
@@ -179,14 +265,18 @@ function writeRetryQueue(entries) {
   } catch { /* retry state must never break the gateway path */ }
 }
 
-function enqueueRetry({ action, key, now, readRetry, writeRetry, receipt }) {
+function enqueueRetry({ route, action, key, tries, now, readRetry, writeRetry, receipt }) {
+  const next = Number(tries || 0) + 1;
+  if (next > RETRY_MAX_TRIES) {
+    receipt('retry_exhausted', `${action} after ${tries} tries`);
+    return;
+  }
   try {
     const entries = readRetry().filter((e) => e && e.key);
-    const rest = entries.filter((e) => e.action !== action);
-    const tries = 1;
-    rest.push({ action, key, tries, notBefore: now() + retryBackoffSec(tries) * 1000 });
+    const rest = entries.filter((e) => !(e.route === route && e.action === action && e.key === key));
+    rest.push({ route, action, key, tries: next, notBefore: now() + retryBackoffSec(next) * 1000 });
     writeRetry(rest);
-    receipt('retry_queued', `tries=${tries} notBefore=+${retryBackoffSec(tries)}s`);
+    receipt(next === 1 ? 'retry_queued' : 'retry_requeued', `tries=${next} notBefore=+${retryBackoffSec(next)}s`);
   } catch { /* never break the gateway path */ }
 }
 
@@ -206,21 +296,25 @@ function drainRetries({ readRetry, writeRetry, now, receiptFor, attempt }) {
   if (!due.length) return;
   const [entry] = due;
   const rest = entries.filter((e) => e !== entry);
-  const prompt = triagePrompt(entry.action.replace(/^review_/, ''), entry.key);
-  const r = attempt({ key: entry.key, prompt });
   const entryReceipt = receiptFor(entry.key);
+  const prompt = entry.route === 'opencode'
+    ? triagePrompt(entry.action.replace(/^review_/, ''), entry.key)
+    : undefined;
+  const r = attempt({ route: entry.route || 'opencode', key: entry.key, prompt, action: entry.action, tries: entry.tries });
+  if (entry.route === 'telegram') {
+    // Fire-and-forget: the entry is dropped now; async settle re-enqueues
+    // itself on failure, or writes 'sent' on success.
+    writeRetry(rest);
+    return;
+  }
   if (r && r.ok) {
     writeRetry(rest);
     entryReceipt('retry_ok', `${entry.action} after ${entry.tries} tries`);
-  } else if (Number(entry.tries) >= RETRY_MAX_TRIES) {
-    writeRetry(rest);
-    entryReceipt('retry_exhausted', `${entry.action} after ${entry.tries} tries`);
-  } else {
-    const tries = Number(entry.tries) + 1;
-    rest.push({ ...entry, tries, notBefore: t + retryBackoffSec(tries) * 1000 });
-    writeRetry(rest);
-    entryReceipt('retry_requeued', `tries=${tries} notBefore=+${retryBackoffSec(tries)}s`);
+    return;
   }
+  writeRetry(rest);
+  enqueueRetry({ route: entry.route || 'opencode', action: entry.action, key: entry.key,
+    tries: entry.tries, now, readRetry, writeRetry, receipt: entryReceipt });
 }
 
 /**
