@@ -461,6 +461,19 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   re-checked, challenge points (Spec-01 phone step, Card-19
   retarget safety, Sheet-03 fidelity, Health-08 RED validity).
 
+## T10f endorsed 10/10 (2026-10-11, maker-checker complete)
+
+- Reviewer (agent/rv10-review, PR #726 draft, learnings-only,
+  tree clean): every cell by key, every proof PNG viewed, sensors
+  re-run, evidence re-checked. 10x ENDORSE, 0x ITERATE.
+- Manager confirm: auditor scope clean; sensor 33/1 (sole fail is
+  the known Auto-01 sweeper duplicate, pending the cron call).
+- ENDORSED for approve: Sync-09, Spec-01 (phone step outstanding
+  and stated — Review≠Done), Card-19 (row-level retarget safe).
+  STAGED for human: Fleet-09 close-flow, Health-10 narrowing.
+  STAND: Sheet-04/Domain-01/Health-08 RED, Sync-08 BLOCKED,
+  Sheet-03 restored Assigned (gate owed).
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
