@@ -24,12 +24,7 @@ export const BOT_COMMANDS = [
   { command: 'plan', description: 'Switch to the plan agent' },
   { command: 'thinking', description: 'Pick the thinking level (variant)' },
   { command: 'skills', description: 'List /do-* skills you can type here' },
-  { command: 'tui', description: 'Open the opencode TUI for this conversation (Mini App)' },
-  { command: 'bugs', description: 'Open the shared bug board (Mini App)' },
-  { command: 'fleet', description: 'Open the live fleet dashboard (Mini App)' },
-  { command: 'review', description: 'Review finished work: proof screenshots, approve or comment (Mini App)' },
-  { command: 'forge', description: 'Create a new bot, one click (Mini App)' },
-  { command: 'app', description: 'Open the mini-app shell: all apps, one burger menu (Mini App)' },
+  { command: 'tui', description: 'Terminal pane status for this conversation (terminal itself moved to web)' },
   { command: 'debug', description: 'Show the active work-session debug view' },
   { command: 'handoff', description: 'Checkpoint this work session for continuation' },
   { command: 'resume', description: 'Print the current bug-ticket packet' },
@@ -67,6 +62,14 @@ export const HIDDEN_COMMANDS = {
   models: 'moved: the model list became the three pool pickers — answers the same pointer',
   store: 'ops: store queue status/flush is a background concern, typed on demand',
   setup: 'ops: provider readiness gaps, surfaced via /allowance and typed to fix',
+  // The bot mini-apps went web-only (2026-10-11 owner call): no buttons, no
+  // menu entries. The cases stay handled so a typed name answers the web
+  // pointer instead of falling through to the tool as a prompt.
+  bugs: 'moved: the bug board is web-only now — answers as a pointer to the Bugs tab',
+  fleet: 'moved: the fleet dashboard is web-only now — answers as a pointer to the Fleet tab',
+  review: 'moved: the review queue is web-only now — answers as a pointer to the Review tab',
+  forge: 'moved: the bot forge is web-only now — answers as a pointer to the Forge tab',
+  app: 'moved: the mini-app shell is a browser page now — answers as a pointer to the web shell',
 };
 
 /**
@@ -105,17 +108,12 @@ export const HELP_USAGE = {
   thinking: { args: '[level]', text: 'pick the thinking level (variant)' },
   skills: { args: '', text: 'list /do-* skills you can type here (typed, not buttons)' },
   tui: {
-    args: '', text: 'open this conversation in a real terminal (Mini App button)',
+    args: '', text: 'terminal pane status for this chat (terminal itself is on the web)',
     extra: [
       '/tui status      name the open pane, who is attached, how long it has been up',
       '/tui off         close that pane (add force to close it mid-turn)',
     ],
   },
-  bugs: { args: '', text: 'open the shared bug board (Mini App button)' },
-  fleet: { args: '', text: 'open the live fleet dashboard across all machines (Mini App button)' },
-  review: { args: '', text: 'review finished work: proof screenshots, approve with 👍 or comment back (Mini App button)' },
-  forge: { args: '', text: 'create a new bot in one click (Mini App forge)' },
-  app: { args: '', text: 'open the mini-app shell: all apps, one burger menu (Mini App button)' },
   debug: { args: '', text: 'show the active work-session debug view' },
   handoff: { args: '', text: 'checkpoint this work session for continuation' },
   resume: { args: '[n]', text: 'print the current bug-ticket packet (n = card #)' },
