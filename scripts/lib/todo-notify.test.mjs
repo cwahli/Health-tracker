@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { wakeEnabled, triagePrompt, notifyTodoEvent, routeFor, retryBackoffSec, attemptSessionPost } from './todo-notify.mjs';
+import { wakeEnabled, triagePrompt, notifyTodoEvent, routeFor, retryBackoffSec, attemptSessionPost, isSessionGoneText, triageModelArgs } from './todo-notify.mjs';
 
 const tmpState = () => fs.mkdtempSync(path.join(os.tmpdir(), 'todo-notify-'));
 
@@ -296,4 +296,70 @@ test('approve still drains one due retry', () => {
   assert.deepEqual(h.queued(), []);
   assert.ok(h.receipts.some((x) => x.outcome === 'approved_no_fanout'));
   assert.ok(h.receipts.some((x) => x.outcome === 'retry_ok'));
+});
+
+test('session lane to a gone session records session_gone with no retry', () => {
+  const h = harness();
+  h.deps.execSyncFn = () => Buffer.from('{"_tag":"SessionNotFoundError","sessionID":"ses_old"} HTTP 404 Not Found');
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'session', TODO_NOTIFY_SESSION_ID: 'ses_old' };
+  const r = notifyTodoEvent('comment', 'card:tag_g', env, h.deps);
+  assert.equal(r.ok, true);
+  assert.deepEqual(h.receipts.map((x) => x.outcome), ['session_gone']);
+  assert.match(h.receipts[0].detail, /refresh TODO_NOTIFY_SESSION_ID/);
+  assert.deepEqual(h.queued(), []);
+});
+
+test('session gone on throw records session_gone with no retry', () => {
+  const h = harness();
+  h.deps.execSyncFn = () => {
+    const e = new Error('Command failed: opencode api post');
+    e.stderr = Buffer.from('SessionNotFoundError: ses_old');
+    throw e;
+  };
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'session', TODO_NOTIFY_SESSION_ID: 'ses_old' };
+  notifyTodoEvent('answer', 'card:tag_h', env, h.deps);
+  assert.deepEqual(h.receipts.map((x) => x.outcome), ['session_gone']);
+  assert.deepEqual(h.queued(), []);
+});
+
+test('gone session retry entries are dropped, not requeued', () => {
+  const h = harness();
+  h.deps.execSyncFn = () => Buffer.from('{"_tag":"SessionNotFoundError"} HTTP 404');
+  h.queue([{ route: 'session', action: 'review_comment', key: 'card:tag_old', tries: 2, notBefore: 1 }]);
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'log', TODO_NOTIFY_SESSION_ID: 'ses_old' };
+  notifyTodoEvent('comment', 'card:tag_new3', env, h.deps);
+  assert.deepEqual(h.queued(), []);
+  assert.ok(h.receipts.some((x) => x.outcome === 'session_gone'));
+  assert.ok(!h.receipts.some((x) => String(x.outcome).startsWith('retry_')));
+});
+
+test('isSessionGoneText only matches gone markers', () => {
+  assert.equal(isSessionGoneText('{"_tag":"SessionNotFoundError"} HTTP 404 Not Found'), true);
+  assert.equal(isSessionGoneText('Session not found: ses_x'), true);
+  assert.equal(isSessionGoneText('{}'), false);
+  assert.equal(isSessionGoneText(''), false);
+});
+
+test('triage model pin passes --model, invalid values fall back to default', () => {
+  const h = harness();
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'opencode', TODO_TRIAGE_MODEL: 'acme/worker#high' };
+  notifyTodoEvent('comment', 'card:tag_m', env, h.deps);
+  const i = h.spawns[0].indexOf('--model');
+  assert.ok(i > 0);
+  assert.equal(h.spawns[0][i + 1], 'acme/worker#high');
+
+  const h2 = harness();
+  notifyTodoEvent('comment', 'card:tag_m', { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'opencode' }, h2.deps);
+  assert.ok(!h2.spawns[0].includes('--model'));
+
+  const h3 = harness();
+  notifyTodoEvent('comment', 'card:tag_m', { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'opencode', TODO_TRIAGE_MODEL: 'rm -rf /; evil' }, h3.deps);
+  assert.ok(!h3.spawns[0].includes('--model'));
+  assert.ok(!h3.spawns[0].some((a) => String(a).includes('evil')));
+});
+
+test('triage prompt tells the child to fail fast on rate limits', () => {
+  assert.match(triagePrompt('comment', 'card:tag_x'), /rate-limit/);
+  assert.deepEqual(triageModelArgs({}), []);
+  assert.deepEqual(triageModelArgs({ TODO_TRIAGE_MODEL: 'no-slash' }), []);
 });
