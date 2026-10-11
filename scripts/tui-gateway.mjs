@@ -3225,31 +3225,11 @@ export const FULLSCREEN_WIDGET_JS = [
   'setTimeout(function(){try{if(tg.requestFullscreen&&!tg.isFullscreen)tg.requestFullscreen();}catch(e){}refit();},1800);',
   "b.addEventListener('click',go);",
   "try{tg.onEvent('viewportChanged',refit);}catch(e){}",
-  // Shell burger (Mini Apps drawer). Same try/catch envelope as above; the
-  // sensor runs this whole script against a stub document, so the button
-  // build is feature-checked and returns silently when DOM creation is
-  // unavailable. Framed in the shell it asks the shell to open the drawer;
-  // top-level it returns to the shell (Telegram via the initData door with
-  // the page's own ?bot=, browsers via the token they already carry).
-  "try{",
-  "var sb=document.getElementById('shell-burger');",
-  "if(!sb&&document.createElement&&document.body){",
-  "sb=document.createElement('button');",
-  "sb.id='shell-burger';sb.setAttribute('aria-label','Menu');sb.textContent='\\u2630';",
-  "sb.style.cssText='position:fixed;top:8px;left:8px;z-index:9999;width:40px;height:40px;'+",
-  "'border-radius:20px;border:1px solid #555;background:rgba(20,20,20,.7);color:#eee;font-size:20px;line-height:1;cursor:pointer;';",
-  "document.body.appendChild(sb);",
-  "}",
-  "if(sb&&sb.addEventListener){",
-  "sb.addEventListener('click',function(){",
-  "try{if(window.self!==window.top){window.parent.postMessage({type:'shell:menu'},'*');return;}}catch(e){}",
-  "var si='';try{si=(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initData)||'';}catch(e){}",
-  "function sq(k){try{return new URLSearchParams((window.location&&window.location.search)||'').get(k)||'';}catch(e){return '';}}",
-  "if(si){var sbot=sq('bot')||'vm';window.location.href='/app/?bot='+encodeURIComponent(sbot)+'&initData='+encodeURIComponent(si);return;}",
-  "var st=sq('token');window.location.href=st?('/app/app?token='+encodeURIComponent(st)+'&tab=tui'):('/app/login?tab=tui');",
-  "});",
-  "}",
-  "}catch(e){}",
+  // No floating burger here by design: every terminal surface carries its
+  // own left burger in the shell header (browser picker bar and Telegram
+  // slim bar alike), which opens the Mini Apps drawer directly. A second
+  // floating button meant a different thing per surface — removed 2026-10-11.
+  // Fullscreen/expand/swipe handling above is untouched.
   '}catch(e){}',
   '})();',
 ].join('\n');
@@ -3296,29 +3276,10 @@ export const FULLSCREEN_WIDGET = [
   `<script>${FULLSCREEN_WIDGET_JS}</script>`,
 ].join('');
 
-/**
- * Shell burger for the terminal page. The terminal has no header bar of its
- * own, so the Mini Apps drawer toggle rides as terminal chrome (top-left,
- * mirroring the fullscreen button top-right): the bare xterm page has no
- * in-flow header to host it, and a header bar would steal terminal rows.
- * Framed in the shell it postMessages the shell to open the drawer;
- * top-level it returns to the shell (Telegram via the initData door with the
- * page's own ?bot=, browsers via the token they already carry).
- */
-export const SHELL_BURGER_BUTTON = [
-  '<button id="shell-burger" aria-label="Menu" style="position:fixed;top:8px;left:8px;'
-    + 'z-index:9999;width:40px;height:40px;border-radius:20px;border:1px solid #555;'
-    + 'background:rgba(20,20,20,.7);color:#eee;font-size:20px;line-height:1;cursor:pointer;">&#x2630;</button>',
-].join('');
-
-export function withShellBurger(html) {
-  // Button HTML only — no <script> tag: the click behaviour rides inside
-  // FULLSCREEN_WIDGET_JS so the +5 script-count sensor does not move.
-  const body = String(html || '');
-  if (body.includes('shell-burger')) return body;
-  if (/<\/body\s*>/i.test(body)) return body.replace(/<\/body\s*>/i, (m) => `${SHELL_BURGER_BUTTON}${m}`);
-  return `${body}${SHELL_BURGER_BUTTON}`;
-}
+// SHELL_BURGER_BUTTON / withShellBurger retired 2026-10-11: the floating
+// in-frame burger duplicated the shell header burger with different meaning
+// per surface. Every terminal surface (browser picker bar, Telegram slim
+// bar) carries the drawer burger in its own header now.
 
 export function withFullscreenButton(html) {
   const body = String(html || '');
@@ -3356,7 +3317,6 @@ function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredentia
         if ((up.statusCode || 200) === 200) {
           let page = withPhoneViewport(out.toString('utf8'));
           page = withFullscreenButton(page);
-          page = withShellBurger(page);
           page = withGeometryProbe(page);
           out = Buffer.from(page, 'utf8');
         }
