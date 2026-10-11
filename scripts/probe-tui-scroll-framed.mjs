@@ -12,8 +12,10 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = '/home/ubuntu/dev/tui-scroll';
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(HERE, '..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const GW_PORT = 18992;
 const STATIC_PORT = 18991;
@@ -106,7 +108,14 @@ try {
   await touch('touchEnd', []);
   await sleep(800);
   const dkeys = (await fkeys()) - b1;
-  check('framed touch drag emits scroll keys in the frame', dkeys >= 3, `${dkeys} keys`);
+  const dbase = b1;
+  // Page granularity (VM4 fix): few bare page keys, never modified fine keys
+  // (Ctrl+Meta produces zero PTY bytes — counting those as scroll is the hole
+  // that stranded VM4 while this probe stayed green).
+  check('framed touch drag emits scroll keys in the frame', dkeys >= 1, `${dkeys} keys`);
+  const dlist = await ev(`(()=>{try{return document.querySelector('iframe').contentWindow.eval('window.__k.slice(${dbase}).join(",")');}catch(e){return '';}})()`);
+  check('framed touch emits bare page keys only',
+    dkeys >= 1 && dlist.split(',').every((k) => k === 'PageDown' || k === 'PageUp'), dlist.slice(0, 80));
   ws.close();
 } finally { chrome.kill('SIGKILL'); gw.kill('SIGKILL'); statik.close(); }
 console.log(failures ? `FRAMED RED (${failures})` : 'FRAMED GREEN');

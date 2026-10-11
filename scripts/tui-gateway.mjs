@@ -2959,16 +2959,21 @@ export const LAYOUT_JS = [
  *
  * opencode binds a LINE key (messages_line_up/down = ctrl+alt+y / ctrl+alt+e,
  * confirmed against the keybind table in the binary and measured moving a live
- * pane). Sending those instead of page keys maps finger travel one-to-one onto
- * lines, which is what "feels like scrolling" actually means. cline has no
- * line key (TRANSCRIPT_KEYBINDS has page and half-page only), so it keeps the
- * half-page keys — finer than a full page, still coarse, and honest about it.
+ * pane), so the WHEEL keeps those for 1:1 feel on the opencode lane. Touch
+ * does NOT use them: it keys on bare PageUp/PageDown at page granularity.
  *
- * Line keys are emitted one per LINE_PX of travel and paced to LINE_COOLDOWN_MS
- * (far tighter than the page cooldown: a line is a small move, so a 300ms
- * cadence would feel like a stall rather than motion). MAX_LINE_KEYS per
- * touchmove bounds a fast flick without throttling it outright, and the fling
- * decays the same way at line granularity.
+ * Why the split (VM4, live 2026-10-11). A touch bridge that sent fine keys for
+ * both lanes — ctrl+alt for opencode, ctrl+meta half-page for cline (TRANSCRIPT
+ * KEYBINDS) — stranded every cline lane: forty dispatched keys, zero movement.
+ * Lab byte-clean room verdict: this ttyd/xterm emits ZERO PTY bytes for
+ * Ctrl+Meta+letter, trusted or synthetic (C-M-u/d/b/f all silent), while
+ * Ctrl+Alt+letter and bare PageUp/PageDown all produce bytes. xterm swallows
+ * the meta combo before it ever becomes bytes, so no app can bind it — the
+ * failure is at the xterm layer, not the app layer, and no key-counting probe
+ * can see it (dispatched keys are counted; produced bytes were not). Touch
+ * therefore sends the one binding both lanes honour through this xterm —
+ * bare page keys — and the wheel keeps opencode line keys (cline wheels ride
+ * app mouse-reporting, which a trusted wheel reaches regardless).
  *
  * Wheel twin (desktop browsers): a wheel over an alt-screen TUI moves nothing
  * natively — same measurement as above, viewport scrollHeight == clientHeight
@@ -2987,20 +2992,19 @@ export const TOUCH_SCROLL_JS = [
   '// would jump full pages per line-px of drag.',
   'var PGUP=33,PGDN=34,MAX_KEYS=3,COOLDOWN_MS=300,',
   'FLING_PX_PER_STEP=160,MAX_FLING_STEPS=6;',
-  // Line granularity, and the per-lane split. opencode binds a LINE key',
-  '// (messages_line_up/down = ctrl+alt+y / ctrl+alt+e); cline has none, and',
-  '// binds half-page to ctrl+meta+u / ctrl+meta+d instead. Those two sets are',
-  '// DISJOINT — opencode binds ctrl+alt, cline binds ctrl+meta — so one',
-  '// gesture step can send both and each lane takes only the step it has a',
-  '// binding for. That is what makes this lane-agnostic: the bridge cannot',
-  '// know which lane is behind the terminal (it is per-chat and can change),',
-  '// so it sends the finest step EVERY lane binds rather than guessing.',
-  '//',
-  '// Verified moving a live opencode pane (ctrl+alt+y/e/u/d all moved it).',
-  '// The cline half-page pair is inherited from the TRANSCRIPT_KEYBINDS note',
-  '// above and has NOT been re-measured on this box — cline is not installed',
-  '// here. Treat cline-side granularity as unproven until someone tries it.',
-  'var LINE_UP="y",LINE_DOWN="e",HALF_UP="u",HALF_DOWN="d",',
+  // Line granularity is WHEEL-ONLY, and opencode-only. opencode binds a LINE key',
+  '// (messages_line_up/down = ctrl+alt+y / ctrl+alt+e), lab byte-proven through',
+  '// this exact ttyd/xterm (C-A-* produce PTY bytes). The cline TRANSCRIPT',
+  '// half-page pair (ctrl+meta+u/d) is NOT sent anymore: lab byte-proven DEAD.',
+  '// ttyd 1.7.7\u2019s xterm emits ZERO PTY bytes for Ctrl+Meta+letter — trusted',
+  '// or synthetic, keyecho-clean (2026-10-11: C-M-u/d/b/f all silent, C-A-y/e/b/f',
+  '// and bare PageUp/PageDown all bytes). xterm swallows the combo before it',
+  '// ever becomes bytes, so no app behind the terminal can bind it — the old',
+  '// "disjoint lane-agnostic" story was wrong at the xterm layer, not the app',
+  '// layer, and it stranded every cline lane (VM4, live 2026-10-11: forty',
+  '// dispatched keys, zero movement). The cline lane scrolls on the BARE page',
+  '// keys both lanes bind, which is why the touch path below keys on pagePx.',
+  'var LINE_UP="y",LINE_DOWN="e",',
   'MAX_LINE_KEYS=6;',
   'var t=null,y0=0,x0=0,acc=0,cumY=0,cumX=0,v=0,v0=0,last=0,active=0,lastDir=0,lastKeyAt=0;',
   'function screen(){return document.querySelector(".xterm-screen")||document.querySelector(".xterm");}',
@@ -3028,12 +3032,11 @@ export const TOUCH_SCROLL_JS = [
   'el.dispatchEvent(new KeyboardEvent("keyup",o));',
   '}catch(e){}',
   '}',
-  '// One LINE of travel on opencode, one HALF PAGE on cline, in the same',
-  '// gesture step. Both are sent because the bindings are disjoint — see the',
-  '// note above. ctrl+alt+e/y and ctrl+meta+d/u are distinct key combinations,',
-  '// so no lane sees a doubled step, and no modifier here is one xterm or the',
-  '// browser eats: alt+letter is the risky pair on some platforms, so a',
-  '// failure degrades to the coarse page key below rather than to nothing.',
+  '// One LINE step for the wheel on opencode (ctrl+alt+y/e). No meta half:',
+  '// see the note above — Ctrl+Meta+letter never becomes PTY bytes here, so',
+  '// sending it only doubles dispatched events for nothing. Touch never calls',
+  '// this; it keys on bare page keys (drain, below). A platform that eats',
+  '// ctrl+alt still degrades to the coarse page key below rather than nothing.',
   'function pressFine(dir){',
   'var el=keys();if(!el)return 0;',
   'var sent=0;',
@@ -3053,8 +3056,6 @@ export const TOUCH_SCROLL_JS = [
   '};',
   '// opencode messages_line_up/down -> ctrl+alt+y / ctrl+alt+e  (one line)',
   'fire(up?LINE_UP:LINE_DOWN,{ctrl:true,alt:true});',
-  '// cline half-page -> ctrl+meta+u / ctrl+meta+d  (TRANSCRIPT_KEYBINDS)',
-  'fire(up?HALF_UP:HALF_DOWN,{ctrl:true,meta:true});',
   '}catch(e){}',
   'return sent;',
   '}',
@@ -3065,35 +3066,34 @@ export const TOUCH_SCROLL_JS = [
   'if(t-lastKeyAt<COOLDOWN_MS)return;',
   'press(dir>0?PGDN:PGUP);lastDir=dir>0?1:-1;lastKeyAt=t;',
   '}',
-  '// LinePx is the whole point of this change: a page key is a WHOLE screen,',
-  '// so one page key per 1/24th of travel makes any drag feel like a handful',
-  '// of full-screen jumps. One LINE of finger travel per line key maps the',
-  '// gesture onto the content 1:1, which is what "scrolling" means to a thumb.',
+  '// linePx is the touch ACTIVATION threshold only (a tap still types): the',
+  '// gesture must be unambiguous before anything scrolls. Keys themselves are',
+  '// page-paced (drain, below) — line keys would be 1:1 on opencode but are',
+  '// dead silence on a cline lane (see the note above), and a scroll that',
+  '// moves on both lanes beats a smooth one that strands one of them.',
   'function linePx(){',
   'try{return 18;}catch(e){return 18;}',
   '}',
-  '// emitFine sends the finest step each lane binds (see pressFine), and has',
-  '// NO time-based cooldown. That is deliberate: the accumulator already',
-  '// admits exactly one key per LINE_PX of finger travel, so a key cannot',
-  '// escape without the finger having moved that far. Adding a timer on top',
-  '// decoupled keys from movement — the scroll would run on a clock instead of',
-  '// the thumb, which is the same "not real" feeling at a smaller scale. The',
-  '// page-key path below keeps its 300ms cooldown because a page key is a',
-  '// WHOLE screen and an unpaced burst would jump screens per touchmove.',
-  '//',
-  '// Falls back to the coarse page key if the fine dispatch sent nothing, so a',
-  '// platform that eats ctrl+alt / ctrl+meta degrades to the old behaviour',
-  '// rather than to a dead scroll.',
+  '// emitFine is the WHEEL path: opencode line keys (see pressFine), with NO',
+  '// time-based cooldown — the wheel accumulator already admits a bounded run',
+  '// per event (MAX_LINE_KEYS), so a key cannot escape without wheel travel.',
+  '// Falls back to the coarse page key if the fine dispatch sent nothing, so',
+  '// a platform that eats ctrl+alt degrades instead of dying silently.',
   'function emitFine(dir){',
   'if(pressFine(dir)>0){lastDir=dir>0?1:-1;return;}',
   'var t=now();',
   'if(t-lastKeyAt<COOLDOWN_MS)return;',
   'press(dir>0?PGDN:PGUP);lastDir=dir>0?1:-1;lastKeyAt=t;',
   '}',
+  '// drain is the TOUCH path: bare page keys at page granularity, paced by the',
+  '// 300ms cooldown in emit (a page key is a WHOLE screen — an unpaced burst',
+  '// would skip screens per touchmove). Page keys are the one binding BOTH',
+  '// lanes honour through this xterm (lab byte-proven), so a drag moves on',
+  '// opencode AND cline; the old fine-key drain stranded cline (VM4 live).',
   'function drain(){',
-  'var s=linePx(),n=0;',
-  'while(acc>=s&&n<MAX_LINE_KEYS){acc-=s;emitFine(1);n++;}',
-  'while(acc<=-s&&n<MAX_LINE_KEYS){acc+=s;emitFine(-1);n++;}',
+  'var s=pagePx(),n=0;',
+  'while(acc>=s&&n<MAX_LINE_KEYS){acc-=s;emit(1);n++;}',
+  'while(acc<=-s&&n<MAX_LINE_KEYS){acc+=s;emit(-1);n++;}',
   '}',
   'function down(e){',
   'if(active||!e.touches||e.touches.length!==1)return;',
@@ -3122,13 +3122,12 @@ export const TOUCH_SCROLL_JS = [
   'if(!t)return;',
   't=null;',
   // Momentum: a flick keeps scrolling for a few steps, one per frame, so it',
-  '// glides instead of stopping dead. Capped, and it ends on its own. The',
-  '// step count is measured in LINES now (linePx, not pagePx), so the fling',
-  '// covers a distance proportional to the flick rather than a fixed number',
-  '// of screen-jumps.',
+  '// glides instead of stopping dead. Steps are page keys (see drain) and run',
+  '// through emit\u2019s 300ms cooldown, so a fling adds at most a page or two \u2014',
+  '// capped, and it ends on its own.',
   'var steps=0;',
   'try{',
-  'steps=Math.min(MAX_FLING_STEPS,Math.round(Math.abs(v)*FLING_PX_PER_STEP/linePx()));',
+  'steps=Math.min(MAX_FLING_STEPS,Math.round(Math.abs(v)*FLING_PX_PER_STEP/pagePx()));',
   '}catch(e){}',
   'var dir=v>0?1:-1;',
   'acc=0;active=0;v=0;',
@@ -3136,7 +3135,7 @@ export const TOUCH_SCROLL_JS = [
   'var n=0;',
   'var tick=function(){',
   'if(n++>=steps)return;',
-  'emitFine(dir);',
+  'emit(dir);',
   'try{requestAnimationFrame(tick);}catch(e){}',
   '};',
   'try{requestAnimationFrame(tick);}catch(e){}',
