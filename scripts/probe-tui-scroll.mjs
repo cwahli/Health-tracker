@@ -143,8 +143,15 @@ try {
   await touch('touchEnd', []);
   await sleep(800);
   const dragKeys = await keyCount();
-  console.log('info drag keys:', (await keys()).slice(0, 300));
-  check('touch drag over the terminal emits scroll keys', dragKeys >= 3, `${dragKeys} keys`);
+  const dragList = await keys();
+  console.log('info drag keys:', dragList.slice(0, 300));
+  // Page granularity (VM4 fix): a 300px drag fires FEW page keys, not a run
+  // of line keys — and every one must be BARE PageUp/PageDown. Modified fine
+  // keys are the dead shape (Ctrl+Meta produces zero PTY bytes in this xterm,
+  // so counting them as "scroll" is exactly the hole that stranded VM4).
+  check('touch drag over the terminal emits scroll keys', dragKeys >= 1, `${dragKeys} keys`);
+  check('touch emits bare page keys, never modified fine keys',
+    dragKeys >= 1 && dragList.split(',').every((k) => /^(PageDown|PageUp)\|000$/.test(k)), dragList.slice(0, 120));
 
   // 3. A tap (sub-line nudge) must NOT scroll.
   await ev(`window.__keys=[]`);

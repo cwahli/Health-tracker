@@ -445,10 +445,14 @@ console.log('assert-tui-gateway:');
   //                   half page = ctrl+meta+u / ctrl+meta+d
   //                   (TRANSCRIPT_KEYBINDS in
   //                   sdk/apps/cli/src/tui/hooks/transcript-keybinds.ts)
-  //       So the bridge sends BARE PageUp / PageDown: the one binding both
-  //       lanes share. A ctrl+alt bridge scrolls opencode and is dead on a
-  //       cline lane (cline wants meta, not alt) — the "scrolls on VM2, dead
-  //       on VM" shape. Both directions are paced: a page key jumps a full
+  //       So the touch bridge sends BARE PageUp / PageDown: the one binding
+  //       both lanes share through this xterm. A fine-key bridge is dead on a
+  //       cline lane — not because cline wants meta (it does, per TRANSCRIPT
+  //       KEYBINDS) but because ttyd 1.7.7's xterm emits ZERO PTY bytes for
+  //       Ctrl+Meta+letter, trusted or synthetic (lab keyecho-clean 2026-10-11:
+  //       C-M-u/d/b/f silent, C-A + bare page keys bytes). That stranded VM4
+  //       live: keys dispatched, zero movement, while key-counting probes
+  //       stayed green. Both directions are paced: a page key jumps a full
   //       page, so an unpaced burst would skip screens per touchmove.
   {
     const handlers = {}; const keys = [];
@@ -506,35 +510,26 @@ console.log('assert-tui-gateway:');
     check('a small nudge does not scroll', keys.length === t0);
     check('a nudge is not taken off the page', prevented === 0);
 
-    // Fine granularity: a LINE of travel emits the line keys, not a page key.
-    // A page key is a WHOLE screen, so keying on pagePx made any drag feel
-    // like a few full-screen jumps however far the finger travelled. linePx is
-    // 18px, so a 300px drag crosses ~16 lines (capped at MAX_LINE_KEYS per
-    // touchmove, paced to LINE_COOLDOWN_MS).
+    // Page granularity: a drag emits BARE page keys, never modified keys.
+    // The old fine-key drain sent ctrl+alt (opencode) + ctrl+meta (cline) per
+    // line of travel — but Ctrl+Meta+letter never becomes PTY bytes in this
+    // xterm (see the header note), so every cline drag silently died (VM4).
+    // linePx stays only as the ACTIVATION threshold (a tap still types);
+    // keys fire per pagePx of travel through the 300ms emit cooldown.
     reset();
     let b = keys.length;
     drag(600, 300, 6);
-    const fineDown = keys.slice(b).filter((k) => k.type === 'keydown');
-    // Per gesture step the bridge sends BOTH lanes' finest keys, because the
-    // two binding sets are disjoint (opencode ctrl+alt, cline ctrl+meta) and
-    // the bridge cannot know which lane is behind the terminal.
-    const lineKeys = fineDown.filter((k) => k.key === 'e');
-    const halfKeys = fineDown.filter((k) => k.key === 'd');
-    check('an upward drag sends the opencode LINE key (ctrl+alt+e)',
-      lineKeys.length >= 1 && lineKeys.every((k) => k.ctrlKey === true && k.altKey === true));
-    check('...and the cline half-page key (ctrl+meta+d), since the bridge',
-      halfKeys.length >= 1 && halfKeys.every((k) => k.ctrlKey === true && k.metaKey === true));
-    check('the two lanes never both fire on one binding (disjoint modifiers)',
-      lineKeys.every((k) => k.metaKey === false) && halfKeys.every((k) => k.altKey === false));
-    check('a drag emits more steps than the old one-page-per-drag bridge',
-      lineKeys.length >= 3, `only ${lineKeys.length} line keys`);
-    check('one touchmove never floods (MAX_LINE_KEYS per move)',
-      lineKeys.length <= 6 * 6);
+    const dragDown = keys.slice(b).filter((k) => k.type === 'keydown');
+    const downs = dragDown.filter((k) => k.keyCode === 34);
+    check('an upward drag sends bare PageDown (both lanes bind it)',
+      downs.length >= 1 && downs.every((k) => k.ctrlKey === false && k.altKey === false && k.metaKey === false));
+    check('touch never sends modified line keys (dead on the cline xterm)',
+      dragDown.every((k) => k.key !== 'e' && k.key !== 'd' && k.key !== 'y' && k.key !== 'u'));
+    check('page keys are paced by the cooldown, not flooded per move',
+      downs.length <= 6);
     check('a key is released as well as pressed',
-      keys.slice(b).some((k) => k.type === 'keyup' && k.key === 'e'));
+      keys.slice(b).some((k) => k.type === 'keyup' && k.keyCode === 34));
     check('the drag is taken off the page once scrolling', prevented >= 1);
-    check('NO bare page key is sent while the fine path works',
-      fineDown.every((k) => k.key !== 'PageDown' && k.key !== 'PageUp'));
 
     // A tap smaller than one line must not scroll: a tap still types.
     // reset() first: drag() never sends touchend, so without it this gesture
@@ -545,15 +540,13 @@ console.log('assert-tui-gateway:');
     handlers.touchmove({ touches: [{ clientY: 594 }], preventDefault() { prevented += 1; } });
     check('a sub-line nudge does not scroll', keys.length === t1);
 
-    // Up: the opposite direction sends y / u, not e / d.
+    // Up: the opposite direction sends bare PageUp (keyCode 33).
     reset();
     b = keys.length;
     drag(300, 600, 6);
-    const fineUp = keys.slice(b).filter((k) => k.type === 'keydown');
-    check('a downward drag sends the opencode line key (ctrl+alt+y)',
-      fineUp.some((k) => k.key === 'y' && k.ctrlKey === true && k.altKey === true));
-    check('...and the cline half-page key (ctrl+meta+u)',
-      fineUp.some((k) => k.key === 'u' && k.ctrlKey === true && k.metaKey === true));
+    const dragUp = keys.slice(b).filter((k) => k.type === 'keydown');
+    check('a downward drag sends bare PageUp',
+      dragUp.some((k) => k.keyCode === 33 && k.ctrlKey === false && k.altKey === false && k.metaKey === false));
 
     // Multi-touch is left alone so pinch-zoom survives.
     reset();
