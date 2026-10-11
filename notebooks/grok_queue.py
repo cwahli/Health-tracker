@@ -14,7 +14,7 @@ VPS queue (colabq@51.254.217.163:~/queue)
   heartbeat           epoch, refreshed every ~20s by the loop (VPS watchdog requeues if >5 min old)
   chat-in/<id>.txt    message for the Colab agent (claimed by renaming to <id>.taken)
   chat-out/<id>.txt   the agent's reply
-Live view: each running job has a tmux session grokq-<job> (tail -F run.log); sshd on 127.0.0.1:2222 (key from
+Live view: each running job has a tmux session grokq-<job> (tail -F run.log); sshd on 127.0.0.1:2299 (key from
   attach.pub in the queue) is reachable from the VPS via a reverse tunnel to the unix socket /home/colabq/attach.sock.
   On the VPS: ~/bin/colab-attach [job]. Logs: ~/.grokq.run/attach.log. Disable with GROKQ_NO_ATTACH=1 in ~/.grokq.env.
 Up to GROKQ_PARALLEL jobs run at once (default 4 on GPU, 3 on CPU), each in its own subshell, 6h timeout.
@@ -52,7 +52,7 @@ alive(){ local p; p=$(cat "$1" 2>/dev/null); [ -n "$p" ] && kill -0 "$p" 2>/dev/
 retry(){ local i; for i in 1 2 3 4 5; do "$@" && return 0; sleep $((i*10)); done; return 1; }
 killp(){ local p; p=$(cat "$1" 2>/dev/null); [ -n "$p" ] && grep -qa -- "$2" "/proc/$p/cmdline" 2>/dev/null && kill "$p" 2>/dev/null; }  # kill by pidfile, only if still ours
 LOOPPID=$$
-AP=${GROKQ_APORT:-2222}                      # Colab-local sshd port for live attach (127.0.0.1 only)
+AP=${GROKQ_APORT:-2299}                      # Colab-local sshd port for live attach (127.0.0.1 only; Colab itself uses 2222)
 AS=${GROKQ_ASOCK:-/home/colabq/attach.sock}  # VPS-side unix socket of the reverse tunnel (mode 0600, colabq)
 
 # Live view: every running job gets a tmux session grokq-<job> (dots -> _) tailing its run.log.
@@ -105,7 +105,9 @@ PrintMotd no
 AllowUsers $(id -un)
 EOF
   killp "$R/sshd.pid" sshd; sleep 1; mkdir -p /run/sshd
-  /usr/sbin/sshd -f "$R/sshd_config" -E "$R/sshd.log" < /dev/null && echo "attach: sshd on 127.0.0.1:$AP $(date)" || { echo "attach: sshd failed (see $R/sshd.log)"; return 1; }
+  /usr/sbin/sshd -f "$R/sshd_config" -E "$R/sshd.log" < /dev/null; sleep 2
+  if kill -0 "$(cat "$R/sshd.pid" 2>/dev/null)" 2>/dev/null; then echo "attach: sshd on 127.0.0.1:$AP $(date)"
+  else echo "attach: sshd failed: $(tail -2 "$R/sshd.log" | tr '\n' ' ')"; return 1; fi
   killp "$R/tunnel.pid" grokq; killp "$R/tunnel.ssh.pid" "$AS"
   ( while kill -0 $LOOPPID 2>/dev/null; do
       $S $V "rm -f $AS" < /dev/null 2>/dev/null
