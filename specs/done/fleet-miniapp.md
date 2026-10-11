@@ -1,6 +1,6 @@
 ---
 id: fleet-miniapp
-status: completed
+status: done
 skill: sync-jobs
 edit_mode: patch
 allowed_files:
