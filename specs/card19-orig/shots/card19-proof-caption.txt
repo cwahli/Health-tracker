@@ -29,3 +29,9 @@ Gates re-run on this tree: scoutGeometry.test.ts 8/8 green;
   pre-fix code exit 1 (fingerprint match), current code exit 0 (FIXED).
 No application-code change this wave (fix = PR #452, on main); evidence + proof only.
 Ledger JSONs: specs/card19-orig/live-status-<job>.json. Repro: scripts/repro-card19-orig.mjs.
+
+Re-upload 11 oct (phantom-listing fix): card19-03-output-history-live.png
+re-uploaded byte-identical (122774 B, md5 359871ec2496a33f034d11f5d4dacfc4)
+as file id 18TqoD0ePxR40IoMhANQ3o5kIuwQG2YzO after the first copy
+(17xuwCNAdlrwW7mKRr2TXVO3SdkBfhAll) listed but returned notFound on download;
+both copies now download and render. Nothing deleted, nothing moved.
