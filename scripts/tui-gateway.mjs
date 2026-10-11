@@ -2521,7 +2521,11 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     }
 
     if (url.pathname === '/review/api/answer' && req.method === 'POST') {
-      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
+      // Same renewal grace as every other authed path: the review page
+      // stays open longer than one token TTL (live 2026-10-11: heart tap
+      // 401'd `bad token` on a page open >15min), and a correctly-signed
+      // token inside grace is still the chat-bound bearer, not a new door.
+      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret, { renewGraceSec: renewGrace });
       if (!verdict.ok) {
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
@@ -2550,7 +2554,8 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     }
 
     if ((url.pathname === '/review/api/approve' || url.pathname === '/review/api/comment') && req.method === 'POST') {
-      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
+      // Renewal grace, same reason as /review/api/answer above.
+      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret, { renewGraceSec: renewGrace });
       if (!verdict.ok) {
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));

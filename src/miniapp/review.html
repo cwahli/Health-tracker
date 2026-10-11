@@ -759,7 +759,7 @@
         render();
       } else {
         heart.textContent = '🤍';
-        toast('Approve failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
+        toast(r.status === 401 ? 'Session expired — reload the page, then tap again' : 'Approve failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
       }
     }).catch(function () { state.busy = false; heart.textContent = '🤍'; toast('Approve failed: network'); });
   }
@@ -833,7 +833,7 @@
         }
         toast(r.body.uploaded ? 'Answer sent \u2192 the agent\u2019s folder' : 'Sent \u2192 ' + (state.target === 'left' ? 'To do' : 'Request'));
       } else {
-        toast('Send failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
+        toast(r.status === 401 ? 'Session expired — reload the page, then send again' : 'Send failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
       }
     }).catch(function (e) {
       state.busy = false;
