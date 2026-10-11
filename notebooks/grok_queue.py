@@ -41,6 +41,9 @@ def _fix_key(k):
     k = k.strip().replace("\\n", "\n").replace("\r", "")
     m = re.search(r"-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----", k, re.S)
     if not m:
+        body = re.sub(r"[^A-Za-z0-9+/=]", "", re.sub(r"-----[A-Z ]+-----", "", k))
+        if body.startswith("b3BlbnNzaC1rZXktdjE"):
+            return "-----BEGIN OPENSSH PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(body, 70)) + "\n-----END OPENSSH PRIVATE KEY-----\n"
         return k + "\n"
     body = re.sub(r"\s+", "", m.group(2))
     return f"-----BEGIN {m.group(1)}-----\n" + "\n".join(textwrap.wrap(body, 70)) + f"\n-----END {m.group(1)}-----\n"
