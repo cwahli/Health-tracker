@@ -64,6 +64,8 @@ function telegramChrome() {
   }
 }
 
+import { isRefusalText } from './frame-refusal';
+
 function currentQuery(): string {
   try {
     return window.location.search || '';
@@ -816,9 +818,9 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     try {
       const text = (frameRef.current?.contentDocument?.body?.innerText || '').trim();
       if (!text) return;
-      // Chrome pretty-prints served JSON (newlines/spaces), so gate on the
-      // whitespace-stripped form; JSON.parse still reads the message.
-      if (text.replace(/\s+/g, '').startsWith('{"ok":false')) {
+      // Chrome pretty-prints served JSON (newlines/spaces) — the shared
+      // refusal detector strips whitespace before matching.
+      if (isRefusalText(text)) {
         let msg = 'terminal refused';
         try { msg = (JSON.parse(text) as { error?: string }).error || msg; } catch { /* raw text */ }
         setOffline(msg);
@@ -973,12 +975,24 @@ function Shell() {
   // born live instead of 401ing inside an unreachable iframe — that hole
   // stranded the agenda sections past their first 15 minutes. initData tabs
   // (forge) re-forward top-level initData per frame — no renewal.
+  // A refused renewal is a dead session (past grace/cliff), not a blip:
+  // drop to sign-in now rather than mounting frames on a dead credential
+  // that can only render refusal JSON (the Hotels "bad token" hole, live
+  // 2026-10-11). Network errors stay silent — the tabs report honestly.
+  // Telegram is skipped: its doors run on initData and the Google wall
+  // would be wrong there.
   useEffect(() => {
-    if (def.id !== 'forge') {
-      renewToken().then((ok) => {
-        if (ok) setQueryEpoch((n) => n + 1);
-      });
-    }
+    if (def.id === 'forge' || inTelegram) return;
+    fetch('/app/token' + currentQuery())
+      .then(async (res) => {
+        if (res.status === 401) { handleAuthDead(); return; }
+        const body = await res.json().catch(() => null);
+        if (res.ok && body && body.ok && typeof body.token === 'string' && body.token) {
+          setQueryToken(body.token);
+          setQueryEpoch((n) => n + 1);
+        }
+      })
+      .catch(() => { /* offline — leave the tabs to report honestly */ });
   }, [def.id]);
 
   useEffect(() => {
