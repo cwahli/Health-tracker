@@ -71,7 +71,7 @@ run_job(){
     while [ ! -e "$R/gpu.ready" ] && [ $w -lt 180 ]; do sleep 10; w=$((w+1)); done
   fi
   echo "job $n start model=${model:-default} timeout=${hrs}h $(date)"
-  ( while sleep 60; do kill -0 $me 2>/dev/null || exit 0; $S $V "date +%s > $Q/heartbeat; date +%s > $Q/running/$n.hb" 2>/dev/null; done ) & local hb=$!
+  ( while sleep 60; do kill -0 $me 2>/dev/null || exit 0; $S $V "date +%s > $Q/heartbeat; date +%s > $Q/running/$n.hb; cat > $Q/running/$n.status" < <( echo "model=${model:-default} started=$(stat -c %Y JOB.txt 2>/dev/null) continues=$(grep -c 'continue #' "$HOME/grokq.log" 2>/dev/null)"; echo "--- REPORT.md"; head -c 2500 REPORT.md 2>/dev/null; echo; echo "--- run.log (tail)"; tail -c 1500 run.log 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' ) 2>/dev/null; done ) & local hb=$!
   local margs=(); [ -n "$model" ] && margs=(-m "$model")
   printf '%s' '{"$schema":"https://opencode.ai/config.json","permission":{"edit":"allow","bash":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"}}' > opencode.json
   local end=$(( $(date +%s) + ${hrs%.*}*3600 + 60 )) rc=0 k=0 left
@@ -87,7 +87,7 @@ run_job(){
   head -1 REPORT.md 2>/dev/null | grep -q 'STATUS: COMPLETE' && rc=0
   kill $hb 2>/dev/null
   [ -s REPORT.md ] || tail -c 3000 run.log > REPORT.md
-  up(){ tar czf - . | $S $V "mkdir -p $Q/done/$n && tar xzf - -C $Q/done/$n && rm -f $Q/running/$n.txt $Q/running/$n.hb"; }
+  up(){ tar czf - . | $S $V "mkdir -p $Q/done/$n && tar xzf - -C $Q/done/$n && rm -f $Q/running/$n.txt $Q/running/$n.hb $Q/running/$n.status"; }
   retry up || echo "job $n: upload to VPS failed"
   local st=DONE; [ $rc -ne 0 ] && st="FAILED(rc=$rc)"; [ $rc -eq 124 ] && st="FAILED(timeout ${hrs}h)"
   ping "$n" "$st: $n. $(head -c 1500 REPORT.md)"
