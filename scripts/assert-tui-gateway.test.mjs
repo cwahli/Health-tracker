@@ -1639,5 +1639,40 @@ console.log('assert-tui-gateway:');
   }
 }
 
+// 20. Review verdicts honor the renewal grace (live 2026-10-11: a heart
+//     tap on a page open past the 15min token TTL 401'd `bad token`, and
+//     the toast gave no recovery). Empty-key bodies fail at `missing key`
+//     (400) without touching Google, so 400 proves auth passed, 401 that
+//     it did not. Both mutating endpoints share the fixed verify call.
+{
+  const secret = 'gateway-test-secret-review-grace';
+  const env = { TUI_GATEWAY_SECRET: secret, TUI_TOKEN_RENEW_GRACE_SEC: '3600' };
+  const handle = createGateway({ env });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = (p, token) => fetch(`${base}${p}?token=${encodeURIComponent(token)}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  });
+  try {
+    const live = issueToken({ botId: 'vm', chatId: '6218257274', secret, ttlSec: 900 });
+    assert.equal((await post('/review/api/approve', live)).status, 400);
+    assert.equal((await post('/review/api/comment', live)).status, 400);
+    assert.equal((await post('/review/api/answer', live)).status, 400);
+
+    // Expired 2min ago, inside the 3600s grace: admitted like a live token.
+    const stale = issueToken({ botId: 'vm', chatId: '6218257274', secret, ttlSec: 900, now: Date.now() - 1020000 });
+    assert.equal((await post('/review/api/approve', stale)).status, 400);
+    assert.equal((await post('/review/api/answer', stale)).status, 400);
+
+    // Expired past the grace, and garbage: still refused.
+    const dead = issueToken({ botId: 'vm', chatId: '6218257274', secret, ttlSec: 900, now: Date.now() - 4600000 });
+    assert.equal((await post('/review/api/approve', dead)).status, 401);
+    assert.equal((await post('/review/api/approve', 'garbage')).status, 401);
+  } finally {
+    server.close();
+  }
+}
+
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
