@@ -73,3 +73,6 @@ c12bac3e  no-trailer colab grok-queue commit on main, recorded 2026-10-11 (not m
 de12c179  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
 5c1fd451  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
 faf9ffbe  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
+488e73a2  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
+b7bace08  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
+d1a43756  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)

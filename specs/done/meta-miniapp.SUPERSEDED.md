@@ -1,7 +1,7 @@
 ---
 id: meta-miniapp
-status: locked
-auto_go: true
+status: superseded
+auto_go: false
 skill: sync-jobs
 edit_mode: patch
 allowed_files:
@@ -33,6 +33,8 @@ gate:
   - node scripts/assert-fleet-miniapp.test.mjs
   - node scripts/assert-review-miniapp.test.mjs
 ---
+
+# SUPERSEDED 2026-10-11: P1 (registry + htk exchange, #652) and the P2+P3 shell/tab migration are live on app.health-tracker.co.uk; bot buttons stripped web-only (#751); tui. redirects to app. P5 teardown is moot — the per-bot ttyd units back the web Terminal tab now. Retired per owner; do not re-execute. Gateway + ttyds stay to serve browsers.
 
 # Packet: meta mini-app — one shell, ten toggleable TG apps
 
