@@ -1513,6 +1513,25 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
           const deep = verifyAnyToken(req, url, secret);
           if (deep.ok) {
             const raw = presentedTokens(req, url).find((t) => verifyToken(t, secret).ok) || '';
+            // A top-level visit (typed domain, bookmark, pasted link) must
+            // land on the shell, never on a raw ttyd page: the raw page has
+            // no burger and no way back (live 2026-10-11: bare
+            // app.health-tracker.co.uk stranded on the tty with no nav).
+            // The shell's own terminal iframe keeps the fast tty path — it
+            // arrives with the shell as Referer and/or dest=iframe.
+            const ref = String(req.headers?.referer || req.headers?.referrer || '');
+            const dest = String(req.headers?.['sec-fetch-dest'] || '').toLowerCase();
+            const framed = dest === 'iframe' || ref.includes('/app/app');
+            if (!framed) {
+              log(`admitted bot=${deep.botId} chat=${deep.chatId} (deep link -> shell)`);
+              const shellQuery = `?token=${encodeURIComponent(raw)}&bot=${encodeURIComponent(deep.botId)}&tab=tui`;
+              res.writeHead(302, {
+                'location': `/app/app${shellQuery}`,
+                'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(raw)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+                'cache-control': 'no-store',
+              });
+              return res.end();
+            }
             log(`admitted bot=${deep.botId} chat=${deep.chatId} (deep link)`);
             res.writeHead(302, {
               'location': landingLocationFor(deep.botId, raw, env),
@@ -1749,7 +1768,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         res.writeHead(503, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: 'gateway has no TUI_TTYD_CREDENTIAL' }));
       }
-      return serveTtydPage(req, res, ttydFor(route.bot, env), route.base, ttydCredential);
+      return serveTtydPage(req, res, ttydFor(route.bot, env), route.base, ttydCredential, route.bot);
     }
 
     // Bug board mini app (packet bug-board-miniapp, Node 5). Same initData
@@ -3265,26 +3284,69 @@ export const MEASURE_JS = [
   '})();',
 ].join('\n');
 
+/**
+ * Escape hatch back to the shell for a STANDALONE terminal page (typed
+ * domain, bookmark, pasted tty link). The shell's terminal tab owns nav
+ * through its own header burger, so when framed this stays hidden — exactly
+ * one burger is ever visible per surface. Top-level it shows a ☰ that
+ * returns to the shell's terminal tab, forwarding the page's own ?token=
+ * (cookie-only sessions fall back to the ungated login entry, which heals
+ * through the cookie or shows the sign-in honestly).
+ */
+export const SHELL_ESCAPE_JS = [
+  '(function(){',
+  'try{',
+  'try{if(window.top!==window.self)return;}catch(e){return;}',
+  'var b=document.getElementById("tui-shellbtn");',
+  'if(!b)return;',
+  'b.style.display="block";',
+  'b.addEventListener("click",function(){',
+  'try{',
+  'var q=new URLSearchParams(location.search||"");',
+  'var t=q.get("token")||"";',
+  'var bot=(b.getAttribute("data-bot")||"").trim();',
+  'if(t){location.href="/app/app?token="+encodeURIComponent(t)',
+  '+(bot?"&bot="+encodeURIComponent(bot):"")+"&tab=tui";}',
+  'else{location.href="/app/login?tab=tui";}',
+  '}catch(e){try{location.href="/app/login?tab=tui";}catch(e2){}}',
+  '});',
+  '}catch(e){}',
+  '})();',
+].join('\n');
+
 export const FULLSCREEN_WIDGET = [
   '<script src="https://telegram.org/js/telegram-web-app.js"></script>',
   '<button id="tui-fsbtn" title="fullscreen" style="position:fixed;top:8px;right:8px;'
     + 'z-index:9999;width:40px;height:40px;border-radius:20px;border:1px solid #555;'
     + 'background:rgba(20,20,20,.7);color:#eee;font-size:20px;line-height:1;cursor:pointer;">&#x26F6;</button>',
+  '<button id="tui-shellbtn" data-bot="" title="Mini Apps" aria-label="Menu" style="display:none;position:fixed;top:8px;left:8px;'
+    + 'z-index:9999;width:40px;height:40px;border-radius:20px;border:1px solid #555;'
+    + 'background:rgba(20,20,20,.7);color:#eee;font-size:20px;line-height:1;cursor:pointer;">&#x2630;</button>',
   `<script>${LAYOUT_JS}</script>`,
   `<script>${TOUCH_SCROLL_JS}</script>`,
   `<script>${FULLSCREEN_WIDGET_JS}</script>`,
+  `<script>${SHELL_ESCAPE_JS}</script>`,
 ].join('');
 
 // SHELL_BURGER_BUTTON / withShellBurger retired 2026-10-11: the floating
 // in-frame burger duplicated the shell header burger with different meaning
-// per surface. Every terminal surface (browser picker bar, Telegram slim
-// bar) carries the drawer burger in its own header now.
+// per surface. Every framed terminal surface (browser picker bar, Telegram
+// slim bar) carries the drawer burger in its own header now; the standalone
+// page keeps only the top-level escape above (hidden when framed), so a bare
+// domain or pasted /tty*/ link is never a dead end without nav.
 
-export function withFullscreenButton(html) {
+function escapeAttr(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+export function withFullscreenButton(html, shellBot = '') {
   const body = String(html || '');
   if (body.includes('tui-fsbtn')) return body;
-  if (/<\/body\s*>/i.test(body)) return body.replace(/<\/body\s*>/i, (m) => `${FULLSCREEN_WIDGET}${m}`);
-  return `${body}${FULLSCREEN_WIDGET}`;
+  const widget = shellBot
+    ? FULLSCREEN_WIDGET.replace('data-bot=""', `data-bot="${escapeAttr(shellBot)}"`)
+    : FULLSCREEN_WIDGET;
+  if (/<\/body\s*>/i.test(body)) return body.replace(/<\/body\s*>/i, (m) => `${widget}${m}`);
+  return `${body}${widget}`;
 }
 
 export function withGeometryProbe(html) {
@@ -3292,7 +3354,7 @@ export function withGeometryProbe(html) {
   if (body.includes('tui-measure')) return body;
   return body.replace(/<\/body\s*>/i, (m) => `<script>${MEASURE_JS}</script>${m}`);
 }
-function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredential = '') {
+function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredential = '', shellBot = '') {
   const target = new URL(upstreamPath, ttydBase);
   const upstream = http.request(
     {
@@ -3315,7 +3377,7 @@ function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredentia
         // bodies pass through untouched.
         if ((up.statusCode || 200) === 200) {
           let page = withPhoneViewport(out.toString('utf8'));
-          page = withFullscreenButton(page);
+          page = withFullscreenButton(page, shellBot);
           page = withGeometryProbe(page);
           out = Buffer.from(page, 'utf8');
         }
