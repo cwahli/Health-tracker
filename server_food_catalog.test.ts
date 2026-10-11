@@ -89,6 +89,23 @@ describe('Food Catalog Normalization & Resolution (PASS 2 - R7)', () => {
     expect(balsamicMatch?.nutrients_per_100g.calories).toBeGreaterThan(200);
   });
 
+  it('Bug-50 class: scout-shaped generic variants resolve canonical, never fallback', async () => {
+    // Tape #50 fell to category_fallback for kalamata olives / balsamic
+    // dressing. The resolver must catch scout wording variants (dressing vs
+    // vinaigrette, doubled tokens, canned suffixes) via canonical lookup.
+    for (const q of [
+      'balsamic dressing',
+      'Balsamic Dressing (dressing)',
+      'kalamata olives',
+      'kalamata olives olives canned',
+      'green olives',
+    ]) {
+      const hit = await resolveInternalFood(q);
+      expect(hit, q).not.toBeNull();
+      expect(hit?.source).toBe('canonical_local');
+    }
+  });
+
   it('normalizes arbitrary food names consistently', () => {
     expect(normalizeFoodKey('  Granola Fruit Cup! ')).toBe('granola_fruit_cup');
     expect(normalizeFoodKey('Whole-Wheat Bread')).toBe('whole_wheat_bread');
