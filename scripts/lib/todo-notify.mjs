@@ -87,7 +87,8 @@ export function triagePrompt(action, key) {
     " (2) if it is a card:tag_* key, read `bugctl packet --id '<tag>' --json` and compare sheet vs canonical;",
     ' (3) run scripts/assert-sheet-proof.mjs and scripts/assert-sheet-canonical-parity.mjs from /home/ubuntu/src/Health-tracker IF present (skip with a note if absent — never fail for that);',
     ` (4) append one JSON line to ${TRIAGE_LOG} with {at, action, key, sheet_state, canonical_state, sensors, needs_go, reason}.`,
-    ' (5) if your model reports rate-limited, write that triage line immediately with needs_go=false and reason=rate-limited, then exit — never retry the build loop.',
+    ' (5) read the Additional question column: it is the owner Q&A thread. If the latest line is a [human …] answer to an agent question, treat the row as unblocked and assess continuing the work.',
+    ' (6) if your model reports rate-limited, write that triage line immediately with needs_go=false and reason=rate-limited, then exit — never retry the build loop.',
     'End with one line: TRIAGE OK (nothing to do) or TRIAGE NEEDS-GO (what fix to authorize).',
   ].join(' ');
 }

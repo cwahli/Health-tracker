@@ -86,6 +86,15 @@
      pinned to the result screenshot, so a review can finish where it starts. */
   .result .heart { position: absolute; right: 10px; bottom: 10px; }
   .result .stage.req { flex: none; height: 52vh; border-radius: 8px; border: 1px solid #1e293b; }
+  /* --- agent question: the Need-info thread lives where the review starts,
+     so the owner answers without tab-hopping. -------------------------- */
+  .qa { margin: 14px 0 0; border: 1px solid #b45309; border-radius: 8px; padding: 10px 12px; background: #1c1410; }
+  .qa .colname { color: #fbbf24; }
+  .qa .thread { white-space: pre-wrap; font-size: 14px; margin: 6px 0 10px; }
+  .qa textarea { width: 100%; box-sizing: border-box; background: #0b1220; color: #f8fafc;
+    border: 1px solid #334155; border-radius: 6px; padding: 8px; font: 14px system-ui; resize: vertical; }
+  .qa button.send { margin-top: 8px; background: #b45309; color: #fff; border: 0; border-radius: 6px;
+    padding: 8px 14px; font: 600 14px system-ui; }
   .view .none { color: #64748b; font-size: 13px; }
 
   /* --- image stage: pinch, pan, swipe, all gestures are ours --------- */
@@ -544,6 +553,12 @@
           + (proofs.length > 1 ? '<div class="count">swipe · 1/' + proofs.length + '</div>' : '')
           + '<button class="heart" data-heart="result" title="Done — archive" aria-label="Mark done and archive">🤍</button></figure>'
         : '<p class="none">No proof screenshots filed.</p>')
+      + (it.question
+        ? '<div class="qa"><div class="colname">Agent asks — answer to unblock</div>'
+          + '<div class="thread" id="qa-thread">' + esc(it.question) + '</div>'
+          + '<textarea id="qa-answer" rows="2" placeholder="Type your answer…"></textarea>'
+          + '<button class="send" id="qa-send">Send answer</button></div>'
+        : '')
       + '</div>';
     views += '<div class="view scroll text" data-view="todo">'
       + '<div class="colname">What\u2019s left to do</div><div id="pane-todo">'
@@ -595,6 +610,8 @@
     document.querySelectorAll('#panel .heart').forEach(function (btn) {
       btn.addEventListener('click', function () { onHeart(btn); });
     });
+    var qaSend = document.getElementById('qa-send');
+    if (qaSend) qaSend.addEventListener('click', sendQuestionAnswer);
     document.getElementById('composer').hidden = false;
     setInfo(false);
   }
@@ -762,6 +779,30 @@
         toast(r.status === 401 ? 'Session expired — reload the page, then tap again' : 'Approve failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
       }
     }).catch(function () { state.busy = false; heart.textContent = '🤍'; toast('Approve failed: network'); });
+  }
+
+  function sendQuestionAnswer() {
+    var box = document.getElementById('qa-answer');
+    var it = state.items[state.idx];
+    if (!it || !box || state.busy) return;
+    var text = box.value.trim();
+    if (!text) { toast('Type your answer first'); return; }
+    state.busy = true;
+    api('/review/api/question', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: it.key, text: text }),
+    }).then(function (r) {
+      state.busy = false;
+      if (r.body && r.body.ok) {
+        var thread = document.getElementById('qa-thread');
+        if (thread) thread.textContent = (thread.textContent || '') + '\n' + r.body.stamped;
+        box.value = '';
+        it.question = (it.question || '') + '\n' + r.body.stamped;
+        toast('Answer sent \u2192 the agent continues');
+      } else {
+        toast(r.status === 401 ? 'Session expired — reload the page, then send again' : 'Send failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
+      }
+    }).catch(function () { state.busy = false; toast('Send failed: network'); });
   }
 
   /** Read the picked file as base64 (no data: prefix) for the answer endpoint. */

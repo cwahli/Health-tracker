@@ -1674,5 +1674,31 @@ console.log('assert-tui-gateway:');
   }
 }
 
+// 20b. The question endpoint admits the same token classes as the other
+// verdict endpoints: live and within-grace pass auth (empty body proves
+// it with `missing key` 400), past-grace and garbage are refused.
+{
+  const secret = 'gateway-test-secret-review-question';
+  const env = { TUI_GATEWAY_SECRET: secret, TUI_TOKEN_RENEW_GRACE_SEC: '3600' };
+  const handle = createGateway({ env });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = (token) => fetch(`${base}/review/api/question?token=${encodeURIComponent(token)}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  });
+  try {
+    const live = issueToken({ botId: 'vm', chatId: '6218257274', secret, ttlSec: 900 });
+    assert.equal((await post(live)).status, 400);
+    const stale = issueToken({ botId: 'vm', chatId: '6218257274', secret, ttlSec: 900, now: Date.now() - 1020000 });
+    assert.equal((await post(stale)).status, 400);
+    const dead = issueToken({ botId: 'vm', chatId: '6218257274', secret, ttlSec: 900, now: Date.now() - 4600000 });
+    assert.equal((await post(dead)).status, 401);
+    assert.equal((await post('garbage')).status, 401);
+  } finally {
+    server.close();
+  }
+}
+
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
