@@ -31,7 +31,18 @@
  * - Every spawn attempt appends one JSON line to triage-receipts.jsonl
  *   {at, action, key, route, outcome, detail} where outcome ∈ spawned,
  *   spawn_error, unknown_route, record_only, retry_queued, retry_ok,
- *   retry_requeued, retry_exhausted.
+ *   retry_requeued, retry_exhausted, posted, post_error, session_gone,
+ *   sent, send_error, approved_no_fanout.
+ * - session_gone is terminal: the target session id is closed or unknown
+ *   (SessionNotFound / HTTP 404 — the CLI exits 0, so stdout must be
+ *   inspected, not just the exit code). A gone session never reopens, so
+ *   it is NOT retried; refresh TODO_NOTIFY_SESSION_ID instead.
+ * - TODO_TRIAGE_MODEL pins the model for `opencode run` triage children
+ *   (format provider/model#variant, e.g. acme/worker#high). Unset means
+ *   the box default. Set it when the default model is rate-limited: the
+ *   child otherwise retries its build loop until the 900s timeout burns
+ *   while holding the single-flight lock ("Rate limit exceeded" in
+ *   triage-spawn.log with no triage.jsonl line).
  * - The triage child itself must append its completion line to
  *   triage.jsonl (already required by the prompt). Attempt receipt with
  *   no completion receipt inside TRIAGE_TIMEOUT_SEC = the child died
@@ -76,6 +87,7 @@ export function triagePrompt(action, key) {
     " (2) if it is a card:tag_* key, read `bugctl packet --id '<tag>' --json` and compare sheet vs canonical;",
     ' (3) run scripts/assert-sheet-proof.mjs and scripts/assert-sheet-canonical-parity.mjs from /home/ubuntu/src/Health-tracker IF present (skip with a note if absent — never fail for that);',
     ` (4) append one JSON line to ${TRIAGE_LOG} with {at, action, key, sheet_state, canonical_state, sensors, needs_go, reason}.`,
+    ' (5) if your model reports rate-limited, write that triage line immediately with needs_go=false and reason=rate-limited, then exit — never retry the build loop.',
     'End with one line: TRIAGE OK (nothing to do) or TRIAGE NEEDS-GO (what fix to authorize).',
   ].join(' ');
 }
@@ -97,6 +109,10 @@ export function triagePrompt(action, key) {
  *   TODO_NOTIFY_SESSION_ID, set to the live conversation — it MUST be
  *   refreshed when the conversation changes, or verdicts land in a dead
  *   or wrong session. This is how a verdict posts directly into chat.
+ *   A dead id receipts `session_gone` (terminal, never retried).
+ * - TODO_TRIAGE_MODEL (optional): model for `opencode run` triage in
+ *   provider/model#variant form. Validated to safe characters only;
+ *   invalid values are ignored (box default used).
  * - log: record-only. No spawn, no send; inbox + receipt still written.
  */
 export const KNOWN_LANES = new Set(['opencode', 'telegram', 'session', 'log']);
@@ -111,6 +127,28 @@ export function routeFor(env = process.env) {
 
 export function verdictText(action, key) {
   return `Review ${action}: ${key} — triage assessing, trail in sheet-todo-watch.`;
+}
+
+/**
+ * The `opencode api post` CLI exits 0 even when the session is gone (it
+ * prints SessionNotFoundError + HTTP 404 as the response body), so the
+ * exit code cannot tell posted from gone — stdout must be inspected.
+ */
+export function isSessionGoneText(s) {
+  return /sessionnotfound|session not found|no such session|unknown session|\b404\b/i.test(String(s || ''));
+}
+
+/**
+ * Optional model pin for triage children (TODO_TRIAGE_MODEL, form
+ * provider/model#variant). Strict allowlist — never interpolate raw env
+ * into the spawn argv. Returns [] (box default) when unset or invalid.
+ */
+export function triageModelArgs(env = process.env) {
+  const m = String(env.TODO_TRIAGE_MODEL || '').trim();
+  if (!m) return [];
+  if (m.length > 120 || !m.includes('/')) return [];
+  if (!/^[A-Za-z0-9_./#:@+~=-]+$/.test(m)) return [];
+  return ['--model', m];
 }
 
 export function retryBackoffSec(tries) {
@@ -165,7 +203,9 @@ function recordAndSpawn({ inboxType, key, prompt, source, env, deps }) {
     }
     if (lane === 'session') {
       const r = attemptSessionPost({ action: inboxType, key, env, deps, receipt });
-      if (!r.ok) enqueueRetry({ route: lane, action: inboxType, key, tries: 0, now, readRetry, writeRetry, receipt });
+      // A gone session never reopens: terminal, no retry. Anything else
+      // transient keeps the bounded retry.
+      if (!r.ok && !r.gone) enqueueRetry({ route: lane, action: inboxType, key, tries: 0, now, readRetry, writeRetry, receipt });
       continue;
     }
     const r = attemptSpawn({ key, prompt, env, deps, receipt });
@@ -189,10 +229,19 @@ export function attemptSessionPost({ action, key, env, deps, receipt }) {
     return { ok: false, reason: 'no session id' };
   }
   const text = `[verdict] Review ${String(action || '').replace(/^review_/, '')}: ${key} — triage assessing, trail in sheet-todo-watch.`;
+  const gone = (detail) => {
+    receipt('session_gone', `session ${sessionId.slice(0, 12)}… gone — refresh TODO_NOTIFY_SESSION_ID (${detail})`.slice(0, 200));
+    return { ok: false, gone: true, reason: 'session gone' };
+  };
   try {
-    execSyncFn('opencode', ['api', 'post', `/api/session/${sessionId}/prompt`, '--data', JSON.stringify({ text })],
+    const out = execSyncFn('opencode', ['api', 'post', `/api/session/${sessionId}/prompt`, '--data', JSON.stringify({ text })],
       { timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'] });
+    const body = out == null ? '' : String(out);
+    if (isSessionGoneText(body)) return gone('SessionNotFound');
   } catch (err) {
+    const parts = [err && err.message, err && err.stderr, err && err.stdout]
+      .map((p) => (p == null ? '' : String(p))).join('\n');
+    if (isSessionGoneText(parts)) return gone('SessionNotFound');
     const detail = String((err && err.message) || err).slice(0, 200);
     receipt('post_error', detail);
     return { ok: false, reason: detail };
@@ -274,12 +323,14 @@ function attemptSpawn({ key, prompt, env, deps, receipt }) {
     openLog = (p) => fs.openSync(p, 'a'),
   } = deps;
   const home = os.homedir();
+  const modelArgs = triageModelArgs(env);
+  const modelFlag = modelArgs.length ? ` --model ${modelArgs[1]}` : '';
   try {
     const logFd = openLog(path.join(STATE_DIR, 'triage-spawn.log'));
     const child = spawnFn(
       'flock',
       ['-n', LOCK_PATH, 'timeout', String(TRIAGE_TIMEOUT_SEC),
-        'opencode', 'run', '--auto', '--title', `sheet-todo triage ${key.slice(0, 40)}`, prompt],
+        'opencode', 'run', '--auto', ...modelArgs, '--title', `sheet-todo triage ${key.slice(0, 40)}`, prompt],
       {
         detached: true,
         stdio: ['ignore', logFd, logFd],
@@ -293,7 +344,7 @@ function attemptSpawn({ key, prompt, env, deps, receipt }) {
     receipt('spawn_error', detail);
     return { ok: false, reason: detail };
   }
-  receipt('spawned', `flock -n ${LOCK_PATH} timeout ${TRIAGE_TIMEOUT_SEC} opencode run`);
+  receipt('spawned', `flock -n ${LOCK_PATH} timeout ${TRIAGE_TIMEOUT_SEC} opencode run${modelFlag}`);
   return { ok: true, reason: 'triage spawned' };
 }
 
@@ -348,6 +399,12 @@ function drainRetries({ readRetry, writeRetry, now, receiptFor, attempt }) {
     ? triagePrompt(entry.action.replace(/^review_/, ''), entry.key)
     : undefined;
   const r = attempt({ route: entry.route || 'opencode', key: entry.key, prompt, action: entry.action, tries: entry.tries });
+  if (r && r.gone) {
+    // Terminal: the target session is gone and never reopens. Drop the
+    // entry (the session_gone receipt is already written) — no requeue.
+    writeRetry(rest);
+    return;
+  }
   if (entry.route === 'telegram') {
     // Fire-and-forget: the entry is dropped now; async settle re-enqueues
     // itself on failure, or writes 'sent' on success.
