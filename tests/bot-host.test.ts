@@ -3962,24 +3962,20 @@ describe('TG TUI failproof sync — no split sessions, no false same-session cla
     expect(exitAt).toBeLessThan(tmuxAt);
   });
 
-  it('/tui offers no button when the chat has no session to attach to', () => {
-    // Live 2026-10-05: /new deleted the chat's session row, /tui ran 20s later,
-    // wrote tui-open.json with sessionId: null and sent the button anyway, and
-    // the tap printed the attach script's refusal on a phone. The gate has to sit
-    // BEFORE the snapshot write (a null session recorded looks like a fact about
-    // the chat) and before the button.
+  it('bare /tui answers status plus a web pointer and offers no terminal button', () => {
+    // Web-only 2026-10-11: the terminal moved to the browser shell. Bare
+    // /tui answers the pane status and a pointer — it never writes
+    // tui-open.json and never sends an Open-the-TUI button. status/off/
+    // refresh above are unchanged.
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    const gateAt = src.indexOf('if (!tuiCanOpen)');
-    const snapshotAt = src.indexOf("'tui-open.json'");
-    const buttonAt = src.indexOf("text: '⌨️ Open the TUI'");
-    expect(gateAt).toBeGreaterThan(-1);
-    expect(snapshotAt).toBeGreaterThan(gateAt);
-    expect(buttonAt).toBeGreaterThan(gateAt);
-    // It answers in the chat and stops there — a `return` before the write.
-    expect(src.slice(gateAt, snapshotAt)).toContain('return;');
-    expect(src.slice(gateAt, snapshotAt)).toContain('tuiNoSessionAdvice');
-    // The advice names the action that fixes it, once, for all three answers
-    // that used to promise a terminal.
+    expect(src).not.toContain("text: '⌨️ Open the TUI'");
+    expect(src).not.toContain("'tui-open.json'");
+    expect(src).toContain('tuiStatusLine(config.id, tuiSessionId)');
+    expect(src).toContain('https://app.health-tracker.co.uk/app/');
+    // The web UI link minter stays: opencode lanes still get a fresh link.
+    expect(src).toContain('personalWebUiLink');
+    expect(src).toContain('freshWebLink');
+    // Pane management keeps its honest advice for sessionless chats.
     expect(src).toContain('const tuiNoSessionAdvice =');
     expect(src).toMatch(/tuiNoSessionAdvice = 'Send me any message first/);
     // The predicate is the shared decision, not a private re-implementation, and
@@ -3995,10 +3991,10 @@ describe('TG TUI failproof sync — no split sessions, no false same-session cla
     // conditionals on the one predicate: nothing to refresh, and pane closed.
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
     expect(src.match(/tuiCanOpen\s*\?/g)?.length).toBe(2);
-    // Both conditionals fall back to the same honest advice, and so does the
-    // /tui gate: the const plus its four call sites, and no fifth promise.
-    // (The fourth site is the sessionless-open guard on the /tui open path.)
-    expect(src.match(/tuiNoSessionAdvice/g)?.length).toBe(5);
+    // Both conditionals fall back to the same honest advice, and so does one
+    // refresh branch: the const plus its two call sites, and no third promise.
+    // (The open-path guard and its duplicate left with the web-only strip.)
+    expect(src.match(/tuiNoSessionAdvice/g)?.length).toBe(3);
   });
 
   it('/new stops promising a terminal it cannot open yet', () => {

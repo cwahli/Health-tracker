@@ -38,6 +38,8 @@ gate:
 
 **Go recorded 2026-10-09 (P1); whole-work go recorded 2026-10-09 by operator ("do the whole work"). Do not ask the user.** R-14.1 is closed, which was this packet's own gate. R-16, BOT-24, and BOT-26 are cleared and are not a sequencing stop. An open PR on `plan/ROADMAP.md` blocks that file only.
 
+**Web-only 2026-10-11 (owner):** bot mini-app buttons are stripped — `/tui` open, `/bugs`, `/fleet`, `/forge`, `/app`, `/review` answer web pointers to `app.health-tracker.co.uk/app/`; `/tui status/off/refresh` and the `/web` UI link stay. `tui.` Caddy block redirects to `app.`. The gateway keeps serving the shell for browsers; P5's per-bot ttyd teardown is unchanged work.
+
 P1 landed on main via #652 (registry + htk exchange) — see learning `meta-p1-stale-premise-20261009`. This go covers **P2+P3+P4**: shell, per-tab migration, single host. P5 (decommission) needs its live phone proof before any delete. Still forbidden: `scripts/lib/free-lanes.mjs`, `scripts/lib/work-session.mjs`, `bots/registry.json`; `bot-host.mjs` / `tui-gateway.mjs` only where a P3 node names them.
 
 ## Journey

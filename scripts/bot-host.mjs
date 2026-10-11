@@ -1632,10 +1632,6 @@ function missingCount(rows) {
 
 export const MAX_FOLLOWUPS = 5;
 const followupQueues = new Map();
-// The tunnel URL this process last handed out. A quick tunnel's hostname changes
-// on every reconnect, so this is how /tui knows an older button is now dead.
-let lastMiniappUrl = '';
-let lastBugsUrl = '';
 
 export function queuedFollowups(chatId) {
   return followupQueues.get(String(chatId)) || [];
@@ -3581,293 +3577,67 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         }
         return;
       }
-      // The actual TUI: ttyd serves a real PTY and mounts it under the same
-      // tunnel and the same login, so this is a terminal you type into from
-      // inside Telegram. It attaches to THIS chat's session in THIS checkout
-      // (resolved per attach by tui-attach.sh).
-      //
-      // WHICH tool it launches follows the chat's effective lane, not the bot's
-      // registry default. It used to be OpenCode unconditionally, so a chat on
-      // Cline opened an OpenCode TUI on a stale opencode session id — a
-      // different agent on a different thread from the one answering here.
-      //
-      // There is deliberately no /web any more. `opencode web` is a chat client,
-      // not a terminal, and every attempt to make it useful from a phone hit a
-      // wall that was the app's own doing: HTTP Basic auth a WebView cannot
-      // answer, a project list kept in browser storage so a fresh WebView opens
-      // empty, and no deep link that survives a tunnel hostname change. The TUI
-      // covers the same ground and is strictly better on a phone; browsing older
-      // sessions is a /sessions picker away inside the TUI itself.
-      // A gateway URL wins over the phone's quick-tunnel file: it is this host's
-      // own terminal, on its own hostname, and it is the one that is not a
-      // dead hostname waiting to happen.
-      const tuiUrl = readTuiUrl();
-      if (!tuiUrl) {
-        // Say what is actually true. This used to blame a phone tunnel, which
-        // is only the story on the phone: the URL file's default path is a
-        // Termux path on EVERY host, so the path cannot be the tell — the
-        // platform can (the same markers freemodels.mjs uses for the mobile
-        // lane). Measured 2026-09-30: vm3, a VM bot with no gateway URL, was
-        // told its "phone tunnel" was down — a tunnel it has no relationship
-        // with.
-        const onPhone = Boolean(process.env.TERMUX_VERSION || process.env.ANDROID_ROOT);
-        await api.sendMessage(chatId, onPhone
-          ? '⌨️ TUI is offline — the phone tunnel is down. It restarts itself; try /tui again in a minute.'
-          : [
-            '⌨️ TUI is not served from this machine yet.',
-            'The phone publishes its terminal through a quick tunnel whose hostname changes on every reconnect, and this bot has no URL for it. The VM-side terminal is a separate gateway on its own hostname (`plan/TUI_IMPLEMENTATION.md` step 2), gated on Telegram `initData` so a public PTY is never anonymous.',
-            'Until that gateway answers there is no terminal to open here. `/tx on` still gives you the live tool feed in this chat.',
-          ].join('\n'));
-        return;
-      }
-      // A quick tunnel's hostname changes on every reconnect, so a button sent
-      // in an older message opens a tunnel that no longer exists and the WebView
-      // fails with nothing to explain it. Say so rather than let the tap look
-      // broken.
-      const moved = lastMiniappUrl && lastMiniappUrl !== tuiUrl;
-      lastMiniappUrl = tuiUrl;
-      // tuiSurface / tuiCanOpen are resolved at the top of this case, with the
-      // session they depend on (status, off and refresh all need it).
-      if (!tuiSurface.terminal) {
-        // An API-only lane has no screen to attach to. Handing it a PTY anyway
-        // would be a scraped badge, not a terminal.
-        await api.sendMessage(chatId, [
-          `⌨️ No terminal for this chat — it is on \`${tuiSurface.tool}\`, which answers in one shot and has no session to attach to.`,
-          '`/tx on` still gives you the live tool feed here, and `/model_free` moves the chat to a lane with a real terminal if you want one.',
-        ].join('\n'));
-        return;
-      }
-      // No session to share means no terminal worth opening: tui-attach.sh
-      // refuses a sessionless opencode open (live 2026-10-04), so the button
-      // below would promise a conversation and deliver that refusal on the
-      // user's screen. Say it here, where the answer belongs. Asked BEFORE the
-      // tui-open.json write so a null session is never recorded as a fact about
-      // the chat — that snapshot with `sessionId: null` is what an auditor reads
-      // afterwards and cannot tell from a broken record.
-      //
-      // Live 2026-10-05: `/new` cleared the chat's session row at 10:54:23,
-      // `/tui` ran at 10:54:43, wrote the null snapshot and sent the button,
-      // and the tap 20s later printed "No chat session recorded yet — nothing
-      // shared to attach to" on a phone. tuiSessionId was already resolved at the
-      // top of this case; nothing read it on the open path.
-      if (!tuiCanOpen) {
-        await api.sendMessage(chatId, [
-          '⌨️ There is nothing for the terminal to attach to yet — this chat has no session.',
-          tuiNoSessionAdvice,
-          '(`/new` puts you here on purpose: a fresh chat has no session until your next message.)',
-        ].join('\n'));
-        return;
-      }
-      // No session to share means no terminal worth opening: tui-attach.sh
-      // refuses a sessionless opencode open (live 2026-10-04), so the button
-      // below would promise a conversation and deliver that refusal on the
-      // user's screen. Say it here, where the answer belongs. Asked BEFORE the
-      // tui-open.json write so a null session is never recorded as a fact about
-      // the chat — that snapshot with `sessionId: null` is what an auditor reads
-      // afterwards and cannot tell from a broken record.
-      //
-      // Live 2026-10-05: `/new` cleared the chat's session row at 10:54:23,
-      // `/tui` ran at 10:54:43, wrote the null snapshot and sent the button,
-      // and the tap 20s later printed "No chat session recorded yet — nothing
-      // shared to attach to" on a phone. tuiSessionId was already resolved at the
-      // top of this case; nothing read it on the open path.
-      if (!tuiCanOpen) {
-        await api.sendMessage(chatId, [
-          '⌨️ There is nothing for the terminal to attach to yet — this chat has no session.',
-          tuiNoSessionAdvice,
-          '(`/new` puts you here on purpose: a fresh chat has no session until your next message.)',
-        ].join('\n'));
-        return;
-      }
-      // Record which chat opened the TUI, which lane it is on, and the session
-      // that lane produced. ttyd runs one static command per bot, so it cannot
-      // be told the chat any other way — and tui-attach.sh reading only ids[0]
-      // attached every chat to whichever conversation happened to be first in
-      // the map. `surface` is what stops the attach from launching OpenCode for
-      // a Cline chat; `model` is the lane's own model so the screen names the
-      // model actually answering here. Best-effort and never fatal: a missing
-      // write just leaves the legacy behaviour in place.
-      try {
-        writeJson(path.join(stateDir(config.id), 'tui-open.json'), {
-          chatId: String(chatId),
-          surface: tuiSurface.surface,
-          model: effective(config, prefs, chatId).model,
-          sessionId: tuiSurface.surface === 'cline'
-            ? loadClineSessions(config.id).get(chatId) || null
-            : tuiSessionId,
-          // The workspace, so tui-attach.sh opens THIS project and not the static
-          // TUI_WORKTREE in its service file. See the script for why that guess
-          // was showing one project's conversation under another's button.
-          workspace: tuiWorkspace,
-          at: new Date().toISOString(),
-        });
-      } catch {
-        // fall through to the button below
-      }
-      // Split solution (plan/WEBUI_MIGRATION.md): opencode chats get the DOM web
-      // UI first (native scroll, real text, same sessions via serve) with the
-      // terminal as fallback; every other lane keeps the TUI button only —
-      // cline/grok/freebuff have no web UI to point at.
+      // The terminal moved to the web (owner call 2026-10-11): no Mini App
+      // button here any more. Bare /tui answers the pane status plus the web
+      // UI link when this lane has one; the full terminal lives behind the
+      // pointer below. status/off/refresh above are unchanged.
       const webUiUrl = tuiSurface.sharedSession ? readWebUiUrl() : '';
       const freshWebLink = webUiUrl
         ? personalWebUiLink({ webUrl: webUiUrl, botId: config.id, chatId, secret: gatewaySecretFromHostEnv() })
         : '';
-      const openButtons = [
-        ...(freshWebLink
-          ? [{ text: '🌐 Open web UI', url: freshWebLink }]
-          : webUiUrl
-            ? [{ text: '🌐 Open web UI', web_app: { url: `${webUiUrl}/?bot=${config.id}` } }]
-            : []),
-        { text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } },
-      ];
       await api.sendMessage(chatId, [
-        moved ? '⚠️ *The tunnel was reconnected*, so any earlier /tui button is dead — use this one.' : null,
-        tuiSurface.sharedSession
-          ? `⌨️ *${tuiSurface.label}* — a real terminal, driven by touch, attached to *this* conversation in \`${tuiWorkspace}\`.`
-          : [
-            `⌨️ *${tuiSurface.label}* — a real ${tuiSurface.tool} terminal in \`${tuiWorkspace}\`, resumed onto the last ${tuiSurface.tool} thread for this chat.`,
-            `This chat is on ${tuiSurface.tool} (\`${shortProviderModel(effective(config, prefs, chatId).model)}\`), so that is the screen you get — not opencode.`,
-            `_Cline cannot resume a thread headlessly, so this is the last ${tuiSurface.tool} thread and not the one I answer each new message in. Work you type here is yours; it does not come back to this chat._`,
-          ].join('\n'),
-        tuiSurface.sharedSession
-          ? 'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.'
-          : 'It runs under tmux, so closing the Mini App keeps your place, and you can reopen the same thread whenever you want.',
-        'We both keep working with it open. The terminal waits for a turn I am running, and I wait for a turn you started — one at a time, never two writers at once. Opening it proves you are the Telegram user this chat belongs to, so there is no password to remember.',
-        ...(webUiUrl ? [`🌐 Prefer reading over typing? The *web UI* shows this same conversation as a normal page — scrolls natively, no terminal frames.${freshWebLink ? ' The button above is minted fresh for this tap and lasts 15 minutes.' : ''}`] : []),
-      ].filter(Boolean).join('\n'), {
-        reply_markup: { inline_keyboard: [openButtons] },
+        `⌨️ ${tuiStatusLine(config.id, tuiSessionId)}`,
+        'The terminal moved to the web — open https://app.health-tracker.co.uk/app/ in a browser and sign in, then pick the Terminal tab.',
+        ...(webUiUrl ? [`🌐 Prefer reading over typing? The *web UI* shows this same conversation as a normal page.${freshWebLink ? ' The button below is minted fresh for this tap and lasts 15 minutes.' : ''}`] : []),
+      ].join('\n'), {
+        ...(freshWebLink
+          ? { reply_markup: { inline_keyboard: [[{ text: '🌐 Open web UI', url: freshWebLink }]] } }
+          : webUiUrl
+            ? { reply_markup: { inline_keyboard: [[{ text: '🌐 Open web UI', web_app: { url: `${webUiUrl}/?bot=${config.id}` } }]] } }
+            : {}),
       });
       return;
     }
 
     case 'bugs': {
-      // Shared bug board mini app (packet bug-board-miniapp, Node 5). Same
-      // web_app button pattern as /tui, served by the same gateway host under
-      // /bugs/ behind the initData door. Scoped to the bug ticket bot: it owns
-      // the canonical card list.
-      // Served from bot-host bots that hold a gateway token. vm is the
-      // master bot and validates today; bug_ticket stays listed so the scope
-      // is correct if it ever gains a bot-host surface (it is a hermes bot
-      // and has no bot-host command path).
-      const BOARD_BOTS = ['vm', 'bug_ticket'];
-      if (!BOARD_BOTS.includes(config.id)) {
-        await api.sendMessage(chatId, '🐛 The bug board lives on the VM bot — ask it for /bugs and it will hand you the button.');
-        return;
-      }
-      const bugsGatewayUrl = readTuiUrl();
-      if (!bugsGatewayUrl) {
-        const onPhone = Boolean(process.env.TERMUX_VERSION || process.env.ANDROID_ROOT);
-        await api.sendMessage(chatId, onPhone
-          ? '🐛 Bug board is offline — the phone tunnel is down. It restarts itself; try /bugs again in a minute.'
-          : '🐛 Bug board is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /bugs again.');
-        return;
-      }
-      const boardUrl = `${bugsGatewayUrl}/bugs/?bot=${config.id}`;
-      const moved = lastBugsUrl && lastBugsUrl !== boardUrl;
-      lastBugsUrl = boardUrl;
-      // The card list below is read live from the store by this handler, not
-      // composed by the model — so its count is the same number the board
-      // shows, even for a stale session that would otherwise answer from chat
-      // history.
+      // The board moved to the web (owner call 2026-10-11): no Mini App
+      // button. The card list below is still read live from the store by this
+      // handler, not composed by the model — so its count is the same number
+      // the board shows, even for a stale session that would otherwise answer
+      // from chat history.
       const liveList = await bugsListText();
       await api.sendMessage(chatId, [
-        moved ? '⚠️ *The tunnel was reconnected*, so any earlier /bugs button is dead — use this one.' : null,
         liveList,
-        'What changes here lands in the same list the site shows.',
-      ].filter(Boolean).join('\n'), {
-        reply_markup: { inline_keyboard: [[{ text: '🐛 Open bug board', web_app: { url: boardUrl } }]] },
-      });
+        'Open the board on the web: https://app.health-tracker.co.uk/app/ — pick the Bugs tab.',
+      ].join('\n'));
       return;
     }
 
     case 'forge': {
-      // One-click bot forge (Mini App). Same web_app button + initData door as
-      // /tui and /bugs: the page calls the gateway's /forge/api/* and the whole
-      // creation is the single `runForge` pipeline. Scoped to the master bot —
-      // it is the one that holds a gateway token and owns the fleet.
-      const FORGE_BOTS = ['vm'];
-      if (!FORGE_BOTS.includes(config.id)) {
-        await api.sendMessage(chatId, '🛠 The bot forge lives on the master bot — ask it for /forge and it will hand you the button.');
-        return;
-      }
-      const forgeGatewayUrl = readTuiUrl();
-      if (!forgeGatewayUrl) {
-        await api.sendMessage(chatId, '🛠 Bot forge is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /forge again.');
-        return;
-      }
-      const forgeUrl = `${forgeGatewayUrl}/forge?bot=${config.id}`;
-      await api.sendMessage(chatId, [
-        '🛠 *Bot forge* — type a name, get a working bot.',
-        'One run gets the token, writes the registry row, syncs the env files, wires supervision, proves the token with `getMe`, and enables it — you never edit a `.env` file.',
-        'With a userbot session it asks @BotFather itself; otherwise paste the token @BotFather gave you into the page.',
-      ].join('\n'), {
-        reply_markup: { inline_keyboard: [[{ text: '🛠 Open bot forge', web_app: { url: forgeUrl } }]] },
-      });
+      // Web-only (owner call 2026-10-11): the forge page lives behind the
+      // shell now; the bot answers the pointer, no button.
+      await api.sendMessage(chatId, '🛠 The bot forge moved to the web: https://app.health-tracker.co.uk/app/ — open in a browser, sign in, and pick the Forge tab.');
       return;
     }
 
     case 'fleet': {
-      // Dynamic fleet dashboard (Mini App). Same web_app button + initData door
-      // as /tui, /bugs, and /forge: served by the gateway under /fleet/.
-      // Served by every bot-host bot: the button carries ?bot=<this bot> and
-      // the gateway validates the opener's initData against that bot's token
-      // (auto-matching any token it holds), so no per-bot allowlist lives here.
-      const fleetGatewayUrl = readTuiUrl();
-      if (!fleetGatewayUrl) {
-        await api.sendMessage(chatId, '📋 Fleet dashboard is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /fleet again.');
-        return;
-      }
-      const fleetUrl = `${fleetGatewayUrl}/fleet/?bot=${config.id}`;
-      await api.sendMessage(chatId, [
-        '📋 *Fleet Dashboard*',
-        'Live tickets from PM sheet, terminal panes across all locations (Mac, VM, Mobile, Collab), and fleet bot activity.',
-      ].join('\n'), {
-        reply_markup: { inline_keyboard: [[{ text: '📋 Open Fleet Dashboard', web_app: { url: fleetUrl } }]] },
-      });
+      // Web-only (owner call 2026-10-11): the fleet dashboard lives behind
+      // the shell now; the bot answers the pointer, no button.
+      await api.sendMessage(chatId, '📋 The Fleet Dashboard moved to the web: https://app.health-tracker.co.uk/app/ — open in a browser, sign in, and pick the Fleet tab.');
       return;
     }
 
     case 'app': {
-      // Meta shell (META-1 P2). Same web_app button + initData door as the
-      // other minis: served by the gateway under /app/. Bot-agnostic — every
-      // bot-host bot serves it, the button carries ?bot=<this bot>, and the
-      // burger inside switches tabs without new buttons.
-      const appGatewayUrl = readTuiUrl();
-      if (!appGatewayUrl) {
-        await api.sendMessage(chatId, '▦ Mini-app shell is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /app again.');
-        return;
-      }
-      const appUrl = `${appGatewayUrl}/app/?bot=${config.id}`;
-      await api.sendMessage(chatId, [
-        '▦ *Mini Apps*',
-        'Bugs, Fleet, Review, Terminal and more behind one burger menu. In a browser instead? Open the same link and sign in with Google.',
-      ].join('\n'), {
-        reply_markup: { inline_keyboard: [[{ text: '▦ Open Mini Apps', web_app: { url: appUrl } }]] },
-      });
+      // Web-only (owner call 2026-10-11): the shell is a browser page now;
+      // the bot answers the pointer, no button.
+      await api.sendMessage(chatId, '▦ Mini Apps moved to the web: https://app.health-tracker.co.uk/app/ — open in a browser and sign in; the burger menu switches tabs.');
       return;
     }
 
     case 'review': {
-      // Human review queue (Mini App). Same web_app button + initData door
-      // as /fleet, served by the gateway under /review/. Unlike the fleet
-      // board it is NOT scoped to the VM bot: every bot serves its own
-      // button, and the gateway accepts initData from any configured bot.
-      // Agents set a row's Status to `review` when work is ready for human
-      // eyes; the app shows proof screenshots over the original request, and
-      // 👍 archives the row while comments append back to the sheet.
-      const reviewGatewayUrl = readTuiUrl();
-      if (!reviewGatewayUrl) {
-        await api.sendMessage(chatId, '⭐ Review queue is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /review again.');
-        return;
-      }
-      const reviewUrl = `${reviewGatewayUrl}/review/?bot=${config.id}`;
-      await api.sendMessage(chatId, [
-        '⭐ *Review Queue*',
-        'Work marked ready for review: proof screenshots over the original request.',
-        '👍 archives a finished item; 💬 sends feedback back to the sheet.',
-      ].join('\n'), {
-        reply_markup: { inline_keyboard: [[{ text: '⭐ Open Review Queue', web_app: { url: reviewUrl } }]] },
-      });
+      // Web-only (owner call 2026-10-11): the review queue lives behind the
+      // shell now; the bot answers the pointer, no button.
+      await api.sendMessage(chatId, '⭐ The Review Queue moved to the web: https://app.health-tracker.co.uk/app/ — open in a browser, sign in, and pick the Review tab. 👍 archives a finished item; 💬 sends feedback back to the sheet.');
       return;
     }
 
