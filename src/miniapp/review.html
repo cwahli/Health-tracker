@@ -85,6 +85,7 @@
   /* The point of truth carries its own Done: the same heart as the stage,
      pinned to the result screenshot, so a review can finish where it starts. */
   .result .heart { position: absolute; right: 10px; bottom: 10px; }
+  .result .stage.req { flex: none; height: 52vh; border-radius: 8px; border: 1px solid #1e293b; }
   .view .none { color: #64748b; font-size: 13px; }
 
   /* --- image stage: pinch, pan, swipe, all gestures are ours --------- */
@@ -534,7 +535,8 @@
       + '<div class="colname">Original request</div><div id="pane-request">' + esc(it.originalRequest) + '</div>'
       + (firstProof
         ? '<figure class="result"><div class="colname">Result</div>'
-          + '<img src="' + proofUrl(it.key, firstProof.id) + '" alt="result screenshot" loading="lazy">'
+          + '<div class="stage req"><div class="track"><div class="slide"><div class="zoom">'
+          + '<img src="' + proofUrl(it.key, firstProof.id) + '" alt="result screenshot" loading="lazy"></div></div></div></div>'
           + '<button class="heart" data-heart="result" title="Done — archive" aria-label="Mark done and archive">🤍</button></figure>'
         : '<p class="none">No proof screenshots filed.</p>')
       + '</div>';
@@ -580,6 +582,8 @@
     panel.innerHTML = views + '<div class="view on" data-view="proof">' + stage + '</div>';
 
     view = proofs.length ? new PictureView(document.getElementById('track'), document.getElementById('imgcount')) : null;
+    var reqTrack = document.querySelector('[data-view="request"] .stage.req .track');
+    if (reqTrack) new PictureView(reqTrack, null);
     // Every heart archives the same item: the stage's and the result's are
     // bound by class (ids stay unique), so Done works where the review starts.
     document.querySelectorAll('#panel .heart').forEach(function (btn) {
@@ -598,7 +602,7 @@
       infoView.classList.toggle('on', state.infoOpen);
       infoView.hidden = !state.infoOpen;
     }
-    var stage = document.querySelector('.stage');
+    var stage = document.querySelector('[data-view="proof"] .stage');
     if (stage) stage.classList.toggle('full', !state.infoOpen);
     document.querySelectorAll('#tabs button').forEach(function (b) {
       b.classList.toggle('on', state.infoOpen && b.getAttribute('data-tab') === 'info');
@@ -607,7 +611,7 @@
 
   function showProof() {
     var proof = document.querySelector('[data-view="proof"]');
-    var stage = document.querySelector('.stage');
+    var stage = document.querySelector('[data-view="proof"] .stage');
     if (stage) stage.hidden = false;
     document.querySelectorAll('#panel .view').forEach(function (v) {
       if (v !== proof) v.classList.remove('on');
@@ -623,7 +627,7 @@
     state.tab = name;
     state.infoOpen = false;
     var proof = document.querySelector('[data-view="proof"]');
-    var stage = document.querySelector('.stage');
+    var stage = document.querySelector('[data-view="proof"] .stage');
     var infoView = document.querySelector('#panel .view[data-view="info"]');
     if (infoView) { infoView.classList.remove('on'); infoView.hidden = true; }
     if (stage) { stage.hidden = true; stage.classList.add('full'); }
