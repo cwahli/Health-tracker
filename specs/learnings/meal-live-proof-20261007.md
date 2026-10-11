@@ -57,3 +57,9 @@ A meal ticket is not reviewable until all three hold:
    spinners, skeletons, or placeholders. The capture script asserts
    loaded state (network idle + per-image complete) before shooting;
    a loading-state capture is not proof and goes back for re-capture.
+5. **Download-back before review.** After any batch Drive upload,
+   download every file back and confirm the bytes render before the
+   row goes to review — a clean folder listing is metadata only and
+   can mask a phantom (unreplicated blob reads as notFound) for
+   several minutes. The caption file carries name + bytes + md5 so a
+   ghost is a two-minute diagnosis, not a re-capture.

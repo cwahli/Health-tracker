@@ -529,6 +529,24 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   [verdict] message into this chat. CI note: Reverts lines must be
   one-per-line (parser reads line-leading only).
 
+## Card-19 original-meal wave closed (2026-10-11 ~evening UTC)
+
+- Human directive executed literally: original failing meal FOUND in
+  the packet's own repro curl (oats + green grapes, job match) — the
+  "unavailable" claim was wrong, no substitute used. Defect packed,
+  repro exit 1 → 0 across the fix line, gates 8/8, zero app-code
+  change (fix = already-merged #452, not reimplemented).
+- Two live re-files on the real picture + verbatim text; all 4 PNGs
+  viewed by verifier (entry, sent, history with both completions,
+  nutrients with grapes row). Iteration round: 03 ghosted as a
+  Drive phantom (propagation lag) → agent re-uploaded byte-identical,
+  verifier confirmed md5 + pixels. Minor: two identical 03 copies
+  top-level (harmless, disclosed, not worth another round).
+- Rule earned + encoded same turn: download-back before review
+  (doc rule 5 + standing needle, guard green). Listing ≠ proof.
+- ENDORSED — recommend approve. Sensor row 5 PASS, branch clean,
+  PR #743 draft.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;

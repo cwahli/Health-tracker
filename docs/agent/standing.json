@@ -362,7 +362,8 @@
           "job_id cited visibly",
           "input (entry picture+text) through output (analysis view)",
           "superseded/",
-          "Captured loaded, not loading"
+          "Captured loaded, not loading",
+          "Download-back before review"
         ],
         "scripts/assert-sheet-proof.mjs": [
           "fileCardNumber",
