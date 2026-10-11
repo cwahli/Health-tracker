@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { wakeEnabled, triagePrompt, workerPrompt, planFor, lockFor, notifyTodoEvent, routeFor, retryBackoffSec, attemptSessionPost, isSessionGoneText, triageModelArgs, LOCK_PATH } from './todo-notify.mjs';
+import { wakeEnabled, triagePrompt, workerPrompt, planFor, lockFor, notifyTodoEvent, routeFor, retryBackoffSec, attemptSessionPost, isSessionGoneText, triageModelArgs, workerModelArgs, workerAgentArgs, sessionNoteFor, pendingNote, LOCK_PATH } from './todo-notify.mjs';
 
 const tmpState = () => fs.mkdtempSync(path.join(os.tmpdir(), 'todo-notify-'));
 
@@ -96,6 +96,7 @@ const harness = (env = { TODO_AGENT_NOTIFY: '1' }) => {
       append: (l) => inbox.push(l),
       openLog: () => 'ignore',
       execSyncFn: () => Buffer.from(''),
+      persistFn: () => ({ memory: true, file: true }),
       receiptSink: (r) => receipts.push(r),
       readRetry: () => queue.map((e) => ({ ...e })),
       writeRetry: (entries) => { queue = entries.map((e) => ({ ...e })); },
@@ -255,13 +256,14 @@ test('session lane posts the verdict into the configured session', () => {
   assert.deepEqual(h.receipts.map((x) => x.outcome), ['posted']);
 });
 
-test('session lane without a session id fails closed with retry', () => {
+test('session lane without a session id tries to open one', () => {
   const h = harness();
-  let execs = 0;
-  h.deps.execSyncFn = () => { execs += 1; return Buffer.from('{}'); };
+  const calls = [];
+  h.deps.execSyncFn = (cmd, args) => { calls.push([cmd, ...args]); return Buffer.from('{}'); };
   const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'session' };
   notifyTodoEvent('comment', 'card:tag_n', env, h.deps);
-  assert.equal(execs, 0);
+  assert.equal(calls.length, 1, 'one create attempt, no id to post to');
+  assert.ok(calls[0].some((a) => String(a) === '/api/session'), 'opens a session');
   assert.deepEqual(h.receipts.map((x) => x.outcome), ['post_error', 'retry_queued']);
   assert.equal(h.queued()[0].route, 'session');
 });
@@ -300,39 +302,70 @@ test('approve still drains one due retry', () => {
   assert.ok(h.receipts.some((x) => x.outcome === 'retry_ok'));
 });
 
-test('session lane to a gone session records session_gone with no retry', () => {
+test('gone session id opens a fresh session and posts there', () => {
   const h = harness();
-  h.deps.execSyncFn = () => Buffer.from('{"_tag":"SessionNotFoundError","sessionID":"ses_old"} HTTP 404 Not Found');
+  const calls = [];
+  let persisted = '';
+  h.deps.persistFn = (id) => { persisted = id; return { memory: true, file: true }; };
+  h.deps.execSyncFn = (cmd, args) => {
+    calls.push([cmd, ...args]);
+    if (args[2] === '/api/session') return Buffer.from('{"data":{"id":"ses_fresh123"}}');
+    if (String(args[2] || '').includes('ses_fresh123')) return Buffer.from('{}');
+    return Buffer.from('{"_tag":"SessionNotFoundError"} HTTP 404 Not Found');
+  };
   const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'session', TODO_NOTIFY_SESSION_ID: 'ses_old' };
   const r = notifyTodoEvent('comment', 'card:tag_g', env, h.deps);
   assert.equal(r.ok, true);
-  assert.deepEqual(h.receipts.map((x) => x.outcome), ['session_gone']);
-  assert.match(h.receipts[0].detail, /refresh TODO_NOTIFY_SESSION_ID/);
+  assert.deepEqual(h.receipts.map((x) => x.outcome), ['session_reopened']);
+  assert.match(h.receipts[0].detail, /ses_fresh123/);
+  assert.ok(calls.some((c) => c.some((a) => String(a).includes('/api/session/ses_fresh123/prompt'))), 'verdict posted to the fresh session');
+  assert.equal(persisted, 'ses_fresh123');
   assert.deepEqual(h.queued(), []);
 });
 
-test('session gone on throw records session_gone with no retry', () => {
+test('missing session id opens one instead of failing closed', () => {
   const h = harness();
-  h.deps.execSyncFn = () => {
-    const e = new Error('Command failed: opencode api post');
-    e.stderr = Buffer.from('SessionNotFoundError: ses_old');
-    throw e;
+  let persisted = '';
+  h.deps.execSyncFn = (cmd, args) => {
+    if (String(args[2] || '').includes('/prompt')) return Buffer.from('{}');
+    return Buffer.from('{"data":{"id":"ses_brandnew"}}');
   };
-  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'session', TODO_NOTIFY_SESSION_ID: 'ses_old' };
-  notifyTodoEvent('answer', 'card:tag_h', env, h.deps);
-  assert.deepEqual(h.receipts.map((x) => x.outcome), ['session_gone']);
-  assert.deepEqual(h.queued(), []);
+  const persistFn = (id) => { persisted = id; return { memory: true, file: true }; };
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'session' };
+  const r = attemptSessionPost({ action: 'review_comment', key: 'card:tag_m', env, deps: { ...h.deps, persistFn }, receipt: (o, d) => h.receipts.push({ outcome: o, detail: d }) });
+  assert.equal(r.ok, true);
+  assert.equal(r.reopened, true);
+  assert.equal(r.id, 'ses_brandnew');
+  assert.equal(persisted, 'ses_brandnew');
 });
 
-test('gone session retry entries are dropped, not requeued', () => {
+test('unopenable session fails with bounded retry', () => {
   const h = harness();
   h.deps.execSyncFn = () => Buffer.from('{"_tag":"SessionNotFoundError"} HTTP 404');
-  h.queue([{ route: 'session', action: 'review_comment', key: 'card:tag_old', tries: 2, notBefore: 1 }]);
-  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'log', TODO_NOTIFY_SESSION_ID: 'ses_old' };
-  notifyTodoEvent('comment', 'card:tag_new3', env, h.deps);
-  assert.deepEqual(h.queued(), []);
-  assert.ok(h.receipts.some((x) => x.outcome === 'session_gone'));
-  assert.ok(!h.receipts.some((x) => String(x.outcome).startsWith('retry_')));
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'session', TODO_NOTIFY_SESSION_ID: 'ses_old' };
+  notifyTodoEvent('comment', 'card:tag_h', env, h.deps);
+  assert.deepEqual(h.receipts.map((x) => x.outcome), ['post_error', 'retry_queued']);
+  assert.equal(h.queued().length, 1);
+});
+
+test('phone DM carries the chat outcome and the queue depth', async () => {
+  const h = harness();
+  const calls = [];
+  h.deps.execSyncFn = (cmd, args) => {
+    if (args[2] === '/api/session') return Buffer.from('{"data":{"id":"ses_dmreopen"}}');
+    if (String(args[2] || '').includes('ses_dmreopen')) return Buffer.from('{}');
+    return Buffer.from('{"_tag":"SessionNotFoundError"} HTTP 404');
+  };
+  h.deps.fetchFn = async (url, opts) => {
+    calls.push([url, opts]);
+    return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 7 } }) };
+  };
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'opencode,telegram,session', TODO_NOTIFY_BOT_TOKEN: 'tok', TODO_NOTIFY_CHAT_ID: '99', TODO_NOTIFY_SESSION_ID: 'ses_old' };
+  notifyTodoEvent('answer', 'card:tag_dm', env, h.deps);
+  await new Promise((res) => setTimeout(res, 20));
+  const body = JSON.parse(calls[0][1].body);
+  assert.match(body.text, /worker continuing/);
+  assert.match(body.text, /chat reopened: ses_dmreopen/);
 });
 
 test('isSessionGoneText only matches gone markers', () => {
@@ -423,4 +456,35 @@ test('answer verdict text says worker continuing', async () => {
   const body = JSON.parse(calls[0][1].body);
   assert.match(body.text, /worker continuing/);
   assert.match(body.text, /card:tag_v/);
+});
+
+test('worker identity is env-editable, invalid values ignored', () => {
+  assert.deepEqual(workerModelArgs({ TODO_WORKER_MODEL: 'free/prov#low' }), ['--model', 'free/prov#low']);
+  assert.deepEqual(workerModelArgs({ TODO_TRIAGE_MODEL: 'acme/worker#high' }), ['--model', 'acme/worker#high']);
+  assert.deepEqual(workerModelArgs({}), []);
+  assert.deepEqual(workerModelArgs({ TODO_WORKER_MODEL: 'rm -rf /' }), []);
+  assert.deepEqual(workerAgentArgs({ TODO_WORKER_AGENT: 'build' }), ['--agent', 'build']);
+  assert.deepEqual(workerAgentArgs({}), []);
+  assert.deepEqual(workerAgentArgs({ TODO_WORKER_AGENT: 'a;evil' }), []);
+
+  const h = harness();
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'opencode', TODO_WORKER_MODEL: 'free/prov#low', TODO_WORKER_AGENT: 'build' };
+  notifyTodoEvent('answer', 'card:tag_fm', env, h.deps);
+  const i = h.spawns[0].indexOf('--model');
+  assert.ok(i > 0 && h.spawns[0][i + 1] === 'free/prov#low');
+  const j = h.spawns[0].indexOf('--agent');
+  assert.ok(j > 0 && h.spawns[0][j + 1] === 'build');
+
+  const h2 = harness();
+  notifyTodoEvent('comment', 'card:tag_fm', { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'opencode', TODO_WORKER_MODEL: 'free/prov#low', TODO_WORKER_AGENT: 'build' }, h2.deps);
+  assert.ok(!h2.spawns[0].includes('--agent'), 'triage keeps box defaults');
+});
+
+test('session notes describe the chat outcome', () => {
+  assert.equal(sessionNoteFor(null), '');
+  assert.equal(sessionNoteFor({ ok: true, reopened: false }), '');
+  assert.match(sessionNoteFor({ ok: true, reopened: true, id: 'ses_abc123' }), /chat reopened: ses_abc123/);
+  assert.match(sessionNoteFor({ ok: false }), /chat unreachable/);
+  assert.equal(pendingNote(0), '');
+  assert.equal(pendingNote(2), '(+2 queued)');
 });
