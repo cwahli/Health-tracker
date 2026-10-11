@@ -81,7 +81,9 @@ function sqliteDriver() {
 /**
  * One row per live opencode session on the VM host — never an aggregate:
  * the user asked for one agent per row, so each session carries its own
- * model, working marker and title.
+ * model, working marker and title. Model-less `opencode run` children
+ * (triage/worker) show as `worker` rows when titled `sheet-todo …`,
+ * so a spawned session is visible with its ticket key.
  * Each row may carry lastType/lastCompleted from its newest session_message:
  * a streaming assistant message (no completed stamp) means working.
  */
@@ -94,15 +96,20 @@ export function vmSessionRows(rows, { now = Date.now() } = {}) {
     } catch {
       modelId = String(r.model || '').trim();
     }
-    if (!modelId) return null;
+    // Headless `opencode run` workers (triage/worker children) never get a
+    // model recorded on the session row, so the model gate below would hide
+    // them forever. A titled sheet-todo child shows as a worker row with
+    // the ticket key in the task; untitled model-less rows stay dropped.
     const dir = String(r.directory || '').trim();
     const title = String(r.title || '').trim();
+    const isTodoChild = !modelId && title.toLowerCase().startsWith('sheet-todo ');
+    if (!modelId && !isTodoChild) return null;
     const label = title && title.toLowerCase() !== 'none' ? title : (dir.split('/').pop() || dir);
     const streaming = String(r.lastType || '') === 'assistant' && (r.lastCompleted === null || r.lastCompleted === undefined);
     const working = streaming || String(r.lastType || '') === 'user';
     return {
       location: 'VM',
-      agent: `opencode/${modelId}`,
+      agent: modelId ? `opencode/${modelId}` : 'worker',
       status: working ? 'working' : 'idle',
       lastPhase: working ? 'working' : 'idle',
       task: label,

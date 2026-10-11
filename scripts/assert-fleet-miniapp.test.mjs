@@ -524,21 +524,29 @@ test('VM pane shows one row per live opencode session with model and working mar
   // Row clock stale but the message stream is fresh: a turn still generating.
   ins.run('ses_stream', JSON.stringify({ id: 'stream-model', providerID: 'opencode' }), '/home/ubuntu', 'Slow stream', t0 - 40 * 60 * 1000, null);
   msg.run('ses_stream', 'assistant', t0 - 2 * 60 * 1000, JSON.stringify({ time: { created: 1, streamed: 2 } }));
+  // Headless worker child: no model recorded, but a sheet-todo title names
+  // the ticket — visible as a worker row. Untitled model-less rows stay out.
+  ins.run('ses_worker', null, '/home/ubuntu', 'sheet-todo worker card:tag_x', t0 - 3 * 60 * 1000, null);
+  msg.run('ses_worker', 'assistant', t0 - 60 * 1000, JSON.stringify({ time: { created: 1, streamed: 2 } }));
+  ins.run('ses_junk', null, '/home/ubuntu', '', t0 - 3 * 60 * 1000, null);
   db.close();
 
   // One row per session: no aggregate sentence, each row carries its own model.
   const tickets = [{ id: 'spec:vm-claim', owner: 'Some Agent @ vps-france', status: 'In progress' }];
   const nodes = getFleetNodes({ now: t0, home: tmpHome, vmOpencodeDb: dbPath, tickets });
   const vmRows = nodes.filter((n) => n.location === 'VM');
-  assert.equal(vmRows.length, 3);
-  assert.equal(vmRows[0].agent, 'opencode/space-bunny-free');
-  assert.equal(vmRows[0].status, 'working');
-  assert.equal(vmRows[0].task, 'Meal QA audit');
-  assert.equal(vmRows[1].agent, 'opencode/muse-spark');
-  assert.equal(vmRows[1].status, 'idle');
-  assert.equal(vmRows[1].task, 'Health-tracker');
-  assert.equal(vmRows[2].agent, 'opencode/stream-model');
-  assert.equal(vmRows[2].status, 'working');
+  assert.equal(vmRows.length, 4);
+  const byAgent = (a) => vmRows.find((r) => r.agent === a);
+  assert.equal(byAgent('opencode/space-bunny-free').status, 'working');
+  assert.equal(byAgent('opencode/space-bunny-free').task, 'Meal QA audit');
+  assert.equal(byAgent('opencode/muse-spark').status, 'idle');
+  assert.equal(byAgent('opencode/muse-spark').task, 'Health-tracker');
+  assert.equal(byAgent('opencode/stream-model').status, 'working');
+  const worker = byAgent('worker');
+  assert.ok(worker, 'titled model-less worker child shows');
+  assert.equal(worker.status, 'working');
+  assert.equal(worker.task, 'sheet-todo worker card:tag_x');
+  assert.ok(!vmRows.some((r) => String(r.task || '') === ''), 'untitled model-less rows stay out');
   assert.ok(!vmRows.some((r) => r.task.includes('working:')));
   assert.ok(!vmRows.some((r) => r.task.includes('old-model') || r.task.includes('archived-model')));
 
