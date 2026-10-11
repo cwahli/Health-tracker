@@ -517,6 +517,18 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
 - Awaiting the user's live verdict tap for the end-to-end demo
   (DM + spawn + check-in action).
 
+## Session lane live (2026-10-11 ~15:55 UTC)
+
+- PR #737 merged + deployed (a047944a). Env set
+  (opencode,telegram,session + chat id + THIS session id),
+  gateway revived on it (verified in /proc environ).
+- Posting into chat proven earlier via API (test message landed).
+  Caveat recorded in code: target must be refreshed per
+  conversation or verdicts land in a dead/wrong session.
+- Live test armed: next To-do verdict should DM + spawn + post a
+  [verdict] message into this chat. CI note: Reverts lines must be
+  one-per-line (parser reads line-leading only).
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
