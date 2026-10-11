@@ -144,6 +144,16 @@ import {
   poolDisplayName,
 } from './lib/free-lanes.mjs';
 import { recordTurn, storeStatus, flushTurns } from './lib/turn-store.mjs';
+// ONE shared implementation of the pool walk order and the pool note lines.
+// The box's ht-model CLI imports the same module (and this file's own
+// formatFreemodelWithDepletion for the row copy), so the terminal print and the
+// Telegram keyboard cannot drift (model-parity ticket, 2026-10-10: "there must
+// be ONE shared implementation, not a box copy").
+import {
+  orderPoolLanes,
+  poolNoteLines,
+  soonestPoolReset,
+} from './lib/model-switch.mjs';
 import { ensureTurnLog, makeSends, writerFor } from './lib/google-writer.mjs';
 // R-16: the score on a button is the bakeoff ledger's own verdict, and the tier
 // is the catalog's. Both live in the catalogs, so there is no ratings table here
@@ -1373,48 +1383,12 @@ export function depletedLaneProse({ label = '', resetIn = '', next = null } = {}
   return `${name ? `${name} is` : 'That lane is'} depleted (${resetInBit(resetIn)}).\n${nextBit}`;
 }
 
-/**
- * The one honest line a pool keyboard carries in its body.
- *
- * A keyboard cannot show a heading when it has a single group, and with one pool
- * it usually has one, so without this the reader cannot tell which list they are
- * looking at or what a quota hit will do to the chat. It names the pool, what is
- * on this host, what is usable, and the way out — which is what decision D2 costs
- * the reader who only wanted to look. The no-pool path never calls this: the body
- * is the keyboard alone, exactly as before.
- */
-function poolNoteLines({ pool, location, total, usable, soonest = '' } = {}) {
-  const loc = String(location || 'vps');
-  const name = poolDisplayName(pool, loc);
-  const move = pool === 'go'
-    ? 'the Go plan is paid, so this lane never moves on its own'
-    : 'a quota hit moves inside this pool only';
-  if (!total) {
-    return [`${name} — no lane of this pool is on ${loc} right now${soonest ? `; soonest reset in ${soonest}` : ''}. ${move}. ${POOL_EXIT_NOTE}`];
-  }
-  const out = [`${name} · ${total} lane${total === 1 ? '' : 's'} on ${loc} · ${usable} usable — ${move}. ${POOL_EXIT_NOTE}`];
-  if (!usable) out.push(`Nothing in this pool is usable right now${soonest ? ` — soonest reset in ${soonest}` : ''}.`);
-  return out;
-}
+// poolNoteLines and soonestPoolReset now live in ./lib/model-switch.mjs: the
+// pool keyboard and the box's ht-model CLI must print one wording, and the
+// box must not carry a copy. They are imported at the top of this file.
+// (The doc comment for the note line is in that module, beside the code.)
 
-/**
- * The soonest reset held by one pool's own rows, as a countdown.
- *
- * An exhausted pool has to name ITS next lane, never the other pool's — a global
- * "soonest" would offer a coding reset to a chat that asked to stay on light, and
- * that is the substitution the pools exist to remove. Read off the rows the
- * caller already built; nothing is fetched here.
- */
-function soonestPoolReset(rows, pool, now = Date.now()) {
-  let best = null;
-  for (const r of Array.isArray(rows) ? rows : []) {
-    if (!r || poolOfRow(r) !== pool) continue;
-    const at = Number(r.resetAt) || Date.parse(String(r.resetIn || '')) || null;
-    if (!Number.isFinite(at) || at === null) continue;
-    if (best === null || at < best) best = at;
-  }
-  return best === null ? '' : formatResetIn(best, now);
-}
+
 
 export function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [], pool = null } = {}) {
   const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
@@ -5162,9 +5136,9 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   const poolOfRoute = (l) => poolOfLane({ provider: l?.provider, model: l?.model });
   const currentInPool = Boolean(pool) && Boolean(current.provider || current.model)
     && poolOfRoute({ provider: current.provider, model: current.model }) === pool;
-  const poolLanes = pool
-    ? [...fallbackLanes].filter((l) => poolOfRoute(l) === pool).sort(bySameTier)
-    : [];
+  // The pool order is the shared walk order (model-switch.orderPoolLanes): the
+  // keyboard, the turn walk and every tmux worker read one implementation.
+  const poolLanes = pool ? orderPoolLanes(fallbackLanes, pool) : [];
   let orderedLanes;
   if (pool === 'go') {
     // A paid lane never moves on its own: the chat's own Go lane when it has a
