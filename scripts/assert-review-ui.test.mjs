@@ -59,6 +59,7 @@ const QUEUE = [
     proof: 'p',
     gate: 'sensor green + screenshot',
     lastActivity: '12:00 - 2 oct (UK)',
+    question: 'Which screenshot shows the bug?',
     proofs: [
       { id: 'file-0', name: 'shot-one.png', mimeType: 'image/png' },
       { id: 'file-1', name: 'shot-two.png', mimeType: 'image/png' },
@@ -140,6 +141,15 @@ async function withPage(fn) {
   await page.route('**/review/api/approve*', (route) => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }),
   }));
+  const qposts = [];
+  await page.route('**/review/api/question*', (route) => {
+    const sent = JSON.parse(route.request().postData() || '{}');
+    qposts.push(sent);
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, key: sent.key, stamped: '[human 11 Oct] ' + sent.text }),
+    });
+  });
   await page.route('**/review/api/answer*', (route) => {
     const sent = JSON.parse(route.request().postData() || '{}');
     answers.push(sent);
@@ -158,7 +168,7 @@ async function withPage(fn) {
     // Landing contract: Request opens first — request text with the result
     // screenshot directly below it.
     await page.waitForSelector('.view[data-view="request"].on');
-    return await fn({ page, base, posts, answers, proofFetches });
+    return await fn({ page, base, posts, answers, proofFetches, qposts });
   } finally {
     await browser.close();
     server.close();
@@ -438,6 +448,21 @@ test('the result screenshot carries its own heart that archives', async (t) => {
     await page.waitForTimeout(250);
     assert.equal(approves, 1, 'the result heart archives from the landing');
     assert.equal(await page.textContent('#pos'), '1/1', 'the archived item left the queue');
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
+test('the agent question shows on landing and the answer posts to the question route', async (t) => {
+  const ran = await withPage(async ({ page, qposts }) => {
+    const thread = await page.textContent('#qa-thread');
+    assert.match(thread, /Which screenshot shows the bug/);
+    await page.fill('#qa-answer', 'the second one');
+    await page.click('#qa-send');
+    await page.waitForTimeout(200);
+    assert.equal(qposts.length, 1);
+    assert.equal(qposts[0].key, 'req:test-a');
+    assert.equal(qposts[0].text, 'the second one');
+    assert.match(await page.textContent('#qa-thread'), /\[human 11 Oct\] the second one/);
+    assert.match(await page.textContent('.toast') || '', /agent continues/);
   });
   if (ran === null) t.skip('playwright not installed');
 });
