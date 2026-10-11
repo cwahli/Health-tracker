@@ -73,8 +73,18 @@ run_job(){
   echo "job $n start model=${model:-default} timeout=${hrs}h $(date)"
   ( while sleep 60; do kill -0 $me 2>/dev/null || exit 0; $S $V "date +%s > $Q/heartbeat; date +%s > $Q/running/$n.hb" 2>/dev/null; done ) & local hb=$!
   local margs=(); [ -n "$model" ] && margs=(-m "$model")
-  timeout "${hrs}h" opencode run "${margs[@]}" "$(cat PROMPT.txt)
-(Work only in $d. Write your final answer to $d/REPORT.md.)" > run.log 2>&1 < /dev/null; local rc=$?
+  printf '%s' '{"$schema":"https://opencode.ai/config.json","permission":{"edit":"allow","bash":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"}}' > opencode.json
+  local end=$(( $(date +%s) + ${hrs%.*}*3600 + 60 )) rc=0 k=0 left
+  left=$(( end - $(date +%s) ))
+  timeout "$left" opencode run "${margs[@]}" "$(cat PROMPT.txt)
+(Work only in $d. You may install packages and use any directory. Keep REPORT.md updated; its first line must stay 'STATUS: IN PROGRESS' until you are fully done, then 'STATUS: COMPLETE'.)" > run.log 2>&1 < /dev/null; rc=$?
+  # opencode run exits after one turn; keep nudging it while the report says it is unfinished
+  while [ $k -lt 12 ] && [ $rc -ne 124 ] && ! head -1 REPORT.md 2>/dev/null | grep -q 'STATUS: COMPLETE'; do
+    left=$(( end - $(date +%s) )); [ $left -gt 120 ] || break; k=$((k+1))
+    echo "job $n continue #$k $(date)"
+    timeout "$left" opencode run --continue "${margs[@]}" "Continue the task from PROMPT.txt in $d. Do the next untested items, update REPORT.md, and set its first line to 'STATUS: COMPLETE' only when every test is done and the verdict is written." >> run.log 2>&1 < /dev/null; rc=$?
+  done
+  head -1 REPORT.md 2>/dev/null | grep -q 'STATUS: COMPLETE' && rc=0
   kill $hb 2>/dev/null
   [ -s REPORT.md ] || tail -c 3000 run.log > REPORT.md
   up(){ tar czf - . | $S $V "mkdir -p $Q/done/$n && tar xzf - -C $Q/done/$n && rm -f $Q/running/$n.txt $Q/running/$n.hb"; }
