@@ -4,10 +4,16 @@
  * The sheet is idle most of the time, so nothing polls it. Instead the
  * gateway calls `notifyTodoEvent` fire-and-forget after a successful
  * review verdict (approve / comment / answer): the human's own tap is
- * the trigger. The call records the event and spawns one single-flight,
- * time-boxed TRIAGE session (`opencode run --auto`) that assesses
- * read-only and appends findings. It never fixes, writes, commits, or
- * messages anyone — a fix still needs an explicit go.
+ * the trigger. The call records the event and fans out:
+ * - comment → one single-flight, time-boxed TRIAGE session
+ *   (`opencode run --auto`) that assesses read-only and appends
+ *   findings. It never fixes, writes, commits, or messages anyone.
+ * - answer → one single-flight, time-boxed WORKER session that continues
+ *   the unblocked ticket to `review` or the next question (draft PRs
+ *   only, never merge/main/Done/deletes, only that ticket's row). The
+ *   owner's answer is the per-ticket go; anything beyond the ticket
+ *   still needs a human.
+ * - approve → audit only (the gateway already archived Done). No fan-out.
  *
  * Guards (all must pass or the event is only recorded):
  * - TODO_AGENT_NOTIFY === '1' (default off; tests never set it, so the
@@ -16,7 +22,7 @@
  * - action ∈ approve/comment/answer, key non-empty.
  * - TODO_TRIAGE_ROUTE names a known route (default 'opencode').
  *
- * Routing (adjustable — who the triage can reach):
+ * Routing (adjustable — who an event can reach):
  * - TODO_TRIAGE_ROUTE=opencode (default): flock single-flight `opencode run`
  *   triage session. This is the starter route — it reaches the opencode
  *   agent surface that owns this box's sheet work.
@@ -30,9 +36,17 @@
  * Receipts (why a silent drop is now visible):
  * - Every spawn attempt appends one JSON line to triage-receipts.jsonl
  *   {at, action, key, route, outcome, detail} where outcome ∈ spawned,
- *   spawn_error, unknown_route, record_only, retry_queued, retry_ok,
- *   retry_requeued, retry_exhausted, posted, post_error, session_gone,
- *   sent, send_error, approved_no_fanout.
+ *   spawn_skipped_locked, spawn_error, unknown_route, record_only,
+ *   retry_queued, retry_ok, retry_requeued, retry_exhausted, posted,
+ *   post_error, session_gone, sent, send_error, approved_no_fanout.
+ * - `spawned` is honest: a synchronous lock probe runs first, so a held
+ *   lock receipts `spawn_skipped_locked` (and requeues) instead of a
+ *   false `spawned`.
+ * - The child must append its completion line to triage.jsonl (triage
+ *   assessments use action "triage-batch"/"triage", answer workers use
+ *   action "worker"). Attempt receipt with no completion receipt inside
+ *   TRIAGE_TIMEOUT_SEC = the child died silently — go read
+ *   triage-spawn.log for that timestamp.
  * - session_gone is terminal: the target session id is closed or unknown
  *   (SessionNotFound / HTTP 404 — the CLI exits 0, so stdout must be
  *   inspected, not just the exit code). A gone session never reopens, so
@@ -43,11 +57,6 @@
  *   child otherwise retries its build loop until the 900s timeout burns
  *   while holding the single-flight lock ("Rate limit exceeded" in
  *   triage-spawn.log with no triage.jsonl line).
- * - The triage child itself must append its completion line to
- *   triage.jsonl (already required by the prompt). Attempt receipt with
- *   no completion receipt inside TRIAGE_TIMEOUT_SEC = the child died
- *   silently (lock contention, timeout kill, opencode failure) — go read
- *   triage-spawn.log for that timestamp.
  * - No polling: retries ride on subsequent verdict events (event-driven).
  *   A failed spawn enqueues {action, key, tries, notBefore}; each later
  *   event drains at most ONE due entry with backoff min(60*tries, 900)s
@@ -55,6 +64,7 @@
  */
 
 import { spawn, execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -64,6 +74,15 @@ export const INBOX_PATH = path.join(STATE_DIR, 'inbox.jsonl');
 export const TRIAGE_LOG = path.join(STATE_DIR, 'triage.jsonl');
 export const LOCK_PATH = path.join(STATE_DIR, 'triage.lock');
 export const KILLSWITCH_PATH = path.join(STATE_DIR, 'DISABLED');
+
+/** Per-ticket single-flight lock for answer workers: different tickets run
+ *  in parallel, the same ticket never runs twice at once. Comment triage
+ *  (cheap, read-only) keeps the single global LOCK_PATH as a stampede
+ *  throttle. Derived from the key — no mapping file to lose. */
+export function lockFor(key) {
+  const h = crypto.createHash('sha1').update(String(key || '')).digest('hex').slice(0, 12);
+  return path.join(STATE_DIR, `worker-${h}.lock`);
+}
 export const RECEIPTS_PATH = path.join(STATE_DIR, 'triage-receipts.jsonl');
 export const RETRY_PATH = path.join(STATE_DIR, 'triage-retry.jsonl');
 export const TRIAGE_TIMEOUT_SEC = 900;
@@ -94,12 +113,44 @@ export function triagePrompt(action, key) {
 }
 
 /**
+ * WORKER prompt (answer events only): the owner's answer just unblocked
+ * this ticket — continue it to `review` or to the next question. The
+ * answer itself is the per-ticket go; anything beyond this ticket still
+ * needs a human. Draft PRs only, never merge, never main, never Done.
+ */
+export function workerPrompt(action, key) {
+  return [
+    `WORKER — an owner answer just unblocked ticket key=${key} (event ${action}). Continue it, nothing else.`,
+    'Do exactly this: (1) read the sheet row (spreadsheet 10oPI9AsHaKpb9xRR8XcTm6JyH1gYyykUFBNqeqg2SM0, tab current) — Status, todo, and the Additional question Q&A thread (the latest [human …] line is your new input);',
+    ' (2) claim the row: `ruby /home/ubuntu/.agents/skills/do-github-sync/scripts/claim_ticket.rb --key \'<key>\' --owner "<you> @ vps-france" --session <your-session-id>`;',
+    ' (3) do the work in a worktree (`~/dev/new-worktree.sh <area>`, branch agent/<area>), file proof in Drive folder Work done/1G7dhvqRy7iOmRg7AfN9a6g8cbIhz14yS/<key>, open a draft PR if code changed;',
+    ' (4) file the row with `sheet_row.rb`: `--status review` when work is complete with proof, or `--status \'Need info\' --question "..."` for a follow-up — the ONLY sheet writer, never raw API;',
+    ` (5) append one JSON line to ${TRIAGE_LOG} with {at, action:"worker", key, sheet_state, canonical_state, sensors, needs_go:false, reason}.`,
+    'HARD LIMITS: never merge, never push main, never set Done, never delete rows, only touch this key. Sheet writes only via sheet_row.rb.',
+    ' (6) rate-limited? File the row Assigned + todo and exit — never retry the build loop.',
+    `End with one line: WORKER DONE ${key} <review|need-info|assigned+why>.`,
+  ].join(' ');
+}
+
+/** Prompt + lock for one event: answers get an acting worker (per-ticket
+ *  lock), comments get a read-only triage (global lock). */
+export function planFor(action, key) {
+  const act = String(action || '').replace(/^review_/, '');
+  if (act === 'answer') return { prompt: workerPrompt(act, key), lock: lockFor(key), title: `sheet-todo worker ${key.slice(0, 40)}` };
+  return { prompt: triagePrompt(act, key), lock: LOCK_PATH, title: `sheet-todo triage ${key.slice(0, 40)}` };
+}
+/**
  * Adjustable routing: who a triage event can reach. TODO_TRIAGE_ROUTE is a
  * comma list; each name must be a known lane, else the whole event fails
  * closed (recorded, nothing fired). Names are never interpolated into a
  * shell command. Lanes:
- * - opencode (default starter): flock single-flight `opencode run` triage
- *   session. Reaches the opencode agent surface owning this box's work.
+ * - opencode (default starter): flock single-flight `opencode run`
+ *   session. Comment events get a read-only triage (global lock);
+ *   answer events get an acting worker that continues the ticket to
+ *   `review` or the next question (per-ticket lock, so tickets run in
+ *   parallel and one ticket never runs twice). Reaches the opencode
+ *   agent surface owning this box's work. A pre-spawn lock probe keeps
+ *   receipts honest: `spawn_skipped_locked`, never a false `spawned`.
  * - telegram: instant DM to TODO_NOTIFY_CHAT_ID via Telegram sendMessage
  *   (token TODO_NOTIFY_BOT_TOKEN, else TUI_BOT_TOKEN_VM). Reaches the
  *   operator's phone in real time — the push channel the opencode route
@@ -127,7 +178,9 @@ export function routeFor(env = process.env) {
 }
 
 export function verdictText(action, key) {
-  return `Review ${action}: ${key} — triage assessing, trail in sheet-todo-watch.`;
+  const act = String(action || '').replace(/^review_/, '');
+  if (act === 'answer') return `Review answer: ${key} — worker continuing, trail in sheet-todo-watch.`;
+  return `Review ${act}: ${key} — triage assessing, trail in sheet-todo-watch.`;
 }
 
 /**
@@ -156,13 +209,14 @@ export function retryBackoffSec(tries) {
   return Math.min(RETRY_BASE_SEC * Math.max(1, Number(tries) || 1), RETRY_CAP_SEC);
 }
 
-function recordAndSpawn({ inboxType, key, prompt, source, env, deps }) {
+function recordAndSpawn({ inboxType, key, source, env, deps }) {
   const {
     exists = fs.existsSync,
     mkdir = (d) => fs.mkdirSync(d, { recursive: true }),
     append = (line) => fs.appendFileSync(INBOX_PATH, line + '\n'),
     spawnFn = spawn,
     openLog = (p) => fs.openSync(p, 'a'),
+    execSyncFn = execFileSync,
     readRetry = () => readRetryQueue(),
     writeRetry = (entries) => writeRetryQueue(entries),
     now = () => Date.now(),
@@ -190,9 +244,10 @@ function recordAndSpawn({ inboxType, key, prompt, source, env, deps }) {
     // nothing to assess, nobody to page. Record the audit line and drain
     // pending retries, but fan out no lanes and spawn no triage.
     receipt('approved_no_fanout', 'approve needs no notify and no triage');
-    drainRetries({ readRetry, writeRetry, now, receiptFor, attempt: (e) => redispatchEntry({ ...e, env, deps, prompt, receipt: receiptFor(e.key), readRetry, writeRetry, now }) });
+    drainRetries({ readRetry, writeRetry, now, receiptFor, attempt: (e) => redispatchEntry({ ...e, env, deps, receipt: receiptFor(e.key), readRetry, writeRetry, now }) });
     return { ok: true, reason: 'approve recorded, no fan-out' };
   }
+  const plan = planFor(inboxType, key);
   for (const lane of route.lanes) {
     if (lane === 'log') {
       receipt('record_only', 'lane=log');
@@ -209,11 +264,13 @@ function recordAndSpawn({ inboxType, key, prompt, source, env, deps }) {
       if (!r.ok && !r.gone) enqueueRetry({ route: lane, action: inboxType, key, tries: 0, now, readRetry, writeRetry, receipt });
       continue;
     }
-    const r = attemptSpawn({ key, prompt, env, deps, receipt });
+    const r = attemptSpawn({ key, plan, env, deps, receipt });
+    // Locked and crashed alike requeue bounded: the next event retries.
+    // Only the terminal session_gone (other lane) drops without retry.
     if (!r.ok) enqueueRetry({ route: lane, action: inboxType, key, tries: 0, now, readRetry, writeRetry, receipt });
   }
-  drainRetries({ readRetry, writeRetry, now, receiptFor, attempt: (e) => redispatchEntry({ ...e, env, deps, prompt, receipt: receiptFor(e.key), readRetry, writeRetry, now }) });
-  return { ok: true, reason: 'triage event fanned out (see receipts)' };
+  drainRetries({ readRetry, writeRetry, now, receiptFor, attempt: (e) => redispatchEntry({ ...e, env, deps, receipt: receiptFor(e.key), readRetry, writeRetry, now }) });
+  return { ok: true, reason: 'event fanned out (see receipts)' };
 }
 
 /**
@@ -229,7 +286,7 @@ export function attemptSessionPost({ action, key, env, deps, receipt }) {
     receipt('post_error', 'no TODO_NOTIFY_SESSION_ID');
     return { ok: false, reason: 'no session id' };
   }
-  const text = `[verdict] Review ${String(action || '').replace(/^review_/, '')}: ${key} — triage assessing, trail in sheet-todo-watch.`;
+  const text = `[verdict] ${verdictText(action, key)}`;
   const gone = (detail) => {
     receipt('session_gone', `session ${sessionId.slice(0, 12)}… gone — refresh TODO_NOTIFY_SESSION_ID (${detail})`.slice(0, 200));
     return { ok: false, gone: true, reason: 'session gone' };
@@ -307,7 +364,7 @@ function dispatchTelegram({ action, key, tries, env, deps, receipt, readRetry, w
   );
 }
 
-function redispatchEntry({ route, action, key, prompt, tries, env, deps, receipt, readRetry, writeRetry, now }) {
+function redispatchEntry({ route, action, key, tries, env, deps, receipt, readRetry, writeRetry, now }) {
   if (route === 'telegram') {
     dispatchTelegram({ action, key, tries, env, deps, receipt, readRetry, writeRetry, now });
     return undefined;
@@ -315,23 +372,33 @@ function redispatchEntry({ route, action, key, prompt, tries, env, deps, receipt
   if (route === 'session') {
     return attemptSessionPost({ action, key, env, deps, receipt });
   }
-  return attemptSpawn({ key, prompt: prompt || triagePrompt(String(action || '').replace(/^review_/, ''), key), env, deps, receipt });
+  return attemptSpawn({ key, plan: planFor(action, key), env, deps, receipt });
 }
 
-function attemptSpawn({ key, prompt, env, deps, receipt }) {
+function attemptSpawn({ key, plan, env, deps, receipt }) {
   const {
     spawnFn = spawn,
     openLog = (p) => fs.openSync(p, 'a'),
+    execSyncFn = execFileSync,
   } = deps;
   const home = os.homedir();
   const modelArgs = triageModelArgs(env);
   const modelFlag = modelArgs.length ? ` --model ${modelArgs[1]}` : '';
+  // Honest single-flight: probe the lock synchronously first. A held lock
+  // receipts spawn_skipped_locked (bounded retry follows) instead of a
+  // false spawned whose flock child would exit without doing anything.
+  try {
+    execSyncFn('flock', ['-n', plan.lock, 'true'], { timeout: 5000, stdio: 'ignore' });
+  } catch {
+    receipt('spawn_skipped_locked', `held: ${plan.lock}`);
+    return { ok: false, locked: true, reason: 'lock held' };
+  }
   try {
     const logFd = openLog(path.join(STATE_DIR, 'triage-spawn.log'));
     const child = spawnFn(
       'flock',
-      ['-n', LOCK_PATH, 'timeout', String(TRIAGE_TIMEOUT_SEC),
-        'opencode', 'run', '--auto', ...modelArgs, '--title', `sheet-todo triage ${key.slice(0, 40)}`, prompt],
+      ['-n', plan.lock, 'timeout', String(TRIAGE_TIMEOUT_SEC),
+        'opencode', 'run', '--auto', ...modelArgs, '--title', plan.title, plan.prompt],
       {
         detached: true,
         stdio: ['ignore', logFd, logFd],
@@ -345,8 +412,8 @@ function attemptSpawn({ key, prompt, env, deps, receipt }) {
     receipt('spawn_error', detail);
     return { ok: false, reason: detail };
   }
-  receipt('spawned', `flock -n ${LOCK_PATH} timeout ${TRIAGE_TIMEOUT_SEC} opencode run${modelFlag}`);
-  return { ok: true, reason: 'triage spawned' };
+  receipt('spawned', `flock -n ${plan.lock} timeout ${TRIAGE_TIMEOUT_SEC} opencode run${modelFlag}`);
+  return { ok: true, reason: 'spawned' };
 }
 
 function readRetryQueue() {
@@ -396,10 +463,7 @@ function drainRetries({ readRetry, writeRetry, now, receiptFor, attempt }) {
   const [entry] = due;
   const rest = entries.filter((e) => e !== entry);
   const entryReceipt = receiptFor(entry.key);
-  const prompt = entry.route === 'opencode'
-    ? triagePrompt(entry.action.replace(/^review_/, ''), entry.key)
-    : undefined;
-  const r = attempt({ route: entry.route || 'opencode', key: entry.key, prompt, action: entry.action, tries: entry.tries });
+  const r = attempt({ route: entry.route || 'opencode', key: entry.key, action: entry.action, tries: entry.tries });
   if (r && r.gone) {
     // Terminal: the target session is gone and never reopens. Drop the
     // entry (the session_gone receipt is already written) — no requeue.
@@ -423,14 +487,16 @@ function drainRetries({ readRetry, writeRetry, now, receiptFor, attempt }) {
 }
 
 /**
- * Fire-and-forget: record + (if guarded) spawn one triage session.
- * Returns synchronously; the child is detached and unrefed.
+ * Fire-and-forget: record + (if guarded) fan out one event.
+ * Answers continue the ticket (worker), comments assess it (triage),
+ * approves record audit only. Returns synchronously; children are
+ * detached and unrefed.
  */
 export function notifyTodoEvent(action, key, env = process.env, deps = {}) {
   const act = String(action || '').trim().toLowerCase();
   const k = String(key || '').trim();
   if (!VALID_ACTIONS.has(act)) return { ok: false, reason: `bad action ${act || '(empty)'}` };
   if (!k) return { ok: false, reason: 'missing key' };
-  return recordAndSpawn({ inboxType: `review_${act}`, key: k, prompt: triagePrompt(act, k), source: 'gateway-hook', env, deps });
+  return recordAndSpawn({ inboxType: `review_${act}`, key: k, source: 'gateway-hook', env, deps });
 }
 

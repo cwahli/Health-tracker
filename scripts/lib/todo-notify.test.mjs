@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { wakeEnabled, triagePrompt, notifyTodoEvent, routeFor, retryBackoffSec, attemptSessionPost, isSessionGoneText, triageModelArgs } from './todo-notify.mjs';
+import { wakeEnabled, triagePrompt, workerPrompt, planFor, lockFor, notifyTodoEvent, routeFor, retryBackoffSec, attemptSessionPost, isSessionGoneText, triageModelArgs, LOCK_PATH } from './todo-notify.mjs';
 
 const tmpState = () => fs.mkdtempSync(path.join(os.tmpdir(), 'todo-notify-'));
 
@@ -63,6 +63,7 @@ test('enabled gate spawns one detached triage run with a read-only prompt', () =
     mkdir: () => {},
     append: (l) => fs.appendFileSync(inboxPath, l + '\n'),
     openLog: () => 'ignore',
+    execSyncFn: () => Buffer.from(''),
     receiptSink: (rec) => receipts.push(rec),
     spawnFn: (cmd, args, o) => { argv = [cmd, ...args]; opts = o; return fakeChild; },
   });
@@ -94,6 +95,7 @@ const harness = (env = { TODO_AGENT_NOTIFY: '1' }) => {
       mkdir: () => {},
       append: (l) => inbox.push(l),
       openLog: () => 'ignore',
+      execSyncFn: () => Buffer.from(''),
       receiptSink: (r) => receipts.push(r),
       readRetry: () => queue.map((e) => ({ ...e })),
       writeRetry: (entries) => { queue = entries.map((e) => ({ ...e })); },
@@ -362,4 +364,63 @@ test('triage prompt tells the child to fail fast on rate limits', () => {
   assert.match(triagePrompt('comment', 'card:tag_x'), /rate-limit/);
   assert.deepEqual(triageModelArgs({}), []);
   assert.deepEqual(triageModelArgs({ TODO_TRIAGE_MODEL: 'no-slash' }), []);
+});
+
+test('locks are per-ticket for workers, global for triage', () => {
+  assert.equal(lockFor('card:tag_a'), lockFor('card:tag_a'));
+  assert.notEqual(lockFor('card:tag_a'), lockFor('card:tag_b'));
+  assert.match(lockFor('card:tag_a'), /worker-[0-9a-f]{12}\.lock$/);
+  assert.equal(planFor('review_comment', 'k').lock, LOCK_PATH);
+  assert.equal(planFor('comment', 'k').lock, LOCK_PATH);
+  assert.equal(planFor('review_answer', 'k').lock, lockFor('k'));
+});
+
+test('answer events spawn a worker, comments a triage', () => {
+  const h = harness();
+  notifyTodoEvent('answer', 'card:tag_w', h.env, h.deps);
+  const w = h.spawns[0];
+  assert.ok(w.includes('flock'));
+  assert.ok(w.some((a) => String(a).includes('worker-') && String(a).endsWith('.lock')), 'per-ticket lock');
+  assert.ok(w.some((a) => String(a).includes('sheet-todo worker card:tag_w')), 'worker title');
+  assert.match(String(w[w.length - 1]), /WORKER — an owner answer just unblocked/);
+  assert.match(String(w[w.length - 1]), /never merge, never push main, never set Done/);
+
+  const h2 = harness();
+  notifyTodoEvent('comment', 'card:tag_w', h2.env, h2.deps);
+  const t = h2.spawns[0];
+  assert.ok(t.includes(LOCK_PATH), 'global triage lock');
+  assert.match(String(t[t.length - 1]), /TRIAGE ONLY/);
+});
+
+test('held lock receipts spawn_skipped_locked and requeues honestly', () => {
+  const h = harness();
+  h.deps.execSyncFn = () => { throw new Error('flock: locked'); };
+  const r = notifyTodoEvent('comment', 'card:tag_l', h.env, h.deps);
+  assert.equal(r.ok, true);
+  assert.equal(h.spawns.length, 0);
+  assert.deepEqual(h.receipts.map((x) => x.outcome), ['spawn_skipped_locked', 'retry_queued']);
+  assert.equal(h.queued().length, 1);
+});
+
+test('drain redispatches answer entries as workers', () => {
+  const h = harness();
+  h.queue([{ route: 'opencode', action: 'review_answer', key: 'card:tag_dw', tries: 1, notBefore: 1 }]);
+  notifyTodoEvent('comment', 'card:tag_new4', h.env, h.deps);
+  const w = h.spawns.find((s) => s.some((a) => String(a).includes('card:tag_dw')));
+  assert.ok(w, 'due answer entry redispatched');
+  assert.match(String(w[w.length - 1]), /WORKER — an owner answer just unblocked/);
+  assert.deepEqual(h.queued(), []);
+});
+
+test('answer verdict text says worker continuing', async () => {
+  const h = harness();
+  h.deps.fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) });
+  const calls = [];
+  h.deps.fetchFn = async (url, opts) => { calls.push([url, opts]); return { ok: true, status: 200, json: async () => ({ ok: true }) }; };
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'telegram', TODO_NOTIFY_BOT_TOKEN: 'tok', TODO_NOTIFY_CHAT_ID: '99' };
+  notifyTodoEvent('answer', 'card:tag_v', env, h.deps);
+  await new Promise((res) => setTimeout(res, 20));
+  const body = JSON.parse(calls[0][1].body);
+  assert.match(body.text, /worker continuing/);
+  assert.match(body.text, /card:tag_v/);
 });
