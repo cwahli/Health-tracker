@@ -1200,7 +1200,7 @@ describe('freemodels', () => {
       if (file.endsWith('auth.json')) return { opencode: { key: 'x' } };
       return null;
     };
-    const refs = listFreeOpenCode({ modelsCachePath: '/x/models.json', authPath: '/x/auth.json', readJson });
+    const refs = listFreeOpenCode({ modelsCachePath: '/x/models.json', authPath: '/x/auth.json', readJson, liveModels: () => null });
     expect(refs).toEqual(['opencode/big-pickle', 'opencode/mimo-v2.6-flash-free']);
   });
 
