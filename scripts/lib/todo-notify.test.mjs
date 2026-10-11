@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { wakeEnabled, triagePrompt, notifyTodoEvent, routeFor, retryBackoffSec } from './todo-notify.mjs';
+import { wakeEnabled, triagePrompt, notifyTodoEvent, routeFor, retryBackoffSec, attemptSessionPost } from './todo-notify.mjs';
 
 const tmpState = () => fs.mkdtempSync(path.join(os.tmpdir(), 'todo-notify-'));
 
@@ -234,4 +234,41 @@ test('opencode+telegram lanes fan out together', async () => {
   await new Promise((res) => setTimeout(res, 20));
   const outcomes = h.receipts.map((x) => x.outcome).sort();
   assert.deepEqual(outcomes, ['sent', 'spawned']);
+});
+
+test('session lane posts the verdict into the configured session', () => {
+  const h = harness();
+  const calls = [];
+  h.deps.execSyncFn = (cmd, args, o) => { calls.push([cmd, ...args]); return Buffer.from('{}'); };
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'session', TODO_NOTIFY_SESSION_ID: 'ses_test123' };
+  const r = notifyTodoEvent('comment', 'card:tag_s', env, h.deps);
+  assert.equal(r.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], 'opencode');
+  assert.ok(calls[0].includes('post') && calls[0].some((a) => String(a).includes('/api/session/ses_test123/prompt')));
+  const dataArg = calls[0][calls[0].indexOf('--data') + 1];
+  const body = JSON.parse(dataArg);
+  assert.match(body.text, /\[verdict\]/);
+  assert.match(body.text, /card:tag_s/);
+  assert.deepEqual(h.receipts.map((x) => x.outcome), ['posted']);
+});
+
+test('session lane without a session id fails closed with retry', () => {
+  const h = harness();
+  let execs = 0;
+  h.deps.execSyncFn = () => { execs += 1; return Buffer.from('{}'); };
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'session' };
+  notifyTodoEvent('approve', 'card:tag_n', env, h.deps);
+  assert.equal(execs, 0);
+  assert.deepEqual(h.receipts.map((x) => x.outcome), ['post_error', 'retry_queued']);
+  assert.equal(h.queued()[0].route, 'session');
+});
+
+test('session post throw enqueues a bounded retry', () => {
+  const h = harness();
+  h.deps.execSyncFn = () => { throw new Error('cli blew up'); };
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'session', TODO_NOTIFY_SESSION_ID: 'ses_x' };
+  notifyTodoEvent('answer', 'card:tag_e', env, h.deps);
+  assert.deepEqual(h.receipts.map((x) => x.outcome), ['post_error', 'retry_queued']);
+  assert.equal(h.queued()[0].tries, 1);
 });

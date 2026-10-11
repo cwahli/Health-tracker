@@ -43,7 +43,7 @@
  *   and drops it after 5 tries (receipt retry_exhausted).
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -91,9 +91,15 @@ export function triagePrompt(action, key) {
  *   (token TODO_NOTIFY_BOT_TOKEN, else TUI_BOT_TOKEN_VM). Reaches the
  *   operator's phone in real time — the push channel the opencode route
  *   lacks. Text carries action + key only, never secrets.
+ * - session: posts the verdict text into an opencode session via
+ *   `opencode api post /api/session/<id>/prompt` (the CLI carries its own
+ *   auth; the hook never handles server credentials). Target is
+ *   TODO_NOTIFY_SESSION_ID, set to the live conversation — it MUST be
+ *   refreshed when the conversation changes, or verdicts land in a dead
+ *   or wrong session. This is how a verdict posts directly into chat.
  * - log: record-only. No spawn, no send; inbox + receipt still written.
  */
-export const KNOWN_LANES = new Set(['opencode', 'telegram', 'log']);
+export const KNOWN_LANES = new Set(['opencode', 'telegram', 'session', 'log']);
 export function routeFor(env = process.env) {
   const names = String(env.TODO_TRIAGE_ROUTE || 'opencode').split(',')
     .map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -149,6 +155,11 @@ function recordAndSpawn({ inboxType, key, prompt, source, env, deps }) {
       dispatchTelegram({ action: inboxType, key, tries: 0, env, deps, receipt, readRetry, writeRetry, now });
       continue;
     }
+    if (lane === 'session') {
+      const r = attemptSessionPost({ action: inboxType, key, env, deps, receipt });
+      if (!r.ok) enqueueRetry({ route: lane, action: inboxType, key, tries: 0, now, readRetry, writeRetry, receipt });
+      continue;
+    }
     const r = attemptSpawn({ key, prompt, env, deps, receipt });
     if (!r.ok) enqueueRetry({ route: lane, action: inboxType, key, tries: 0, now, readRetry, writeRetry, receipt });
   }
@@ -156,8 +167,33 @@ function recordAndSpawn({ inboxType, key, prompt, source, env, deps }) {
   return { ok: true, reason: 'triage event fanned out (see receipts)' };
 }
 
-function telegramTarget(env = process.env) {
-  const token = String(env.TODO_NOTIFY_BOT_TOKEN || env.TUI_BOT_TOKEN_VM || '').trim();
+/**
+ * Posts the verdict into a live opencode session (the chat itself) via the
+ * `opencode api` CLI, which carries its own server auth — the hook never
+ * sees credentials. Synchronous, bounded (15s timeout): the CLI is local
+ * and fast. Returns {ok} so failures enqueue retries like every lane.
+ */
+export function attemptSessionPost({ action, key, env, deps, receipt }) {
+  const { execSyncFn = execFileSync } = deps;
+  const sessionId = String(env.TODO_NOTIFY_SESSION_ID || '').trim();
+  if (!sessionId) {
+    receipt('post_error', 'no TODO_NOTIFY_SESSION_ID');
+    return { ok: false, reason: 'no session id' };
+  }
+  const text = `[verdict] Review ${String(action || '').replace(/^review_/, '')}: ${key} — triage assessing, trail in sheet-todo-watch.`;
+  try {
+    execSyncFn('opencode', ['api', 'post', `/api/session/${sessionId}/prompt`, '--data', JSON.stringify({ text })],
+      { timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (err) {
+    const detail = String((err && err.message) || err).slice(0, 200);
+    receipt('post_error', detail);
+    return { ok: false, reason: detail };
+  }
+  receipt('posted', `session ${sessionId.slice(0, 12)}…`);
+  return { ok: true, reason: 'verdict posted to session' };
+}
+
+function telegramTarget(env = process.env) {  const token = String(env.TODO_NOTIFY_BOT_TOKEN || env.TUI_BOT_TOKEN_VM || '').trim();
   const chatId = String(env.TODO_NOTIFY_CHAT_ID || '').trim();
   if (!token) return { ok: false, reason: 'no bot token (TODO_NOTIFY_BOT_TOKEN nor TUI_BOT_TOKEN_VM)' };
   if (!chatId) return { ok: false, reason: 'no TODO_NOTIFY_CHAT_ID' };
@@ -217,6 +253,9 @@ function redispatchEntry({ route, action, key, prompt, tries, env, deps, receipt
   if (route === 'telegram') {
     dispatchTelegram({ action, key, tries, env, deps, receipt, readRetry, writeRetry, now });
     return undefined;
+  }
+  if (route === 'session') {
+    return attemptSessionPost({ action, key, env, deps, receipt });
   }
   return attemptSpawn({ key, prompt: prompt || triagePrompt(String(action || '').replace(/^review_/, ''), key), env, deps, receipt });
 }
