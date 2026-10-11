@@ -116,6 +116,15 @@ async function withPage(fn) {
     status: 200, contentType: 'application/json',
     body: JSON.stringify({ ok: true, google: true, items: QUEUE }),
   }));
+  // The page also opens the live-push SSE stream, and the test gateway
+  // admits it and immediately pushes the REAL queue. Unstubbed, that event
+  // rebuilds the page mid-test with live items (intermittent fixture
+  // failures showing real keys). Hold the stream quiet: sensors test user
+  // gestures, not the push channel.
+  await page.route('**/review/api/events**', (r) => r.fulfill({
+    status: 200, contentType: 'text/event-stream',
+    body: ': test-quiet\nretry: 60000\n\n',
+  }));
   await page.route('**/review/api/proof*', (r) => {
     const id = new URL(r.request().url()).searchParams.get('file') || '';
     proofFetches.push(id);
@@ -411,6 +420,24 @@ test('the heart confirms once, then archives', async (t) => {
     assert.equal(await page.textContent('#pos'), '1/1', 'the archived item left the queue');
     const shown = await page.textContent('.kv .key');
     assert.match(shown, /req:test-b/, 'the next item is now showing');
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
+
+test('the result screenshot carries its own heart that archives', async (t) => {
+  const ran = await withPage(async ({ page }) => {
+    let approves = 0;
+    await page.route('**/review/api/approve*', (route) => {
+      approves += 1;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    });
+    // On the Request landing: the heart pinned to the result archives
+    // without ever opening the swipe stage.
+    assert.equal(await page.textContent('#pos'), '1/2', 'two items to start');
+    await page.click('.view[data-view="request"] .result .heart');
+    await page.waitForTimeout(250);
+    assert.equal(approves, 1, 'the result heart archives from the landing');
+    assert.equal(await page.textContent('#pos'), '1/1', 'the archived item left the queue');
   });
   if (ran === null) t.skip('playwright not installed');
 });

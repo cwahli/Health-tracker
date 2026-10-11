@@ -144,6 +144,15 @@ async function withPage(fn) {
     status: 200, contentType: 'application/json',
     body: JSON.stringify({ ok: true, google: true, items: QUEUE }),
   }));
+  // The page also opens the live-push SSE stream, and the test gateway
+  // admits it and immediately pushes the REAL queue. Unstubbed, that event
+  // rebuilds the page mid-test with live items (intermittent fixture
+  // failures showing real keys). Hold the stream quiet: sensors test user
+  // gestures, not the push channel.
+  await page.route('**/review/api/events**', (r) => r.fulfill({
+    status: 200, contentType: 'text/event-stream',
+    body: ': test-quiet\nretry: 60000\n\n',
+  }));
   await page.route('**/review/api/proof**', (route) => {
     const id = new URL(route.request().url()).searchParams.get('file') || '';
     return route.fulfill({ status: 200, contentType: 'image/png', body: id === 'file-0' ? PNG_TALL : PNG_WIDE });
