@@ -724,8 +724,13 @@ async function proxyWebUi(req, res, url, env, { ttlSec = 900 } = {}) {
  * gateway door above already admitted the caller; this only moves bytes. The
  * full search string passes through untouched; the query is never logged.
  */
-async function proxyHostUpstream(req, res, url, upstream, downError) {
-  const target = `${String(upstream).replace(/\/+$/, '')}${url.pathname}${url?.search || ''}`;
+async function proxyHostUpstream(req, res, url, upstream, downError, { stripPrefix = '', stripToken = false } = {}) {
+  let proximate = url.pathname;
+  if (stripPrefix && (proximate === stripPrefix || proximate.startsWith(`${stripPrefix}/`))) {
+    proximate = proximate.slice(stripPrefix.length) || '/';
+  }
+  const query = stripToken ? webUpstreamQuery(url?.search) : (url?.search || '');
+  const target = `${String(upstream).replace(/\/+$/, '')}${proximate}${query}`;
   try {
     const headers = {};
     for (const [k, v] of Object.entries(req.headers || {})) {
@@ -1469,6 +1474,22 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         return res.end(JSON.stringify({ ok: false, error: agendaVerdict.reason }));
       }
       return proxyHostUpstream(req, res, url, agendaUpstream(env), 'agenda upstream unreachable');
+    }
+
+    // Agenda sections on the app host (/agenda/*): the tax calendar, agenda
+    // and hostel scout are sections (?tab=) of one upstream app whose
+    // absolute asset/API paths demand whole-app proxying — which a path
+    // prefix cannot do unless the prefix is stripped here (it is) and the
+    // app addresses relatively (it does after the companion change).
+    if (url.pathname === '/agenda' || url.pathname.startsWith('/agenda/')) {
+      const agendaVerdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace, maxAgeSec: sessionMax });
+      if (!agendaVerdict.ok) {
+        log(`agenda path refused (${agendaVerdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: agendaVerdict.reason }));
+      }
+      return proxyHostUpstream(req, res, url, agendaUpstream(env), 'agenda upstream unreachable',
+        { stripPrefix: '/agenda', stripToken: true });
     }
 
     // The Mini App's landing URL. It carries initData, which is exchanged for

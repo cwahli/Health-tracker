@@ -673,6 +673,42 @@ console.log('assert-tui-gateway:');
   check('no token gets no status', bare === 401);
 }
 
+// 12b. Agenda sections on the app host (/agenda/*): same upstream as the
+//      agenda host, prefix stripped, gateway token never proxied upstream.
+{
+  const seen = [];
+  const agenda = http.createServer((rq, rs) => {
+    seen.push(rq.url);
+    rs.writeHead(200, { 'content-type': 'application/json' });
+    rs.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise((r) => agenda.listen(0, '127.0.0.1', r));
+  const env = { TUI_GATEWAY_SECRET: SECRET, AGENDA_UPSTREAM: `http://127.0.0.1:${agenda.address().port}` };
+  const token = issueToken({ botId: 'web', chatId: 'firebase:1', secret: SECRET, ttlSec: 900 });
+  const call = (url, headers = {}) => new Promise((resolve, reject) => {
+    let code = 0; let body = '';
+    const res = { writeHead: (c) => { code = c; }, write: () => true,
+      end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+    createGateway({ env, log: () => {} })(
+      { method: 'GET', url, headers, [Symbol.asyncIterator]: async function* () {} }, res).catch(reject);
+    setTimeout(() => resolve({ code: -2, body: '' }), 5000).unref?.();
+  });
+  const q = `token=${encodeURIComponent(token)}`;
+  const api = await call(`/agenda/api/tax-status?${q}`, { host: 'app.example' });
+  check('a tokened agenda path proxies', api.code === 200);
+  check('the prefix is stripped upstream', seen.some((u) => u === '/api/tax-status'));
+  check('the gateway token never reaches upstream', seen.every((u) => !u.includes('token=')));
+  const root = await call(`/agenda/?${q}&tab=tax`, { host: 'app.example' });
+  check('the section query survives the strip', seen.some((u) => u === '/?tab=tax'));
+  void root;
+  check('no token gets no agenda path', (await call('/agenda/api/tax-status', { host: 'app.example' })).code === 401);
+  check('a page referer admits the framed subresource call',
+    (await call('/agenda/api/agenda', { host: 'app.example', referer: `https://app.example/agenda/?${q}` })).code === 200);
+  check('a lookalike path is not an agenda route',
+    (await call(`/agendax?${q}`, { host: 'app.example' })).code !== 200);
+  agenda.close();
+}
+
 // 12b. The bootstrap we do serve is ours, so it is executed with stubs.
   const boot = await bootstrapThroughGateway();
   const scripts = [...boot.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]);

@@ -547,7 +547,7 @@ function BugsTab({ onMenu }: { onMenu: () => void }) {
 function PendingTab({ def, onMenu }: { def: MiniAppDef; onMenu: () => void }) {
   return (
     <div style={{ padding: 24, textAlign: 'center' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, margin: '0 0 8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 8, margin: '0 0 8px' }}>
         <button type="button" aria-label="Menu" onClick={onMenu}
           style={{ width: 32, height: 32, borderRadius: 8, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 16, cursor: 'pointer' }}>
           ☰
@@ -567,7 +567,7 @@ function PendingTab({ def, onMenu }: { def: MiniAppDef; onMenu: () => void }) {
 function TtyTab({ def, onMenu }: { def: MiniAppDef; onMenu: () => void }) {
   return (
     <div style={{ padding: 24, textAlign: 'center' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, margin: '0 0 8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 8, margin: '0 0 8px' }}>
         <button type="button" aria-label="Menu" onClick={onMenu}
           style={{ width: 32, height: 32, borderRadius: 8, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 16, cursor: 'pointer' }}>
           ☰
@@ -669,7 +669,20 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     const tok = queryToken();
     const landing = tok ? `/?bot=${encodeURIComponent(bot)}&token=${encodeURIComponent(tok)}` : null;
     if (!landing) return <TtyTab def={def} onMenu={onMenu} />;
-    return <Frame key={`tg:${epoch}`} title={def.title as string} src={landing} />;
+    // Same left burger as every other tab: opens the shell drawer, no
+    // detour, no fullscreen. The frame below stays untouched.
+    return (
+      <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderBottom: '1px solid #1e293b', background: '#0b1220' }}>
+          <button type="button" aria-label="Menu" onClick={onMenu}
+            style={{ width: 28, height: 28, borderRadius: 8, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 15, cursor: 'pointer', flex: '0 0 auto' }}>
+            ☰
+          </button>
+          <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 600 }}>{def.title}</span>
+        </div>
+        <Frame key={`tg:${epoch}`} title={def.title as string} src={landing} />
+      </div>
+    );
   }
 
   const pickedRoute = (routes || []).find((r) => r.bot === picked);
@@ -865,6 +878,41 @@ function Shell() {
   const authed = !authDeadTrip && (inTelegram || fbAuthed || !!queryToken());
   const bot = query.bot || (!inTelegram && fbAuthed ? 'web' : '');
 
+  // Back (button or swipe) closes the drawer instead of leaving the page:
+  // opening the drawer pushes one history entry, popping it only closes the
+  // drawer — the page itself never changes. Telegram owns back itself (its
+  // BackButton above), so this is browser-only.
+  const menuPushed = useRef(false);
+  useEffect(() => {
+    if (!drawer || inTelegram || menuPushed.current) return;
+    try {
+      window.history.pushState({ shellMenu: true }, '', window.location.href);
+      menuPushed.current = true;
+    } catch {
+      /* history unavailable — backdrop and × still close */
+    }
+  }, [drawer, inTelegram]);
+  useEffect(() => {
+    const onPop = () => { menuPushed.current = false; setDrawer(false); };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  // Every drawer exit funnels here so the pushed entry is consumed: plain
+  // setDrawer(false) would strand it and the next back-press would pop a
+  // dead entry instead of doing nothing.
+  const closeDrawer = () => {
+    if (menuPushed.current) {
+      menuPushed.current = false;
+      try {
+        window.history.back();
+        return;
+      } catch {
+        /* fall through to a plain close */
+      }
+    }
+    setDrawer(false);
+  };
+
   useEffect(() => {
     telegramChrome();
     // Frames need ?token= in their own query. Cookie-only sessions (fresh
@@ -882,11 +930,12 @@ function Shell() {
   }, []);
 
   // Token frames carry ?token= in their own src, minted from the shell's
-  // 900s page token. Renew on every switch to a token tab so the frame is
-  // born live instead of 401ing inside an unreachable iframe. initData tabs
-  // (bags, forge) re-forward top-level initData per frame — no renewal.
+  // 900s page token. Renew on every switch to any token tab so the frame is
+  // born live instead of 401ing inside an unreachable iframe — that hole
+  // stranded the agenda sections past their first 15 minutes. initData tabs
+  // (forge) re-forward top-level initData per frame — no renewal.
   useEffect(() => {
-    if (def.id === 'fleet' || def.id === 'review' || def.id === 'tui' || def.id === 'web') {
+    if (def.id !== 'forge') {
       renewToken().then((ok) => {
         if (ok) setQueryEpoch((n) => n + 1);
       });
@@ -994,13 +1043,19 @@ function Shell() {
   return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overscrollBehavior: 'none' }}>
       {drawer && (
-        <div role="presentation" onClick={() => setDrawer(false)}
+        <div role="presentation" onClick={closeDrawer}
           style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(2,6,23,0.6)' }}>
           <nav aria-label="Mini apps" onClick={(e) => e.stopPropagation()}
             style={{ width: 'min(320px, 85vw)', height: '100%', background: '#0f172a', borderRight: '1px solid #334155', padding: '12px 0', overflowY: 'auto' }}>
-            <div style={{ padding: '4px 12px 10px', color: '#94a3b8', fontSize: 12 }}>Mini Apps</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px 10px' }}>
+              <button type="button" aria-label="Close menu" onClick={closeDrawer}
+                style={{ width: 28, height: 28, borderRadius: 8, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 15, cursor: 'pointer', flex: '0 0 auto' }}>
+                ×
+              </button>
+              <span style={{ color: '#94a3b8', fontSize: 12 }}>Mini Apps</span>
+            </div>
             {apps.map((a) => (
-              <button key={a.id} type="button" onClick={() => { setDrawer(false); setTab(a.id); }}
+              <button key={a.id} type="button" onClick={() => { closeDrawer(); setTab(a.id); }}
                 style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', background: 'none', border: 0, color: '#e2e8f0', cursor: 'pointer', fontWeight: a.id === def.id ? 700 : 400 }}>
                 {a.title}
               </button>
