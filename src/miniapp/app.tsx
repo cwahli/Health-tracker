@@ -1,6 +1,7 @@
 import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { enabledMiniApps, miniAppById, type MiniAppDef } from './miniapp-registry';
+import { tabUrl } from './shell-nav';
 import { BugBoard } from '../components/bug-board/BugBoard';
 import { useBugBoard } from '../components/bug-board/useBugBoard';
 import '../index.css';
@@ -949,6 +950,11 @@ function Shell() {
   // drawer — the page itself never changes. Telegram owns back itself (its
   // BackButton above), so this is browser-only.
   const menuPushed = useRef(false);
+  // Latest tab/bot for the pop handler below: consuming the pushed drawer
+  // entry with history.back() lands on the PRE-drawer URL (stale ?tab=),
+  // so the pop re-asserts the current tab — otherwise a drawer visit shows
+  // the new tab but refreshes into the old one (live 2026-10-11).
+  const navRef = useRef({ tab: '', bot: '' });
   useEffect(() => {
     if (!drawer || inTelegram || menuPushed.current) return;
     try {
@@ -959,7 +965,16 @@ function Shell() {
     }
   }, [drawer, inTelegram]);
   useEffect(() => {
-    const onPop = () => { menuPushed.current = false; setDrawer(false); };
+    const onPop = () => {
+      menuPushed.current = false;
+      setDrawer(false);
+      try {
+        const n = navRef.current;
+        if (n.tab) window.history.replaceState(null, '', tabUrl(window.location.search || '', n.tab, n.bot));
+      } catch {
+        /* history unavailable — tab state stays in memory */
+      }
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -1023,11 +1038,9 @@ function Shell() {
   useEffect(() => {
     document.title = `${def.title} — Mini App`;
     writeLastTab(def.id);
+    navRef.current = { tab: def.id, bot };
     try {
-      const q = new URLSearchParams(window.location.search || '');
-      q.set('tab', def.id);
-      if (bot) q.set('bot', bot);
-      window.history.replaceState(null, '', `?${q.toString()}`);
+      window.history.replaceState(null, '', tabUrl(window.location.search || '', def.id, bot));
     } catch {
       /* history unavailable — tab state stays in memory */
     }
