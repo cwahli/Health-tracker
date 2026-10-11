@@ -1517,14 +1517,16 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
             // land on the shell, never on a raw ttyd page: the raw page has
             // no burger and no way back (live 2026-10-11: bare
             // app.health-tracker.co.uk stranded on the tty with no nav).
-            // The shell's own terminal iframe keeps the fast tty path — it
-            // arrives with the shell as Referer and/or dest=iframe.
+            // No tab is forced: the shell opens its last-visited tab (or the
+            // terminal for a first visit), so a refresh returns to the page
+            // already on. The shell's own terminal iframe keeps the fast tty
+            // path — it arrives with the shell as Referer and/or dest=iframe.
             const ref = String(req.headers?.referer || req.headers?.referrer || '');
             const dest = String(req.headers?.['sec-fetch-dest'] || '').toLowerCase();
             const framed = dest === 'iframe' || ref.includes('/app/app');
             if (!framed) {
               log(`admitted bot=${deep.botId} chat=${deep.chatId} (deep link -> shell)`);
-              const shellQuery = `?token=${encodeURIComponent(raw)}&bot=${encodeURIComponent(deep.botId)}&tab=tui`;
+              const shellQuery = `?token=${encodeURIComponent(raw)}&bot=${encodeURIComponent(deep.botId)}`;
               res.writeHead(302, {
                 'location': `/app/app${shellQuery}`,
                 'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(raw)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
