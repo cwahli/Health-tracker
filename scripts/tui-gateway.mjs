@@ -917,6 +917,7 @@ import {
   approveReviewItem as approveReviewItemStatus,
   commentReviewItem as commentReviewItemStatus,
   answerReviewItem as answerReviewItemStatus,
+  answerQuestion as answerQuestionStatus,
   verifyProofFile as verifyProofFileStatus,
   resetReviewState as resetReviewStateStatus,
 } from './lib/review-status.mjs';
@@ -2577,6 +2578,33 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         );
         // Event-driven todo wake-up (see /answer above).
         try { notifyTodoEvent(url.pathname === '/review/api/approve' ? 'approve' : 'comment', data.key, env); } catch { /* notify must never fail the verdict */ }
+      }
+      res.writeHead(out.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify(out));
+    }
+
+    if (url.pathname === '/review/api/question' && req.method === 'POST') {
+      // ❓ The owner answers the agent's Additional question. Same renewal
+      // grace as the other verdict endpoints; the answer lands in the
+      // question cell and the answer wake-up re-runs triage on the row.
+      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret, { renewGraceSec: renewGrace });
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const parsed = await readJsonBody(req);
+      if (!parsed.ok) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: parsed.error }));
+      }
+      const data = parsed.json || {};
+      const out = await answerQuestionStatus(data.key, data.text, { env });
+      if (out.ok) {
+        getReviewItemsStatus({ env, root: REPO_ROOT }).then(
+          (state) => broadcastReviewEvent('state', state),
+          () => {},
+        );
+        try { notifyTodoEvent('answer', data.key, env); } catch { /* notify must never fail the verdict */ }
       }
       res.writeHead(out.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify(out));

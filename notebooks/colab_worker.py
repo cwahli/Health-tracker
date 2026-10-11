@@ -62,6 +62,7 @@ IDLE_TIMEOUT_MINUTES = 20
 # Active engine state inside Colab
 CURRENT_ENGINE = "muse-spark-1.3"  # or "qwen-3.8"
 LAST_ACTIVE_TIME = time.time()
+OPENCODE_EXTRA_ARGS = ""  # e.g. "--continue"; set by the Grok chat relay (grok_queue.py) for its turns
 
 def tg_send(chat_id, text):
     if not TELEGRAM_BOT_TOKEN or "YOUR_TELEGRAM" in TELEGRAM_BOT_TOKEN:
@@ -130,7 +131,7 @@ def run_agent_turn(chat_id, user_prompt):
             model_id = CURRENT_ENGINE
 
         # Step 3: Run OpenCode agentic loop
-        cmd = f"opencode run --auto --dir {REPO_DIR} -m {model_id} {json.dumps(user_prompt)}"
+        cmd = f"opencode run --auto --dir {REPO_DIR} -m {model_id} {OPENCODE_EXTRA_ARGS} {json.dumps(user_prompt)}"
         res = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=REPO_DIR, timeout=600)
         output = (res.stdout or "").strip()
         if not output and res.stderr:
@@ -316,7 +317,7 @@ if __name__ == "__main__":
     print("=" * 60)
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else "/content/Health-tracker/notebooks")
-        import importlib, grok_queue; importlib.reload(grok_queue); grok_queue.start()
+        import importlib, grok_queue; importlib.reload(grok_queue); grok_queue.start(tg_token=TELEGRAM_BOT_TOKEN, chat_id=ALLOWED_USER_ID)
     except Exception as e:
         print(f"• Grok queue not started: {e}")
     polling_loop()

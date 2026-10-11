@@ -38,6 +38,9 @@ import {
   approveReviewItem,
   commentReviewItem,
   answerReviewItem,
+  answerQuestion,
+  isNeedInfoStatus,
+  isQueueStatus,
   verifyProofFile,
   resetReviewState,
   ANSWER_PREFIX,
@@ -483,4 +486,67 @@ test('gateway /review/api routes refuse without a token outside test auth', asyn
   }
   assert.ok(COOKIE_NAME.length > 0);
   assert.ok(issueToken);
+});
+
+test('need-info rows join the queue with their question, answers append to the cell', async () => {
+  assert.equal(isNeedInfoStatus('Need info'), true);
+  assert.equal(isNeedInfoStatus('review'), false);
+  assert.equal(isQueueStatus('Need info'), true);
+  assert.equal(isQueueStatus('Assigned'), false);
+  const header = [...HEADER, 'Additional question'];
+  const qi = header.indexOf('Additional question');
+  const mkrow = (vals) => { const r = [...vals, '']; return r; };
+  const rowN = mkrow([...ROW_A.slice(0, 5), 'Need info', ...ROW_A.slice(6)]);
+  rowN[qi] = 'Which screenshot shows the bug?';
+  const rowR = mkrow(ROW_A);
+  const deps = fakeDeps();
+  const readTab = deps.readTab;
+  deps.readTab = async (sheetId, tab) => {
+    if (tab === REVIEW_TAB) return { ok: true, json: { values: [header, rowN, rowR] } };
+    return readTab(sheetId, tab);
+  };
+  resetReviewState();
+  const res = await getReviewItems({ env: {}, deps, refresh: true });
+  assert.equal(res.items.length, 2);
+  assert.equal(res.items[0].question, 'Which screenshot shows the bug?');
+  assert.equal(res.items[1].question, '');
+});
+
+test('answerQuestion stamps the answer into the Additional question cell', async () => {
+  const header = [...HEADER, 'Additional question'];
+  const qi = header.indexOf('Additional question');
+  const row = [...ROW_A.slice(0, 5), 'Need info', ...ROW_A.slice(6)];
+  while (row.length < header.length) row.push('');
+  row[qi] = 'Which screenshot shows the bug?';
+  const calls = {};
+  const deps = fakeDeps(calls);
+  const readTab = deps.readTab;
+  deps.readTab = async (sheetId, tab) => {
+    if (tab === REVIEW_TAB) return { ok: true, json: { values: [header, row] } };
+    return readTab(sheetId, tab);
+  };
+  resetReviewState();
+  const out = await answerQuestion('req:test-1', 'the second one', { env: {}, deps, now: new Date('2026-10-11T19:00:00+01:00').getTime() });
+  assert.equal(out.ok, true);
+  assert.match(out.stamped, /\[human 11 Oct\] the second one/);
+  const q = calls.updated.find((u) => u.range.includes(colLetter(qi)));
+  assert.ok(q, 'question cell written');
+  assert.match(q.values[0][0], /Which screenshot shows the bug\?\n\[human 11 Oct\] the second one/);
+});
+
+test('answerQuestion refuses empty answers, non-queue rows, and a missing column', async () => {
+  assert.equal((await answerQuestion('req:test-1', '  ', { env: {}, deps: fakeDeps() })).ok, false);
+  const deps = fakeDeps();
+  resetReviewState();
+  assert.equal((await answerQuestion('req:test-2', 'x', { env: {}, deps })).ok, false);
+  const deps2 = fakeDeps();
+  const readTab = deps2.readTab;
+  deps2.readTab = async (sheetId, tab) => {
+    if (tab === REVIEW_TAB) return { ok: true, json: { values: [HEADER, ROW_C] } };
+    return readTab(sheetId, tab);
+  };
+  resetReviewState();
+  const missing = await answerQuestion('req:test-3', 'x', { env: {}, deps: deps2 });
+  assert.equal(missing.ok, false);
+  assert.match(missing.error, /Additional question missing/);
 });
