@@ -1,0 +1,31 @@
+spec:card-19 — live proof on the ORIGINAL failing meal (no substitute, no reconstruction)
+
+Original failure: job_1790784359089_kvt6r0c0g (2026-09-30)
+  user text (verbatim): "I had 70g of Sainsbury oat + fruit"
+  entry photo: sha256_0aa49da2d85f54546874f080c044b8f094fc751370ced556ce066b6d67242798
+  (bowl of oats topped with green grapes; debug bundle + photo committed at specs/card19-orig/)
+  defect: 2 scout dishes -> 1 ledger row, both compositeSiblings boxless (DISH_DROP)
+
+Live re-files on this branch's dev server (same code as origin/main, zero app-code diff):
+  A. job_1791738758388_card19orig (API submit, byte-identical entry photo):
+     scout 2 dishes (oats 70g [450,230,890,770], grapes 100g [390,110,880,880])
+     -> 1 composite + 2 compositeSiblings, EACH WITH ITS OWN BOX; composite = union.
+     Analysis: 307 kcal (oats 230 + grapes 77). Status "Analysis complete".
+     Debug: https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/debug/anonymous/job_1791738758388_card19orig.json
+  B. job_1791739000037_tqizyvrgw (in-app composer: photo attached + verbatim text typed + sent):
+     scout drew 1 dish this run (live scout is nondeterministic) -> ledger 2 ROWS,
+     each with its own box (oats [250,0,950,1000], grapes [380,110,880,880]).
+     Analysis: 332 kcal (254 + 78). Status "succeeded".
+     (UI-attached photo re-encoded by the composer pipeline, same picture.)
+
+Shots (all chromium screenshots of the live app, loaded-with-data, job cited on strip):
+  card19-01-input-composer-live.png — INPUT staged in composer (job B)
+  card19-02-input-sent-live.png — INPUT sent, photo+verbatim text in history (job B)
+  card19-03-output-history-live.png — OUTPUT history, both re-files Analysis completed (jobs A+B)
+  card19-04-output-nutrients-live.png — OUTPUT analysis table, grapes own row+nutrients (job A)
+
+Gates re-run on this tree: scoutGeometry.test.ts 8/8 green;
+  scripts/repro-card19-orig.mjs: stored bundle exit 1 (REPRODUCED),
+  pre-fix code exit 1 (fingerprint match), current code exit 0 (FIXED).
+No application-code change this wave (fix = PR #452, on main); evidence + proof only.
+Ledger JSONs: specs/card19-orig/live-status-<job>.json. Repro: scripts/repro-card19-orig.mjs.

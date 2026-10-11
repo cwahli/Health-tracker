@@ -1,0 +1,16 @@
+repro: ./node_modules/.bin/tsx scripts/repro-card19-orig.mjs [--before] [--sg=<impl>] [--debug-json=<path>]
+env: worktree node_modules (npm ci), tsx 4.x; no network, no live backends
+params: debug bundle specs/card19-orig/job_1790784359089_kvt6r0c0g.json
+  (jobId pinned inside the driver; any other bundle exits 3)
+
+1. --before (stored failing run, real ledger bytes):
+   command: ./node_modules/.bin/tsx scripts/repro-card19-orig.mjs --before
+   exit: 1 — scout=2 ledger=1, both components boxless (REPRODUCED)
+2. live on pre-fix code (git show 05e93cce^:src/server/food/scoutGeometry.ts,
+   same 2 real scout dishes as input):
+   exit: 1 — oats/grapes comp boxes undefined (REPRODUCED, fingerprint match)
+3. live on current code (src/server/food/scoutGeometry.ts, same input):
+   command: ./node_modules/.bin/tsx scripts/repro-card19-orig.mjs
+   exit: 0 — oats [250,100,955,990], grapes [390,110,875,880], composite=union (FIXED)
+
+full transcript: run.log (this folder)

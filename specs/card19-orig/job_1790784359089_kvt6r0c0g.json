@@ -1,0 +1,3061 @@
+{
+  "jobId": "job_1790784359089_kvt6r0c0g",
+  "userId": "Pqc9RG33GRdELpXvkqI4EJhHyQ53",
+  "kind": "food_log",
+  "mode": "review",
+  "text": "I had 70g of Sainsbury oat + fruit",
+  "photoUrl": "https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_0aa49da2d85f54546874f080c044b8f094fc751370ced556ce066b6d67242798.jpg",
+  "result": {
+    "pendingFoodLog": {
+      "id": "meal_1790784386905",
+      "calories": 313,
+      "itemsBreakdown": [
+        {
+          "scoutIndex": 0,
+          "name": "Sainsbury Oat and Fruit with Green Grapes",
+          "canonicalDbName": "Sainsbury Oat and Fruit with Green Grapes",
+          "originalName": "Sainsbury Oat and Fruit with Green Grapes",
+          "keyword": "Sainsbury Oat and Fruit with Green Grapes",
+          "chainName": "Sainsbury's",
+          "brandName": "Sainsbury's",
+          "weightGrams": 70,
+          "calories": 313,
+          "protein": 8.5,
+          "totalFat": 2.5,
+          "saturatedFat": 0.5,
+          "carbohydrates": 59,
+          "sodium": 17,
+          "addedSugar": 1.6,
+          "nutrients": {
+            "calories": 313,
+            "protein": 8.5,
+            "totalFat": 2.5,
+            "saturatedFat": 0.5,
+            "transFat": 0,
+            "unsaturatedFat": 2.2,
+            "carbohydrates": 59,
+            "sugar": 11.3,
+            "addedSugar": 1.6,
+            "totalFibre": 8.4,
+            "solubleFibre": 1.3,
+            "sodium": 17,
+            "potassium": 160,
+            "magnesium": 43.43,
+            "calcium": 27.43,
+            "iron": 1.6,
+            "zinc": 1.14,
+            "selenium": 6.86,
+            "iodine": 2.29,
+            "phosphorus": 118.86,
+            "vitaminD": 0,
+            "vitaminB12": 0,
+            "folate": 27.43,
+            "vitaminC": 0.23,
+            "vitaminE": 0.91,
+            "vitaminK": 0.91,
+            "vitaminA": 4.57,
+            "vitaminB6": 0.14,
+            "thiamine": 0.18,
+            "riboflavin": 0.14,
+            "niacin": 1.83,
+            "omega3": 0,
+            "salt": 0.04
+          },
+          "lockedNutrientKeys": [
+            "calories",
+            "protein",
+            "totalFat",
+            "saturatedFat",
+            "carbohydrates",
+            "sodium"
+          ],
+          "dbSource": "estimated",
+          "dbId": null,
+          "rawNutritionLabel": null,
+          "labelNutrientsPerServing": null,
+          "brandLock": null,
+          "atwaterFlag": null,
+          "ingredientsList": "Sainsbury Oat and Fruit, Green Grapes",
+          "visualIngredients": [
+            "Sainsbury Oat and Fruit",
+            "Green Grapes"
+          ],
+          "components": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45,
+                "calories": 237,
+                "totalFat": 2.5,
+                "solubleFibre": 2.9
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 70,
+              "calories": 237,
+              "carbs": 45,
+              "totalFibre": 7.5,
+              "solubleFibre": 2.9,
+              "baseNutrients100g": {
+                "calories": 339,
+                "protein": 12.1,
+                "totalFat": 3.6,
+                "saturatedFat": 0.6,
+                "carbohydrates": 64.3,
+                "sodium": 21,
+                "totalFibre": 10.7,
+                "solubleFibre": 4.1
+              }
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18,
+                "calories": 76,
+                "totalFat": 0.2,
+                "solubleFibre": 0.3
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 100,
+              "calories": 76,
+              "carbs": 18,
+              "totalFibre": 0.9,
+              "solubleFibre": 0.3,
+              "baseNutrients100g": {
+                "calories": 76,
+                "protein": 0.6,
+                "totalFat": 0.2,
+                "saturatedFat": 0.1,
+                "carbohydrates": 18,
+                "sodium": 2,
+                "totalFibre": 0.9,
+                "solubleFibre": 0.3
+              }
+            }
+          ],
+          "componentsDetailList": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45,
+                "calories": 237,
+                "totalFat": 2.5,
+                "solubleFibre": 2.9
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 70,
+              "calories": 237,
+              "carbs": 45,
+              "totalFibre": 7.5,
+              "solubleFibre": 2.9,
+              "baseNutrients100g": {
+                "calories": 339,
+                "protein": 12.1,
+                "totalFat": 3.6,
+                "saturatedFat": 0.6,
+                "carbohydrates": 64.3,
+                "sodium": 21,
+                "totalFibre": 10.7,
+                "solubleFibre": 4.1
+              }
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18,
+                "calories": 76,
+                "totalFat": 0.2,
+                "solubleFibre": 0.3
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 100,
+              "calories": 76,
+              "carbs": 18,
+              "totalFibre": 0.9,
+              "solubleFibre": 0.3,
+              "baseNutrients100g": {
+                "calories": 76,
+                "protein": 0.6,
+                "totalFat": 0.2,
+                "saturatedFat": 0.1,
+                "carbohydrates": 18,
+                "sodium": 2,
+                "totalFibre": 0.9,
+                "solubleFibre": 0.3
+              }
+            }
+          ],
+          "compositeSiblings": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45,
+                "calories": 237,
+                "totalFat": 2.5,
+                "solubleFibre": 2.9
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 70,
+              "calories": 237,
+              "carbs": 45,
+              "totalFibre": 7.5,
+              "solubleFibre": 2.9,
+              "baseNutrients100g": {
+                "calories": 339,
+                "protein": 12.1,
+                "totalFat": 3.6,
+                "saturatedFat": 0.6,
+                "carbohydrates": 64.3,
+                "sodium": 21,
+                "totalFibre": 10.7,
+                "solubleFibre": 4.1
+              }
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18,
+                "calories": 76,
+                "totalFat": 0.2,
+                "solubleFibre": 0.3
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 100,
+              "calories": 76,
+              "carbs": 18,
+              "totalFibre": 0.9,
+              "solubleFibre": 0.3,
+              "baseNutrients100g": {
+                "calories": 76,
+                "protein": 0.6,
+                "totalFat": 0.2,
+                "saturatedFat": 0.1,
+                "carbohydrates": 18,
+                "sodium": 2,
+                "totalFibre": 0.9,
+                "solubleFibre": 0.3
+              }
+            }
+          ],
+          "hasComponents": true,
+          "boundingBox2D": [
+            250,
+            100,
+            955,
+            990
+          ],
+          "sourceImageIndex": 0,
+          "foodType": "composed",
+          "cookingMethod": null,
+          "diningEnvironment": "home_cooked",
+          "isDishEstimate": true,
+          "carbs": 59,
+          "fat": 2.5
+        }
+      ],
+      "items": [
+        {
+          "scoutIndex": 0,
+          "name": "Sainsbury Oat and Fruit with Green Grapes",
+          "canonicalDbName": "Sainsbury Oat and Fruit with Green Grapes",
+          "originalName": "Sainsbury Oat and Fruit with Green Grapes",
+          "keyword": "Sainsbury Oat and Fruit with Green Grapes",
+          "chainName": "Sainsbury's",
+          "brandName": "Sainsbury's",
+          "weightGrams": 70,
+          "calories": 313,
+          "protein": 8.5,
+          "totalFat": 2.5,
+          "saturatedFat": 0.5,
+          "carbohydrates": 59,
+          "sodium": 17,
+          "addedSugar": 1.6,
+          "nutrients": {
+            "calories": 313,
+            "protein": 8.5,
+            "totalFat": 2.5,
+            "saturatedFat": 0.5,
+            "transFat": 0,
+            "unsaturatedFat": 2.2,
+            "carbohydrates": 59,
+            "sugar": 11.3,
+            "addedSugar": 1.6,
+            "totalFibre": 8.4,
+            "solubleFibre": 1.3,
+            "sodium": 17,
+            "potassium": 160,
+            "magnesium": 43.43,
+            "calcium": 27.43,
+            "iron": 1.6,
+            "zinc": 1.14,
+            "selenium": 6.86,
+            "iodine": 2.29,
+            "phosphorus": 118.86,
+            "vitaminD": 0,
+            "vitaminB12": 0,
+            "folate": 27.43,
+            "vitaminC": 0.23,
+            "vitaminE": 0.91,
+            "vitaminK": 0.91,
+            "vitaminA": 4.57,
+            "vitaminB6": 0.14,
+            "thiamine": 0.18,
+            "riboflavin": 0.14,
+            "niacin": 1.83,
+            "omega3": 0,
+            "salt": 0.04
+          },
+          "lockedNutrientKeys": [
+            "calories",
+            "protein",
+            "totalFat",
+            "saturatedFat",
+            "carbohydrates",
+            "sodium"
+          ],
+          "dbSource": "estimated",
+          "dbId": null,
+          "rawNutritionLabel": null,
+          "labelNutrientsPerServing": null,
+          "brandLock": null,
+          "atwaterFlag": null,
+          "ingredientsList": "Sainsbury Oat and Fruit, Green Grapes",
+          "visualIngredients": [
+            "Sainsbury Oat and Fruit",
+            "Green Grapes"
+          ],
+          "components": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45,
+                "calories": 237,
+                "totalFat": 2.5,
+                "solubleFibre": 2.9
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 70,
+              "calories": 237,
+              "carbs": 45,
+              "totalFibre": 7.5,
+              "solubleFibre": 2.9,
+              "baseNutrients100g": {
+                "calories": 339,
+                "protein": 12.1,
+                "totalFat": 3.6,
+                "saturatedFat": 0.6,
+                "carbohydrates": 64.3,
+                "sodium": 21,
+                "totalFibre": 10.7,
+                "solubleFibre": 4.1
+              }
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18,
+                "calories": 76,
+                "totalFat": 0.2,
+                "solubleFibre": 0.3
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 100,
+              "calories": 76,
+              "carbs": 18,
+              "totalFibre": 0.9,
+              "solubleFibre": 0.3,
+              "baseNutrients100g": {
+                "calories": 76,
+                "protein": 0.6,
+                "totalFat": 0.2,
+                "saturatedFat": 0.1,
+                "carbohydrates": 18,
+                "sodium": 2,
+                "totalFibre": 0.9,
+                "solubleFibre": 0.3
+              }
+            }
+          ],
+          "componentsDetailList": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45,
+                "calories": 237,
+                "totalFat": 2.5,
+                "solubleFibre": 2.9
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 70,
+              "calories": 237,
+              "carbs": 45,
+              "totalFibre": 7.5,
+              "solubleFibre": 2.9,
+              "baseNutrients100g": {
+                "calories": 339,
+                "protein": 12.1,
+                "totalFat": 3.6,
+                "saturatedFat": 0.6,
+                "carbohydrates": 64.3,
+                "sodium": 21,
+                "totalFibre": 10.7,
+                "solubleFibre": 4.1
+              }
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18,
+                "calories": 76,
+                "totalFat": 0.2,
+                "solubleFibre": 0.3
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 100,
+              "calories": 76,
+              "carbs": 18,
+              "totalFibre": 0.9,
+              "solubleFibre": 0.3,
+              "baseNutrients100g": {
+                "calories": 76,
+                "protein": 0.6,
+                "totalFat": 0.2,
+                "saturatedFat": 0.1,
+                "carbohydrates": 18,
+                "sodium": 2,
+                "totalFibre": 0.9,
+                "solubleFibre": 0.3
+              }
+            }
+          ],
+          "compositeSiblings": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45,
+                "calories": 237,
+                "totalFat": 2.5,
+                "solubleFibre": 2.9
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 70,
+              "calories": 237,
+              "carbs": 45,
+              "totalFibre": 7.5,
+              "solubleFibre": 2.9,
+              "baseNutrients100g": {
+                "calories": 339,
+                "protein": 12.1,
+                "totalFat": 3.6,
+                "saturatedFat": 0.6,
+                "carbohydrates": 64.3,
+                "sodium": 21,
+                "totalFibre": 10.7,
+                "solubleFibre": 4.1
+              }
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18,
+                "calories": 76,
+                "totalFat": 0.2,
+                "solubleFibre": 0.3
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 100,
+              "calories": 76,
+              "carbs": 18,
+              "totalFibre": 0.9,
+              "solubleFibre": 0.3,
+              "baseNutrients100g": {
+                "calories": 76,
+                "protein": 0.6,
+                "totalFat": 0.2,
+                "saturatedFat": 0.1,
+                "carbohydrates": 18,
+                "sodium": 2,
+                "totalFibre": 0.9,
+                "solubleFibre": 0.3
+              }
+            }
+          ],
+          "hasComponents": true,
+          "boundingBox2D": [
+            250,
+            100,
+            955,
+            990
+          ],
+          "sourceImageIndex": 0,
+          "foodType": "composed",
+          "cookingMethod": null,
+          "diningEnvironment": "home_cooked",
+          "isDishEstimate": true,
+          "carbs": 59,
+          "fat": 2.5
+        }
+      ],
+      "nutrients": {
+        "calories": 313,
+        "protein": 8.5,
+        "totalFat": 2.5,
+        "saturatedFat": 0.5,
+        "transFat": 0,
+        "unsaturatedFat": 2.2,
+        "omega3": 0,
+        "carbohydrates": 59,
+        "sugar": 11.3,
+        "addedSugar": 1.6,
+        "totalFibre": 8.4,
+        "solubleFibre": 1.3,
+        "sodium": 17,
+        "potassium": 160,
+        "magnesium": 43.4,
+        "calcium": 27.4,
+        "iron": 1.6,
+        "zinc": 1.1,
+        "selenium": 6.9,
+        "iodine": 2.3,
+        "phosphorus": 118.9,
+        "vitaminD": 0,
+        "vitaminB12": 0,
+        "folate": 27.4,
+        "vitaminC": 0.2,
+        "vitaminE": 0.9,
+        "vitaminK": 0.9,
+        "vitaminA": 4.6,
+        "vitaminB6": 0.1,
+        "thiamine": 0.2,
+        "riboflavin": 0.1,
+        "niacin": 1.8,
+        "salt": 0.04
+      },
+      "name": "Sainsbury Oat and Fruit with Green Grapes",
+      "title": "Sainsbury Oat and Fruit with Green Grapes",
+      "message": "Your choice of Sainsbury oats delivers a strong fiber boost that supports both your cholesterol and HbA1c goals. However, watch the total carbohydrate and sugar load from the dried fruit and fresh grapes, as keeping portions controlled helps manage blood sugar stability.",
+      "healthImpact": "",
+      "composition": "Sainsbury Oat and Fruit with Green Grapes",
+      "benefits": [],
+      "risks": [],
+      "recommendation": "",
+      "verdict": {
+        "label": "Supports sustained metabolic energy",
+        "level": "good"
+      },
+      "imageUrls": [
+        "https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_0aa49da2d85f54546874f080c044b8f094fc751370ced556ce066b6d67242798.jpg"
+      ],
+      "weightGrams": 70,
+      "quantity": "1 serving",
+      "receiptTable": "### 🧾 Nutrition calculation\n\n| Item / Ingredient | Kcal | Protein | Sat Fat | Sodium |\n|---|---|---|---|---|\n| **1. Sainsbury Oat and Fruit with Green Grapes - 70g** | - | - | - | - |\n| Sainsbury Oat and Fruit - 70g | 237 | 8.5g | 0.4g | 15mg |\n| Green Grapes - 100g | 76 | 0.6g | 0.1g | 2mg |\n| **Item Sub-Total - 70g** | **313** | **8.5g** | **0.5g** | **17mg** |\n| **🏆 GRAND MEAL TOTAL - 70g** | **313** | **8.5g** | **0.5g** | **17mg** |\n",
+      "savable": true,
+      "degradedStages": [],
+      "date": "2026-09-30",
+      "scoutItems": [
+        {
+          "keyword": "Sainsbury Oat and Fruit with Green Grapes",
+          "originalName": "Sainsbury Oat and Fruit with Green Grapes",
+          "name": "Sainsbury Oat and Fruit with Green Grapes",
+          "genericEnglishName": "oatmeal with fruit",
+          "chainName": "Sainsbury's",
+          "packageLabelText": null,
+          "estimatedWeightGrams": 70,
+          "nutrientBasisWeight": 170,
+          "packGrams": null,
+          "cookingMethod": "boiled",
+          "sourceImageIndex": 0,
+          "boundingBox2D": [
+            250,
+            100,
+            955,
+            990
+          ],
+          "isStandaloneCondimentPacket": false,
+          "components": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null
+            }
+          ],
+          "componentsDetailList": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null
+            }
+          ],
+          "compositeSiblings": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null
+            }
+          ],
+          "hasComponents": true,
+          "ingredients": [
+            "Sainsbury Oat and Fruit",
+            "Green Grapes"
+          ],
+          "visualIngredients": [
+            "Sainsbury Oat and Fruit",
+            "Green Grapes"
+          ],
+          "ingredientsList": "Sainsbury Oat and Fruit, Green Grapes",
+          "rawNutritionLabel": null,
+          "source": "estimated",
+          "dbSource": "estimated",
+          "nutrients": {
+            "calories": 313,
+            "protein": 8.5,
+            "totalFat": 2.5,
+            "saturatedFat": 0.5,
+            "transFat": 0,
+            "unsaturatedFat": 2.2,
+            "carbohydrates": 59,
+            "sugar": 11.3,
+            "addedSugar": 1.6,
+            "totalFibre": 8.4,
+            "solubleFibre": 1.3,
+            "sodium": 17,
+            "potassium": 160,
+            "magnesium": 43.43,
+            "calcium": 27.43,
+            "iron": 1.6,
+            "zinc": 1.14,
+            "selenium": 6.86,
+            "iodine": 2.29,
+            "phosphorus": 118.86,
+            "vitaminD": 0,
+            "vitaminB12": 0,
+            "folate": 27.43,
+            "vitaminC": 0.23,
+            "vitaminE": 0.91,
+            "vitaminK": 0.91,
+            "vitaminA": 4.57,
+            "vitaminB6": 0.14,
+            "thiamine": 0.18,
+            "riboflavin": 0.14,
+            "niacin": 1.83,
+            "omega3": 0,
+            "salt": 0.04
+          },
+          "truthNutrients": {
+            "protein": 8.5,
+            "carbohydrates": 45,
+            "totalFat": 2.5,
+            "saturatedFat": 0.4,
+            "transFat": 0,
+            "sugar": 12,
+            "addedSugar": 4,
+            "totalFibre": 7.5,
+            "sodium": 15,
+            "potassium": 0,
+            "omega3": 0,
+            "calcium": 0,
+            "iron": 0,
+            "magnesium": 0,
+            "vitaminD": 0,
+            "zinc": 0,
+            "selenium": 0,
+            "iodine": 0,
+            "phosphorus": 0,
+            "vitaminA": 0,
+            "vitaminC": 0,
+            "vitaminE": 0,
+            "vitaminK": 0,
+            "vitaminB12": 0,
+            "folate": 0,
+            "vitaminB6": 0,
+            "thiamine": 0,
+            "riboflavin": 0,
+            "niacin": 0,
+            "solubleFibre": 2.9,
+            "unsaturatedFat": 2.1
+          },
+          "scoutIndex": 0,
+          "isCompositeDish": true,
+          "itemConfidence": "High (>90%)",
+          "internalReasoning": "Extracted user-specified Sainsbury oats and visible grapes with estimated nutrient values.",
+          "weightGrams": 70,
+          "statedGramsAdopted": true,
+          "preCalcNutrients": {
+            "calories": 313,
+            "protein": 8.5,
+            "totalFat": 2.5,
+            "saturatedFat": 0.5,
+            "transFat": 0,
+            "unsaturatedFat": 2.2,
+            "carbohydrates": 59,
+            "sugar": 11.3,
+            "addedSugar": 1.6,
+            "totalFibre": 8.4,
+            "solubleFibre": 1.3,
+            "sodium": 17,
+            "potassium": 160,
+            "magnesium": 43.43,
+            "calcium": 27.43,
+            "iron": 1.6,
+            "zinc": 1.14,
+            "selenium": 6.86,
+            "iodine": 2.29,
+            "phosphorus": 118.86,
+            "vitaminD": 0,
+            "vitaminB12": 0,
+            "folate": 27.43,
+            "vitaminC": 0.23,
+            "vitaminE": 0.91,
+            "vitaminK": 0.91,
+            "vitaminA": 4.57,
+            "vitaminB6": 0.14,
+            "thiamine": 0.18,
+            "riboflavin": 0.14,
+            "niacin": 1.83,
+            "omega3": 0,
+            "salt": 0.04
+          }
+        }
+      ],
+      "historyLog": [
+        {
+          "type": "stage_complete",
+          "timestamp": "2026-09-30T16:06:26.905Z",
+          "stage": "calculation",
+          "message": "Happy-path meal attached (savable)",
+          "id": "iql4d4s",
+          "seq": 1
+        }
+      ],
+      "userLockedSlots": [],
+      "quantityResolutions": [
+        {
+          "scoutIndex": 0,
+          "name": "Sainsbury Oat and Fruit with Green Grapes",
+          "candidates": [
+            {
+              "source": "user",
+              "grams": 70,
+              "packGrams": null,
+              "confidence": "high",
+              "note": "stated \"I had 70g of Sainsbury oat\""
+            },
+            {
+              "source": "visual",
+              "grams": 170,
+              "packGrams": null,
+              "confidence": "low",
+              "note": "uncorroborated scout guess"
+            }
+          ],
+          "decision": "adopt-stated",
+          "why": "explicit user statement outranks visual guess (170g → 70g)"
+        }
+      ],
+      "imageUrl": "https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_0aa49da2d85f54546874f080c044b8f094fc751370ced556ce066b6d67242798.jpg"
+    },
+    "message": "Your choice of Sainsbury oats delivers a strong fiber boost that supports both your cholesterol and HbA1c goals. However, watch the total carbohydrate and sugar load from the dried fruit and fresh grapes, as keeping portions controlled helps manage blood sugar stability.",
+    "text": "Your choice of Sainsbury oats delivers a strong fiber boost that supports both your cholesterol and HbA1c goals. However, watch the total carbohydrate and sugar load from the dried fruit and fresh grapes, as keeping portions controlled helps manage blood sugar stability.",
+    "mealAgentScratchpad": "Extracted user-specified Sainsbury oats and visible grapes with estimated nutrient values.",
+    "dietitianScratchpad": "Extracted user-specified Sainsbury oats and visible grapes with estimated nutrient values.",
+    "mode": "new_log",
+    "scoutItems": [
+      {
+        "keyword": "Sainsbury Oat and Fruit with Green Grapes",
+        "originalName": "Sainsbury Oat and Fruit with Green Grapes",
+        "name": "Sainsbury Oat and Fruit with Green Grapes",
+        "genericEnglishName": "oatmeal with fruit",
+        "chainName": "Sainsbury's",
+        "packageLabelText": null,
+        "estimatedWeightGrams": 70,
+        "nutrientBasisWeight": 170,
+        "packGrams": null,
+        "cookingMethod": "boiled",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          250,
+          100,
+          955,
+          990
+        ],
+        "isStandaloneCondimentPacket": false,
+        "components": [
+          {
+            "name": "Sainsbury Oat and Fruit",
+            "searchQuery": "oatmeal with dried fruit",
+            "weightGrams": 70,
+            "estimatedWeightGrams": 70,
+            "volumePercentage": 41,
+            "packGrams": null,
+            "nutrients": {
+              "protein": 8.5,
+              "saturatedFat": 0.4,
+              "addedSugar": 4,
+              "totalFibre": 7.5,
+              "sodium": 15,
+              "carbohydrates": 45
+            },
+            "protein": 8.5,
+            "totalFat": 2.5,
+            "fat": 2.5,
+            "saturatedFat": 0.4,
+            "carbohydrates": 45,
+            "sodium": 15,
+            "dbSource": "estimated",
+            "dbId": null
+          },
+          {
+            "name": "Green Grapes",
+            "searchQuery": "green grapes",
+            "weightGrams": 100,
+            "estimatedWeightGrams": 100,
+            "volumePercentage": 59,
+            "packGrams": null,
+            "nutrients": {
+              "protein": 0.6,
+              "saturatedFat": 0.1,
+              "addedSugar": 0,
+              "totalFibre": 0.9,
+              "sodium": 2,
+              "carbohydrates": 18
+            },
+            "protein": 0.6,
+            "totalFat": 0.2,
+            "fat": 0.2,
+            "saturatedFat": 0.1,
+            "carbohydrates": 18,
+            "sodium": 2,
+            "dbSource": "estimated",
+            "dbId": null
+          }
+        ],
+        "componentsDetailList": [
+          {
+            "name": "Sainsbury Oat and Fruit",
+            "searchQuery": "oatmeal with dried fruit",
+            "weightGrams": 70,
+            "estimatedWeightGrams": 70,
+            "volumePercentage": 41,
+            "packGrams": null,
+            "nutrients": {
+              "protein": 8.5,
+              "saturatedFat": 0.4,
+              "addedSugar": 4,
+              "totalFibre": 7.5,
+              "sodium": 15,
+              "carbohydrates": 45
+            },
+            "protein": 8.5,
+            "totalFat": 2.5,
+            "fat": 2.5,
+            "saturatedFat": 0.4,
+            "carbohydrates": 45,
+            "sodium": 15,
+            "dbSource": "estimated",
+            "dbId": null
+          },
+          {
+            "name": "Green Grapes",
+            "searchQuery": "green grapes",
+            "weightGrams": 100,
+            "estimatedWeightGrams": 100,
+            "volumePercentage": 59,
+            "packGrams": null,
+            "nutrients": {
+              "protein": 0.6,
+              "saturatedFat": 0.1,
+              "addedSugar": 0,
+              "totalFibre": 0.9,
+              "sodium": 2,
+              "carbohydrates": 18
+            },
+            "protein": 0.6,
+            "totalFat": 0.2,
+            "fat": 0.2,
+            "saturatedFat": 0.1,
+            "carbohydrates": 18,
+            "sodium": 2,
+            "dbSource": "estimated",
+            "dbId": null
+          }
+        ],
+        "compositeSiblings": [
+          {
+            "name": "Sainsbury Oat and Fruit",
+            "searchQuery": "oatmeal with dried fruit",
+            "weightGrams": 70,
+            "estimatedWeightGrams": 70,
+            "volumePercentage": 41,
+            "packGrams": null,
+            "nutrients": {
+              "protein": 8.5,
+              "saturatedFat": 0.4,
+              "addedSugar": 4,
+              "totalFibre": 7.5,
+              "sodium": 15,
+              "carbohydrates": 45
+            },
+            "protein": 8.5,
+            "totalFat": 2.5,
+            "fat": 2.5,
+            "saturatedFat": 0.4,
+            "carbohydrates": 45,
+            "sodium": 15,
+            "dbSource": "estimated",
+            "dbId": null
+          },
+          {
+            "name": "Green Grapes",
+            "searchQuery": "green grapes",
+            "weightGrams": 100,
+            "estimatedWeightGrams": 100,
+            "volumePercentage": 59,
+            "packGrams": null,
+            "nutrients": {
+              "protein": 0.6,
+              "saturatedFat": 0.1,
+              "addedSugar": 0,
+              "totalFibre": 0.9,
+              "sodium": 2,
+              "carbohydrates": 18
+            },
+            "protein": 0.6,
+            "totalFat": 0.2,
+            "fat": 0.2,
+            "saturatedFat": 0.1,
+            "carbohydrates": 18,
+            "sodium": 2,
+            "dbSource": "estimated",
+            "dbId": null
+          }
+        ],
+        "hasComponents": true,
+        "ingredients": [
+          "Sainsbury Oat and Fruit",
+          "Green Grapes"
+        ],
+        "visualIngredients": [
+          "Sainsbury Oat and Fruit",
+          "Green Grapes"
+        ],
+        "ingredientsList": "Sainsbury Oat and Fruit, Green Grapes",
+        "rawNutritionLabel": null,
+        "source": "estimated",
+        "dbSource": "estimated",
+        "nutrients": {
+          "calories": 313,
+          "protein": 8.5,
+          "totalFat": 2.5,
+          "saturatedFat": 0.5,
+          "transFat": 0,
+          "unsaturatedFat": 2.2,
+          "carbohydrates": 59,
+          "sugar": 11.3,
+          "addedSugar": 1.6,
+          "totalFibre": 8.4,
+          "solubleFibre": 1.3,
+          "sodium": 17,
+          "potassium": 160,
+          "magnesium": 43.43,
+          "calcium": 27.43,
+          "iron": 1.6,
+          "zinc": 1.14,
+          "selenium": 6.86,
+          "iodine": 2.29,
+          "phosphorus": 118.86,
+          "vitaminD": 0,
+          "vitaminB12": 0,
+          "folate": 27.43,
+          "vitaminC": 0.23,
+          "vitaminE": 0.91,
+          "vitaminK": 0.91,
+          "vitaminA": 4.57,
+          "vitaminB6": 0.14,
+          "thiamine": 0.18,
+          "riboflavin": 0.14,
+          "niacin": 1.83,
+          "omega3": 0,
+          "salt": 0.04
+        },
+        "truthNutrients": {
+          "protein": 8.5,
+          "carbohydrates": 45,
+          "totalFat": 2.5,
+          "saturatedFat": 0.4,
+          "transFat": 0,
+          "sugar": 12,
+          "addedSugar": 4,
+          "totalFibre": 7.5,
+          "sodium": 15,
+          "potassium": 0,
+          "omega3": 0,
+          "calcium": 0,
+          "iron": 0,
+          "magnesium": 0,
+          "vitaminD": 0,
+          "zinc": 0,
+          "selenium": 0,
+          "iodine": 0,
+          "phosphorus": 0,
+          "vitaminA": 0,
+          "vitaminC": 0,
+          "vitaminE": 0,
+          "vitaminK": 0,
+          "vitaminB12": 0,
+          "folate": 0,
+          "vitaminB6": 0,
+          "thiamine": 0,
+          "riboflavin": 0,
+          "niacin": 0,
+          "solubleFibre": 2.9,
+          "unsaturatedFat": 2.1
+        },
+        "scoutIndex": 0,
+        "isCompositeDish": true,
+        "itemConfidence": "High (>90%)",
+        "internalReasoning": "Extracted user-specified Sainsbury oats and visible grapes with estimated nutrient values.",
+        "weightGrams": 70,
+        "statedGramsAdopted": true,
+        "preCalcNutrients": {
+          "calories": 313,
+          "protein": 8.5,
+          "totalFat": 2.5,
+          "saturatedFat": 0.5,
+          "transFat": 0,
+          "unsaturatedFat": 2.2,
+          "carbohydrates": 59,
+          "sugar": 11.3,
+          "addedSugar": 1.6,
+          "totalFibre": 8.4,
+          "solubleFibre": 1.3,
+          "sodium": 17,
+          "potassium": 160,
+          "magnesium": 43.43,
+          "calcium": 27.43,
+          "iron": 1.6,
+          "zinc": 1.14,
+          "selenium": 6.86,
+          "iodine": 2.29,
+          "phosphorus": 118.86,
+          "vitaminD": 0,
+          "vitaminB12": 0,
+          "folate": 27.43,
+          "vitaminC": 0.23,
+          "vitaminE": 0.91,
+          "vitaminK": 0.91,
+          "vitaminA": 4.57,
+          "vitaminB6": 0.14,
+          "thiamine": 0.18,
+          "riboflavin": 0.14,
+          "niacin": 1.83,
+          "omega3": 0,
+          "salt": 0.04
+        }
+      }
+    ],
+    "scoutContentType": "visual",
+    "rawScout": {
+      "dishes": [
+        {
+          "dishName": "Sainsbury Oat and Fruit",
+          "genericEnglishName": "oatmeal with fruit",
+          "chainName": "Sainsbury's",
+          "estimatedWeightGrams": 220,
+          "cookingMethod": "boiled",
+          "sourceImageIndex": 0,
+          "boundingBox2D": [
+            250,
+            100,
+            955,
+            990
+          ],
+          "foods": [
+            {
+              "foodName": "Sainsbury Oat and Fruit",
+              "genericEnglishName": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "sourceImageIndex": 0,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45
+              },
+              "boundingBox2D": [
+                450,
+                235,
+                888,
+                792
+              ]
+            }
+          ],
+          "dishNutrients": {
+            "saturatedFat": 0.4,
+            "totalFat": 2.5,
+            "totalSugar": 12,
+            "vitaminD": 0,
+            "addedSugar": 4,
+            "carbohydrates": 58,
+            "protein": 9.5,
+            "totalFibre": 8.5
+          }
+        },
+        {
+          "dishName": "Green Grapes",
+          "genericEnglishName": "green grapes",
+          "estimatedWeightGrams": 100,
+          "cookingMethod": "raw",
+          "sourceImageIndex": 0,
+          "boundingBox2D": [
+            390,
+            110,
+            875,
+            880
+          ],
+          "foods": [
+            {
+              "foodName": "Green Grapes",
+              "genericEnglishName": "green grapes",
+              "weightGrams": 100,
+              "sourceImageIndex": 0,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18
+              },
+              "boundingBox2D": [
+                390,
+                110,
+                875,
+                880
+              ]
+            }
+          ],
+          "dishNutrients": {
+            "saturatedFat": 0.1,
+            "totalFat": 0.2,
+            "totalSugar": 15.5,
+            "vitaminD": 0,
+            "addedSugar": 0,
+            "carbohydrates": 18,
+            "protein": 0.6,
+            "totalFibre": 0.9
+          }
+        }
+      ],
+      "contentType": "visual",
+      "diningEnvironment": "home_cooked",
+      "verdict": {
+        "label": "Fiber-Rich Oats with Fruit",
+        "level": "good"
+      },
+      "clinicalAdvice": "Your choice of Sainsbury oats delivers a strong fiber boost that supports both your cholesterol and HbA1c goals. However, watch the total carbohydrate and sugar load from the dried fruit and fresh grapes, as keeping portions controlled helps manage blood sugar stability.",
+      "perImage": [
+        {
+          "imageIndex": 0,
+          "itemsFound": [
+            "Sainsbury Oat and Fruit",
+            "Green Grapes"
+          ]
+        }
+      ],
+      "_internalReasoning": "Extracted user-specified Sainsbury oats and visible grapes with estimated nutrient values."
+    },
+    "photoUrl": "https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_0aa49da2d85f54546874f080c044b8f094fc751370ced556ce066b6d67242798.jpg",
+    "photoUrls": [
+      "https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_0aa49da2d85f54546874f080c044b8f094fc751370ced556ce066b6d67242798.jpg"
+    ],
+    "imageUrls": [
+      "https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_0aa49da2d85f54546874f080c044b8f094fc751370ced556ce066b6d67242798.jpg"
+    ],
+    "backendLogsUrl": "https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/logs/job_1790784359089_kvt6r0c0g.txt",
+    "backendLogs": "[Logs stored in R2: https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/logs/job_1790784359089_kvt6r0c0g.txt]",
+    "mealBuild": {
+      "id": "meal_1790784386905",
+      "schemaVersion": 1,
+      "version": 2,
+      "mode": "new_log",
+      "items": [
+        {
+          "scoutIndex": 0,
+          "name": "Sainsbury Oat and Fruit with Green Grapes",
+          "canonicalDbName": "Sainsbury Oat and Fruit with Green Grapes",
+          "originalName": "Sainsbury Oat and Fruit with Green Grapes",
+          "keyword": "Sainsbury Oat and Fruit with Green Grapes",
+          "chainName": "Sainsbury's",
+          "brandName": "Sainsbury's",
+          "weightGrams": 70,
+          "calories": 313,
+          "protein": 8.5,
+          "totalFat": 2.5,
+          "saturatedFat": 0.5,
+          "carbohydrates": 59,
+          "sodium": 17,
+          "addedSugar": 1.6,
+          "nutrients": {
+            "calories": 313,
+            "protein": 8.5,
+            "totalFat": 2.5,
+            "saturatedFat": 0.5,
+            "transFat": 0,
+            "unsaturatedFat": 2.2,
+            "carbohydrates": 59,
+            "sugar": 11.3,
+            "addedSugar": 1.6,
+            "totalFibre": 8.4,
+            "solubleFibre": 1.3,
+            "sodium": 17,
+            "potassium": 160,
+            "magnesium": 43.43,
+            "calcium": 27.43,
+            "iron": 1.6,
+            "zinc": 1.14,
+            "selenium": 6.86,
+            "iodine": 2.29,
+            "phosphorus": 118.86,
+            "vitaminD": 0,
+            "vitaminB12": 0,
+            "folate": 27.43,
+            "vitaminC": 0.23,
+            "vitaminE": 0.91,
+            "vitaminK": 0.91,
+            "vitaminA": 4.57,
+            "vitaminB6": 0.14,
+            "thiamine": 0.18,
+            "riboflavin": 0.14,
+            "niacin": 1.83,
+            "omega3": 0,
+            "salt": 0.04
+          },
+          "lockedNutrientKeys": [
+            "calories",
+            "protein",
+            "totalFat",
+            "saturatedFat",
+            "carbohydrates",
+            "sodium"
+          ],
+          "dbSource": "estimated",
+          "dbId": null,
+          "rawNutritionLabel": null,
+          "labelNutrientsPerServing": null,
+          "brandLock": null,
+          "atwaterFlag": null,
+          "ingredientsList": "Sainsbury Oat and Fruit, Green Grapes",
+          "visualIngredients": [
+            "Sainsbury Oat and Fruit",
+            "Green Grapes"
+          ],
+          "components": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45,
+                "calories": 237,
+                "totalFat": 2.5,
+                "solubleFibre": 2.9
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 70,
+              "calories": 237,
+              "carbs": 45,
+              "totalFibre": 7.5,
+              "solubleFibre": 2.9,
+              "baseNutrients100g": {
+                "calories": 339,
+                "protein": 12.1,
+                "totalFat": 3.6,
+                "saturatedFat": 0.6,
+                "carbohydrates": 64.3,
+                "sodium": 21,
+                "totalFibre": 10.7,
+                "solubleFibre": 4.1
+              }
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18,
+                "calories": 76,
+                "totalFat": 0.2,
+                "solubleFibre": 0.3
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 100,
+              "calories": 76,
+              "carbs": 18,
+              "totalFibre": 0.9,
+              "solubleFibre": 0.3,
+              "baseNutrients100g": {
+                "calories": 76,
+                "protein": 0.6,
+                "totalFat": 0.2,
+                "saturatedFat": 0.1,
+                "carbohydrates": 18,
+                "sodium": 2,
+                "totalFibre": 0.9,
+                "solubleFibre": 0.3
+              }
+            }
+          ],
+          "componentsDetailList": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45,
+                "calories": 237,
+                "totalFat": 2.5,
+                "solubleFibre": 2.9
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 70,
+              "calories": 237,
+              "carbs": 45,
+              "totalFibre": 7.5,
+              "solubleFibre": 2.9,
+              "baseNutrients100g": {
+                "calories": 339,
+                "protein": 12.1,
+                "totalFat": 3.6,
+                "saturatedFat": 0.6,
+                "carbohydrates": 64.3,
+                "sodium": 21,
+                "totalFibre": 10.7,
+                "solubleFibre": 4.1
+              }
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18,
+                "calories": 76,
+                "totalFat": 0.2,
+                "solubleFibre": 0.3
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 100,
+              "calories": 76,
+              "carbs": 18,
+              "totalFibre": 0.9,
+              "solubleFibre": 0.3,
+              "baseNutrients100g": {
+                "calories": 76,
+                "protein": 0.6,
+                "totalFat": 0.2,
+                "saturatedFat": 0.1,
+                "carbohydrates": 18,
+                "sodium": 2,
+                "totalFibre": 0.9,
+                "solubleFibre": 0.3
+              }
+            }
+          ],
+          "compositeSiblings": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45,
+                "calories": 237,
+                "totalFat": 2.5,
+                "solubleFibre": 2.9
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 70,
+              "calories": 237,
+              "carbs": 45,
+              "totalFibre": 7.5,
+              "solubleFibre": 2.9,
+              "baseNutrients100g": {
+                "calories": 339,
+                "protein": 12.1,
+                "totalFat": 3.6,
+                "saturatedFat": 0.6,
+                "carbohydrates": 64.3,
+                "sodium": 21,
+                "totalFibre": 10.7,
+                "solubleFibre": 4.1
+              }
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18,
+                "calories": 76,
+                "totalFat": 0.2,
+                "solubleFibre": 0.3
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null,
+              "nutrientBasisWeight": 100,
+              "calories": 76,
+              "carbs": 18,
+              "totalFibre": 0.9,
+              "solubleFibre": 0.3,
+              "baseNutrients100g": {
+                "calories": 76,
+                "protein": 0.6,
+                "totalFat": 0.2,
+                "saturatedFat": 0.1,
+                "carbohydrates": 18,
+                "sodium": 2,
+                "totalFibre": 0.9,
+                "solubleFibre": 0.3
+              }
+            }
+          ],
+          "hasComponents": true,
+          "boundingBox2D": [
+            250,
+            100,
+            955,
+            990
+          ],
+          "sourceImageIndex": 0,
+          "foodType": "composed",
+          "cookingMethod": null,
+          "diningEnvironment": "home_cooked",
+          "isDishEstimate": true,
+          "carbs": 59,
+          "fat": 2.5
+        }
+      ],
+      "nutrients": {
+        "calories": 313,
+        "protein": 8.5,
+        "totalFat": 2.5,
+        "saturatedFat": 0.5,
+        "transFat": 0,
+        "unsaturatedFat": 2.2,
+        "omega3": 0,
+        "carbohydrates": 59,
+        "sugar": 11.3,
+        "addedSugar": 1.6,
+        "totalFibre": 8.4,
+        "solubleFibre": 1.3,
+        "sodium": 17,
+        "potassium": 160,
+        "magnesium": 43.4,
+        "calcium": 27.4,
+        "iron": 1.6,
+        "zinc": 1.1,
+        "selenium": 6.9,
+        "iodine": 2.3,
+        "phosphorus": 118.9,
+        "vitaminD": 0,
+        "vitaminB12": 0,
+        "folate": 27.4,
+        "vitaminC": 0.2,
+        "vitaminE": 0.9,
+        "vitaminK": 0.9,
+        "vitaminA": 4.6,
+        "vitaminB6": 0.1,
+        "thiamine": 0.2,
+        "riboflavin": 0.1,
+        "niacin": 1.8,
+        "salt": 0.04
+      },
+      "content": {
+        "name": "Sainsbury Oat and Fruit with Green Grapes",
+        "healthImpact": "",
+        "benefits": [],
+        "risks": [],
+        "recommendation": "",
+        "verdict": {
+          "label": "Supports sustained metabolic energy",
+          "level": "good"
+        },
+        "message": "Your choice of Sainsbury oats delivers a strong fiber boost that supports both your cholesterol and HbA1c goals. However, watch the total carbohydrate and sugar load from the dried fruit and fresh grapes, as keeping portions controlled helps manage blood sugar stability."
+      },
+      "imageUrls": [
+        "https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_0aa49da2d85f54546874f080c044b8f094fc751370ced556ce066b6d67242798.jpg"
+      ],
+      "composition": "Sainsbury Oat and Fruit with Green Grapes",
+      "receiptTable": "### 🧾 Nutrition calculation\n\n| Item / Ingredient | Kcal | Protein | Sat Fat | Sodium |\n|---|---|---|---|---|\n| **1. Sainsbury Oat and Fruit with Green Grapes - 70g** | - | - | - | - |\n| Sainsbury Oat and Fruit - 70g | 237 | 8.5g | 0.4g | 15mg |\n| Green Grapes - 100g | 76 | 0.6g | 0.1g | 2mg |\n| **Item Sub-Total - 70g** | **313** | **8.5g** | **0.5g** | **17mg** |\n| **🏆 GRAND MEAL TOTAL - 70g** | **313** | **8.5g** | **0.5g** | **17mg** |\n",
+      "weightGrams": 70,
+      "quantity": "1 serving",
+      "date": "2026-09-30",
+      "historyLog": [
+        {
+          "type": "stage_complete",
+          "timestamp": "2026-09-30T16:06:26.905Z",
+          "stage": "calculation",
+          "message": "Happy-path meal attached (savable)",
+          "id": "iql4d4s",
+          "seq": 1
+        }
+      ],
+      "savable": true,
+      "lastCompletedStage": "diet",
+      "degradedStages": [],
+      "diningEnvironment": "home_cooked",
+      "scoutSnapshot": [
+        {
+          "keyword": "Sainsbury Oat and Fruit with Green Grapes",
+          "originalName": "Sainsbury Oat and Fruit with Green Grapes",
+          "name": "Sainsbury Oat and Fruit with Green Grapes",
+          "genericEnglishName": "oatmeal with fruit",
+          "chainName": "Sainsbury's",
+          "packageLabelText": null,
+          "estimatedWeightGrams": 70,
+          "nutrientBasisWeight": 170,
+          "packGrams": null,
+          "cookingMethod": "boiled",
+          "sourceImageIndex": 0,
+          "boundingBox2D": [
+            250,
+            100,
+            955,
+            990
+          ],
+          "isStandaloneCondimentPacket": false,
+          "components": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null
+            }
+          ],
+          "componentsDetailList": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null
+            }
+          ],
+          "compositeSiblings": [
+            {
+              "name": "Sainsbury Oat and Fruit",
+              "searchQuery": "oatmeal with dried fruit",
+              "weightGrams": 70,
+              "estimatedWeightGrams": 70,
+              "volumePercentage": 41,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 8.5,
+                "saturatedFat": 0.4,
+                "addedSugar": 4,
+                "totalFibre": 7.5,
+                "sodium": 15,
+                "carbohydrates": 45
+              },
+              "protein": 8.5,
+              "totalFat": 2.5,
+              "fat": 2.5,
+              "saturatedFat": 0.4,
+              "carbohydrates": 45,
+              "sodium": 15,
+              "dbSource": "estimated",
+              "dbId": null
+            },
+            {
+              "name": "Green Grapes",
+              "searchQuery": "green grapes",
+              "weightGrams": 100,
+              "estimatedWeightGrams": 100,
+              "volumePercentage": 59,
+              "packGrams": null,
+              "nutrients": {
+                "protein": 0.6,
+                "saturatedFat": 0.1,
+                "addedSugar": 0,
+                "totalFibre": 0.9,
+                "sodium": 2,
+                "carbohydrates": 18
+              },
+              "protein": 0.6,
+              "totalFat": 0.2,
+              "fat": 0.2,
+              "saturatedFat": 0.1,
+              "carbohydrates": 18,
+              "sodium": 2,
+              "dbSource": "estimated",
+              "dbId": null
+            }
+          ],
+          "hasComponents": true,
+          "ingredients": [
+            "Sainsbury Oat and Fruit",
+            "Green Grapes"
+          ],
+          "visualIngredients": [
+            "Sainsbury Oat and Fruit",
+            "Green Grapes"
+          ],
+          "ingredientsList": "Sainsbury Oat and Fruit, Green Grapes",
+          "rawNutritionLabel": null,
+          "source": "estimated",
+          "dbSource": "estimated",
+          "nutrients": {
+            "calories": 313,
+            "protein": 8.5,
+            "totalFat": 2.5,
+            "saturatedFat": 0.5,
+            "transFat": 0,
+            "unsaturatedFat": 2.2,
+            "carbohydrates": 59,
+            "sugar": 11.3,
+            "addedSugar": 1.6,
+            "totalFibre": 8.4,
+            "solubleFibre": 1.3,
+            "sodium": 17,
+            "potassium": 160,
+            "magnesium": 43.43,
+            "calcium": 27.43,
+            "iron": 1.6,
+            "zinc": 1.14,
+            "selenium": 6.86,
+            "iodine": 2.29,
+            "phosphorus": 118.86,
+            "vitaminD": 0,
+            "vitaminB12": 0,
+            "folate": 27.43,
+            "vitaminC": 0.23,
+            "vitaminE": 0.91,
+            "vitaminK": 0.91,
+            "vitaminA": 4.57,
+            "vitaminB6": 0.14,
+            "thiamine": 0.18,
+            "riboflavin": 0.14,
+            "niacin": 1.83,
+            "omega3": 0,
+            "salt": 0.04
+          },
+          "truthNutrients": {
+            "protein": 8.5,
+            "carbohydrates": 45,
+            "totalFat": 2.5,
+            "saturatedFat": 0.4,
+            "transFat": 0,
+            "sugar": 12,
+            "addedSugar": 4,
+            "totalFibre": 7.5,
+            "sodium": 15,
+            "potassium": 0,
+            "omega3": 0,
+            "calcium": 0,
+            "iron": 0,
+            "magnesium": 0,
+            "vitaminD": 0,
+            "zinc": 0,
+            "selenium": 0,
+            "iodine": 0,
+            "phosphorus": 0,
+            "vitaminA": 0,
+            "vitaminC": 0,
+            "vitaminE": 0,
+            "vitaminK": 0,
+            "vitaminB12": 0,
+            "folate": 0,
+            "vitaminB6": 0,
+            "thiamine": 0,
+            "riboflavin": 0,
+            "niacin": 0,
+            "solubleFibre": 2.9,
+            "unsaturatedFat": 2.1
+          },
+          "scoutIndex": 0,
+          "isCompositeDish": true,
+          "itemConfidence": "High (>90%)",
+          "internalReasoning": "Extracted user-specified Sainsbury oats and visible grapes with estimated nutrient values.",
+          "weightGrams": 70,
+          "statedGramsAdopted": true,
+          "preCalcNutrients": {
+            "calories": 313,
+            "protein": 8.5,
+            "totalFat": 2.5,
+            "saturatedFat": 0.5,
+            "transFat": 0,
+            "unsaturatedFat": 2.2,
+            "carbohydrates": 59,
+            "sugar": 11.3,
+            "addedSugar": 1.6,
+            "totalFibre": 8.4,
+            "solubleFibre": 1.3,
+            "sodium": 17,
+            "potassium": 160,
+            "magnesium": 43.43,
+            "calcium": 27.43,
+            "iron": 1.6,
+            "zinc": 1.14,
+            "selenium": 6.86,
+            "iodine": 2.29,
+            "phosphorus": 118.86,
+            "vitaminD": 0,
+            "vitaminB12": 0,
+            "folate": 27.43,
+            "vitaminC": 0.23,
+            "vitaminE": 0.91,
+            "vitaminK": 0.91,
+            "vitaminA": 4.57,
+            "vitaminB6": 0.14,
+            "thiamine": 0.18,
+            "riboflavin": 0.14,
+            "niacin": 1.83,
+            "omega3": 0,
+            "salt": 0.04
+          }
+        }
+      ],
+      "staleDietNarrative": false,
+      "stageLedger": [
+        {
+          "stageKey": "meal_1790784386905|calculation|1",
+          "stage": "calculation",
+          "attempt": 1,
+          "timestamp": "2026-09-30T16:06:26.905Z",
+          "status": "success",
+          "actor": "job_stage_calculation"
+        }
+      ]
+    },
+    "lastUserAction": {
+      "action": "submit_meal_job",
+      "timestamp": "2026-09-30T16:06:11.541Z",
+      "details": {
+        "jobId": "job_1790784359089_kvt6r0c0g",
+        "promptLength": 34,
+        "imageCount": 1,
+        "submissionMode": "review"
+      }
+    },
+    "reply": "Your choice of Sainsbury oats delivers a strong fiber boost that supports both your cholesterol and HbA1c goals. However, watch the total carbohydrate and sugar load from the dried fruit and fresh grapes, as keeping portions controlled helps manage blood sugar stability.",
+    "agentInstructions": {
+      "scout": {
+        "systemInstruction": "=== USER OUTPUT LANGUAGE ===\nThe patient's UI language is English (code: en).\nWrite every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in English.\nKeep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.\nKeep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.\nFood identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into English.\n\n- HIERARCHY: Extract each distinct food item/ingredient (e.g. Tofu, Beef, sides, meal prep items, drinks, packages) directly as its own separate 'dish' with its own boundingBox2D & nutrients. Never group distinct food items into a single composite dish with sub-items. Do not duplicate identical dishes across multi-angles or cooking prep.\n- QUANTITY & MULTIPACKS: Output 'weightGrams' (consumed serving) and 'packGrams' (container total). For unopened grocery multi-packs (e.g. '5 x 65ml', 'pack of 6') without explicit user notes stating all N units were consumed, set 'weightGrams' to a single unit/serving size (e.g. 65g) and 'packGrams' to the container total (e.g. 325g). Never estimate the whole container as consumed: weightGrams is ALWAYS one serving here — the portion question resolves the true amount.\n- GROCERY/SCALE STICKERS: Treat supermarket stickers as atomic: pair printed text with printed weight (e.g. 'Berat 0.252' -> 252g). Output text in 'packageLabelText'. Never transpose weights between packages.\n- LOCAL NAMES: Preserve the verbatim printed name from stickers, packaging, or menus in local language as foodName (e.g. 'Ikan Cendro', 'Cumi Bangka'). Do not genericise when specific local name is readable. ALWAYS provide the generic English translation of the ingredient in 'genericEnglishName' (e.g. 'needlefish', 'squid').\n- INGESTION: Extract ALL visible food items/packages from ALL provided images into dishes[]. After dishes[], emit 'perImage': one entry per provided image in 0-based order with the dishName values seen in that image ('itemsFound'; empty array only when that image truly shows no food, or when no images are attached) — every provided image must appear exactly once; never skip an image. Before emitting, verify the anchor both ways for images 0..N-1: each 'perImage' entry must match at least one dish carrying that same 'sourceImageIndex', and any entry with no matching dish must be confirmed food-free — a food image with no matching dish means you stopped early, so go back and extract it. 'contentType' is post-extraction metadata and must not restrict extraction.\n- DIRECT OCR & LABEL TRUTH: Transcribe printed labels into 'rawNutritionLabel' (preserve exact 0s and % AKG/% DV). Before emitting rawNutritionLabel & nutrients, perform an accuracy check on printed tables: verify negative prefixes in English & all languages (e.g. 'un-'/'non-'/'tidak': saturated fat is strictly the pure saturated row, never unsaturated/tidak jenuh or total fat; soluble fiber is never insoluble). When packaging/label accompanies prepared food across photos, anchor dish nutrients to printed label truth.\n- BRANDS & CONDIMENTS: Set 'chainName' for brands. Set 'isStandaloneCondimentPacket' for packets <=30g.\n- GROCERY VS MEAL (anti-double-count): grocery packs with scale stickers are shopping reference, not eaten portions, when the SAME ingredient also appears prepared in a pot/bowl in another image (e.g. baby corn pack + baby corn in hotpot). Do not sum both: emit the prepared dish as the consumed item and keep packs as reference with packGrams only. In-shell packs (e.g. KCG TANAH KULIT): weight is gross with shell; edible kernels are ~65%.\n- LABEL MISMATCH: if a sticker name contradicts the visual/brand (e.g. DAUN SELADA lettuce sticker on poultry-branded pack, or cucumbers in frame), do not emit the sticker name as fact — flag low confidence and prefer the visual/brand identity.\n- COOKING FATS: Include cooking oils/fats in 'dishNutrients.totalFat' based on 'cookingMethod'.\n- CLINICAL VERDICT & NARRATIVE: Provide a 3-6 word 'verdict' ('level': good|warning|alert|neutral) and a direct 35-70 word clinical 'clinicalAdvice' in 2nd person (\"You got...\"). Balance two sides: celebrate positive nutrient achievements (protein, soluble fiber, healthy fats) while plainly flagging any nutrient over budget (sodium, saturated fat) with its magnitude and actionable movement.\n\n=== REQUIRED OUTPUT JSON SCHEMA ===\nOutput exactly ONE JSON object matching this schema:\n{\n  \"_internalReasoning\": \"string (<15 words)\",\n  \"contentType\": \"visual | menu_or_poster | label | text\",\n  \"diningEnvironment\": \"home_cooked | casual_restaurant | fast_food_chain | fine_dining | airline | unknown\",\n  \"verdict\": {\n    \"label\": \"Supports Gut Health with Added Sugar\",\n    \"level\": \"neutral\"\n  },\n  \"clinicalAdvice\": \"The fried snacks pack 9g of saturated fat, nearly half your day's limit in one item — that load works against your cholesterol goal and stiffens post-meal blood flow. The beef soup's 30g of clean protein is the win here, and its broth keeps you hydrated. A 10-minute walk will help clear the fat load.\",\n  \"perImage\": [{ \"imageIndex\": 0, \"itemsFound\": [\"Vegetable and Beef Hotpot\"] }],\n  \"dishes\": [\n    {\n      \"dishName\": \"Vegetable and Beef Hotpot\",\n      \"genericEnglishName\": \"beef and vegetable stew\",\n      \"chainName\": null,\n      \"estimatedWeightGrams\": 650,\n      \"packGrams\": 650,\n      \"cookingMethod\": \"raw | baked | grilled | boiled | steamed | deep_fried | pan_fried | stir_fried\",\n      \"boundingBox2D\": [300, 200, 850, 900],\n      \"sourceImageIndex\": 1,\n      \"isStandaloneCondimentPacket\": false,\n      \"foods\": [\n        {\n          \"foodName\": \"Beef Blade\",\n          \"genericEnglishName\": \"beef\",\n          \"packageLabelText\": \"BEEF BLADE - Berat 0.110\",\n          \"weightGrams\": 110,\n          \"packGrams\": 110,\n          \"sourceImageIndex\": 0,\n          \"rawNutritionLabel\": null,\n          \"nutrients\": { \"protein\": 24.0, \"saturatedFat\": 2.5, \"addedSugar\": 0, \"totalFibre\": 0, \"sodium\": 65, \"carbohydrates\": 0 }\n        }\n      ],\n      \"dishNutrients\": { \"saturatedFat\": 5.8, \"totalFat\": 18.2, \"totalSugar\": 5.0, \"potassium\": 1450, \"omega3\": 0.15, \"calcium\": 190, \"iron\": 5.5, \"magnesium\": 120, \"vitaminD\": 0 }\n    }\n  ]\n}\n\n- PATIENT CONTEXT (special case — shapes verdict/advice only, never identity or weights): at-risk: AUDIT Binge Drinking Score (high); Cholesterol/HDL Ratio (high); Non-HDL Cholesterol (high); Total Cholesterol (high); HbA1c (high). Budgets: see NUTRITIONAL TARGET STATUS below. Pair praise for positive nutrient targets with plain alerts on any dish or nutrient working against those numbers.\n=== NUTRITIONAL TARGET STATUS ===\n7 days avg: Sat fat (16.4g), Calorie (2017.2kcal), Sodium (1498.8mg), Protein (75.1g), Carbohydrates (320.2g), Total Fibre (23.2g), Potassium (1335.1mg), Soluble Fibre (4.2g), Added Sugar (23.4g), Trans Fat (0.4g)",
+        "userPrompt": "Analyze the provided meal image. Inspect all visible prepared dishes, cooking pots, grocery packages, and barcode labels. Read any visible OCR text on cups, wrappers, or menus to identify fast-food brands or commercial chains, and use these to anchor the nutritional estimation (e.g. calories and fat for commercial deep-fried items) to standard commercial nutrition tables. Ingest all visible foods and packages completely into dishes and constituent foods. User note: \"I had 70g of Sainsbury oat + fruit\". If the user note explicitly mentions additional foods consumed, you MUST extract them as well, even if not visible in the images. Extract all physical dishes and constituent foods into the hierarchical schema with weightGrams, packGrams, and nutrients."
+      }
+    },
+    "sessionEvents": [
+      {
+        "ts": 1790784359089,
+        "writer": "JobStore.apply",
+        "status": "draft",
+        "action": "createJob"
+      },
+      {
+        "ts": 1790784371473,
+        "writer": "LogChat.submit",
+        "status": "queued",
+        "action": "SubmitStarted"
+      }
+    ],
+    "clientConsoleLogs": [
+      "[LOG 2026-09-30T16:03:51.034Z] [SupabaseJobSync] Supabase direct client/realtime disabled, relying on background polling",
+      "[LOG 2026-09-30T16:03:52.500Z] [SupabaseJobSync] Supabase direct client/realtime disabled, relying on background polling",
+      "[LOG 2026-09-30T16:03:53.495Z] [Sync] Fetching 1 missing images (cap 24)...",
+      "[LOG 2026-09-30T16:03:56.418Z] Firestore connection test: Backend unreachable or offline. Operating smoothly in local storage mode.",
+      "[LOG 2026-09-30T16:04:54.998Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop starting - 0 jobs queued to sync",
+      "[LOG 2026-09-30T16:04:54.998Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop finished - 0 jobs, total 0ms",
+      "[LOG 2026-09-30T16:04:56.032Z] [job_1790784235900_ee9r7hg2i] [LogChat] Job successfully submitted to server: {\"success\":true,\"jobId\":\"job_1790784235900_ee9r7hg2i\",\"status\":\"running\",\"imageUrls\":[\"https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_a1cf19eb6049b89d7fba57823ba3fd104cb1eeb51d72bc77fb47112c790d9f68.jpg\",\"https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_0c2ccc55308b5b3fa29677dc5240378bc2a6e4902969904ba7021663f20c305a.jpg\"]}",
+      "[LOG 2026-09-30T16:04:56.047Z] [job_1790784235900_ee9r7hg2i] [JobQueueRunner] Job job_1790784235900_ee9r7hg2i is server-owned. Polling /api/jobs/status...",
+      "[LOG 2026-09-30T16:05:10.891Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1790784235900_ee9r7hg2i",
+      "[LOG 2026-09-30T16:05:11.157Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1790784235900_ee9r7hg2i responded 200 in 266ms",
+      "[LOG 2026-09-30T16:05:11.157Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1790784235900_ee9r7hg2i",
+      "[LOG 2026-09-30T16:05:19.163Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: Step 1/2 failed, attempting Firestore mirror for job job_1790784235900_ee9r7hg2i",
+      "[WARN 2026-09-30T16:05:22.889Z] [job_1790784235900_ee9r7hg2i] [LiveBackendStreamViewer] Direct R2 fetch failed, trying proxy: {}",
+      "[LOG 2026-09-30T16:05:27.061Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop starting - 0 jobs queued to sync",
+      "[LOG 2026-09-30T16:05:27.061Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop finished - 0 jobs, total 0ms",
+      "[LOG 2026-09-30T16:05:28.608Z] [job_1790784235900_ee9r7hg2i] [LogChat] Job successfully submitted to server: {\"success\":true,\"jobId\":\"job_1790784235900_ee9r7hg2i\",\"status\":\"running\"}",
+      "[LOG 2026-09-30T16:05:28.633Z] [job_1790784235900_ee9r7hg2i] [JobQueueRunner] Job job_1790784235900_ee9r7hg2i is server-owned. Polling /api/jobs/status...",
+      "[LOG 2026-09-30T16:05:30.908Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1790784235900_ee9r7hg2i",
+      "[LOG 2026-09-30T16:05:30.909Z] [job_1790784235900_ee9r7hg2i] [JobQueueRunner] Auto-saving edited food log meal_1790784308630 from job job_1790784235900_ee9r7hg2i",
+      "[LOG 2026-09-30T16:05:31.374Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1790784235900_ee9r7hg2i responded 200 in 466ms",
+      "[LOG 2026-09-30T16:05:32.597Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop starting - 1 jobs queued to sync",
+      "[LOG 2026-09-30T16:05:32.597Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1790784235900_ee9r7hg2i",
+      "[LOG 2026-09-30T16:05:33.008Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1790784235900_ee9r7hg2i responded 200 in 411ms",
+      "[LOG 2026-09-30T16:05:33.008Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Chunk 1 (1 jobs) took 411ms",
+      "[LOG 2026-09-30T16:05:33.008Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop finished - 1 jobs, total 411ms",
+      "[LOG 2026-09-30T16:05:40.708Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop starting - 0 jobs queued to sync",
+      "[LOG 2026-09-30T16:05:40.708Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop finished - 0 jobs, total 0ms",
+      "[LOG 2026-09-30T16:05:54.580Z] [job_1790784341284_cjwipj3cg] [LogChat] Job successfully submitted to server: {\"success\":true,\"jobId\":\"job_1790784341284_cjwipj3cg\",\"status\":\"running\",\"imageUrls\":[\"https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_0aa49da2d85f54546874f080c044b8f094fc751370ced556ce066b6d67242798.jpg\"]}",
+      "[LOG 2026-09-30T16:05:54.581Z] [job_1790784341284_cjwipj3cg] [JobQueueRunner] Job job_1790784341284_cjwipj3cg is server-owned. Polling /api/jobs/status...",
+      "[LOG 2026-09-30T16:05:54.976Z] [job_1790784341284_cjwipj3cg] [DIAG3] Job upsert loop starting - 0 jobs queued to sync",
+      "[LOG 2026-09-30T16:05:54.976Z] [job_1790784341284_cjwipj3cg] [DIAG3] Job upsert loop finished - 0 jobs, total 0ms"
+    ],
+    "networkErrors": [
+      "[2026-09-30T16:04:26.267Z] [NET LATENCY WARNING POST] https://securetoken.googleapis.com/v1/token (4439ms)",
+      "[2026-09-30T16:04:54.055Z] [NET LATENCY WARNING POST] /api/sync/supabase-pull (29440ms)",
+      "[2026-09-30T16:04:55.741Z] [NET LATENCY WARNING GET] /api/jobs/status (7240ms)",
+      "[2026-09-30T16:04:56.030Z] [NET LATENCY WARNING POST] /api/jobs/submit (31592ms)",
+      "[2026-09-30T16:04:56.480Z] [NET LATENCY WARNING POST] /api/sync/supabase-push (31866ms)",
+      "[2026-09-30T16:05:19.161Z] [NET ABORT POST] /api/jobs/upsert (7999ms) - signal is aborted without reason",
+      "[2026-09-30T16:05:22.888Z] [NET DROP GET] https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/logs/job_1790784235900_ee9r7hg2i.txt (2278ms) - Failed to fetch",
+      "[2026-09-30T16:05:23.054Z] [NET DROP GET] https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/logs/job_1790784235900_ee9r7hg2i.txt (2302ms) - Failed to fetch",
+      "[2026-09-30T16:05:26.004Z] [NET LATENCY WARNING POST] /api/sync/supabase-pull (5152ms)",
+      "[2026-09-30T16:05:27.041Z] [NET LATENCY WARNING GET] /api/r2/log-proxy (4152ms)",
+      "[2026-09-30T16:05:27.042Z] [NET LATENCY WARNING POST] /api/sync/supabase-push (6191ms)",
+      "[2026-09-30T16:05:28.470Z] [NET LATENCY WARNING GET] /api/r2/log-proxy (5415ms)",
+      "[2026-09-30T16:05:28.607Z] [NET LATENCY WARNING POST] /api/jobs/submit (5703ms)",
+      "[2026-09-30T16:05:50.591Z] [NET ABORT POST] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel (71ms) - signal is aborted without reason",
+      "[2026-09-30T16:05:54.579Z] [NET LATENCY WARNING POST] /api/jobs/submit (4201ms)",
+      "[2026-09-30T16:05:54.867Z] [NET LATENCY WARNING POST] /api/sync/supabase-pull (4324ms)",
+      "[2026-09-30T16:05:54.976Z] [NET LATENCY WARNING POST] /api/sync/supabase-push (4434ms)"
+    ],
+    "userActionBreadcrumbs": [
+      {
+        "timestamp": "2026-09-30T16:03:53.664Z",
+        "action": "click",
+        "target": "button",
+        "details": {
+          "id": "nav-tab-food",
+          "label": "Food History"
+        }
+      },
+      {
+        "timestamp": "2026-09-30T16:03:55.239Z",
+        "action": "click",
+        "target": "button",
+        "details": {
+          "label": "w-14 h-14 bg-indigo-600 text-w"
+        }
+      },
+      {
+        "timestamp": "2026-09-30T16:03:55.900Z",
+        "action": "click",
+        "target": "button",
+        "details": {
+          "id": "quick-action-log-meal",
+          "label": "Log Meal"
+        }
+      },
+      {
+        "timestamp": "2026-09-30T16:03:57.405Z",
+        "action": "click",
+        "target": "button",
+        "details": {
+          "id": "food-chat-photo-btn",
+          "label": "food-chat-photo-btn"
+        }
+      },
+      {
+        "timestamp": "2026-09-30T16:03:58.161Z",
+        "action": "click",
+        "target": "button",
+        "details": {
+          "label": "Photos\nPhoto gallery & albums"
+        }
+      },
+      {
+        "timestamp": "2026-09-30T16:04:21.815Z",
+        "action": "input_change",
+        "target": "input",
+        "details": {
+          "name": "input",
+          "valueLength": 26
+        }
+      },
+      {
+        "timestamp": "2026-09-30T16:04:24.288Z",
+        "action": "click",
+        "target": "button",
+        "details": {
+          "id": "food-chat-send-btn",
+          "label": "food-chat-send-btn"
+        }
+      },
+      {
+        "timestamp": "2026-09-30T16:04:24.293Z",
+        "action": "submit_initiated",
+        "target": "chat_composer",
+        "details": {
+          "prompt": "Analyze this meal photo.",
+          "imageCount": 2
+        }
+      },
+      {
+        "timestamp": "2026-09-30T16:04:24.432Z",
+        "action": "submit_meal_job",
+        "target": "chat_compose_dock",
+        "details": {
+          "jobId": "job_1790784235900_ee9r7hg2i",
+          "promptLength": 24,
+          "imageCount": 2,
+          "submissionMode": "review"
+        }
+      }
+    ],
+    "dispatches": [
+      {
+        "id": "t1/scout",
+        "parent": null,
+        "turn": 1,
+        "agent": "scout",
+        "user": "I had 70g of Sainsbury oat + fruit",
+        "received": {
+          "mode": "review",
+          "photoCount": 1,
+          "photoUrls": [
+            "https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_0aa49da2d85f54546874f080c044b8f094fc751370ced556ce066b6d67242798.jpg"
+          ],
+          "imageCount": 1
+        },
+        "systemInstruction": "=== USER OUTPUT LANGUAGE ===\nThe patient's UI language is English (code: en).\nWrite every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in English.\nKeep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.\nKeep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.\nFood identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into English.\n\n- HIERARCHY: Extract each distinct food item/ingredient (e.g. Tofu, Beef, sides, meal prep items, drinks, packages) directly as its own separate 'dish' with its own boundingBox2D & nutrients. Never group distinct food items into a single composite dish with sub-items. Do not duplicate identical dishes across multi-angles or cooking prep.\n- QUANTITY & MULTIPACKS: Output 'weightGrams' (consumed serving) and 'packGrams' (container total). For unopened grocery multi-packs (e.g. '5 x 65ml', 'pack of 6') without explicit user notes stating all N units were consumed, set 'weightGrams' to a single unit/serving size (e.g. 65g) and 'packGrams' to the container total (e.g. 325g). Never estimate the whole container as consumed: weightGrams is ALWAYS one serving here — the portion question resolves the true amount.\n- GROCERY/SCALE STICKERS: Treat supermarket stickers as atomic: pair printed text with printed weight (e.g. 'Berat 0.252' -> 252g). Output text in 'packageLabelText'. Never transpose weights between packages.\n- LOCAL NAMES: Preserve the verbatim printed name from stickers, packaging, or menus in local language as foodName (e.g. 'Ikan Cendro', 'Cumi Bangka'). Do not genericise when specific local name is readable. ALWAYS provide the generic English translation of the ingredient in 'genericEnglishName' (e.g. 'needlefish', 'squid').\n- INGESTION: Extract ALL visible food items/packages from ALL provided images into dishes[]. After dishes[], emit 'perImage': one entry per provided image in 0-based order with the dishName values seen in that image ('itemsFound'; empty array only when that image truly shows no food, or when no images are attached) — every provided image must appear exactly once; never skip an image. Before emitting, verify the anchor both ways for images 0..N-1: each 'perImage' entry must match at least one dish carrying that same 'sourceImageIndex', and any entry with no matching dish must be confirmed food-free — a food image with no matching dish means you stopped early, so go back and extract it. 'contentType' is post-extraction metadata and must not restrict extraction.\n- DIRECT OCR & LABEL TRUTH: Transcribe printed labels into 'rawNutritionLabel' (preserve exact 0s and % AKG/% DV). Before emitting rawNutritionLabel & nutrients, perform an accuracy check on printed tables: verify negative prefixes in English & all languages (e.g. 'un-'/'non-'/'tidak': saturated fat is strictly the pure saturated row, never unsaturated/tidak jenuh or total fat; soluble fiber is never insoluble). When packaging/label accompanies prepared food across photos, anchor dish nutrients to printed label truth.\n- BRANDS & CONDIMENTS: Set 'chainName' for brands. Set 'isStandaloneCondimentPacket' for packets <=30g.\n- GROCERY VS MEAL (anti-double-count): grocery packs with scale stickers are shopping reference, not eaten portions, when the SAME ingredient also appears prepared in a pot/bowl in another image (e.g. baby corn pack + baby corn in hotpot). Do not sum both: emit the prepared dish as the consumed item and keep packs as reference with packGrams only. In-shell packs (e.g. KCG TANAH KULIT): weight is gross with shell; edible kernels are ~65%.\n- LABEL MISMATCH: if a sticker name contradicts the visual/brand (e.g. DAUN SELADA lettuce sticker on poultry-branded pack, or cucumbers in frame), do not emit the sticker name as fact — flag low confidence and prefer the visual/brand identity.\n- COOKING FATS: Include cooking oils/fats in 'dishNutrients.totalFat' based on 'cookingMethod'.\n- CLINICAL VERDICT & NARRATIVE: Provide a 3-6 word 'verdict' ('level': good|warning|alert|neutral) and a direct 35-70 word clinical 'clinicalAdvice' in 2nd person (\"You got...\"). Balance two sides: celebrate positive nutrient achievements (protein, soluble fiber, healthy fats) while plainly flagging any nutrient over budget (sodium, saturated fat) with its magnitude and actionable movement.\n\n=== REQUIRED OUTPUT JSON SCHEMA ===\nOutput exactly ONE JSON object matching this schema:\n{\n  \"_internalReasoning\": \"string (<15 words)\",\n  \"contentType\": \"visual | menu_or_poster | label | text\",\n  \"diningEnvironment\": \"home_cooked | casual_restaurant | fast_food_chain | fine_dining | airline | unknown\",\n  \"verdict\": {\n    \"label\": \"Supports Gut Health with Added Sugar\",\n    \"level\": \"neutral\"\n  },\n  \"clinicalAdvice\": \"The fried snacks pack 9g of saturated fat, nearly half your day's limit in one item — that load works against your cholesterol goal and stiffens post-meal blood flow. The beef soup's 30g of clean protein is the win here, and its broth keeps you hydrated. A 10-minute walk will help clear the fat load.\",\n  \"perImage\": [{ \"imageIndex\": 0, \"itemsFound\": [\"Vegetable and Beef Hotpot\"] }],\n  \"dishes\": [\n    {\n      \"dishName\": \"Vegetable and Beef Hotpot\",\n      \"genericEnglishName\": \"beef and vegetable stew\",\n      \"chainName\": null,\n      \"estimatedWeightGrams\": 650,\n      \"packGrams\": 650,\n      \"cookingMethod\": \"raw | baked | grilled | boiled | steamed | deep_fried | pan_fried | stir_fried\",\n      \"boundingBox2D\": [300, 200, 850, 900],\n      \"sourceImageIndex\": 1,\n      \"isStandaloneCondimentPacket\": false,\n      \"foods\": [\n        {\n          \"foodName\": \"Beef Blade\",\n          \"genericEnglishName\": \"beef\",\n          \"packageLabelText\": \"BEEF BLADE - Berat 0.110\",\n          \"weightGrams\": 110,\n          \"packGrams\": 110,\n          \"sourceImageIndex\": 0,\n          \"rawNutritionLabel\": null,\n          \"nutrients\": { \"protein\": 24.0, \"saturatedFat\": 2.5, \"addedSugar\": 0, \"totalFibre\": 0, \"sodium\": 65, \"carbohydrates\": 0 }\n        }\n      ],\n      \"dishNutrients\": { \"saturatedFat\": 5.8, \"totalFat\": 18.2, \"totalSugar\": 5.0, \"potassium\": 1450, \"omega3\": 0.15, \"calcium\": 190, \"iron\": 5.5, \"magnesium\": 120, \"vitaminD\": 0 }\n    }\n  ]\n}\n\n- PATIENT CONTEXT (special case — shapes verdict/advice only, never identity or weights): at-risk: AUDIT Binge Drinking Score (high); Cholesterol/HDL Ratio (high); Non-HDL Cholesterol (high); Total Cholesterol (high); HbA1c (high). Budgets: see NUTRITIONAL TARGET STATUS below. Pair praise for positive nutrient targets with plain alerts on any dish or nutrient working against those numbers.\n=== NUTRITIONAL TARGET STATUS ===\n7 days avg: Sat fat (16.4g), Calorie (2017.2kcal), Sodium (1498.8mg), Protein (75.1g), Carbohydrates (320.2g), Total Fibre (23.2g), Potassium (1335.1mg), Soluble Fibre (4.2g), Added Sugar (23.4g), Trans Fat (0.4g)",
+        "userPrompt": "Analyze the provided meal image. Inspect all visible prepared dishes, cooking pots, grocery packages, and barcode labels. Read any visible OCR text on cups, wrappers, or menus to identify fast-food brands or commercial chains, and use these to anchor the nutritional estimation (e.g. calories and fat for commercial deep-fried items) to standard commercial nutrition tables. Ingest all visible foods and packages completely into dishes and constituent foods. User note: \"I had 70g of Sainsbury oat + fruit\". If the user note explicitly mentions additional foods consumed, you MUST extract them as well, even if not visible in the images. Extract all physical dishes and constituent foods into the hierarchical schema with weightGrams, packGrams, and nutrients.",
+        "instruction": "=== SYSTEM INSTRUCTION ===\n=== USER OUTPUT LANGUAGE ===\nThe patient's UI language is English (code: en).\nWrite every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in English.\nKeep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.\nKeep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.\nFood identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into English.\n\n- HIERARCHY: Extract each distinct food item/ingredient (e.g. Tofu, Beef, sides, meal prep items, drinks, packages) directly as its own separate 'dish' with its own boundingBox2D & nutrients. Never group distinct food items into a single composite dish with sub-items. Do not duplicate identical dishes across multi-angles or cooking prep.\n- QUANTITY & MULTIPACKS: Output 'weightGrams' (consumed serving) and 'packGrams' (container total). For unopened grocery multi-packs (e.g. '5 x 65ml', 'pack of 6') without explicit user notes stating all N units were consumed, set 'weightGrams' to a single unit/serving size (e.g. 65g) and 'packGrams' to the container total (e.g. 325g). Never estimate the whole container as consumed: weightGrams is ALWAYS one serving here — the portion question resolves the true amount.\n- GROCERY/SCALE STICKERS: Treat supermarket stickers as atomic: pair printed text with printed weight (e.g. 'Berat 0.252' -> 252g). Output text in 'packageLabelText'. Never transpose weights between packages.\n- LOCAL NAMES: Preserve the verbatim printed name from stickers, packaging, or menus in local language as foodName (e.g. 'Ikan Cendro', 'Cumi Bangka'). Do not genericise when specific local name is readable. ALWAYS provide the generic English translation of the ingredient in 'genericEnglishName' (e.g. 'needlefish', 'squid').\n- INGESTION: Extract ALL visible food items/packages from ALL provided images into dishes[]. After dishes[], emit 'perImage': one entry per provided image in 0-based order with the dishName values seen in that image ('itemsFound'; empty array only when that image truly shows no food, or when no images are attached) — every provided image must appear exactly once; never skip an image. Before emitting, verify the anchor both ways for images 0..N-1: each 'perImage' entry must match at least one dish carrying that same 'sourceImageIndex', and any entry with no matching dish must be confirmed food-free — a food image with no matching dish means you stopped early, so go back and extract it. 'contentType' is post-extraction metadata and must not restrict extraction.\n- DIRECT OCR & LABEL TRUTH: Transcribe printed labels into 'rawNutritionLabel' (preserve exact 0s and % AKG/% DV). Before emitting rawNutritionLabel & nutrients, perform an accuracy check on printed tables: verify negative prefixes in English & all languages (e.g. 'un-'/'non-'/'tidak': saturated fat is strictly the pure saturated row, never unsaturated/tidak jenuh or total fat; soluble fiber is never insoluble). When packaging/label accompanies prepared food across photos, anchor dish nutrients to printed label truth.\n- BRANDS & CONDIMENTS: Set 'chainName' for brands. Set 'isStandaloneCondimentPacket' for packets <=30g.\n- GROCERY VS MEAL (anti-double-count): grocery packs with scale stickers are shopping reference, not eaten portions, when the SAME ingredient also appears prepared in a pot/bowl in another image (e.g. baby corn pack + baby corn in hotpot). Do not sum both: emit the prepared dish as the consumed item and keep packs as reference with packGrams only. In-shell packs (e.g. KCG TANAH KULIT): weight is gross with shell; edible kernels are ~65%.\n- LABEL MISMATCH: if a sticker name contradicts the visual/brand (e.g. DAUN SELADA lettuce sticker on poultry-branded pack, or cucumbers in frame), do not emit the sticker name as fact — flag low confidence and prefer the visual/brand identity.\n- COOKING FATS: Include cooking oils/fats in 'dishNutrients.totalFat' based on 'cookingMethod'.\n- CLINICAL VERDICT & NARRATIVE: Provide a 3-6 word 'verdict' ('level': good|warning|alert|neutral) and a direct 35-70 word clinical 'clinicalAdvice' in 2nd person (\"You got...\"). Balance two sides: celebrate positive nutrient achievements (protein, soluble fiber, healthy fats) while plainly flagging any nutrient over budget (sodium, saturated fat) with its magnitude and actionable movement.\n\n=== REQUIRED OUTPUT JSON SCHEMA ===\nOutput exactly ONE JSON object matching this schema:\n{\n  \"_internalReasoning\": \"string (<15 words)\",\n  \"contentType\": \"visual | menu_or_poster | label | text\",\n  \"diningEnvironment\": \"home_cooked | casual_restaurant | fast_food_chain | fine_dining | airline | unknown\",\n  \"verdict\": {\n    \"label\": \"Supports Gut Health with Added Sugar\",\n    \"level\": \"neutral\"\n  },\n  \"clinicalAdvice\": \"The fried snacks pack 9g of saturated fat, nearly half your day's limit in one item — that load works against your cholesterol goal and stiffens post-meal blood flow. The beef soup's 30g of clean protein is the win here, and its broth keeps you hydrated. A 10-minute walk will help clear the fat load.\",\n  \"perImage\": [{ \"imageIndex\": 0, \"itemsFound\": [\"Vegetable and Beef Hotpot\"] }],\n  \"dishes\": [\n    {\n      \"dishName\": \"Vegetable and Beef Hotpot\",\n      \"genericEnglishName\": \"beef and vegetable stew\",\n      \"chainName\": null,\n      \"estimatedWeightGrams\": 650,\n      \"packGrams\": 650,\n      \"cookingMethod\": \"raw | baked | grilled | boiled | steamed | deep_fried | pan_fried | stir_fried\",\n      \"boundingBox2D\": [300, 200, 850, 900],\n      \"sourceImageIndex\": 1,\n      \"isStandaloneCondimentPacket\": false,\n      \"foods\": [\n        {\n          \"foodName\": \"Beef Blade\",\n          \"genericEnglishName\": \"beef\",\n          \"packageLabelText\": \"BEEF BLADE - Berat 0.110\",\n          \"weightGrams\": 110,\n          \"packGrams\": 110,\n          \"sourceImageIndex\": 0,\n          \"rawNutritionLabel\": null,\n          \"nutrients\": { \"protein\": 24.0, \"saturatedFat\": 2.5, \"addedSugar\": 0, \"totalFibre\": 0, \"sodium\": 65, \"carbohydrates\": 0 }\n        }\n      ],\n      \"dishNutrients\": { \"saturatedFat\": 5.8, \"totalFat\": 18.2, \"totalSugar\": 5.0, \"potassium\": 1450, \"omega3\": 0.15, \"calcium\": 190, \"iron\": 5.5, \"magnesium\": 120, \"vitaminD\": 0 }\n    }\n  ]\n}\n\n- PATIENT CONTEXT (special case — shapes verdict/advice only, never identity or weights): at-risk: AUDIT Binge Drinking Score (high); Cholesterol/HDL Ratio (high); Non-HDL Cholesterol (high); Total Cholesterol (high); HbA1c (high). Budgets: see NUTRITIONAL TARGET STATUS below. Pair praise for positive nutrient targets with plain alerts on any dish or nutrient working against those numbers.\n=== NUTRITIONAL TARGET STATUS ===\n7 days avg: Sat fat (16.4g), Calorie (2017.2kcal), Sodium (1498.8mg), Protein (75.1g), Carbohydrates (320.2g), Total Fibre (23.2g), Potassium (1335.1mg), Soluble Fibre (4.2g), Added Sugar (23.4g), Trans Fat (0.4g)\n\n=== USER PROMPT ===\nAnalyze the provided meal image. Inspect all visible prepared dishes, cooking pots, grocery packages, and barcode labels. Read any visible OCR text on cups, wrappers, or menus to identify fast-food brands or commercial chains, and use these to anchor the nutritional estimation (e.g. calories and fat for commercial deep-fried items) to standard commercial nutrition tables. Ingest all visible foods and packages completely into dishes and constituent foods. User note: \"I had 70g of Sainsbury oat + fruit\". If the user note explicitly mentions additional foods consumed, you MUST extract them as well, even if not visible in the images. Extract all physical dishes and constituent foods into the hierarchical schema with weightGrams, packGrams, and nutrients.",
+        "output": {
+          "dishes": [
+            {
+              "dishName": "Sainsbury Oat and Fruit",
+              "genericEnglishName": "oatmeal with fruit",
+              "chainName": "Sainsbury's",
+              "estimatedWeightGrams": 220,
+              "cookingMethod": "boiled",
+              "sourceImageIndex": 0,
+              "boundingBox2D": [
+                250,
+                100,
+                955,
+                990
+              ],
+              "foods": [
+                {
+                  "foodName": "Sainsbury Oat and Fruit",
+                  "genericEnglishName": "oatmeal with dried fruit",
+                  "weightGrams": 70,
+                  "sourceImageIndex": 0,
+                  "nutrients": {
+                    "protein": 8.5,
+                    "saturatedFat": 0.4,
+                    "addedSugar": 4,
+                    "totalFibre": 7.5,
+                    "sodium": 15,
+                    "carbohydrates": 45
+                  },
+                  "boundingBox2D": [
+                    450,
+                    235,
+                    888,
+                    792
+                  ]
+                }
+              ],
+              "dishNutrients": {
+                "saturatedFat": 0.4,
+                "totalFat": 2.5,
+                "totalSugar": 12,
+                "vitaminD": 0,
+                "addedSugar": 4,
+                "carbohydrates": 58,
+                "protein": 9.5,
+                "totalFibre": 8.5
+              }
+            },
+            {
+              "dishName": "Green Grapes",
+              "genericEnglishName": "green grapes",
+              "estimatedWeightGrams": 100,
+              "cookingMethod": "raw",
+              "sourceImageIndex": 0,
+              "boundingBox2D": [
+                390,
+                110,
+                875,
+                880
+              ],
+              "foods": [
+                {
+                  "foodName": "Green Grapes",
+                  "genericEnglishName": "green grapes",
+                  "weightGrams": 100,
+                  "sourceImageIndex": 0,
+                  "nutrients": {
+                    "protein": 0.6,
+                    "saturatedFat": 0.1,
+                    "addedSugar": 0,
+                    "totalFibre": 0.9,
+                    "sodium": 2,
+                    "carbohydrates": 18
+                  },
+                  "boundingBox2D": [
+                    390,
+                    110,
+                    875,
+                    880
+                  ]
+                }
+              ],
+              "dishNutrients": {
+                "saturatedFat": 0.1,
+                "totalFat": 0.2,
+                "totalSugar": 15.5,
+                "vitaminD": 0,
+                "addedSugar": 0,
+                "carbohydrates": 18,
+                "protein": 0.6,
+                "totalFibre": 0.9
+              }
+            }
+          ],
+          "contentType": "visual",
+          "diningEnvironment": "home_cooked",
+          "verdict": {
+            "label": "Fiber-Rich Oats with Fruit",
+            "level": "good"
+          },
+          "clinicalAdvice": "Your choice of Sainsbury oats delivers a strong fiber boost that supports both your cholesterol and HbA1c goals. However, watch the total carbohydrate and sugar load from the dried fruit and fresh grapes, as keeping portions controlled helps manage blood sugar stability.",
+          "perImage": [
+            {
+              "imageIndex": 0,
+              "itemsFound": [
+                "Sainsbury Oat and Fruit",
+                "Green Grapes"
+              ]
+            }
+          ],
+          "_internalReasoning": "Extracted user-specified Sainsbury oats and visible grapes with estimated nutrient values."
+        },
+        "rawEmission": {
+          "dishes": [
+            {
+              "dishName": "Sainsbury Oat and Fruit",
+              "genericEnglishName": "oatmeal with fruit",
+              "chainName": "Sainsbury's",
+              "estimatedWeightGrams": 220,
+              "cookingMethod": "boiled",
+              "sourceImageIndex": 0,
+              "boundingBox2D": [
+                250,
+                100,
+                955,
+                990
+              ],
+              "foods": [
+                {
+                  "foodName": "Sainsbury Oat and Fruit",
+                  "genericEnglishName": "oatmeal with dried fruit",
+                  "weightGrams": 70,
+                  "sourceImageIndex": 0,
+                  "nutrients": {
+                    "protein": 8.5,
+                    "saturatedFat": 0.4,
+                    "addedSugar": 4,
+                    "totalFibre": 7.5,
+                    "sodium": 15,
+                    "carbohydrates": 45
+                  },
+                  "boundingBox2D": [
+                    450,
+                    235,
+                    888,
+                    792
+                  ]
+                }
+              ],
+              "dishNutrients": {
+                "saturatedFat": 0.4,
+                "totalFat": 2.5,
+                "totalSugar": 12,
+                "vitaminD": 0,
+                "addedSugar": 4,
+                "carbohydrates": 58,
+                "protein": 9.5,
+                "totalFibre": 8.5
+              }
+            },
+            {
+              "dishName": "Green Grapes",
+              "genericEnglishName": "green grapes",
+              "estimatedWeightGrams": 100,
+              "cookingMethod": "raw",
+              "sourceImageIndex": 0,
+              "boundingBox2D": [
+                390,
+                110,
+                875,
+                880
+              ],
+              "foods": [
+                {
+                  "foodName": "Green Grapes",
+                  "genericEnglishName": "green grapes",
+                  "weightGrams": 100,
+                  "sourceImageIndex": 0,
+                  "nutrients": {
+                    "protein": 0.6,
+                    "saturatedFat": 0.1,
+                    "addedSugar": 0,
+                    "totalFibre": 0.9,
+                    "sodium": 2,
+                    "carbohydrates": 18
+                  },
+                  "boundingBox2D": [
+                    390,
+                    110,
+                    875,
+                    880
+                  ]
+                }
+              ],
+              "dishNutrients": {
+                "saturatedFat": 0.1,
+                "totalFat": 0.2,
+                "totalSugar": 15.5,
+                "vitaminD": 0,
+                "addedSugar": 0,
+                "carbohydrates": 18,
+                "protein": 0.6,
+                "totalFibre": 0.9
+              }
+            }
+          ],
+          "contentType": "visual",
+          "diningEnvironment": "home_cooked",
+          "verdict": {
+            "label": "Fiber-Rich Oats with Fruit",
+            "level": "good"
+          },
+          "clinicalAdvice": "Your choice of Sainsbury oats delivers a strong fiber boost that supports both your cholesterol and HbA1c goals. However, watch the total carbohydrate and sugar load from the dried fruit and fresh grapes, as keeping portions controlled helps manage blood sugar stability.",
+          "perImage": [
+            {
+              "imageIndex": 0,
+              "itemsFound": [
+                "Sainsbury Oat and Fruit",
+                "Green Grapes"
+              ]
+            }
+          ],
+          "_internalReasoning": "Extracted user-specified Sainsbury oats and visible grapes with estimated nutrient values."
+        },
+        "model": "gemini-3.5-flash-lite",
+        "latency_ms": 14032,
+        "error": null
+      }
+    ],
+    "agentResult": {
+      "reply": "Your choice of Sainsbury oats delivers a strong fiber boost that supports both your cholesterol and HbA1c goals. However, watch the total carbohydrate and sugar load from the dried fruit and fresh grapes, as keeping portions controlled helps manage blood sugar stability."
+    }
+  },
+  "backendLogsUrl": "https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/logs/job_1790784359089_kvt6r0c0g.txt",
+  "backendLogs": "[scout_instruction] Vision Scout Instruction dispatched (model: gemini-3.5-flash-lite). Prompt length: 760 chars — see [UnifiedLLM-Prompt:scout] below for full text.\n[scout_system_instruction] Vision Scout System Instruction dispatched (model: gemini-3.5-flash-lite) — see [UnifiedLLM-Prompt:scout] below for full text.\n[scout_answer] Scout identified 1 item(s): Sainsbury Oat and Fruit with Green Grapes (~170g)\n[info] [scout] Prompt: 3184, Completion: 810, Total: 5081\n[info] [UnifiedLLM-Timing:scout] ms=14000\n[diet_answer] Your choice of Sainsbury oats delivers a strong fiber boost that supports both your cholesterol and HbA1c goals. However, watch the total carbohydrate and sugar load from the dried fruit and fresh grapes, as keeping portions controlled helps manage blood sugar stability.",
+  "completedAt": "2026-09-30T16:06:27.070Z",
+  "sessionEvents": [
+    {
+      "ts": 1790784359089,
+      "writer": "JobStore.apply",
+      "status": "draft",
+      "action": "createJob"
+    },
+    {
+      "ts": 1790784371473,
+      "writer": "LogChat.submit",
+      "status": "queued",
+      "action": "SubmitStarted"
+    }
+  ],
+  "lastUserAction": {
+    "action": "submit_meal_job",
+    "timestamp": "2026-09-30T16:06:11.541Z",
+    "details": {
+      "jobId": "job_1790784359089_kvt6r0c0g",
+      "promptLength": 34,
+      "imageCount": 1,
+      "submissionMode": "review"
+    }
+  },
+  "clientConsoleLogs": [
+    "[LOG 2026-09-30T16:03:51.034Z] [SupabaseJobSync] Supabase direct client/realtime disabled, relying on background polling",
+    "[LOG 2026-09-30T16:03:52.500Z] [SupabaseJobSync] Supabase direct client/realtime disabled, relying on background polling",
+    "[LOG 2026-09-30T16:03:53.495Z] [Sync] Fetching 1 missing images (cap 24)...",
+    "[LOG 2026-09-30T16:03:56.418Z] Firestore connection test: Backend unreachable or offline. Operating smoothly in local storage mode.",
+    "[LOG 2026-09-30T16:04:54.998Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop starting - 0 jobs queued to sync",
+    "[LOG 2026-09-30T16:04:54.998Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop finished - 0 jobs, total 0ms",
+    "[LOG 2026-09-30T16:04:56.032Z] [job_1790784235900_ee9r7hg2i] [LogChat] Job successfully submitted to server: {\"success\":true,\"jobId\":\"job_1790784235900_ee9r7hg2i\",\"status\":\"running\",\"imageUrls\":[\"https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_a1cf19eb6049b89d7fba57823ba3fd104cb1eeb51d72bc77fb47112c790d9f68.jpg\",\"https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_0c2ccc55308b5b3fa29677dc5240378bc2a6e4902969904ba7021663f20c305a.jpg\"]}",
+    "[LOG 2026-09-30T16:04:56.047Z] [job_1790784235900_ee9r7hg2i] [JobQueueRunner] Job job_1790784235900_ee9r7hg2i is server-owned. Polling /api/jobs/status...",
+    "[LOG 2026-09-30T16:05:10.891Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1790784235900_ee9r7hg2i",
+    "[LOG 2026-09-30T16:05:11.157Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1790784235900_ee9r7hg2i responded 200 in 266ms",
+    "[LOG 2026-09-30T16:05:11.157Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1790784235900_ee9r7hg2i",
+    "[LOG 2026-09-30T16:05:19.163Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: Step 1/2 failed, attempting Firestore mirror for job job_1790784235900_ee9r7hg2i",
+    "[WARN 2026-09-30T16:05:22.889Z] [job_1790784235900_ee9r7hg2i] [LiveBackendStreamViewer] Direct R2 fetch failed, trying proxy: {}",
+    "[LOG 2026-09-30T16:05:27.061Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop starting - 0 jobs queued to sync",
+    "[LOG 2026-09-30T16:05:27.061Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop finished - 0 jobs, total 0ms",
+    "[LOG 2026-09-30T16:05:28.608Z] [job_1790784235900_ee9r7hg2i] [LogChat] Job successfully submitted to server: {\"success\":true,\"jobId\":\"job_1790784235900_ee9r7hg2i\",\"status\":\"running\"}",
+    "[LOG 2026-09-30T16:05:28.633Z] [job_1790784235900_ee9r7hg2i] [JobQueueRunner] Job job_1790784235900_ee9r7hg2i is server-owned. Polling /api/jobs/status...",
+    "[LOG 2026-09-30T16:05:30.908Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1790784235900_ee9r7hg2i",
+    "[LOG 2026-09-30T16:05:30.909Z] [job_1790784235900_ee9r7hg2i] [JobQueueRunner] Auto-saving edited food log meal_1790784308630 from job job_1790784235900_ee9r7hg2i",
+    "[LOG 2026-09-30T16:05:31.374Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1790784235900_ee9r7hg2i responded 200 in 466ms",
+    "[LOG 2026-09-30T16:05:32.597Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop starting - 1 jobs queued to sync",
+    "[LOG 2026-09-30T16:05:32.597Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1790784235900_ee9r7hg2i",
+    "[LOG 2026-09-30T16:05:33.008Z] [job_1790784235900_ee9r7hg2i] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1790784235900_ee9r7hg2i responded 200 in 411ms",
+    "[LOG 2026-09-30T16:05:33.008Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Chunk 1 (1 jobs) took 411ms",
+    "[LOG 2026-09-30T16:05:33.008Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop finished - 1 jobs, total 411ms",
+    "[LOG 2026-09-30T16:05:40.708Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop starting - 0 jobs queued to sync",
+    "[LOG 2026-09-30T16:05:40.708Z] [job_1790784235900_ee9r7hg2i] [DIAG3] Job upsert loop finished - 0 jobs, total 0ms",
+    "[LOG 2026-09-30T16:05:54.580Z] [job_1790784341284_cjwipj3cg] [LogChat] Job successfully submitted to server: {\"success\":true,\"jobId\":\"job_1790784341284_cjwipj3cg\",\"status\":\"running\",\"imageUrls\":[\"https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_0aa49da2d85f54546874f080c044b8f094fc751370ced556ce066b6d67242798.jpg\"]}",
+    "[LOG 2026-09-30T16:05:54.581Z] [job_1790784341284_cjwipj3cg] [JobQueueRunner] Job job_1790784341284_cjwipj3cg is server-owned. Polling /api/jobs/status...",
+    "[LOG 2026-09-30T16:05:54.976Z] [job_1790784341284_cjwipj3cg] [DIAG3] Job upsert loop starting - 0 jobs queued to sync",
+    "[LOG 2026-09-30T16:05:54.976Z] [job_1790784341284_cjwipj3cg] [DIAG3] Job upsert loop finished - 0 jobs, total 0ms"
+  ],
+  "networkErrors": [
+    "[2026-09-30T16:04:26.267Z] [NET LATENCY WARNING POST] https://securetoken.googleapis.com/v1/token (4439ms)",
+    "[2026-09-30T16:04:54.055Z] [NET LATENCY WARNING POST] /api/sync/supabase-pull (29440ms)",
+    "[2026-09-30T16:04:55.741Z] [NET LATENCY WARNING GET] /api/jobs/status (7240ms)",
+    "[2026-09-30T16:04:56.030Z] [NET LATENCY WARNING POST] /api/jobs/submit (31592ms)",
+    "[2026-09-30T16:04:56.480Z] [NET LATENCY WARNING POST] /api/sync/supabase-push (31866ms)",
+    "[2026-09-30T16:05:19.161Z] [NET ABORT POST] /api/jobs/upsert (7999ms) - signal is aborted without reason",
+    "[2026-09-30T16:05:22.888Z] [NET DROP GET] https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/logs/job_1790784235900_ee9r7hg2i.txt (2278ms) - Failed to fetch",
+    "[2026-09-30T16:05:23.054Z] [NET DROP GET] https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/logs/job_1790784235900_ee9r7hg2i.txt (2302ms) - Failed to fetch",
+    "[2026-09-30T16:05:26.004Z] [NET LATENCY WARNING POST] /api/sync/supabase-pull (5152ms)",
+    "[2026-09-30T16:05:27.041Z] [NET LATENCY WARNING GET] /api/r2/log-proxy (4152ms)",
+    "[2026-09-30T16:05:27.042Z] [NET LATENCY WARNING POST] /api/sync/supabase-push (6191ms)",
+    "[2026-09-30T16:05:28.470Z] [NET LATENCY WARNING GET] /api/r2/log-proxy (5415ms)",
+    "[2026-09-30T16:05:28.607Z] [NET LATENCY WARNING POST] /api/jobs/submit (5703ms)",
+    "[2026-09-30T16:05:50.591Z] [NET ABORT POST] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel (71ms) - signal is aborted without reason",
+    "[2026-09-30T16:05:54.579Z] [NET LATENCY WARNING POST] /api/jobs/submit (4201ms)",
+    "[2026-09-30T16:05:54.867Z] [NET LATENCY WARNING POST] /api/sync/supabase-pull (4324ms)",
+    "[2026-09-30T16:05:54.976Z] [NET LATENCY WARNING POST] /api/sync/supabase-push (4434ms)"
+  ],
+  "userActionBreadcrumbs": [
+    {
+      "timestamp": "2026-09-30T16:03:53.664Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "nav-tab-food",
+        "label": "Food History"
+      }
+    },
+    {
+      "timestamp": "2026-09-30T16:03:55.239Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "label": "w-14 h-14 bg-indigo-600 text-w"
+      }
+    },
+    {
+      "timestamp": "2026-09-30T16:03:55.900Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "quick-action-log-meal",
+        "label": "Log Meal"
+      }
+    },
+    {
+      "timestamp": "2026-09-30T16:03:57.405Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "food-chat-photo-btn",
+        "label": "food-chat-photo-btn"
+      }
+    },
+    {
+      "timestamp": "2026-09-30T16:03:58.161Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "label": "Photos\nPhoto gallery & albums"
+      }
+    },
+    {
+      "timestamp": "2026-09-30T16:04:21.815Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "input",
+        "valueLength": 26
+      }
+    },
+    {
+      "timestamp": "2026-09-30T16:04:24.288Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "food-chat-send-btn",
+        "label": "food-chat-send-btn"
+      }
+    },
+    {
+      "timestamp": "2026-09-30T16:04:24.293Z",
+      "action": "submit_initiated",
+      "target": "chat_composer",
+      "details": {
+        "prompt": "Analyze this meal photo.",
+        "imageCount": 2
+      }
+    },
+    {
+      "timestamp": "2026-09-30T16:04:24.432Z",
+      "action": "submit_meal_job",
+      "target": "chat_compose_dock",
+      "details": {
+        "jobId": "job_1790784235900_ee9r7hg2i",
+        "promptLength": 24,
+        "imageCount": 2,
+        "submissionMode": "review"
+      }
+    }
+  ],
+  "dispatches": [
+    {
+      "id": "t1/scout",
+      "parent": null,
+      "turn": 1,
+      "agent": "scout",
+      "user": "I had 70g of Sainsbury oat + fruit",
+      "received": {
+        "mode": "review",
+        "photoCount": 1,
+        "photoUrls": [
+          "https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_0aa49da2d85f54546874f080c044b8f094fc751370ced556ce066b6d67242798.jpg"
+        ],
+        "imageCount": 1
+      },
+      "systemInstruction": "=== USER OUTPUT LANGUAGE ===\nThe patient's UI language is English (code: en).\nWrite every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in English.\nKeep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.\nKeep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.\nFood identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into English.\n\n- HIERARCHY: Extract each distinct food item/ingredient (e.g. Tofu, Beef, sides, meal prep items, drinks, packages) directly as its own separate 'dish' with its own boundingBox2D & nutrients. Never group distinct food items into a single composite dish with sub-items. Do not duplicate identical dishes across multi-angles or cooking prep.\n- QUANTITY & MULTIPACKS: Output 'weightGrams' (consumed serving) and 'packGrams' (container total). For unopened grocery multi-packs (e.g. '5 x 65ml', 'pack of 6') without explicit user notes stating all N units were consumed, set 'weightGrams' to a single unit/serving size (e.g. 65g) and 'packGrams' to the container total (e.g. 325g). Never estimate the whole container as consumed: weightGrams is ALWAYS one serving here — the portion question resolves the true amount.\n- GROCERY/SCALE STICKERS: Treat supermarket stickers as atomic: pair printed text with printed weight (e.g. 'Berat 0.252' -> 252g). Output text in 'packageLabelText'. Never transpose weights between packages.\n- LOCAL NAMES: Preserve the verbatim printed name from stickers, packaging, or menus in local language as foodName (e.g. 'Ikan Cendro', 'Cumi Bangka'). Do not genericise when specific local name is readable. ALWAYS provide the generic English translation of the ingredient in 'genericEnglishName' (e.g. 'needlefish', 'squid').\n- INGESTION: Extract ALL visible food items/packages from ALL provided images into dishes[]. After dishes[], emit 'perImage': one entry per provided image in 0-based order with the dishName values seen in that image ('itemsFound'; empty array only when that image truly shows no food, or when no images are attached) — every provided image must appear exactly once; never skip an image. Before emitting, verify the anchor both ways for images 0..N-1: each 'perImage' entry must match at least one dish carrying that same 'sourceImageIndex', and any entry with no matching dish must be confirmed food-free — a food image with no matching dish means you stopped early, so go back and extract it. 'contentType' is post-extraction metadata and must not restrict extraction.\n- DIRECT OCR & LABEL TRUTH: Transcribe printed labels into 'rawNutritionLabel' (preserve exact 0s and % AKG/% DV). Before emitting rawNutritionLabel & nutrients, perform an accuracy check on printed tables: verify negative prefixes in English & all languages (e.g. 'un-'/'non-'/'tidak': saturated fat is strictly the pure saturated row, never unsaturated/tidak jenuh or total fat; soluble fiber is never insoluble). When packaging/label accompanies prepared food across photos, anchor dish nutrients to printed label truth.\n- BRANDS & CONDIMENTS: Set 'chainName' for brands. Set 'isStandaloneCondimentPacket' for packets <=30g.\n- GROCERY VS MEAL (anti-double-count): grocery packs with scale stickers are shopping reference, not eaten portions, when the SAME ingredient also appears prepared in a pot/bowl in another image (e.g. baby corn pack + baby corn in hotpot). Do not sum both: emit the prepared dish as the consumed item and keep packs as reference with packGrams only. In-shell packs (e.g. KCG TANAH KULIT): weight is gross with shell; edible kernels are ~65%.\n- LABEL MISMATCH: if a sticker name contradicts the visual/brand (e.g. DAUN SELADA lettuce sticker on poultry-branded pack, or cucumbers in frame), do not emit the sticker name as fact — flag low confidence and prefer the visual/brand identity.\n- COOKING FATS: Include cooking oils/fats in 'dishNutrients.totalFat' based on 'cookingMethod'.\n- CLINICAL VERDICT & NARRATIVE: Provide a 3-6 word 'verdict' ('level': good|warning|alert|neutral) and a direct 35-70 word clinical 'clinicalAdvice' in 2nd person (\"You got...\"). Balance two sides: celebrate positive nutrient achievements (protein, soluble fiber, healthy fats) while plainly flagging any nutrient over budget (sodium, saturated fat) with its magnitude and actionable movement.\n\n=== REQUIRED OUTPUT JSON SCHEMA ===\nOutput exactly ONE JSON object matching this schema:\n{\n  \"_internalReasoning\": \"string (<15 words)\",\n  \"contentType\": \"visual | menu_or_poster | label | text\",\n  \"diningEnvironment\": \"home_cooked | casual_restaurant | fast_food_chain | fine_dining | airline | unknown\",\n  \"verdict\": {\n    \"label\": \"Supports Gut Health with Added Sugar\",\n    \"level\": \"neutral\"\n  },\n  \"clinicalAdvice\": \"The fried snacks pack 9g of saturated fat, nearly half your day's limit in one item — that load works against your cholesterol goal and stiffens post-meal blood flow. The beef soup's 30g of clean protein is the win here, and its broth keeps you hydrated. A 10-minute walk will help clear the fat load.\",\n  \"perImage\": [{ \"imageIndex\": 0, \"itemsFound\": [\"Vegetable and Beef Hotpot\"] }],\n  \"dishes\": [\n    {\n      \"dishName\": \"Vegetable and Beef Hotpot\",\n      \"genericEnglishName\": \"beef and vegetable stew\",\n      \"chainName\": null,\n      \"estimatedWeightGrams\": 650,\n      \"packGrams\": 650,\n      \"cookingMethod\": \"raw | baked | grilled | boiled | steamed | deep_fried | pan_fried | stir_fried\",\n      \"boundingBox2D\": [300, 200, 850, 900],\n      \"sourceImageIndex\": 1,\n      \"isStandaloneCondimentPacket\": false,\n      \"foods\": [\n        {\n          \"foodName\": \"Beef Blade\",\n          \"genericEnglishName\": \"beef\",\n          \"packageLabelText\": \"BEEF BLADE - Berat 0.110\",\n          \"weightGrams\": 110,\n          \"packGrams\": 110,\n          \"sourceImageIndex\": 0,\n          \"rawNutritionLabel\": null,\n          \"nutrients\": { \"protein\": 24.0, \"saturatedFat\": 2.5, \"addedSugar\": 0, \"totalFibre\": 0, \"sodium\": 65, \"carbohydrates\": 0 }\n        }\n      ],\n      \"dishNutrients\": { \"saturatedFat\": 5.8, \"totalFat\": 18.2, \"totalSugar\": 5.0, \"potassium\": 1450, \"omega3\": 0.15, \"calcium\": 190, \"iron\": 5.5, \"magnesium\": 120, \"vitaminD\": 0 }\n    }\n  ]\n}\n\n- PATIENT CONTEXT (special case — shapes verdict/advice only, never identity or weights): at-risk: AUDIT Binge Drinking Score (high); Cholesterol/HDL Ratio (high); Non-HDL Cholesterol (high); Total Cholesterol (high); HbA1c (high). Budgets: see NUTRITIONAL TARGET STATUS below. Pair praise for positive nutrient targets with plain alerts on any dish or nutrient working against those numbers.\n=== NUTRITIONAL TARGET STATUS ===\n7 days avg: Sat fat (16.4g), Calorie (2017.2kcal), Sodium (1498.8mg), Protein (75.1g), Carbohydrates (320.2g), Total Fibre (23.2g), Potassium (1335.1mg), Soluble Fibre (4.2g), Added Sugar (23.4g), Trans Fat (0.4g)",
+      "userPrompt": "Analyze the provided meal image. Inspect all visible prepared dishes, cooking pots, grocery packages, and barcode labels. Read any visible OCR text on cups, wrappers, or menus to identify fast-food brands or commercial chains, and use these to anchor the nutritional estimation (e.g. calories and fat for commercial deep-fried items) to standard commercial nutrition tables. Ingest all visible foods and packages completely into dishes and constituent foods. User note: \"I had 70g of Sainsbury oat + fruit\". If the user note explicitly mentions additional foods consumed, you MUST extract them as well, even if not visible in the images. Extract all physical dishes and constituent foods into the hierarchical schema with weightGrams, packGrams, and nutrients.",
+      "instruction": "=== SYSTEM INSTRUCTION ===\n=== USER OUTPUT LANGUAGE ===\nThe patient's UI language is English (code: en).\nWrite every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in English.\nKeep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.\nKeep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.\nFood identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into English.\n\n- HIERARCHY: Extract each distinct food item/ingredient (e.g. Tofu, Beef, sides, meal prep items, drinks, packages) directly as its own separate 'dish' with its own boundingBox2D & nutrients. Never group distinct food items into a single composite dish with sub-items. Do not duplicate identical dishes across multi-angles or cooking prep.\n- QUANTITY & MULTIPACKS: Output 'weightGrams' (consumed serving) and 'packGrams' (container total). For unopened grocery multi-packs (e.g. '5 x 65ml', 'pack of 6') without explicit user notes stating all N units were consumed, set 'weightGrams' to a single unit/serving size (e.g. 65g) and 'packGrams' to the container total (e.g. 325g). Never estimate the whole container as consumed: weightGrams is ALWAYS one serving here — the portion question resolves the true amount.\n- GROCERY/SCALE STICKERS: Treat supermarket stickers as atomic: pair printed text with printed weight (e.g. 'Berat 0.252' -> 252g). Output text in 'packageLabelText'. Never transpose weights between packages.\n- LOCAL NAMES: Preserve the verbatim printed name from stickers, packaging, or menus in local language as foodName (e.g. 'Ikan Cendro', 'Cumi Bangka'). Do not genericise when specific local name is readable. ALWAYS provide the generic English translation of the ingredient in 'genericEnglishName' (e.g. 'needlefish', 'squid').\n- INGESTION: Extract ALL visible food items/packages from ALL provided images into dishes[]. After dishes[], emit 'perImage': one entry per provided image in 0-based order with the dishName values seen in that image ('itemsFound'; empty array only when that image truly shows no food, or when no images are attached) — every provided image must appear exactly once; never skip an image. Before emitting, verify the anchor both ways for images 0..N-1: each 'perImage' entry must match at least one dish carrying that same 'sourceImageIndex', and any entry with no matching dish must be confirmed food-free — a food image with no matching dish means you stopped early, so go back and extract it. 'contentType' is post-extraction metadata and must not restrict extraction.\n- DIRECT OCR & LABEL TRUTH: Transcribe printed labels into 'rawNutritionLabel' (preserve exact 0s and % AKG/% DV). Before emitting rawNutritionLabel & nutrients, perform an accuracy check on printed tables: verify negative prefixes in English & all languages (e.g. 'un-'/'non-'/'tidak': saturated fat is strictly the pure saturated row, never unsaturated/tidak jenuh or total fat; soluble fiber is never insoluble). When packaging/label accompanies prepared food across photos, anchor dish nutrients to printed label truth.\n- BRANDS & CONDIMENTS: Set 'chainName' for brands. Set 'isStandaloneCondimentPacket' for packets <=30g.\n- GROCERY VS MEAL (anti-double-count): grocery packs with scale stickers are shopping reference, not eaten portions, when the SAME ingredient also appears prepared in a pot/bowl in another image (e.g. baby corn pack + baby corn in hotpot). Do not sum both: emit the prepared dish as the consumed item and keep packs as reference with packGrams only. In-shell packs (e.g. KCG TANAH KULIT): weight is gross with shell; edible kernels are ~65%.\n- LABEL MISMATCH: if a sticker name contradicts the visual/brand (e.g. DAUN SELADA lettuce sticker on poultry-branded pack, or cucumbers in frame), do not emit the sticker name as fact — flag low confidence and prefer the visual/brand identity.\n- COOKING FATS: Include cooking oils/fats in 'dishNutrients.totalFat' based on 'cookingMethod'.\n- CLINICAL VERDICT & NARRATIVE: Provide a 3-6 word 'verdict' ('level': good|warning|alert|neutral) and a direct 35-70 word clinical 'clinicalAdvice' in 2nd person (\"You got...\"). Balance two sides: celebrate positive nutrient achievements (protein, soluble fiber, healthy fats) while plainly flagging any nutrient over budget (sodium, saturated fat) with its magnitude and actionable movement.\n\n=== REQUIRED OUTPUT JSON SCHEMA ===\nOutput exactly ONE JSON object matching this schema:\n{\n  \"_internalReasoning\": \"string (<15 words)\",\n  \"contentType\": \"visual | menu_or_poster | label | text\",\n  \"diningEnvironment\": \"home_cooked | casual_restaurant | fast_food_chain | fine_dining | airline | unknown\",\n  \"verdict\": {\n    \"label\": \"Supports Gut Health with Added Sugar\",\n    \"level\": \"neutral\"\n  },\n  \"clinicalAdvice\": \"The fried snacks pack 9g of saturated fat, nearly half your day's limit in one item — that load works against your cholesterol goal and stiffens post-meal blood flow. The beef soup's 30g of clean protein is the win here, and its broth keeps you hydrated. A 10-minute walk will help clear the fat load.\",\n  \"perImage\": [{ \"imageIndex\": 0, \"itemsFound\": [\"Vegetable and Beef Hotpot\"] }],\n  \"dishes\": [\n    {\n      \"dishName\": \"Vegetable and Beef Hotpot\",\n      \"genericEnglishName\": \"beef and vegetable stew\",\n      \"chainName\": null,\n      \"estimatedWeightGrams\": 650,\n      \"packGrams\": 650,\n      \"cookingMethod\": \"raw | baked | grilled | boiled | steamed | deep_fried | pan_fried | stir_fried\",\n      \"boundingBox2D\": [300, 200, 850, 900],\n      \"sourceImageIndex\": 1,\n      \"isStandaloneCondimentPacket\": false,\n      \"foods\": [\n        {\n          \"foodName\": \"Beef Blade\",\n          \"genericEnglishName\": \"beef\",\n          \"packageLabelText\": \"BEEF BLADE - Berat 0.110\",\n          \"weightGrams\": 110,\n          \"packGrams\": 110,\n          \"sourceImageIndex\": 0,\n          \"rawNutritionLabel\": null,\n          \"nutrients\": { \"protein\": 24.0, \"saturatedFat\": 2.5, \"addedSugar\": 0, \"totalFibre\": 0, \"sodium\": 65, \"carbohydrates\": 0 }\n        }\n      ],\n      \"dishNutrients\": { \"saturatedFat\": 5.8, \"totalFat\": 18.2, \"totalSugar\": 5.0, \"potassium\": 1450, \"omega3\": 0.15, \"calcium\": 190, \"iron\": 5.5, \"magnesium\": 120, \"vitaminD\": 0 }\n    }\n  ]\n}\n\n- PATIENT CONTEXT (special case — shapes verdict/advice only, never identity or weights): at-risk: AUDIT Binge Drinking Score (high); Cholesterol/HDL Ratio (high); Non-HDL Cholesterol (high); Total Cholesterol (high); HbA1c (high). Budgets: see NUTRITIONAL TARGET STATUS below. Pair praise for positive nutrient targets with plain alerts on any dish or nutrient working against those numbers.\n=== NUTRITIONAL TARGET STATUS ===\n7 days avg: Sat fat (16.4g), Calorie (2017.2kcal), Sodium (1498.8mg), Protein (75.1g), Carbohydrates (320.2g), Total Fibre (23.2g), Potassium (1335.1mg), Soluble Fibre (4.2g), Added Sugar (23.4g), Trans Fat (0.4g)\n\n=== USER PROMPT ===\nAnalyze the provided meal image. Inspect all visible prepared dishes, cooking pots, grocery packages, and barcode labels. Read any visible OCR text on cups, wrappers, or menus to identify fast-food brands or commercial chains, and use these to anchor the nutritional estimation (e.g. calories and fat for commercial deep-fried items) to standard commercial nutrition tables. Ingest all visible foods and packages completely into dishes and constituent foods. User note: \"I had 70g of Sainsbury oat + fruit\". If the user note explicitly mentions additional foods consumed, you MUST extract them as well, even if not visible in the images. Extract all physical dishes and constituent foods into the hierarchical schema with weightGrams, packGrams, and nutrients.",
+      "output": {
+        "dishes": [
+          {
+            "dishName": "Sainsbury Oat and Fruit",
+            "genericEnglishName": "oatmeal with fruit",
+            "chainName": "Sainsbury's",
+            "estimatedWeightGrams": 220,
+            "cookingMethod": "boiled",
+            "sourceImageIndex": 0,
+            "boundingBox2D": [
+              250,
+              100,
+              955,
+              990
+            ],
+            "foods": [
+              {
+                "foodName": "Sainsbury Oat and Fruit",
+                "genericEnglishName": "oatmeal with dried fruit",
+                "weightGrams": 70,
+                "sourceImageIndex": 0,
+                "nutrients": {
+                  "protein": 8.5,
+                  "saturatedFat": 0.4,
+                  "addedSugar": 4,
+                  "totalFibre": 7.5,
+                  "sodium": 15,
+                  "carbohydrates": 45
+                },
+                "boundingBox2D": [
+                  450,
+                  235,
+                  888,
+                  792
+                ]
+              }
+            ],
+            "dishNutrients": {
+              "saturatedFat": 0.4,
+              "totalFat": 2.5,
+              "totalSugar": 12,
+              "vitaminD": 0,
+              "addedSugar": 4,
+              "carbohydrates": 58,
+              "protein": 9.5,
+              "totalFibre": 8.5
+            }
+          },
+          {
+            "dishName": "Green Grapes",
+            "genericEnglishName": "green grapes",
+            "estimatedWeightGrams": 100,
+            "cookingMethod": "raw",
+            "sourceImageIndex": 0,
+            "boundingBox2D": [
+              390,
+              110,
+              875,
+              880
+            ],
+            "foods": [
+              {
+                "foodName": "Green Grapes",
+                "genericEnglishName": "green grapes",
+                "weightGrams": 100,
+                "sourceImageIndex": 0,
+                "nutrients": {
+                  "protein": 0.6,
+                  "saturatedFat": 0.1,
+                  "addedSugar": 0,
+                  "totalFibre": 0.9,
+                  "sodium": 2,
+                  "carbohydrates": 18
+                },
+                "boundingBox2D": [
+                  390,
+                  110,
+                  875,
+                  880
+                ]
+              }
+            ],
+            "dishNutrients": {
+              "saturatedFat": 0.1,
+              "totalFat": 0.2,
+              "totalSugar": 15.5,
+              "vitaminD": 0,
+              "addedSugar": 0,
+              "carbohydrates": 18,
+              "protein": 0.6,
+              "totalFibre": 0.9
+            }
+          }
+        ],
+        "contentType": "visual",
+        "diningEnvironment": "home_cooked",
+        "verdict": {
+          "label": "Fiber-Rich Oats with Fruit",
+          "level": "good"
+        },
+        "clinicalAdvice": "Your choice of Sainsbury oats delivers a strong fiber boost that supports both your cholesterol and HbA1c goals. However, watch the total carbohydrate and sugar load from the dried fruit and fresh grapes, as keeping portions controlled helps manage blood sugar stability.",
+        "perImage": [
+          {
+            "imageIndex": 0,
+            "itemsFound": [
+              "Sainsbury Oat and Fruit",
+              "Green Grapes"
+            ]
+          }
+        ],
+        "_internalReasoning": "Extracted user-specified Sainsbury oats and visible grapes with estimated nutrient values."
+      },
+      "rawEmission": {
+        "dishes": [
+          {
+            "dishName": "Sainsbury Oat and Fruit",
+            "genericEnglishName": "oatmeal with fruit",
+            "chainName": "Sainsbury's",
+            "estimatedWeightGrams": 220,
+            "cookingMethod": "boiled",
+            "sourceImageIndex": 0,
+            "boundingBox2D": [
+              250,
+              100,
+              955,
+              990
+            ],
+            "foods": [
+              {
+                "foodName": "Sainsbury Oat and Fruit",
+                "genericEnglishName": "oatmeal with dried fruit",
+                "weightGrams": 70,
+                "sourceImageIndex": 0,
+                "nutrients": {
+                  "protein": 8.5,
+                  "saturatedFat": 0.4,
+                  "addedSugar": 4,
+                  "totalFibre": 7.5,
+                  "sodium": 15,
+                  "carbohydrates": 45
+                },
+                "boundingBox2D": [
+                  450,
+                  235,
+                  888,
+                  792
+                ]
+              }
+            ],
+            "dishNutrients": {
+              "saturatedFat": 0.4,
+              "totalFat": 2.5,
+              "totalSugar": 12,
+              "vitaminD": 0,
+              "addedSugar": 4,
+              "carbohydrates": 58,
+              "protein": 9.5,
+              "totalFibre": 8.5
+            }
+          },
+          {
+            "dishName": "Green Grapes",
+            "genericEnglishName": "green grapes",
+            "estimatedWeightGrams": 100,
+            "cookingMethod": "raw",
+            "sourceImageIndex": 0,
+            "boundingBox2D": [
+              390,
+              110,
+              875,
+              880
+            ],
+            "foods": [
+              {
+                "foodName": "Green Grapes",
+                "genericEnglishName": "green grapes",
+                "weightGrams": 100,
+                "sourceImageIndex": 0,
+                "nutrients": {
+                  "protein": 0.6,
+                  "saturatedFat": 0.1,
+                  "addedSugar": 0,
+                  "totalFibre": 0.9,
+                  "sodium": 2,
+                  "carbohydrates": 18
+                },
+                "boundingBox2D": [
+                  390,
+                  110,
+                  875,
+                  880
+                ]
+              }
+            ],
+            "dishNutrients": {
+              "saturatedFat": 0.1,
+              "totalFat": 0.2,
+              "totalSugar": 15.5,
+              "vitaminD": 0,
+              "addedSugar": 0,
+              "carbohydrates": 18,
+              "protein": 0.6,
+              "totalFibre": 0.9
+            }
+          }
+        ],
+        "contentType": "visual",
+        "diningEnvironment": "home_cooked",
+        "verdict": {
+          "label": "Fiber-Rich Oats with Fruit",
+          "level": "good"
+        },
+        "clinicalAdvice": "Your choice of Sainsbury oats delivers a strong fiber boost that supports both your cholesterol and HbA1c goals. However, watch the total carbohydrate and sugar load from the dried fruit and fresh grapes, as keeping portions controlled helps manage blood sugar stability.",
+        "perImage": [
+          {
+            "imageIndex": 0,
+            "itemsFound": [
+              "Sainsbury Oat and Fruit",
+              "Green Grapes"
+            ]
+          }
+        ],
+        "_internalReasoning": "Extracted user-specified Sainsbury oats and visible grapes with estimated nutrient values."
+      },
+      "model": "gemini-3.5-flash-lite",
+      "latency_ms": 14032,
+      "error": null
+    }
+  ]
+}
