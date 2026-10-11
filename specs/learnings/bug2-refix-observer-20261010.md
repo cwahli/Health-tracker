@@ -502,6 +502,21 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   immediately; fixes still need explicit human go per event unless
   the human pre-authorizes a class.
 
+## Telegram lane live (2026-10-11 ~15:08 UTC)
+
+- PR #736 merged + deployed (665cff73); gateway env set
+  (TODO_TRIAGE_ROUTE=opencode,telegram, TODO_NOTIFY_CHAT_ID set to
+  the sole operator id) and gateway SIGTERM-revived (Restart=always;
+  careful: pgrep pattern once matched my own shell — exclude self).
+- Live DM proven pre-deploy (message_id 1736). Lane uses
+  TODO_NOTIFY_BOT_TOKEN else TUI_BOT_TOKEN_VM (validated via getMe),
+  10s timeout, token never logged, per-lane receipts + lane-aware
+  retry. Clarified direction: TG bot → opencode batch sessions
+  exists (bot-host); nothing can inject into a live interactive
+  session — the DM notifies the human instantly instead.
+- Awaiting the user's live verdict tap for the end-to-end demo
+  (DM + spawn + check-in action).
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
