@@ -490,6 +490,18 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
 - Routing changes via TODO_TRIAGE_ROUTE in tui-gateway.env + gateway
   revive. Next real verdict proves the chain end to end.
 
+## Standing: verdict check-in (2026-10-11)
+
+- No push channel exists from the box into a live agent session:
+  verdicts land as inbox + receipts + triage.jsonl, and the manager
+  reads them at session start, at every wave landing, and whenever
+  the user pings — never on a timer (no-polling rule holds).
+- Lossless, not instant: with receipts + retry nothing rots
+  silently; latency = time to next check-in.
+- Acting rights unchanged: read-only + pre-authorized standing work
+  immediately; fixes still need explicit human go per event unless
+  the human pre-authorizes a class.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
