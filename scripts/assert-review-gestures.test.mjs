@@ -272,6 +272,19 @@ test('Request lands first with the result below; Info folds the card over the pi
   if (ran === null) t.skip('playwright not installed');
 });
 
+test('the request result swipes through every shot like the stage', async (t) => {
+  const ran = await withPage(async ({ page, swipe }) => {
+    // Still on the Request landing: swipe inside the result frame.
+    const count = () => page.textContent('[data-view="request"] .result .count');
+    const before = await count();
+    assert.match(before, /1\/3/, 'three shots, first showing');
+    await swipe({ x: 340, y: 550 }, { x: 60, y: 550 });
+    await page.waitForTimeout(320);
+    assert.match(await count(), /2\/3/, 'the result swipes to the next shot');
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
+
 test('the request result zooms with the same gestures as the stage', async (t) => {
   const ran = await withPage(async ({ page, pinch }) => {
     // Still on the Request landing: pinch the result screenshot itself.

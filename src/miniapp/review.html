@@ -527,16 +527,21 @@
       + '</div>';
     // The two column tabs name the sheet column they show, so a reader can
     // never be guessing which cell is on screen. Request is the point of
-    // truth: the request text first, then the result screenshot directly
-    // below it (first proof shot, same bytes as the stage) — see the
-    // request and see the result, no tab-hopping.
-    var firstProof = proofs.length ? proofs[0] : null;
+    // truth: the request text first, then the result screenshots directly
+    // below it — the SAME multi-shot swipe component as the proof stage
+    // (every proof, swipeable, zoomable), so there is exactly one picture
+    // component to learn. See the request and see the result, no tab-hopping.
     views += '<div class="view scroll text" data-view="request">'
       + '<div class="colname">Original request</div><div id="pane-request">' + esc(it.originalRequest) + '</div>'
-      + (firstProof
+      + (proofs.length
         ? '<figure class="result"><div class="colname">Result</div>'
-          + '<div class="stage req"><div class="track"><div class="slide"><div class="zoom">'
-          + '<img src="' + proofUrl(it.key, firstProof.id) + '" alt="result screenshot" loading="lazy"></div></div></div></div>'
+          + '<div class="stage req"><div class="track">'
+          + proofs.map(function (p, i) {
+              var src = proofUrl(it.key, p.id);
+              return '<div class="slide"><div class="zoom"><img src="' + src + '" alt="result screenshot ' + (i + 1) + ' of ' + proofs.length + '" loading="lazy"></div></div>';
+            }).join('')
+          + '</div></div>'
+          + (proofs.length > 1 ? '<div class="count">swipe · 1/' + proofs.length + '</div>' : '')
           + '<button class="heart" data-heart="result" title="Done — archive" aria-label="Mark done and archive">🤍</button></figure>'
         : '<p class="none">No proof screenshots filed.</p>')
       + '</div>';
@@ -582,8 +587,9 @@
     panel.innerHTML = views + '<div class="view on" data-view="proof">' + stage + '</div>';
 
     view = proofs.length ? new PictureView(document.getElementById('track'), document.getElementById('imgcount')) : null;
-    var reqTrack = document.querySelector('[data-view="request"] .stage.req .track');
-    if (reqTrack) new PictureView(reqTrack, null);
+    var reqFigure = document.querySelector('[data-view="request"] .result');
+    var reqTrack = reqFigure && reqFigure.querySelector('.stage.req .track');
+    if (reqTrack) new PictureView(reqTrack, reqFigure.querySelector('.count'));
     // Every heart archives the same item: the stage's and the result's are
     // bound by class (ids stay unique), so Done works where the review starts.
     document.querySelectorAll('#panel .heart').forEach(function (btn) {
