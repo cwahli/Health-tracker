@@ -428,6 +428,27 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   20:30, confirmed absent; plus open flag that #712's 21:26
   "Sheet-03" write may have mistargeted after the archive shift).
 
+## T10f: next 10 + maker-checker (2026-10-11)
+
+- Doer (agent/t10f-next, running): Sync-09 gate-run, Spec-01
+  non-phone steps, Sheet-04 mechanical checks, Fleet-09 STAGED patch
+  (no move), Health-10 STAGED patch (no assert edit), Sync-08
+  read-only probe, Domain-01 retirement proof, Card-19 gate-cell
+  retarget (no script edit), Health-08 via #706 (ready only if CI
+  green + diff unchanged), Sheet-03 recovery (audit mistarget,
+  restore from archive). No closures, no Done, full-URL proof cells.
+- Reviewer (independent, launches on doer's completion): re-verify
+  all ten (branches/PRs, rows vs rules, PNGs seen, sensors re-run,
+  patch correctness) — endorse-or-iterate per item, reports to
+  manager. Read-only except its own learnings note.
+- Image bug (review app Result not rendering on phone): code path
+  checked (same proofUrl/token as stage) — need the user's
+  screenshot + item key to diagnose (on-device only).
+- Ops note: observer worktree was gone this morning (all commits
+  safe on origin); recreated via `git worktree add` from
+  agent/sheet-cleanup-observer. Cause unknown — worth one look at
+  overnight cleaner logs if trees keep vanishing.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
