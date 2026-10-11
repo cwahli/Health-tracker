@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal, isWebStatic, verifyWithRefererFallback, tgtgUpstream, tgtgHost, isTgtgHost, agendaUpstream, agendaHost, isAgendaHost } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, SHELL_ESCAPE_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal, isWebStatic, verifyWithRefererFallback, tgtgUpstream, tgtgHost, isTgtgHost, agendaUpstream, agendaHost, isAgendaHost } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -279,7 +279,7 @@ console.log('assert-tui-gateway:');
   check('the upstream body survives the injection', html.includes('console.log("hello")'));
   check('the fullscreen button ships with the page', html.includes('tui-fsbtn'));
   check('exactly our widget scripts are added, nothing else',
-    (html.match(/<script/gi) || []).length === (upstream.match(/<script/gi) || []).length + 5
+    (html.match(/<script/gi) || []).length === (upstream.match(/<script/gi) || []).length + 6
     && html.includes('requestFullscreen'));
   check('the page is not gzip bytes labelled as html', !html.startsWith('\u001f\u008b'));
   check('no credential is embedded in the page', !/tui_session=/.test(html) && !/var TOKEN =/.test(html));
@@ -348,17 +348,26 @@ console.log('assert-tui-gateway:');
     );
     check('without Telegram the button hides itself', btn2.style.display === 'none');
   }
-  // One burger per surface: the floating in-frame burger is gone (every
-  // terminal header carries the drawer burger instead), while expand,
-  // fullscreen and the swipe lock stay.
+  // One burger per surface: the framed shell header owns nav, so the
+  // standalone page carries a top-level-only escape (hidden when framed) —
+  // a bare domain or pasted /tty*/ link is never a dead end without nav
+  // (live 2026-10-11). The old floating in-frame burger with its per-surface
+  // double meaning stays gone; expand, fullscreen and the swipe lock stay.
   check('no floating shell-burger is injected anymore',
     !FULLSCREEN_WIDGET_JS.includes('shell-burger'));
+  check('the standalone escape hides itself when framed',
+    SHELL_ESCAPE_JS.includes('window.top!==window.self'));
+  check('the standalone escape returns to the shell terminal tab',
+    SHELL_ESCAPE_JS.includes('/app/app?token=')
+    && SHELL_ESCAPE_JS.includes('&tab=tui')
+    && SHELL_ESCAPE_JS.includes('/app/login?tab=tui'));
   check('expand + fullscreen + swipe lock survive the removal',
     FULLSCREEN_WIDGET_JS.includes('disableVerticalSwipes')
     && FULLSCREEN_WIDGET_JS.includes('requestFullscreen')
     && FULLSCREEN_WIDGET_JS.includes('tg.expand'));
-  // The served terminal page itself: exactly one burger per surface means
-  // zero in the frame (the shell header owns nav now).
+  // The served terminal page itself: exactly one burger per surface — the
+  // shell header owns nav when framed, so the page carries only the
+  // top-level escape (hidden inside the shell's iframe).
   {
     const ttyd = http.createServer((rq, rs) => {
       rs.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -381,8 +390,39 @@ console.log('assert-tui-gateway:');
     ttyd.close();
     check('the served terminal page has no floating burger',
       page.code === 200 && !page.body.includes('shell-burger'));
+    check('the served terminal page carries the top-level shell escape',
+      page.body.includes('tui-shellbtn') && page.body.includes('data-bot="vm"'));
+    check('the escape hides when framed (shell header owns nav there)',
+      page.body.includes('window.top!==window.self'));
     check('the served page keeps the fullscreen button + scroll bridge',
       page.body.includes('tui-fsbtn') && page.body.includes('emitFine'));
+    {
+      const runEscape = (framed) => {
+        const self = {};
+        const escBtn = { style: {}, getAttribute: () => 'vm',
+          addEventListener: (ev, fn) => { escBtn[ev] = fn; } };
+        const loc = { search: `?token=${encodeURIComponent(token)}`, href: '' };
+        let threw = '';
+        try {
+          // eslint-disable-next-line no-new-func
+          new Function('window', 'document', 'location', SHELL_ESCAPE_JS)(
+            framed ? { top: {}, self } : { top: self, self },
+            { getElementById: () => escBtn }, loc,
+          );
+        } catch (e) { threw = String((e && e.message) || e); }
+        if (typeof escBtn.click === 'function') {
+          try { escBtn.click(); } catch (e) { threw = threw || String((e && e.message) || e); }
+        }
+        return { threw, shown: escBtn.style.display, target: loc.href };
+      };
+      const top = runEscape(false);
+      check(`the escape runs without throwing${top.threw ? ` — ${top.threw}` : ''}`, top.threw === '');
+      check('the escape shows itself top-level', top.shown === 'block');
+      check('the escape returns to the shell terminal tab with the token',
+        top.target.startsWith('/app/app?token=') && top.target.includes('&bot=vm') && top.target.includes('&tab=tui'));
+      const framed = runEscape(true);
+      check('the escape stays hidden when framed', framed.threw === '' && framed.shown !== 'block' && framed.target === '');
+    }
   }
 
   // 12a4. The LAYOUT pass must not depend on Telegram, and it must fill
@@ -939,11 +979,28 @@ console.log('assert-tui-gateway:');
       const r = await call('/tty/token', { host: 't.example', referer: `https://t.example/?token=${encodeURIComponent(old)}` });
       return r.code === 200 && String(r.h['set-cookie'] || '').includes(COOKIE_NAME);
     })());
-  check('a tokened TUI root deep-links to the terminal path, never the bootstrap',
+  // A tokened TUI root lands on the shell for a top-level visit (typed
+  // domain, bookmark: the raw ttyd page has no burger and no way back —
+  // live 2026-10-11), while the shell's own terminal iframe keeps the fast
+  // tty path (shell Referer and/or dest=iframe).
+  check('a top-level tokened TUI root lands on the shell terminal tab, never the bootstrap',
     await (async () => {
       const r = await call(`/?token=${encodeURIComponent(token)}`, { host: 't.example' });
-      return r.code === 302 && String(r.h.location || '').startsWith('/tty/')
+      const loc = String(r.h.location || '');
+      return r.code === 302 && loc.startsWith('/app/app?token=') && loc.includes('&bot=vm') && loc.includes('&tab=tui')
         && String(r.h['set-cookie'] || '').includes(COOKIE_NAME);
+    })());
+  check('the shell terminal iframe keeps the fast tty path (shell referer)',
+    await (async () => {
+      const r = await call(`/?bot=vm&token=${encodeURIComponent(token)}`,
+        { host: 't.example', referer: `https://t.example/app/app?token=${encodeURIComponent(token)}&bot=vm&tab=tui` });
+      return r.code === 302 && String(r.h.location || '').startsWith('/tty/');
+    })());
+  check('the shell terminal iframe keeps the fast tty path (dest iframe)',
+    await (async () => {
+      const r = await call(`/?bot=vm&token=${encodeURIComponent(token)}`,
+        { host: 't.example', 'sec-fetch-dest': 'iframe' });
+      return r.code === 302 && String(r.h.location || '').startsWith('/tty/');
     })());
   check('a bare TUI root still gets the cold bootstrap',
     await (async () => {
@@ -1103,9 +1160,14 @@ console.log('assert-tui-gateway:');
     exch.code === 302 && String(exch.h.location || '').startsWith('/?token='));
 
   const tuiRoot = await call('/', { host: 'tui.health-tracker.co.uk', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` });
-  check('a tokened TUI root deep-links to its own terminal path (bot isolation kept)',
-    tuiRoot.code === 302 && String(tuiRoot.h.location || '').startsWith('/tty/')
+  check('a top-level tokened TUI root lands on the shell, never a raw tty (bot isolation kept)',
+    tuiRoot.code === 302 && String(tuiRoot.h.location || '').startsWith('/app/app?token=')
+    && String(tuiRoot.h.location || '').includes('&tab=tui')
     && !tuiRoot.body.includes('serve index'));
+  const tuiFramed = await call('/?bot=vm&token=' + encodeURIComponent(wtoken),
+    { host: 'tui.health-tracker.co.uk', referer: `https://tui.health-tracker.co.uk/app/app?token=${encodeURIComponent(wtoken)}&bot=vm&tab=tui` });
+  check('the framed TUI root still deep-links to its own terminal path',
+    tuiFramed.code === 302 && String(tuiFramed.h.location || '').startsWith('/tty/'));
 
   // Cookie planting: subresource requests carry no token of their own, so a
   // token-authed proxy plants the presented token as the cookie — otherwise
