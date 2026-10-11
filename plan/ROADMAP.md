@@ -33,7 +33,7 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 ## Current work — sequence closed on the VM fleet (2026-10-09)
 
-R-14.1 through R-16 are closed. Do not restart them. Do not give two agents the same file (`scripts/bot-host.mjs`, `scripts/lib/free-lanes.mjs`, `scripts/lib/work-session.mjs`). The open list under this sequence is F-13.2, D-10, and V-17b.
+R-14.1 through R-16 are closed. Do not restart them. Do not give two agents the same file (`scripts/bot-host.mjs`, `scripts/lib/free-lanes.mjs`, `scripts/lib/work-session.mjs`). The open list under this sequence is D-10 and V-17b.
 
 1. **R-14.1 COMPLETE (2026-10-06).** Cards in [R14_1_AGENT_PLAN.md](./R14_1_AGENT_PLAN.md), card state and evidence in [R14_1_LIVE_PASS.md](./R14_1_LIVE_PASS.md) — cards 1–8 proven live on `@VM_19485_bot`, card 9 re-scoped on the record to the VM-fleet baseline per owner directive. Location-agnostic spine built and verified.
 2. **TUI steps 1–4 COMPLETE (2026-10-06).** [TUI_IMPLEMENTATION.md](./TUI_IMPLEMENTATION.md) rows S1–S8 landed and deployed (`tui-gateway`, `/tui` Telegram Mini App auth/door, HMAC token renewal, line-by-line scrolling at `linePx = 18`). Mobile on-device touch feel is an open user checkpoint.
@@ -53,7 +53,7 @@ R-14.1 through R-16 are closed. Do not restart them. Do not give two agents the 
    is decided (2026-10-09):** leave `progress.progressMode` as `'gist'`. Do not
    set `'phase'`. Full write-up: `specs/active/progress-surfaces-1.md`.
 
-**Still open.** F-13.2 stays blocked on a live T2 `per_100g` capture. D-10 stays off the execute list until an explicit delete go. V-17b is the remaining site move (DuckDNS log soak, then remove the DuckDNS blocks). Website shipped rows stay shipped.
+**Still open.** D-10 stays off the execute list until an explicit delete go. V-17b is the remaining site move (DuckDNS log soak, then remove the DuckDNS blocks). Website shipped rows stay shipped. F-13.2 was removed 2026-10-11 per owner directive — do not reopen the lock-merge basis.
 
 **Cleared 2026-10-09. Do not execute.** D-3, the D-4 VPS re-run, D-5, D-6, D-7, D-8, L-5, R-13.4, R-13.5, V-18, CB-7, CB-8. Decision: **keep D1**. English and Indonesian stay the only locales. CB-6 stays superseded. V-17 stays superseded by V-17b.
 
@@ -70,7 +70,7 @@ BOT-14, BOT-19, BOT-21, and BOT-23 stay DONE.
 
 **Ticket flow (the agreed shape — roles, not bots):** packer (`bug_ticket`, Solar-free, card only) → QA reproduces (`qa_meal --ticket`, V-30.3) → orchestrator specifies (strong model, locked spec) → you lock (`go`) → script dispatches one healthy backend → verifier (didn't author it) closes on `named_test` green. Packer never writes specs, never dispatches, never edits `src/`. Full role contract: `plan/BUG_TICKET_PIPELINE.md` §4.4. Worked transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` turn plumbing) in §6.2. The dev is a transient process, not a bot — no registry row, no token, no memory.
 
-**D-2 is CLOSED.** All ledger rows DONE; verified clean-tree on 2026-09-24: `tsc` 0, 60/60 packet vitest, `journey-guard D-2` PASS (retired from `specs/active/`). Residual: `golden_cases` has no D1 table (skipped by design). **D-1 is DONE** (2026-09-25). **Decision 2026-10-09: keep D1.** D-3 and D-5…D-8 are cleared. Still open on this plane: **D-10** only, and only after an explicit go. **F-13.2** stays blocked on a live T2 `per_100g` lock capture. **V-27 is DONE** (phone check passed 2026-09-24).
+**D-2 is CLOSED.** All ledger rows DONE; verified clean-tree on 2026-09-24: `tsc` 0, 60/60 packet vitest, `journey-guard D-2` PASS (retired from `specs/active/`). Residual: `golden_cases` has no D1 table (skipped by design). **D-1 is DONE** (2026-09-25). **Decision 2026-10-09: keep D1.** D-3 and D-5…D-8 are cleared. Still open on this plane: **D-10** only, and only after an explicit go. **V-27 is DONE** (phone check passed 2026-09-24).
 
 **Bot code** follows the rail above (BOT-20 using the existing `scripts/lib/bug-pack.mjs`). **Track V Phase 10 pickup:** V-30.1 DONE, **V-30.2 CLOSED 2026-09-24** (P9 token, one live E2E reply, `enabled: true` + `@Bug_ticket_bot`, traceable fixture + packer-only boundary), **V-30.3 DONE 2026-09-24** (human go received; skill/runner/`repro --check`/gate `assert-bug-repro` 57/0 + live verdict on card #2 → `failed`/`not_reproducible`, `svc-repro` done), **V-30.4 DONE 2026-09-24** (human go received; `--ticket=#n` packet dispatch + guard + plan/attempt/block + verifier separation; gate `assert-bug-dispatch` 49/0; live VPS proof: card #3 → `done` via PR #101 + named_test verify, card #4 → `blocked_reason`, hardening #98/#102/#103), **V-30.5 DONE 2026-09-25** (human go received; generated `bug-backlog.mjs` + preserved legacy, `/resume`, capability proof transitions with ticket-scoped strict, CI gates, `BUG_PIPELINE.md`/`telegram_work.md`, retro-audit 6/6 from disk, review-failures fixture signature sensorized + zero recurrence since #130). The complete dependency order, exact runbook, and file/gate handoff are in `plan/BUG_TICKET_PIPELINE.md` §6.2.
 
@@ -204,7 +204,7 @@ Fixed across 5 layers: (1) `src/utils/syncUtils.ts` awaits `authStateReady()` an
 **BUG-2 — Gemini 503 on food analysis (peak demand mitigation, COMPLETE 2026-09-24).**  
 Enhanced `server_food_scout_source.ts` with emergency safety net: (1) increased backoff delay for 503/UNAVAILABLE to 2500ms; (2) `runScoutRetryLoop` now hops to `gemini-2.5-flash` if both `gemini-3.5-flash-lite` and `gemini-3.1-flash-lite` return 503/UNAVAILABLE during peak demand on the flash-lite infrastructure. Verified via `sync-regression` + `food-calc`, `tsc` 0.
 
-**Still open:** **F-13.2** (a live T2 `per_100g` lock capture), **D-10** (explicit go before any R2 delete), **V-17b** (DuckDNS soak, then remove the DuckDNS blocks). **Cleared 2026-10-09:** D-3, D-5…D-8, L-5, R-13.4, R-13.5, V-18, CB-7, CB-8, the cross-device half of R-16, BOT-24's unstarted packets, BOT-26 L18. **D-1 is DONE 2026-09-25.** **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), Cloud Run, **VPS SQLite**, dual-write D1+SQLite, **R2 bulk-delete from `R2_DELETE_CANDIDATES.json`**. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
+**Still open:** **D-10** (explicit go before any R2 delete), **V-17b** (DuckDNS soak, then remove the DuckDNS blocks). F-13.2 removed 2026-10-11 per owner — do not reopen. **Cleared 2026-10-09:** D-3, D-5…D-8, L-5, R-13.4, R-13.5, V-18, CB-7, CB-8, the cross-device half of R-16, BOT-24's unstarted packets, BOT-26 L18. **D-1 is DONE 2026-09-25.** **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), Cloud Run, **VPS SQLite**, dual-write D1+SQLite, **R2 bulk-delete from `R2_DELETE_CANDIDATES.json`**. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
 
 **Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 744/0/0 at `5615f1e`, `golden/scorecard/result_summary/LATEST.md`).
 
@@ -572,7 +572,7 @@ M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` 
 | ID | Item | Done when | Do not |
 |---|---|---|---|
 | **F-13.1** | **Shipped 2026-09-17.** `src/utils/foodFollowUpEdit.ts` — text-only follow-up on a blank draft + recent meal ⇒ `submissionMode = 'edit'`, so the existing `activeMeal` fallback (`LogChat.tsx:2498`) supplies the prior meal. 24/24 vitest. | Text-only follow-up reports `mode === 'edit'` with the prior meal's dishes carried | Adopt the newest meal unconditionally — T1 sends a photo and must stay a new scan |
-| **F-13.2** | Lock-merge basis consistency in `server_dish_finalize.ts` residual fill. **Not started: no hard evidence** — the golden path succeeded with oats *estimated* (turn-2 capture has zero `per_100g`), so the recorded numbers are prose only. Do not guess math in the sole kcal writer. | A live T2 capture that actually exercises a `per_100g` brand lock at a non-100 g weight | Change `finalizeDishLedger` basis on prose alone |
+| **F-13.2** | **REMOVED 2026-10-11 per owner directive.** Residual fill stays as-is; do not guess math in the sole kcal writer. | — | Reopen the lock-merge basis |
 | **F-13.3** | **DONE 2026-09-23 — live T2 GREEN.** Blank drafts adopt the newest NON-EMPTY succeeded session meal (`newestSucceededFoodJob` + `pendingMealOfJob` incl. persisted messages; `LogChat.tsx` only). Root causes killed: (1) completions only flip JobStore status, meal lives in messages; (2) stale demo seeds with empty breakdowns outranked T1. Live gate 2/2 incl. T2 (oats 40g, Big Mac 508 lock, no coconut, ledger math, persisted). Live spec now uses fresh-signup identity (fixed demo account accumulates seeds across runs). Temp diag breadcrumb removed. | Same-thread edit works on a pristine account; unit 32/32, tsc 0, guard PASS | Widen packet scope or touch `App.tsx`/`JobStore` for this |
 
 ---
@@ -882,7 +882,7 @@ packet. Q-9/Q-8.2 are green.
 
 | | **Any agent** (Studio / Antigravity / OpenCode / Cline) | **Grok** (quota-scarce) |
 |---|---|---|
-| Prefer | Current work at the top of this file. Q-11 and Q-13 are complete. Still open: F-13.2, D-10 (explicit go), and V-17b. The 2026-10-09 cleared list is not work. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
+| Prefer | Current work at the top of this file. Q-11 and Q-13 are complete. Still open: D-10 (explicit go) and V-17b. F-13.2 removed 2026-10-11. The 2026-10-09 cleared list is not work. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
 | Do not | `npm test`; critic LLM; USDA; invent a primitive; live Gemini as inner loop; wait for Grok | Sit in a live wait loop; rewrite binge; re-lock packets other agents are executing |
 
 ---
