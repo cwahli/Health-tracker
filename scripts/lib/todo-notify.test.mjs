@@ -58,7 +58,7 @@ test('enabled gate spawns one detached triage run with a read-only prompt', () =
   let argv = null;
   let opts = null;
   const fakeChild = { unref: () => {} };
-  const r = notifyTodoEvent('approve', 'card:tag_y', { TODO_AGENT_NOTIFY: '1', HOME: dir }, {
+  const r = notifyTodoEvent('comment', 'card:tag_y', { TODO_AGENT_NOTIFY: '1', HOME: dir }, {
     exists: () => false,
     mkdir: () => {},
     append: (l) => fs.appendFileSync(inboxPath, l + '\n'),
@@ -76,7 +76,7 @@ test('enabled gate spawns one detached triage run with a read-only prompt', () =
   assert.equal(opts.detached, true);
   assert.ok(String(opts.env.PATH).includes('.local/bin'));
   const recorded = JSON.parse(fs.readFileSync(inboxPath, 'utf8').trim());
-  assert.equal(recorded.type, 'review_approve');
+  assert.equal(recorded.type, 'review_comment');
   assert.deepEqual(receipts.map((x) => x.outcome), ['spawned']);
   assert.equal(receipts[0].route, 'opencode');
   assert.equal(receipts[0].key, 'card:tag_y');
@@ -127,7 +127,7 @@ test('unknown route fails closed with a receipt, spawns nothing', () => {
 
 test('log route records without spawning', () => {
   const h = harness();
-  const r = notifyTodoEvent('approve', 'card:tag_q', { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'log' }, h.deps);
+  const r = notifyTodoEvent('comment', 'card:tag_q', { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'log' }, h.deps);
   assert.equal(r.ok, true);
   assert.equal(h.spawns.length, 0);
   assert.equal(h.inbox.length, 1);
@@ -150,7 +150,7 @@ test('spawn throw writes spawn_error receipt and enqueues one retry', () => {
 test('a later event drains one due retry and clears it on success', () => {
   const h = harness();
   h.queue([{ action: 'review_comment', key: 'card:tag_d', tries: 1, notBefore: 999_999 }]);
-  const r = notifyTodoEvent('approve', 'card:tag_new', h.env, h.deps);
+  const r = notifyTodoEvent('comment', 'card:tag_new', h.env, h.deps);
   assert.equal(r.ok, true);
   assert.equal(h.spawns.length, 2);
   assert.deepEqual(h.receipts.map((x) => x.outcome), ['spawned', 'spawned', 'retry_ok']);
@@ -161,14 +161,14 @@ test('drain requeues with growing backoff and drops after five tries', () => {
   const h = harness();
   h.deps.spawnFn = () => { throw new Error('down'); };
   h.queue([{ action: 'review_comment', key: 'card:tag_b', tries: 1, notBefore: 1 }]);
-  const r = notifyTodoEvent('approve', 'card:tag_new', h.env, h.deps);
+  const r = notifyTodoEvent('comment', 'card:tag_new', h.env, h.deps);
   assert.equal(r.ok, true);
   const q = h.queued();
   assert.equal(q.filter((e) => e.key === 'card:tag_b')[0].tries, 2);
   assert.ok(h.receipts.some((x) => x.outcome === 'retry_requeued'));
   h.queue([{ action: 'review_comment', key: 'card:tag_b', tries: 5, notBefore: 1 }]);
   h.receipts.length = 0;
-  notifyTodoEvent('approve', 'card:tag_new2', h.env, h.deps);
+  notifyTodoEvent('comment', 'card:tag_new2', h.env, h.deps);
   assert.deepEqual(h.queued().filter((e) => e.key === 'card:tag_b'), []);
   assert.ok(h.receipts.some((x) => x.outcome === 'retry_exhausted'));
 });
@@ -206,7 +206,7 @@ test('telegram without chat id fails closed with receipt and retry', async () =>
   let fetched = 0;
   h.deps.fetchFn = async () => { fetched += 1; return { ok: true }; };
   const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'telegram', TODO_NOTIFY_BOT_TOKEN: 'tok' };
-  notifyTodoEvent('approve', 'card:tag_c', env, h.deps);
+  notifyTodoEvent('comment', 'card:tag_c', env, h.deps);
   await new Promise((res) => setTimeout(res, 20));
   assert.equal(fetched, 0);
   assert.deepEqual(h.receipts.map((x) => x.outcome), ['send_error', 'retry_queued']);
@@ -258,7 +258,7 @@ test('session lane without a session id fails closed with retry', () => {
   let execs = 0;
   h.deps.execSyncFn = () => { execs += 1; return Buffer.from('{}'); };
   const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'session' };
-  notifyTodoEvent('approve', 'card:tag_n', env, h.deps);
+  notifyTodoEvent('comment', 'card:tag_n', env, h.deps);
   assert.equal(execs, 0);
   assert.deepEqual(h.receipts.map((x) => x.outcome), ['post_error', 'retry_queued']);
   assert.equal(h.queued()[0].route, 'session');
@@ -271,4 +271,29 @@ test('session post throw enqueues a bounded retry', () => {
   notifyTodoEvent('answer', 'card:tag_e', env, h.deps);
   assert.deepEqual(h.receipts.map((x) => x.outcome), ['post_error', 'retry_queued']);
   assert.equal(h.queued()[0].tries, 1);
+});
+
+test('approve records audit and drains, but fans out nothing', () => {
+  const h = harness();
+  h.deps.fetchFn = async () => ({ ok: true });
+  let execs = 0;
+  h.deps.execSyncFn = () => { execs += 1; return Buffer.from('{}'); };
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'opencode,telegram,session', TODO_NOTIFY_BOT_TOKEN: 'tok', TODO_NOTIFY_CHAT_ID: '99', TODO_NOTIFY_SESSION_ID: 'ses_x' };
+  const r = notifyTodoEvent('approve', 'card:tag_a', env, h.deps);
+  assert.equal(r.ok, true);
+  assert.equal(h.spawns.length, 0);
+  assert.equal(execs, 0);
+  assert.equal(h.inbox.length, 1);
+  assert.deepEqual(h.receipts.map((x) => x.outcome), ['approved_no_fanout']);
+});
+
+test('approve still drains one due retry', () => {
+  const h = harness();
+  h.queue([{ route: 'opencode', action: 'review_comment', key: 'card:tag_d', tries: 1, notBefore: 999_999 }]);
+  const env = { TODO_AGENT_NOTIFY: '1', TODO_TRIAGE_ROUTE: 'opencode,telegram,session', TODO_NOTIFY_BOT_TOKEN: 'tok', TODO_NOTIFY_CHAT_ID: '99', TODO_NOTIFY_SESSION_ID: 'ses_x' };
+  notifyTodoEvent('approve', 'card:tag_a', env, h.deps);
+  assert.equal(h.spawns.length, 1);
+  assert.deepEqual(h.queued(), []);
+  assert.ok(h.receipts.some((x) => x.outcome === 'approved_no_fanout'));
+  assert.ok(h.receipts.some((x) => x.outcome === 'retry_ok'));
 });

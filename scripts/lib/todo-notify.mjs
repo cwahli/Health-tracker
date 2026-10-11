@@ -146,6 +146,14 @@ function recordAndSpawn({ inboxType, key, prompt, source, env, deps }) {
     receiptSink({ at: new Date().toISOString(), key, route: '', outcome: 'unknown_route', detail: route.reason });
     return { ok: false, reason: route.reason };
   }
+  if (inboxType === 'review_approve') {
+    // An approval finishes the work by itself (gateway archives Done):
+    // nothing to assess, nobody to page. Record the audit line and drain
+    // pending retries, but fan out no lanes and spawn no triage.
+    receipt('approved_no_fanout', 'approve needs no notify and no triage');
+    drainRetries({ readRetry, writeRetry, now, receiptFor, attempt: (e) => redispatchEntry({ ...e, env, deps, prompt, receipt: receiptFor(e.key), readRetry, writeRetry, now }) });
+    return { ok: true, reason: 'approve recorded, no fan-out' };
+  }
   for (const lane of route.lanes) {
     if (lane === 'log') {
       receipt('record_only', 'lane=log');
