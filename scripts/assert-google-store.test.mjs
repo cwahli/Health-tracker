@@ -327,9 +327,25 @@ check('replacement never touches a non-Doc (Docs MIME is the only conversion tar
   return /mimeType: MIME\.doc/.test(fn) && !/MIME\.(md|sheet|png)/.test(fn);
 });
 
-check('nothing is ever replaced: no PUT, and no upload onto an existing file id', () => {
+check('only the review queue overwrites cells in place: one PUT, inside updateValues', () => {
+  // updateValues is the one deliberate exception to "nothing is overwritten":
+  // the /review mini-app edits one row's Status / Original-request /
+  // What's-left cells and deletes the row on archive, and a human review
+  // queue cannot append its way to "approved". The single PUT lives inside
+  // updateValues (Sheets spreadsheets.values.update) and the upload half is
+  // still create-only (no upload onto an existing file id).
   const puts = [...LIB.matchAll(/method: 'PUT'/g)].length;
-  return puts === 0 && !/files\/\$\{[^}]+\}\/upload/.test(LIB);
+  const fn = LIB.slice(LIB.indexOf('export async function updateValues'), LIB.indexOf('export async function deleteSheetRows'));
+  return puts === 1 && /method: 'PUT'/.test(fn) && !/files\/\$\{[^}]+\}\/upload/.test(LIB);
+});
+
+check('the cell overwriter is never called by the turn log, the writer, or the scorecard', () => {
+  // updateValues exists so the review queue can flip a row's Status/cells in
+  // place. If the write-once paths ever call it, the append-only law is dead.
+  const turn = fs.readFileSync(path.join(HERE, 'lib', 'turn-store.mjs'), 'utf8');
+  const writer = fs.readFileSync(path.join(HERE, 'lib', 'google-writer.mjs'), 'utf8');
+  const card = fs.readFileSync(path.join(HERE, 'google-store-scorecard.mjs'), 'utf8');
+  return !/updateValues/.test(turn) && !/updateValues/.test(writer) && !/updateValues/.test(card);
 });
 
 check('a rename cannot smuggle other fields (name is sanitized and length-capped)', () => {
