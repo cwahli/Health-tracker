@@ -143,7 +143,8 @@ run_job(){
   ( while sleep 60; do kill -0 $me 2>/dev/null || exit 0; $S $V "date +%s > $Q/heartbeat; date +%s > $Q/running/$n.hb; cat > $Q/running/$n.status" < <( echo "model=${model:-default} started=$(stat -c %Y JOB.txt 2>/dev/null) continues=$(grep -c 'continue #' "$HOME/grokq.log" 2>/dev/null)"; echo "--- REPORT.md"; head -c 2500 REPORT.md 2>/dev/null; echo; echo "--- run.log (tail)"; tail -c 1500 run.log 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' ) 2>/dev/null; done ) & local hb=$!
   local margs=(); [ -n "$model" ] && margs=(-m "$model")
   printf '%s' '{"$schema":"https://opencode.ai/config.json","permission":{"edit":"allow","bash":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"}}' > opencode.json
-  local end=$(( $(date +%s) + ${hrs%.*}*3600 + 60 )) rc=0 k=0 left
+  local secs; secs=$(awk -v h="$hrs" 'BEGIN{printf "%d", h*3600}')   # fractional hours OK (0.5 = 30 min)
+  local end=$(( $(date +%s) + ${secs:-21600} + 60 )) rc=0 k=0 left
   left=$(( end - $(date +%s) ))
   timeout "$left" opencode run "${margs[@]}" "$(cat PROMPT.txt)
 (Work only in $d. You may install packages and use any directory. Keep REPORT.md updated; its first line must stay 'STATUS: IN PROGRESS' until you are fully done, then 'STATUS: COMPLETE'.)" > run.log 2>&1 < /dev/null; rc=$?
