@@ -982,12 +982,14 @@ console.log('assert-tui-gateway:');
   // A tokened TUI root lands on the shell for a top-level visit (typed
   // domain, bookmark: the raw ttyd page has no burger and no way back —
   // live 2026-10-11), while the shell's own terminal iframe keeps the fast
-  // tty path (shell Referer and/or dest=iframe).
-  check('a top-level tokened TUI root lands on the shell terminal tab, never the bootstrap',
+  // tty path (shell Referer and/or dest=iframe). No tab is forced: the
+  // shell opens its last-visited tab (live 2026-10-11: bare domain kept
+  // rebooting into the terminal instead of the previous page).
+  check('a top-level tokened TUI root lands on the shell with no forced tab, never the bootstrap',
     await (async () => {
       const r = await call(`/?token=${encodeURIComponent(token)}`, { host: 't.example' });
       const loc = String(r.h.location || '');
-      return r.code === 302 && loc.startsWith('/app/app?token=') && loc.includes('&bot=vm') && loc.includes('&tab=tui')
+      return r.code === 302 && loc.startsWith('/app/app?token=') && loc.includes('&bot=vm') && !loc.includes('tab=')
         && String(r.h['set-cookie'] || '').includes(COOKIE_NAME);
     })());
   check('the shell terminal iframe keeps the fast tty path (shell referer)',
@@ -1160,9 +1162,9 @@ console.log('assert-tui-gateway:');
     exch.code === 302 && String(exch.h.location || '').startsWith('/?token='));
 
   const tuiRoot = await call('/', { host: 'tui.health-tracker.co.uk', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` });
-  check('a top-level tokened TUI root lands on the shell, never a raw tty (bot isolation kept)',
+  check('a top-level tokened TUI root lands on the shell with no forced tab, never a raw tty (bot isolation kept)',
     tuiRoot.code === 302 && String(tuiRoot.h.location || '').startsWith('/app/app?token=')
-    && String(tuiRoot.h.location || '').includes('&tab=tui')
+    && !String(tuiRoot.h.location || '').includes('tab=')
     && !tuiRoot.body.includes('serve index'));
   const tuiFramed = await call('/?bot=vm&token=' + encodeURIComponent(wtoken),
     { host: 'tui.health-tracker.co.uk', referer: `https://tui.health-tracker.co.uk/app/app?token=${encodeURIComponent(wtoken)}&bot=vm&tab=tui` });

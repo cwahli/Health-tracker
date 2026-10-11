@@ -296,6 +296,31 @@ function readQuery(): { bot: string; tab: string } {
   }
 }
 
+/**
+ * Last-visited tab, so a fresh entry (bare domain, bookmark, relaunch)
+ * returns to the previous page instead of a hardcoded one. Same hint shape
+ * as the fbauth marker: localStorage, validated, never trusted blindly —
+ * a disabled/unknown id falls back to the default. The explicit ?tab=
+ * query always wins over this.
+ */
+function readLastTab(): string {
+  try {
+    const id = window.localStorage.getItem('miniapp:lastTab') || '';
+    if (id && miniAppById(id)?.enabled) return id;
+  } catch {
+    /* storage unavailable — fall through to the default */
+  }
+  return '';
+}
+
+function writeLastTab(id: string) {
+  try {
+    window.localStorage.setItem('miniapp:lastTab', id);
+  } catch {
+    /* private mode — tab state stays in memory */
+  }
+}
+
 // Public Firebase client config (same project as the website:
 // health-tracker-b04dd). Client keys are public by design; the check
 // happens server-side on the ID token.
@@ -901,7 +926,7 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
 
 function Shell() {
   const [query] = useState(readQuery);
-  const [tab, setTab] = useState(() => resolveDef(readQuery().tab).id);
+  const [tab, setTab] = useState(() => resolveDef(readQuery().tab || readLastTab() || 'tui').id);
   const [drawer, setDrawer] = useState(false);
   // Bumped whenever the page token is (re)minted after first render, so
   // iframe tabs reload with a live credential instead of 401-polling.
@@ -997,6 +1022,7 @@ function Shell() {
 
   useEffect(() => {
     document.title = `${def.title} — Mini App`;
+    writeLastTab(def.id);
     try {
       const q = new URLSearchParams(window.location.search || '');
       q.set('tab', def.id);
