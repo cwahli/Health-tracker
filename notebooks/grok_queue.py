@@ -161,7 +161,7 @@ while true; do
   run=0; for f in "$R"/job.*.pid; do [ -e "$f" ] || continue; if alive "$f"; then run=$((run+1)); else rm -f "$f"; fi; done
   want=$((N-run)); [ $want -lt 0 ] && want=0
   out=$($S $V "date +%s > $Q/heartbeat; cd $Q && { ls -tr inbox | grep -E '^[A-Za-z0-9._-]+\.txt\$' | head -n $want; echo ---; ls -tr chat-in 2>/dev/null | grep -E '^[A-Za-z0-9._-]+\.txt\$' | head -n 1; }" 2>/dev/null)
-  jobs_=$(printf '%s\n' "$out" | sed '/^---$/,$d'); chat=$(printf '%s\n' "$out" | sed '1,/^---$/d')
+  jobs_=$(printf '%s\n' "$out" | sed '/^---$/,$d'); chat=$(printf '%s\n' "$out" | awk 'f;/^---$/{f=1}')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     n=${f%.txt}; [[ "$n" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "skipping job with unsafe name '$n'"; continue; }
