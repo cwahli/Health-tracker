@@ -474,6 +474,22 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   STAND: Sheet-04/Domain-01/Health-08 RED, Sync-08 BLOCKED,
   Sheet-03 restored Assigned (gate owed).
 
+## Notify fix shipped (2026-10-11 ~14:36 UTC)
+
+- Root cause proven: hook recorded inbox + stamped sheet, spawn left
+  zero trace (no receipt, no retry, lock/exit invisible). Fix
+  (agent/notify-fix, PR #733 merged): attempt receipts, completion
+  reconciliation via triage.jsonl, event-driven bounded retry
+  (1-per-event, 60s*tries cap 900s, drop after 5), TODO_TRIAGE_ROUTE
+  (opencode default starter, log record-only, unknown fails closed).
+- CI took 4 rounds: preservation Reverts, Author trailer, body
+  Summary/Status/Left+Next, stranded-ratchet (opened observer PR
+  #735 — the notes branch had no PR). All green, squash-merged.
+- Deployed (c7faa470) + gateway SIGTERM-revived (Restart=always);
+  live module verified (default opencode, backoff 60).
+- Routing changes via TODO_TRIAGE_ROUTE in tui-gateway.env + gateway
+  revive. Next real verdict proves the chain end to end.
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
