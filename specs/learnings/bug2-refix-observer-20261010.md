@@ -449,6 +449,18 @@ agent/meal35-redo (live-proof redo, ses_ed968b75).
   agent/sheet-cleanup-observer. Cause unknown — worth one look at
   overnight cleaner logs if trees keep vanishing.
 
+## T10f doer landed, reviewer auditing (2026-10-11)
+
+- Doer (agent/t10f-next, PR #724): 3 flips CLAIMED (Sync-09,
+  Spec-01, Card-19), 2 staged patches (Fleet-09, Health-10),
+  4 honest-backs (Sheet-04/Domain-01/Health-08 RED, Sync-08
+  BLOCKED), 1 recovery (Sheet-03 restored from archive 1004).
+  NOTHING endorsed yet — flips sit unapproved pending audit.
+- Reviewer (agent/rv10-review, running, read-only): per-item
+  ENDORSE-or-ITERATE with PNGs viewed, sensors re-run, evidence
+  re-checked, challenge points (Spec-01 phone step, Card-19
+  retarget safety, Sheet-03 fidelity, Health-08 RED validity).
+
 ## Promote recommendation
 
 - P1 (approve-guard) EARNED: the run proved proof-present review works;
