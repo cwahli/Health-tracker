@@ -13,7 +13,12 @@ S="ssh -i $HOME/.ssh/colabq -o StrictHostKeyChecking=accept-new -o ConnectTimeou
 case "$WAUTH" in Authorization:*) H="$WAUTH";; Bearer\ *|Basic\ *) H="Authorization: $WAUTH";; *) H="Authorization: Bearer $WAUTH";; esac
 ping(){ python3 -c 'import json,sys;print(json.dumps({"session":"colab-"+sys.argv[1],"verdict":sys.argv[2]}))' "$1" "$2" |
   curl -s -m 20 -o /dev/null -w "%{http_code}\n" -X POST -H "$H" -H "Content-Type: application/json" --data-binary @- "$WURL"; }
-echo "loop start $(date)"; ping start "Colab runner started $(date -u +%H:%MZ)"
+echo "loop start $(date)"
+if ! $S -o BatchMode=yes $V true 2>/dev/null; then
+  rm -f ~/.ssh/colabq ~/.ssh/colabq.pub; ssh-keygen -q -t ed25519 -N "" -C colab-auto -f ~/.ssh/colabq
+  echo "key rejected; generated new key, asked Grok to authorize it"
+  ping pubkey "COLAB_PUBKEY $(cat ~/.ssh/colabq.pub)"
+fi
 while true; do
   $S $V 'date +%s > ~/queue/heartbeat' 2>/dev/null
   n=$($S $V 'ls ~/queue/inbox/*.txt 2>/dev/null | head -1 | xargs -r basename | sed "s/\.txt$//"' 2>/dev/null)
@@ -41,6 +46,9 @@ def _fix_key(k):
     k = k.strip().replace("\\n", "\n").replace("\r", "")
     m = re.search(r"-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----", k, re.S)
     if not m:
+        body = re.sub(r"[^A-Za-z0-9+/=]", "", re.sub(r"-----[A-Z ]+-----", "", k))
+        if body.startswith("b3BlbnNzaC1rZXktdjE"):
+            return "-----BEGIN OPENSSH PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(body, 70)) + "\n-----END OPENSSH PRIVATE KEY-----\n"
         return k + "\n"
     body = re.sub(r"\s+", "", m.group(2))
     return f"-----BEGIN {m.group(1)}-----\n" + "\n".join(textwrap.wrap(body, 70)) + f"\n-----END {m.group(1)}-----\n"
