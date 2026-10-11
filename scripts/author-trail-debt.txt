@@ -70,3 +70,4 @@ c12bac3e  no-trailer colab grok-queue commit on main, recorded 2026-10-11 (not m
 5ccd1857  no-trailer colab grok-queue commit on main, recorded 2026-10-11 (not mine to rewrite)
 10e5e08c  no-trailer colab grok-queue commit on main, recorded 2026-10-11 (not mine to rewrite)
 455f5bb6  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
+de12c179  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
