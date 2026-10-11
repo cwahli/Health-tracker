@@ -35,6 +35,16 @@ while true; do
 done
 '''
 
+def _fix_key(k):
+    """Rebuild an OpenSSH private key whose line breaks were lost when pasted into Secrets."""
+    import re, textwrap
+    k = k.strip().replace("\\n", "\n").replace("\r", "")
+    m = re.search(r"-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----", k, re.S)
+    if not m:
+        return k + "\n"
+    body = re.sub(r"\s+", "", m.group(2))
+    return f"-----BEGIN {m.group(1)}-----\n" + "\n".join(textwrap.wrap(body, 70)) + f"\n-----END {m.group(1)}-----\n"
+
 def start():
     key = url = auth = None
     try:
@@ -48,7 +58,7 @@ def start():
     if not (key and url and auth):
         print("• Grok queue: COLABQ_KEY / HT_WAKE_WEBHOOK_URL / HT_WAKE_WEBHOOK_AUTH missing, skipped."); return False
     home = os.path.expanduser("~"); os.makedirs(f"{home}/.ssh", exist_ok=True)
-    with open(f"{home}/.ssh/colabq", "w") as f: f.write(key.strip() + "\n")
+    with open(f"{home}/.ssh/colabq", "w") as f: f.write(_fix_key(key))
     os.chmod(f"{home}/.ssh/colabq", 0o600)
     with open(f"{home}/.grokq.env", "w") as f: f.write(f"WURL='{url.strip()}'\nWAUTH='{auth.strip()}'\n")
     return _launch(home)
