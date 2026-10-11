@@ -48,7 +48,15 @@ def start():
     os.chmod(f"{home}/.ssh/colabq", 0o600)
     with open(f"{home}/.grokq.env", "w") as f: f.write(f"WURL='{url.strip()}'\nWAUTH='{auth.strip()}'\n")
     with open(f"{home}/grokq.sh", "w") as f: f.write(LOOP)
-    subprocess.run("pkill -f grokq.sh; nohup bash ~/grokq.sh >> ~/grokq.log 2>&1 &", shell=True)
+    subprocess.run("command -v ssh >/dev/null || (apt-get -qq update && apt-get -qq install -y openssh-client) >/dev/null 2>&1", shell=True)
+    pidf = f"{home}/grokq.pid"
+    try:
+        os.kill(int(open(pidf).read()), 15)
+    except Exception:
+        pass
+    log = open(f"{home}/grokq.log", "a")
+    p = subprocess.Popen(["bash", f"{home}/grokq.sh"], stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True)
+    open(pidf, "w").write(str(p.pid))
     print("• Grok queue: runner started (log ~/grokq.log)."); return True
 
 if __name__ == "__main__":
