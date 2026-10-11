@@ -166,7 +166,8 @@ run_job(){
   up(){ tar czf - . | $S $V "mkdir -p $Q/done/$n && tar xzf - -C $Q/done/$n && rm -f $Q/running/$n.txt $Q/running/$n.hb $Q/running/$n.status"; }
   retry up || echo "job $n: upload to VPS failed"
   local st=DONE; [ $rc -ne 0 ] && st="FAILED(rc=$rc)"; [ $rc -eq 124 ] && st="FAILED(timeout ${hrs}h)"
-  ping "$n" "$st: $n. $(head -c 1500 REPORT.md)"
+  code=$(ping "$n" "$st: $n. $(head -c 1500 REPORT.md)")
+  [ "$code" = 200 ] && $S $V "touch $Q/done/$n/.pinged" 2>/dev/null
   echo "job $n $st $(date)"
 }
 
