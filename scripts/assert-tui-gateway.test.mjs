@@ -1015,6 +1015,23 @@ console.log('assert-tui-gateway:');
       });
       return code === 200;
     })());
+  // Cold-browser forward: no initData and no token means an expired (or
+  // first) session — the login entry must NOT force tab=tui, or every
+  // re-login reboots into the terminal instead of the previous page (the
+  // shell opens its last-visited tab, terminal for a first visit).
+  check('the cold bootstrap forwards browsers to login with no forced tab',
+    await (async () => {
+      const chunks = [];
+      await new Promise((resolve, reject) => {
+        const res = { writeHead: () => {}, write: (c) => { chunks.push(Buffer.from(String(c))); return true; }, end: (b) => { if (b) chunks.push(Buffer.from(String(b))); resolve(null); } };
+        createGateway({ env, log: () => {} })(
+          { method: 'GET', url: '/', headers: { host: 't.example' }, [Symbol.asyncIterator]: async function* () {} }, res).catch(reject);
+        setTimeout(() => resolve(null), 5000).unref?.();
+      });
+      const body = chunks.join('');
+      return body.includes('location.replace("/app/login")')
+        && !body.includes('/app/login?tab=');
+    })());
   check('the fallback prefers direct tokens and otherwise needs the referer',
     verifyWithRefererFallback({ headers: { host: 't.example', cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` } }, new URL('http://x/'), SECRET).ok === true
     && verifyWithRefererFallback({ headers: { host: 't.example', referer: refOf } }, new URL('http://x/'), SECRET).ok === true

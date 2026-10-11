@@ -14,6 +14,9 @@ VPS queue (colabq@51.254.217.163:~/queue)
   heartbeat           epoch, refreshed every ~20s by the loop (VPS watchdog requeues if >5 min old)
   chat-in/<id>.txt    message for the Colab agent (claimed by renaming to <id>.taken)
   chat-out/<id>.txt   the agent's reply
+Live view: each running job has a tmux session grokq-<job> (tail -F run.log); sshd on 127.0.0.1:2299 (key from
+  attach.pub in the queue) is reachable from the VPS via a reverse tunnel to the unix socket /home/colabq/attach.sock.
+  On the VPS: ~/bin/colab-attach [job]. Logs: ~/.grokq.run/attach.log. Disable with GROKQ_NO_ATTACH=1 in ~/.grokq.env.
 Up to GROKQ_PARALLEL jobs run at once (default 4 on GPU, 3 on CPU), each in its own subshell, 6h timeout.
 Chat messages are handled one at a time through colab_worker.handle_telegram_command (same path as a
 Telegram message, with opencode --continue) and mirrored to the user's Telegram.
@@ -47,6 +50,72 @@ ping(){ python3 -c 'import json,sys;print(json.dumps({"session":"colab-"+sys.arg
   curl -s -m 20 -o /dev/null -w "%{http_code}\n" -X POST -H "$H" -H "Content-Type: application/json" --data-binary @- "$WURL"; }
 alive(){ local p; p=$(cat "$1" 2>/dev/null); [ -n "$p" ] && kill -0 "$p" 2>/dev/null && grep -qa -e grokq -e ollama "/proc/$p/cmdline" 2>/dev/null; }  # pidfile live and still ours
 retry(){ local i; for i in 1 2 3 4 5; do "$@" && return 0; sleep $((i*10)); done; return 1; }
+killp(){ local p; p=$(cat "$1" 2>/dev/null); [ -n "$p" ] && grep -qa -- "$2" "/proc/$p/cmdline" 2>/dev/null && kill "$p" 2>/dev/null; }  # kill by pidfile, only if still ours
+LOOPPID=$$
+AP=${GROKQ_APORT:-2299}                      # Colab-local sshd port for live attach (127.0.0.1 only; Colab itself uses 2222)
+AS=${GROKQ_ASOCK:-/home/colabq/attach.sock}  # VPS-side unix socket of the reverse tunnel (mode 0600, colabq)
+
+# Live view: every running job gets a tmux session grokq-<job> (dots -> _) tailing its run.log.
+# From the VPS: ~/bin/colab-attach [job]  (reverse tunnel -> Colab sshd -> tmux attach -r).
+# Finished jobs keep their session for 30 min so the end of the log stays viewable.
+views(){
+  command -v tmux >/dev/null || return 0
+  local f j s live=" " now; now=$(date +%s)
+  for f in "$R"/job.*.pid; do [ -e "$f" ] || continue; j=${f#$R/job.}; j=${j%.pid}; alive "$f" || continue
+    s=grokq-${j//./_}; live="$live$s "; rm -f "$R/view.$s.end"
+    tmux has-session -t "=$s" 2>/dev/null || tmux -f "$R/tmux.conf" new-session -d -s "$s" -x 200 -y 50 \
+      "cd $HOME/jobs/$j 2>/dev/null; printf '\033[1m== grokq job $j: live OpenCode output (run.log). Ctrl-b d to detach ==\033[0m\n'; exec tail -n 500 -F run.log" < /dev/null > /dev/null 2>&1
+  done
+  tmux ls -F '#S' 2>/dev/null | while IFS= read -r s; do
+    case "$s" in grokq-*) ;; *) continue;; esac
+    case "$live" in *" $s "*) continue;; esac
+    [ -e "$R/view.$s.end" ] || { echo "$now" > "$R/view.$s.end"; continue; }
+    [ $(( now - $(cat "$R/view.$s.end") )) -gt 1800 ] && { tmux kill-session -t "=$s"; rm -f "$R/view.$s.end"; }
+  done
+} 9>&-
+
+attach_setup(){
+  export DEBIAN_FRONTEND=noninteractive
+  local need=; command -v tmux >/dev/null || need="$need tmux"; [ -x /usr/sbin/sshd ] || need="$need openssh-server"
+  if [ -n "$need" ]; then echo "attach: installing$need $(date)"
+    (apt-get -qq install -y $need || (apt-get -qq update && apt-get -qq install -y $need)) > "$R/attach-apt.log" 2>&1 < /dev/null; fi
+  [ -x /usr/sbin/sshd ] || { echo "attach: no sshd, live attach disabled"; return 1; }
+  if ! retry $S $V "cat $Q/attach.pub" > "$R/attach_keys.tmp" < /dev/null || ! grep -q '^ssh-' "$R/attach_keys.tmp"; then
+    rm -f "$R/attach_keys.tmp"; echo "attach: no $Q/attach.pub on the VPS, live attach disabled"; return 1; fi
+  chmod 700 "$R"; mv "$R/attach_keys.tmp" "$R/attach_keys"; chmod 600 "$R/attach_keys"
+  [ -s "$R/attach_hostkey" ] || ssh-keygen -q -t ed25519 -N "" -C grokq-attach -f "$R/attach_hostkey"
+  cat > "$R/sshd_config" <<EOF
+# grokq live-attach sshd: localhost only, key only, reached through the reverse tunnel
+Port $AP
+ListenAddress 127.0.0.1
+HostKey $R/attach_hostkey
+PidFile $R/sshd.pid
+AuthorizedKeysFile $R/attach_keys
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+UsePAM no
+AllowTcpForwarding no
+AllowAgentForwarding no
+X11Forwarding no
+PermitTunnel no
+PrintMotd no
+AllowUsers $(id -un)
+EOF
+  killp "$R/sshd.pid" sshd; sleep 1; mkdir -p /run/sshd
+  /usr/sbin/sshd -f "$R/sshd_config" -E "$R/sshd.log" < /dev/null; sleep 2
+  if kill -0 "$(cat "$R/sshd.pid" 2>/dev/null)" 2>/dev/null; then echo "attach: sshd on 127.0.0.1:$AP $(date)"
+  else echo "attach: sshd failed: $(tail -2 "$R/sshd.log" | tr '\n' ' ')"; return 1; fi
+  killp "$R/tunnel.pid" grokq; killp "$R/tunnel.ssh.pid" "$AS"
+  ( while kill -0 $LOOPPID 2>/dev/null; do
+      $S $V "rm -f $AS" < /dev/null 2>/dev/null
+      $S -o ExitOnForwardFailure=yes -o ServerAliveCountMax=3 -N -R "$AS:127.0.0.1:$AP" $V < /dev/null & echo $! > "$R/tunnel.ssh.pid"
+      wait $!; echo "attach: tunnel exited rc=$? $(date)"; sleep 15
+    done ) &
+  echo $! > "$R/tunnel.pid"; echo "attach: reverse tunnel loop pid $! -> VPS $AS"
+}
 
 run_job(){
   local n=$1 d=$HOME/jobs/$1 model= hrs=6 hdr=1 line me=$BASHPID
@@ -158,6 +227,8 @@ if [ -z "$GROKQ_KEY" ] && ! $S $V true 2>/dev/null; then
   ping pubkey "COLAB_PUBKEY $(cat ~/.ssh/colabq.pub)"
 fi
 [ -n "$GPU" ] && [ -z "$GROKQ_NO_OLLAMA" ] && { gpu_setup >> "$R/gpu.log" 2>&1 9>&- & }
+printf 'set -g history-limit 20000\nset -g status-right "grokq %%H:%%M"\n' > "$R/tmux.conf"
+[ -z "$GROKQ_NO_ATTACH" ] && { attach_setup >> "$R/attach.log" 2>&1 9>&- & }
 
 # Adopt jobs still running from a previous loop (restart keeps them); put back anything orphaned.
 mine=" "; for f in "$R"/job.*.pid; do [ -e "$f" ] || continue; j=${f#$R/job.}; j=${j%.pid}
@@ -169,6 +240,7 @@ $S $V "mkdir -p $Q/chat-in $Q/chat-out 2>/dev/null; cd $Q || exit 0
 
 while true; do
   run=0; for f in "$R"/job.*.pid; do [ -e "$f" ] || continue; if alive "$f"; then run=$((run+1)); else rm -f "$f"; fi; done
+  views
   want=$((N-run)); [ $want -lt 0 ] && want=0
   out=$($S $V "date +%s > $Q/heartbeat; cd $Q && { ls -tr inbox | grep -E '^[A-Za-z0-9._-]+\.txt\$' | head -n $want; echo ---; ls -tr chat-in 2>/dev/null | grep -E '^[A-Za-z0-9._-]+\.txt\$' | head -n 1; }" 2>/dev/null)
   jobs_=$(printf '%s\n' "$out" | sed '/^---$/,$d'); chat=$(printf '%s\n' "$out" | awk 'f;/^---$/{f=1}')
@@ -189,6 +261,7 @@ while true; do
       echo $! > "$R/chat.pid"
     fi
   fi
+  views
   sleep ${GROKQ_TICK:-20} 9>&-
 done
 '''
