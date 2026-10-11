@@ -831,9 +831,12 @@ const BOOTSTRAP = [
     // the ungated login entry instead of stranding it on a Telegram-only
     // refusal. No ?bot= is forwarded on purpose: the shell defaults Firebase
     // sessions to bot 'web', and a stale bot=vm would poison that (terminal
-    // door + bag injection both key on the token's own bot).
+    // door + bag injection both key on the token's own bot). No ?tab= either:
+    // the shell opens its last-visited tab (or the terminal for a first
+    // visit) — a forced tab=tui here rebooted expired sessions into the
+    // terminal instead of the previous page (live 2026-10-11).
     '    if (typeof location !== "undefined" && location.replace) {',
-    '      location.replace("/app/login?tab=" + encodeURIComponent("tui"));',
+    '      location.replace("/app/login");',
     '      return;',
     '    }',
   '    if (m) m.textContent = "no initData \u2014 open this from the /tui button in Telegram";',
