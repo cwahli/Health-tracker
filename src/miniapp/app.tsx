@@ -200,17 +200,20 @@ function Frame({ src, title }: { src: string; title: string }) {
   );
 }
 
-/** One ☰ trigger per framed tab; everything else lives inside the popup, so
- * normally the only permanent chrome is the trigger itself (+ the tab's own
- * picker, if it has one). The backdrop closes on any outside tap. */
-function MenuButton({ children }: { children: (close: () => void) => ReactNode }) {
+/** One ☰ trigger per framed tab — except ExternalFrame, which pairs the
+ * drawer ☰ with a ⋮ for tab-local actions (Reload, full-screen); everything
+ * else lives inside the popup, so normally the only permanent chrome is the
+ * trigger itself (+ the tab's own picker, if it has one). The backdrop
+ * closes on any outside tap. */
+function MenuButton({ children, glyph }: { children: (close: () => void) => ReactNode; glyph?: string }) {
   const [menu, setMenu] = useState(false);
   const close = () => setMenu(false);
+  const mark = glyph || '☰';
   return (
     <span style={{ position: 'relative', flex: '0 0 auto' }}>
-      <button type="button" aria-label="Menu" title="Menu" onClick={() => setMenu((v) => !v)}
+      <button type="button" aria-label={mark === '☰' ? 'Menu' : 'Actions'} title={mark === '☰' ? 'Menu' : 'Actions'} onClick={() => setMenu((v) => !v)}
         style={{ width: 28, height: 28, borderRadius: 8, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 15, cursor: 'pointer' }}>
-        ☰
+        {mark}
       </button>
       {menu && (
         <>
@@ -231,8 +234,8 @@ function MenuDivider() {
 }
 
 /** Cross-host tabs (bags, web, agenda sections) frame their own app with its
- * own door. Permanent chrome is one slim bar — title plus the tab menu, which
- * holds Mini Apps, Reload and the full-screen escape hatch. A spinner covers
+ * own door. The left ☰ opens the Mini Apps drawer directly (same as every
+ * tab); tab actions (Reload, full-screen) live under ⋮. A spinner covers
  * the frame until its own load event: the serve SPA ships a large bundle, so
  * without it the tab reads as a dead blank page while it loads (live report
  * 2026-10-10). */
@@ -243,16 +246,19 @@ function ExternalFrame({ src, def, onMenu }: { src: string; def: MiniAppDef; onM
   return (
     <>
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderBottom: '1px solid #1e293b', background: '#0b1220' }}>
-        <MenuButton>
+        <button type="button" aria-label="Menu" title="Mini Apps" onClick={onMenu}
+          style={{ width: 28, height: 28, borderRadius: 8, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 15, cursor: 'pointer', flex: '0 0 auto' }}>
+          ☰
+        </button>
+        <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 600, flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</span>
+        <MenuButton glyph="⋮">
           {(close) => (
             <>
-              <button type="button" onClick={() => { close(); onMenu(); }} style={menuItemStyle}>Mini Apps</button>
               <button type="button" onClick={() => { setLoaded(false); setReloadKey((n) => n + 1); close(); }} style={menuItemStyle}>Reload</button>
               <button type="button" onClick={() => { window.location.href = src; }} style={menuItemStyle}>Open {def.title} full-screen ↗</button>
             </>
           )}
         </MenuButton>
-        <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 600, flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.title}</span>
       </div>
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
         {!loaded && (
@@ -586,6 +592,72 @@ function TtyTab({ def, onMenu }: { def: MiniAppDef; onMenu: () => void }) {
 
 type TtyRoute = { bot: string; path: string };
 
+/** The session dropdown: the trigger shows the current bot with its live
+ * dot, and the panel lists every served bot with its own liveness plus
+ * View/Kill — the server info used to live behind a second floating
+ * burger, now it lives here. The ☰ burger is only ever the Mini Apps nav.
+ */
+function SessionMenu({ routes, picked, open, live, killMsg, onView, onToggleOpen, onKill, onRefresh }: {
+  routes: TtyRoute[] | null; picked: string; open: boolean; live: Record<string, boolean>; killMsg: string;
+  onView: (bot: string) => void; onToggleOpen: () => void; onKill: (bot: string) => void; onRefresh: () => void;
+}) {
+  const [menu, setMenu] = useState(false);
+  const isLive = picked !== '' && live[picked] === true;
+  return (
+    <span style={{ position: 'relative', flex: '1 1 auto', minWidth: 0 }}>
+      <button type="button" aria-label="Session" title="Sessions" disabled={!routes} onClick={() => setMenu((v) => !v)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 8px', fontSize: 13, cursor: 'pointer' }}>
+        <span title={isLive ? 'session live' : 'session dormant'}
+          style={{ width: 8, height: 8, borderRadius: 4, background: isLive ? '#4ade80' : '#475569', flex: '0 0 auto' }} />
+        <span style={{ flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}>
+          {routes === null ? 'Loading…' : (picked || 'No sessions')}
+        </span>
+        <span style={{ color: '#94a3b8' }}>▾</span>
+      </button>
+      {menu && (
+        <>
+          <span role="presentation" onClick={() => setMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 78 }} />
+          <span style={{ position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 79, minWidth: 230, maxWidth: '78vw', maxHeight: '70dvh', overflowY: 'auto', background: '#0f172a', border: '1px solid #334155', borderRadius: 12, padding: 6, display: 'flex', flexDirection: 'column', gap: 2, overscrollBehavior: 'none' }}>
+            <button type="button" onClick={() => { onToggleOpen(); setMenu(false); }} style={menuItemStyle}>
+              {open ? `Close ${picked || 'terminal'}` : `Open ${picked || 'terminal'}`}
+            </button>
+            <MenuDivider />
+            {(routes || []).map((r) => {
+              const watching = r.bot === picked && open;
+              const rowLive = live[r.bot] === true;
+              return (
+                <span key={r.bot}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, fontSize: 13, color: '#e2e8f0', background: watching ? '#1e293b' : 'none' }}>
+                  <span title={rowLive ? 'session live' : 'session dormant'}
+                    style={{ width: 8, height: 8, borderRadius: 4, background: rowLive ? '#4ade80' : '#475569', flex: '0 0 auto' }} />
+                  <span style={{ flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.bot}</span>
+                  {watching ? (
+                    <span style={{ color: '#7dd3fc' }}>watching</span>
+                  ) : (
+                    <button type="button" onClick={() => { onView(r.bot); setMenu(false); }}
+                      style={{ background: 'none', border: 0, color: '#7dd3fc', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}>
+                      View
+                    </button>
+                  )}
+                  <button type="button" onClick={() => onKill(r.bot)}
+                    style={{ background: 'none', border: 0, color: '#f0abfc', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}>
+                    Kill
+                  </button>
+                </span>
+              );
+            })}
+            <button type="button" onClick={onRefresh}
+              style={{ ...menuItemStyle, color: '#94a3b8' }}>↻ Refresh sessions</button>
+            {killMsg && (
+              <span style={{ fontSize: 12, color: '#94a3b8', padding: '6px 10px' }}>{killMsg}</span>
+            )}
+          </span>
+        </>
+      )}
+    </span>
+  );
+}
+
 /**
  * Terminal tab. One tab, every session: a compact in-flow picker switches
  * between the gateway's ttyd routes (Telegram keeps its single terminal —
@@ -761,63 +833,30 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   return (
     <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overscrollBehavior: 'none' }}>
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderBottom: '1px solid #1e293b', background: '#0b1220' }}>
-        <MenuButton>
-          {(close) => (
-            <>
-              <button type="button" onClick={() => { close(); onMenu(); }} style={menuItemStyle}>Mini Apps</button>
-              <MenuDivider />
-              {open ? (
-                <button type="button" onClick={() => { setOpen(false); close(); }} style={menuItemStyle}>Close {picked || 'terminal'}</button>
-              ) : (
-                <button type="button" onClick={() => { setKillMsg(''); setOffline(''); setOpen(true); setEpoch((n) => n + 1); close(); }} style={menuItemStyle}>Open {picked || 'terminal'}</button>
-              )}
-              <MenuDivider />
-              {(routes || []).map((r) => {
-                const watching = r.bot === picked && open;
-                const isLive = live[r.bot] === true;
-                return (
-                  <span key={r.bot}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, fontSize: 13, color: '#e2e8f0', background: watching ? '#1e293b' : 'none' }}>
-                    <span title={isLive ? 'session live' : 'session dormant'}
-                      style={{ width: 8, height: 8, borderRadius: 4, background: isLive ? '#4ade80' : '#475569', flex: '0 0 auto' }} />
-                    <span style={{ flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.bot}</span>
-                    {watching ? (
-                      <span style={{ color: '#7dd3fc' }}>watching</span>
-                    ) : (
-                      <button type="button" onClick={() => { viewBot(r.bot); close(); }}
-                        style={{ background: 'none', border: 0, color: '#7dd3fc', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}>
-                        View
-                      </button>
-                    )}
-                    <button type="button" onClick={() => killSession(r.bot)}
-                      style={{ background: 'none', border: 0, color: '#f0abfc', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}>
-                      Kill
-                    </button>
-                  </span>
-                );
-              })}
-              <button type="button" onClick={() => { loadTtys(); loadStatus(); }}
-                style={{ ...menuItemStyle, color: '#94a3b8' }}>↻ Refresh sessions</button>
-              {killMsg && (
-                <span style={{ fontSize: 12, color: '#94a3b8', padding: '6px 10px' }}>{killMsg}</span>
-              )}
-            </>
-          )}
-        </MenuButton>
-        <label htmlFor="tty-session" style={{ fontSize: 12, color: '#94a3b8' }}>Session</label>
-        <select
-          id="tty-session"
-          value={picked}
-          disabled={!routes}
-          onChange={(e) => viewBot(e.target.value)}
-          style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 8px', fontSize: 13, flex: '1 1 auto', minWidth: 0 }}
-        >
-          {routes === null && <option value="">Loading…</option>}
-          {routes !== null && routes.length === 0 && <option value="">No sessions</option>}
-          {(routes || []).map((r) => (
-            <option key={r.bot} value={r.bot}>{r.bot}</option>
-          ))}
-        </select>
+        <button type="button" aria-label="Menu" title="Mini Apps" onClick={onMenu}
+          style={{ width: 28, height: 28, borderRadius: 8, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', fontSize: 15, cursor: 'pointer', flex: '0 0 auto' }}>
+          ☰
+        </button>
+        <SessionMenu
+          routes={routes}
+          picked={picked}
+          open={open}
+          live={live}
+          killMsg={killMsg}
+          onView={viewBot}
+          onToggleOpen={() => {
+            if (open) {
+              setOpen(false);
+            } else {
+              setKillMsg('');
+              setOffline('');
+              setOpen(true);
+              setEpoch((n) => n + 1);
+            }
+          }}
+          onKill={killSession}
+          onRefresh={() => { loadTtys(); loadStatus(); }}
+        />
         {loadError && (
           <span style={{ fontSize: 12, color: '#f0abfc' }}>
             {loadError}{' '}
@@ -1069,7 +1108,7 @@ function Shell() {
         ) : def.id === 'tui' ? (
           <TerminalTab def={def} bot={bot} inTelegram={inTelegram} onMenu={() => setDrawer(true)} onAuthDead={handleAuthDead} />
         ) : frameSrc(def, bot) ? (
-          def.id === 'tgtg' || def.id === 'web' || def.id === 'hotels' || def.id === 'tax' || def.id === 'agenda' ? (
+          def.id === 'tgtg' || def.id === 'web' || def.id === 'hotels' || def.id === 'tax' || def.id === 'agenda' || def.id === 'forge' ? (
             <ExternalFrame key={`${def.id}:${queryEpoch}`} def={def} src={frameSrc(def, bot) as string} onMenu={() => setDrawer(true)} />
           ) : (
             <Frame key={`${def.id}:${queryEpoch}`} title={def.title as string} src={frameSrc(def, bot) as string} />

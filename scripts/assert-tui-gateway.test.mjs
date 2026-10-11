@@ -348,6 +348,42 @@ console.log('assert-tui-gateway:');
     );
     check('without Telegram the button hides itself', btn2.style.display === 'none');
   }
+  // One burger per surface: the floating in-frame burger is gone (every
+  // terminal header carries the drawer burger instead), while expand,
+  // fullscreen and the swipe lock stay.
+  check('no floating shell-burger is injected anymore',
+    !FULLSCREEN_WIDGET_JS.includes('shell-burger'));
+  check('expand + fullscreen + swipe lock survive the removal',
+    FULLSCREEN_WIDGET_JS.includes('disableVerticalSwipes')
+    && FULLSCREEN_WIDGET_JS.includes('requestFullscreen')
+    && FULLSCREEN_WIDGET_JS.includes('tg.expand'));
+  // The served terminal page itself: exactly one burger per surface means
+  // zero in the frame (the shell header owns nav now).
+  {
+    const ttyd = http.createServer((rq, rs) => {
+      rs.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      rs.end('<html><head></head><body><div class="xterm"></div></body></html>');
+    });
+    await new Promise((r) => ttyd.listen(0, '127.0.0.1', r));
+    const env = { TUI_GATEWAY_SECRET: SECRET, TUI_BOT_TOKEN_VM: TOKEN,
+      TUI_TTYD_URL: `http://127.0.0.1:${ttyd.address().port}`,
+      TUI_TTYD_CREDENTIAL: Buffer.from('tui:x').toString('base64') };
+    const token = issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+    const page = await new Promise((resolve, reject) => {
+      let code = 0; let body = '';
+      const res = { writeHead: (c) => { code = c; }, write: (c) => { body += c; },
+        end: (b) => { body += String(b || ''); resolve({ code, body }); } };
+      createGateway({ env, log: () => {} })(
+        { method: 'GET', url: '/tty/', headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` },
+          [Symbol.asyncIterator]: async function* () {} }, res).catch(reject);
+      setTimeout(() => resolve({ code: -2, body: '' }), 5000).unref?.();
+    });
+    ttyd.close();
+    check('the served terminal page has no floating burger',
+      page.code === 200 && !page.body.includes('shell-burger'));
+    check('the served page keeps the fullscreen button + scroll bridge',
+      page.body.includes('tui-fsbtn') && page.body.includes('emitFine'));
+  }
 
   // 12a4. The LAYOUT pass must not depend on Telegram, and it must fill
   //       whatever the viewport actually is — no device is special-cased.
