@@ -1717,5 +1717,78 @@ console.log('assert-tui-gateway:');
   }
 }
 
+// 12a10. The picker lists bare VM opencode sessions next to the ttyd
+//        routes (all three in one place: collab/VM-bot ttyd rows plus the
+//        box's own agent sessions, which have no ttyd route). Session rows
+//        carry `opencode:<sessionId>` ids so several `vm` rows never share a
+//        key, and the kill door still 400s them (no tmux name to kill).
+{
+  const { DatabaseSync } = await import('node:sqlite');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ttys-picker-'));
+  const dbPath = path.join(dir, 'opencode.db');
+  const db = new DatabaseSync(dbPath);
+  db.exec(`create table session_v2(id text primary key, model text, directory text, title text, time_updated integer, time_archived integer);
+    create table session_message(session_id text, type text, data text, time_created integer);`);
+  const now = Date.now();
+  const insSession = db.prepare('insert into session_v2(id, model, directory, title, time_updated, time_archived) values (?, ?, ?, ?, ?, ?)');
+  const insMsg = db.prepare('insert into session_message(session_id, type, data, time_created) values (?, ?, ?, ?)');
+  const model = (id) => JSON.stringify({ id, providerID: 'opencode' });
+  insSession.run('ses_work1', model('probe-model'), '/home/ubuntu', 'Probe working session', now - 60000, null);
+  insMsg.run('ses_work1', 'assistant', JSON.stringify({ time: { created: 1 } }), now - 60000);
+  insSession.run('ses_idle1', model('probe-idle'), '/home/ubuntu', 'Probe idle session', now - 120000, null);
+  insMsg.run('ses_idle1', 'assistant', JSON.stringify({ time: { created: 1, completed: 2 } }), now - 120000);
+  insSession.run('ses_stale1', model('probe-old'), '/home/ubuntu', 'Probe stale session', now - 20 * 60000, null);
+  insSession.run('ses_noname', '', '/home/ubuntu', '', now - 60000, null);
+  insSession.run('ses_archived1', model('probe-arch'), '/home/ubuntu', 'Probe archived session', now - 60000, now - 1000);
+  db.close();
+  const call = async (env, method, urlPath, jsonBody = null) => {
+    const token = issueToken({ botId: 'webop', chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+    const handle = createGateway({ env, log: () => {} });
+    return new Promise((resolve, reject) => {
+      let code = 0; let body = '';
+      const res = { writeHead: (c) => { code = c; }, end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+      const payload = jsonBody === null ? null : JSON.stringify(jsonBody);
+      const req = { method, url: urlPath,
+        headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}`, ...(payload ? { 'content-type': 'application/json' } : {}) },
+        on: (ev, fn) => { if (payload && ev === 'data') fn(payload); if (ev === 'end') fn(); } };
+      handle(req, res).catch(reject);
+    });
+  };
+  const env = { TUI_GATEWAY_SECRET: SECRET, TUI_ROUTE_TTYTEST_PATH: '/ttytest/', VM_OPENCODE_DB_PATH: dbPath };
+  const listed = await call(env, 'GET', '/api/ttys');
+  const ttys = JSON.parse(listed.body || '{}').ttys || [];
+  const byId = Object.fromEntries(ttys.map((r) => [r.id, r]));
+  check('ttyd rows keep their order and gain tty ids',
+    listed.code === 200 && ttys[0] && ttys[0].bot === 'ttytest' && ttys[0].id === 'tty:ttytest' && ttys[0].kind === 'tty' && ttys[0].path === '/ttytest/');
+  check('a working bare session is listed with its title and model',
+    byId['opencode:ses_work1'] && byId['opencode:ses_work1'].kind === 'opencode'
+    && byId['opencode:ses_work1'].title === 'Probe working session'
+    && byId['opencode:ses_work1'].agent === 'opencode/probe-model'
+    && byId['opencode:ses_work1'].status === 'working');
+  check('an idle bare session is listed too',
+    byId['opencode:ses_idle1'] && byId['opencode:ses_idle1'].status === 'idle');
+  check('session rows point at the public web UI, not a ttyd path',
+    String(byId['opencode:ses_work1']?.url || '').startsWith('https://')
+    && !('path' in (byId['opencode:ses_work1'] || {})));
+  check('stale, archived and model-less sessions stay out of the picker',
+    !byId['opencode:ses_stale1'] && !byId['opencode:ses_archived1'] && !byId['opencode:ses_noname']);
+  const killSession = await call(env, 'POST', '/api/ttys/kill', { bot: 'opencode:ses_work1' });
+  check('a session id is not a tmux name: kill 400s instead of killing',
+    killSession.code === 400);
+  const statusRes = await call(env, 'GET', '/api/ttys/status');
+  const status = JSON.parse(statusRes.body || '{}').status || [];
+  const sById = Object.fromEntries(status.filter((s) => s && s.id).map((s) => [s.id, s]));
+  check('bare sessions report live under their picker id',
+    statusRes.code === 200 && sById['opencode:ses_work1'] && sById['opencode:ses_work1'].live === true);
+  check('session status rows are keyed by picker id, apart from the bot row',
+    status.filter((s) => s && s.bot === 'vm' && !s.id).length <= 1
+    && sById['opencode:ses_work1'].bot === 'vm');
+  const missing = await call({ ...env, VM_OPENCODE_DB_PATH: path.join(dir, 'nope.db') }, 'GET', '/api/ttys');
+  const missingTtys = JSON.parse(missing.body || '{}').ttys || [];
+  check('a missing opencode.db degrades to ttyd rows only, never a 500',
+    missing.code === 200 && missingTtys.length >= 1 && !missingTtys.some((r) => r && r.kind === 'opencode'));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
