@@ -1790,5 +1790,69 @@ console.log('assert-tui-gateway:');
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// 12a11. The shared session viewer: POST /api/ttys/view points it at one
+//        bare VM session so the row opens as a real attached TUI, not the
+//        web UI (which already owns the Web tab). Unknown/stale sessions
+//        404, bare strings 400, and without the viewer route it honestly
+//        503s so the client can fall back.
+{
+  const { DatabaseSync } = await import('node:sqlite');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ttys-view-'));
+  const dbPath = path.join(dir, 'opencode.db');
+  const targetFile = path.join(dir, 'vmsession', 'target.json');
+  const db = new DatabaseSync(dbPath);
+  db.exec(`create table session_v2(id text primary key, model text, directory text, title text, time_updated integer, time_archived integer);
+    create table session_message(session_id text, type text, data text, time_created integer);`);
+  const now = Date.now();
+  const model = (id) => JSON.stringify({ id, providerID: 'opencode' });
+  db.prepare('insert into session_v2(id, model, directory, title, time_updated, time_archived) values (?, ?, ?, ?, ?, ?)')
+    .run('ses_view1', model('probe-view'), '/tmp', 'Probe viewed session', now - 60000, null);
+  db.prepare('insert into session_message(session_id, type, data, time_created) values (?, ?, ?, ?)')
+    .run('ses_view1', 'assistant', JSON.stringify({ time: { created: 1 } }), now - 60000);
+  db.close();
+  const view = async (env, jsonBody, { method = 'POST', token = true } = {}) => {
+    const tok = token ? issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900 }) : '';
+    const handle = createGateway({ env, log: () => {} });
+    return new Promise((resolve, reject) => {
+      let code = 0; let body = '';
+      const res = { writeHead: (c) => { code = c; }, end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+      const payload = jsonBody === null ? null : JSON.stringify(jsonBody);
+      const req = { method, url: '/api/ttys/view',
+        headers: { ...(tok ? { cookie: `${COOKIE_NAME}=${encodeURIComponent(tok)}` } : {}), ...(payload ? { 'content-type': 'application/json' } : {}) },
+        on: (ev, fn) => { if (payload && ev === 'data') fn(payload); if (ev === 'end') fn(); } };
+      handle(req, res).catch(reject);
+    });
+  };
+  const env = {
+    TUI_GATEWAY_SECRET: SECRET,
+    TUI_ROUTE_VMSESSION_PATH: '/ttyvm/',
+    VM_OPENCODE_DB_PATH: dbPath,
+    VMSESSION_TARGET_FILE: targetFile,
+  };
+  const ok = await view(env, { id: 'opencode:ses_view1' });
+  const okBody = JSON.parse(ok.body || '{}');
+  check('pointing the viewer at a live session records its target',
+    ok.code === 200 && okBody.ok === true && okBody.bot === 'vmsession' && okBody.path === '/ttyvm/'
+    && okBody.id === 'tty:vmsession');
+  const target = JSON.parse(fs.readFileSync(targetFile, 'utf8'));
+  check('the recorded target carries session id and workspace, server-side only',
+    target.sessionId === 'ses_view1' && target.directory === '/tmp');
+  const stale = await view(env, { id: 'opencode:ses_nosuch' });
+  check('an unknown session is a 404, never an attach to nothing',
+    stale.code === 404);
+  const bare = await view(env, { id: 'vm' });
+  check('a bare bot name is not a viewable session id',
+    bare.code === 400);
+  const anon = await view(env, { id: 'opencode:ses_view1' }, { token: false });
+  check('no token gets no view', anon.code === 401);
+  const get = await view(env, null, { method: 'GET' });
+  check('the view route is POST only', get.code === 405);
+  const { TUI_ROUTE_VMSESSION_PATH: _dropped, ...noViewerEnv } = env;
+  const unconfigured = await view(noViewerEnv, { id: 'opencode:ses_view1' });
+  check('without the viewer route it 503s so the client falls back',
+    unconfigured.code === 503);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);

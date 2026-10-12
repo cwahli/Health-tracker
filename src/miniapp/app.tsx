@@ -677,7 +677,7 @@ function SessionMenu({ routes, picked, pickedLabel, open, live, killMsg, onView,
                   <span title={rowLive ? 'session live' : 'session dormant'}
                     style={{ width: 8, height: 8, borderRadius: 4, background: rowLive ? '#4ade80' : '#475569', flex: '0 0 auto' }} />
                   <span style={{ flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {isSession ? (r.title || r.sessionId || r.bot) : r.bot}
+                    {isSession ? (r.title || r.sessionId || r.bot) : (r.bot === 'vmsession' ? 'VM session' : r.bot)}
                     {isSession && r.agent ? (
                       <span style={{ display: 'block', fontSize: 11, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {r.agent}{r.status ? ` · ${r.status}` : ''}
@@ -822,22 +822,58 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
 
   const pickedRoute = (routes || []).find((r) => ttyRowId(r) === picked);
   const pickedLabel = pickedRoute
-    ? (pickedRoute.kind === 'opencode' ? (pickedRoute.title || pickedRoute.sessionId || picked) : pickedRoute.bot)
+    ? (pickedRoute.kind === 'opencode'
+      ? (pickedRoute.title || pickedRoute.sessionId || picked)
+      : (pickedRoute.bot === 'vmsession' ? 'VM session' : pickedRoute.bot))
     : (picked || 'No sessions');
   const tok = queryToken();
-  // ttyd rows open their served path; bare VM sessions open the public web
-  // UI root (the session itself is one click away there — the SPA owns the
-  // session route, so the picker does not guess it).
+  // ttyd rows open their served path; bare VM sessions go through the shared
+  // viewer (viewSession above) and only fall back to the public web UI root
+  // here when the viewer is not configured — the SPA owns the session route,
+  // so the picker does not guess it.
   const pickedBase = pickedRoute ? (pickedRoute.url || pickedRoute.path) : '';
   const src = pickedRoute && tok && pickedBase ? `${pickedBase}?token=${encodeURIComponent(tok)}` : null;
 
-  // Views one session: selects it and (re)mounts the frame.
+  // Points the shared session viewer at a bare VM session and views it as a
+  // real attached TUI (the Terminal tab stays TUI-only; the Web tab stays the
+  // opencode web UI). Falls back to the web UI root when the viewer is not
+  // configured or the session moved on.
+  const viewSession = async (r: TtyRoute) => {
+    const rowId = ttyRowId(r);
+    let viewerId = '';
+    try {
+      const res = await fetch('/api/ttys/view' + currentQuery(), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: rowId }),
+      });
+      const body = await res.json().catch(() => null);
+      if (res.ok && body && body.ok === true && typeof body.path === 'string' && body.path) {
+        viewerId = (typeof body.id === 'string' && body.id) || `tty:${String(body.bot || 'vmsession')}`;
+      }
+    } catch { /* fall through to the web UI root below */ }
+    setPicked(viewerId || rowId);
+    setOffline('');
+    setKillMsg('');
+    setOpen(true);
+    renewToken().then((ok) => { setEpoch((n) => n + 1); if (!ok) checkFrame(); loadTtys(); loadStatus(); });
+  };
+
+  // Views one ttyd terminal: selects it and (re)mounts the frame.
   const viewBot = (id: string) => {
     setPicked(id);
     setOffline('');
     setKillMsg('');
     setOpen(true);
     renewToken().then((ok) => { setEpoch((n) => n + 1); if (!ok) checkFrame(); loadTtys(); loadStatus(); });
+  };
+
+  // Views one session: ttyd rows open their own terminal, bare VM sessions
+  // go through the shared viewer above.
+  const viewRow = (rid: string) => {
+    const row = (routes || []).find((r) => ttyRowId(r) === rid);
+    if (row && row.kind === 'opencode') { void viewSession(row); return; }
+    viewBot(rid);
   };
 
   // Frees exactly one bot's backend RAM (operator only). The attach script
@@ -916,7 +952,7 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
           open={open}
           live={live}
           killMsg={killMsg}
-          onView={viewBot}
+          onView={viewRow}
           onToggleOpen={() => {
             if (open) {
               setOpen(false);

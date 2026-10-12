@@ -160,6 +160,25 @@ export function readVmPickerEntries({ home = os.homedir(), now = Date.now(), win
   );
 }
 
+/**
+ * Attach target for one bare VM session: the session id plus the workspace
+ * directory the viewer terminal must start in. Only sessions the picker
+ * itself would list (fresh, model-bearing) resolve — anything else is a 404
+ * upstream, never a `null` the viewer would turn into a fresh session.
+ * The directory stays server-side (target file + attach argv); picker rows
+ * never carry it.
+ */
+export function findVmSessionTarget(rawRows, sessionId, { now = Date.now() } = {}) {
+  const sid = String(sessionId || '').trim();
+  if (!/^ses_[A-Za-z0-9]+$/.test(sid)) return null;
+  const row = (Array.isArray(rawRows) ? rawRows : []).find((r) => String(r?.id || '') === sid);
+  if (!row) return null;
+  if (!vmSessionRows([row], { now })[0]) return null;
+  const directory = String(row.directory || '').trim();
+  if (!directory) return null;
+  return { sessionId: sid, directory, title: String(row.title || '').trim() };
+}
+
 /** Recent unarchived opencode sessions from the local opencode.db (best-effort).
  * Freshness is the latest activity of either clock: the session row
  * (moves on step completion) or its message stream (moves while a turn is
