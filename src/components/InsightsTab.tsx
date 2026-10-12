@@ -2,7 +2,7 @@ import { toYYYYMMDD } from "../utils/dateUtils";
 import React, { useState, useEffect } from 'react';
 import { UserProfile, FoodLog, RecommendationReport } from '../types';
 import { translations } from '../utils/translations';
-import { displayCategoryLabel, displayEthnicityOption, interpolate } from '../utils/i18n';
+import { displayCategoryLabel, displayEthnicityOption, interpolate, pickPlural } from '../utils/i18n';
 import { 
   Brain, Sparkles, AlertCircle, TrendingDown, BookOpen, Clock, Heart, 
   CheckCircle, HelpCircle, Loader, ShieldCheck, Database, Check, X, ArrowRight, Activity, Send, ChevronDown, ChevronUp, Trash2, Lock, Archive, Search, Stethoscope
@@ -1505,7 +1505,10 @@ export default function InsightsTab({
         } else if (Array.isArray(latestAnalysis.result)) {
           count = latestAnalysis.result.length;
         }
-        return interpolate(t.biomarkersExtractedStatus, { count: count || 5, recWord });
+        return interpolate(
+          pickPlural(t, profile.language, count || 5, 'biomarkersExtractedStatusOne', 'biomarkersExtractedStatus'),
+          { count: count || 5, recWord },
+        );
       }
       case 'health_baseline':
         return interpolate(t.precisionDietGenerated, { recWord });
