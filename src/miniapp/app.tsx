@@ -618,16 +618,30 @@ function TtyTab({ def, onMenu }: { def: MiniAppDef; onMenu: () => void }) {
   );
 }
 
-type TtyRoute = { bot: string; path: string };
+type TtyRoute = {
+  bot: string; path: string;
+  // Picker identity: ttyd rows are `tty:<bot>`, bare VM opencode sessions
+  // are `opencode:<sessionId>` (several share bot `vm`, so bot alone is not
+  // a key). Session rows carry no ttyd path — the frame opens `url`, the
+  // public web UI root, instead. All fields optional so older gateways'
+  // `{bot, path}` rows keep rendering.
+  id?: string; kind?: string; sessionId?: string; title?: string;
+  agent?: string; status?: string; updatedAt?: string | null; url?: string;
+};
+
+/** Stable picker key: the row id, falling back to bot for older gateways. */
+function ttyRowId(r: TtyRoute): string {
+  return (r && typeof r.id === 'string' && r.id) || r.bot;
+}
 
 /** The session dropdown: the trigger shows the current bot with its live
  * dot, and the panel lists every served bot with its own liveness plus
  * View/Kill — the server info used to live behind a second floating
  * burger, now it lives here. The ☰ burger is only ever the Mini Apps nav.
  */
-function SessionMenu({ routes, picked, open, live, killMsg, onView, onToggleOpen, onKill, onRefresh }: {
-  routes: TtyRoute[] | null; picked: string; open: boolean; live: Record<string, boolean>; killMsg: string;
-  onView: (bot: string) => void; onToggleOpen: () => void; onKill: (bot: string) => void; onRefresh: () => void;
+function SessionMenu({ routes, picked, pickedLabel, open, live, killMsg, onView, onToggleOpen, onKill, onRefresh }: {
+  routes: TtyRoute[] | null; picked: string; pickedLabel: string; open: boolean; live: Record<string, boolean>; killMsg: string;
+  onView: (id: string) => void; onToggleOpen: () => void; onKill: (bot: string) => void; onRefresh: () => void;
 }) {
   const [menu, setMenu] = useState(false);
   const isLive = picked !== '' && live[picked] === true;
@@ -638,7 +652,7 @@ function SessionMenu({ routes, picked, open, live, killMsg, onView, onToggleOpen
         <span title={isLive ? 'session live' : 'session dormant'}
           style={{ width: 8, height: 8, borderRadius: 4, background: isLive ? '#4ade80' : '#475569', flex: '0 0 auto' }} />
         <span style={{ flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}>
-          {routes === null ? 'Loading…' : (picked || 'No sessions')}
+          {routes === null ? 'Loading…' : pickedLabel}
         </span>
         <span style={{ color: '#94a3b8' }}>▾</span>
       </button>
@@ -647,30 +661,43 @@ function SessionMenu({ routes, picked, open, live, killMsg, onView, onToggleOpen
           <span role="presentation" onClick={() => setMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 78 }} />
           <span style={{ position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 79, minWidth: 230, maxWidth: '78vw', maxHeight: '70dvh', overflowY: 'auto', background: '#0f172a', border: '1px solid #334155', borderRadius: 12, padding: 6, display: 'flex', flexDirection: 'column', gap: 2, overscrollBehavior: 'none' }}>
             <button type="button" onClick={() => { onToggleOpen(); setMenu(false); }} style={menuItemStyle}>
-              {open ? `Close ${picked || 'terminal'}` : `Open ${picked || 'terminal'}`}
+              {open ? `Close ${pickedLabel}` : `Open ${pickedLabel}`}
             </button>
             <MenuDivider />
             {(routes || []).map((r) => {
-              const watching = r.bot === picked && open;
-              const rowLive = live[r.bot] === true;
+              const rid = ttyRowId(r);
+              const watching = rid === picked && open;
+              const rowLive = live[rid] === true;
+              // Bare VM sessions share bot `vm` and have no tmux to kill:
+              // they show their title + model, and View opens the web UI.
+              const isSession = r.kind === 'opencode';
               return (
-                <span key={r.bot}
+                <span key={rid}
                   style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, fontSize: 13, color: '#e2e8f0', background: watching ? '#1e293b' : 'none' }}>
                   <span title={rowLive ? 'session live' : 'session dormant'}
                     style={{ width: 8, height: 8, borderRadius: 4, background: rowLive ? '#4ade80' : '#475569', flex: '0 0 auto' }} />
-                  <span style={{ flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.bot}</span>
+                  <span style={{ flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {isSession ? (r.title || r.sessionId || r.bot) : r.bot}
+                    {isSession && r.agent ? (
+                      <span style={{ display: 'block', fontSize: 11, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {r.agent}{r.status ? ` · ${r.status}` : ''}
+                      </span>
+                    ) : null}
+                  </span>
                   {watching ? (
                     <span style={{ color: '#7dd3fc' }}>watching</span>
                   ) : (
-                    <button type="button" onClick={() => { onView(r.bot); setMenu(false); }}
+                    <button type="button" onClick={() => { onView(rid); setMenu(false); }}
                       style={{ background: 'none', border: 0, color: '#7dd3fc', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}>
                       View
                     </button>
                   )}
-                  <button type="button" onClick={() => onKill(r.bot)}
-                    style={{ background: 'none', border: 0, color: '#f0abfc', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}>
-                    Kill
-                  </button>
+                  {isSession ? null : (
+                    <button type="button" onClick={() => onKill(r.bot)}
+                      style={{ background: 'none', border: 0, color: '#f0abfc', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}>
+                      Kill
+                    </button>
+                  )}
                 </span>
               );
             })}
@@ -736,7 +763,11 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     }
     const list = body.ttys as TtyRoute[];
     setRoutes(list);
-    setPicked((cur) => cur || (list.some((r) => r.bot === 'web') ? 'web' : (list[0]?.bot || '')));
+    setPicked((cur) => {
+      if (cur && list.some((r) => ttyRowId(r) === cur)) return cur;
+      const web = list.find((r) => r.bot === 'web');
+      return web ? ttyRowId(web) : (list[0] ? ttyRowId(list[0]) : '');
+    });
   };
 
   const loadStatus = async () => {
@@ -751,8 +782,12 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     if (deadRef.current) return;
     if (!body || body.ok !== true || !Array.isArray(body.status)) return;
     const map: Record<string, boolean> = {};
-    for (const row of body.status as { bot: string; live: boolean }[]) {
-      if (row && typeof row.bot === 'string') map[row.bot] = row.live === true;
+    for (const row of body.status as { id?: string; bot: string; live: boolean }[]) {
+      if (!row || typeof row.bot !== 'string') continue;
+      // Keyed rows (bare sessions) must not paint the shared `vm` bot row:
+      // a live bare session is not a live VM tmux session.
+      if (typeof row.id === 'string' && row.id) map[row.id] = row.live === true;
+      else map[row.bot] = row.live === true;
     }
     setLive(map);
   };
@@ -785,13 +820,20 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     );
   }
 
-  const pickedRoute = (routes || []).find((r) => r.bot === picked);
+  const pickedRoute = (routes || []).find((r) => ttyRowId(r) === picked);
+  const pickedLabel = pickedRoute
+    ? (pickedRoute.kind === 'opencode' ? (pickedRoute.title || pickedRoute.sessionId || picked) : pickedRoute.bot)
+    : (picked || 'No sessions');
   const tok = queryToken();
-  const src = pickedRoute && tok ? `${pickedRoute.path}?token=${encodeURIComponent(tok)}` : null;
+  // ttyd rows open their served path; bare VM sessions open the public web
+  // UI root (the session itself is one click away there — the SPA owns the
+  // session route, so the picker does not guess it).
+  const pickedBase = pickedRoute ? (pickedRoute.url || pickedRoute.path) : '';
+  const src = pickedRoute && tok && pickedBase ? `${pickedBase}?token=${encodeURIComponent(tok)}` : null;
 
-  // Views one bot's terminal: selects it and (re)mounts the frame.
-  const viewBot = (bot: string) => {
-    setPicked(bot);
+  // Views one session: selects it and (re)mounts the frame.
+  const viewBot = (id: string) => {
+    setPicked(id);
     setOffline('');
     setKillMsg('');
     setOpen(true);
@@ -831,6 +873,8 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
       return;
     }
     if (target === picked) setOpen(false);
+    const pickedRow = (routes || []).find((r) => ttyRowId(r) === picked);
+    if (pickedRow && target === pickedRow.bot) setOpen(false);
     setKillMsg(body.killed
       ? `Stopped ${target} — memory freed. View restarts it.`
       : `No live ${target} session — nothing was running.`);
@@ -868,6 +912,7 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
         <SessionMenu
           routes={routes}
           picked={picked}
+          pickedLabel={pickedLabel}
           open={open}
           live={live}
           killMsg={killMsg}

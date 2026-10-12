@@ -121,6 +121,45 @@ export function vmSessionRows(rows, { now = Date.now() } = {}) {
   }).filter(Boolean);
 }
 
+/**
+ * Terminal-picker rows for live VM opencode CLI sessions: bare sessions with
+ * no ttyd route (this box's own agent runs). The picker's ttyd rows are keyed
+ * per bot, so these carry their own `opencode:<sessionId>` ids — one row per
+ * session, never merged into the VM bot row. `url` is the public web UI root
+ * the picker opens for the session (same gateway door, token appended by the
+ * client); the row itself is what makes the session visible in one place with
+ * the collab and VM-bot terminals.
+ */
+export function vmPickerEntries(rawRows, { now = Date.now(), webUrl = '' } = {}) {
+  const out = [];
+  for (const r of (Array.isArray(rawRows) ? rawRows : [])) {
+    const mapped = vmSessionRows([r], { now })[0];
+    if (!mapped) continue;
+    const sid = String(r?.id || '').trim();
+    if (!sid) continue;
+    out.push({
+      id: `opencode:${sid}`,
+      kind: 'opencode',
+      bot: 'vm',
+      sessionId: sid,
+      agent: mapped.agent,
+      title: mapped.task,
+      status: mapped.status,
+      updatedAt: mapped.updatedAt,
+      url: String(webUrl || ''),
+    });
+  }
+  return out;
+}
+
+/** Read + map in one call for the terminal picker (best-effort, never throws). */
+export function readVmPickerEntries({ home = os.homedir(), now = Date.now(), windowMs = VM_OPENCODE_WINDOW_MS, dbPath = null, webUrl = '' } = {}) {
+  return vmPickerEntries(
+    readVmOpencodeSessions({ home, now, windowMs, dbPath }),
+    { now, webUrl },
+  );
+}
+
 /** Recent unarchived opencode sessions from the local opencode.db (best-effort).
  * Freshness is the latest activity of either clock: the session row
  * (moves on step completion) or its message stream (moves while a turn is
@@ -134,7 +173,7 @@ export function readVmOpencodeSessions({ home = os.homedir(), now = Date.now(), 
     const conn = new DatabaseSync(db, { readOnly: true });
     try {
       const rows = conn.prepare(
-        `select s.model, s.directory, s.title, s.time_updated as timeUpdated,
+        `select s.id as id, s.model, s.directory, s.title, s.time_updated as timeUpdated,
           (select m.type from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastType,
           (select m.data from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastData,
           (select max(m.time_created) from session_message m where m.session_id = s.id) as lastMsgMs

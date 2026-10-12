@@ -382,6 +382,15 @@ export function webUiHost(env = process.env) {
   return String(env.OPENCODE_WEB_HOST || 'web.health-tracker.co.uk').trim().toLowerCase();
 }
 
+/** Public origin of the opencode web UI for browsers (same default as the
+ * mini-app registry's `web` entry). The picker opens this for bare VM
+ * sessions; the per-request gateway token is appended by the client. */
+export function webPublicUrl(env = process.env) {
+  const raw = String(env.OPENCODE_WEB_URL || '').trim().replace(/\/+$/, '');
+  if (raw) return raw;
+  return `https://${webUiHost(env)}`;
+}
+
 export function isWebUiHost(req, env = process.env) {
   const raw = req?.headers?.host || req?.headers?.[':authority'] || '';
   const host = String(raw).split(':')[0].trim().toLowerCase();
@@ -910,6 +919,7 @@ import {
   getFleetNodes as getFleetNodesStatus,
   getFleetBots as getFleetBotsStatus,
   resetFleetState as resetFleetStateStatus,
+  readVmPickerEntries as readVmPickerEntriesStatus,
   FLEET_CACHE_TTL_MS,
 } from './lib/fleet-status.mjs';
 
@@ -1847,9 +1857,13 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
 
     // Terminal session list for the shell picker. Same ttydRoutes table the
     // page routes serve (trailing-slash entries only, first wins per bot),
-    // so the picker can never name a path the gateway does not serve.
-    // The list itself is deployment shape, not session data; any valid
-    // token reads it. Opening another bot's terminal additionally needs an
+    // so the picker can never name a path the gateway does not serve — plus
+    // one row per live VM opencode CLI session (bare sessions with no ttyd
+    // route), so collab, VM-bot and VM sessions are all visible in one place.
+    // Rows are keyed by id (`tty:<bot>` vs `opencode:<sessionId>`), never by
+    // bot alone, because several session rows share bot `vm`. The list itself
+    // is deployment shape + liveness, not session data; any valid token reads
+    // it. Opening another bot's terminal additionally needs an
     // operator ('webop') token at the page/token routes below.
     if (url.pathname === '/api/ttys') {
       const verdict = verifyAnyToken(req, url, secret);
@@ -1863,9 +1877,14 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       for (const [routePath, route] of Object.entries(ttydRoutes(env))) {
         if (!routePath.endsWith('/') || seen.has(route.bot)) continue;
         seen.add(route.bot);
-        ttys.push({ bot: route.bot, path: routePath });
+        ttys.push({ bot: route.bot, path: routePath, id: `tty:${route.bot}`, kind: 'tty' });
       }
       ttys.sort((a, b) => String(a.bot).localeCompare(String(b.bot)));
+      // VM_OPENCODE_DB_PATH is a test seam only: unset in prod, where the
+      // default opencode.db under HOME is read (best-effort, never throws).
+      for (const e of readVmPickerEntriesStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) })) {
+        ttys.push(e);
+      }
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       return res.end(JSON.stringify({ ok: true, ttys }));
     }
@@ -1921,7 +1940,9 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // Live/dormant flags for the shell's per-bot session rows. Same door as
     // the list (deployment shape + liveness, no session data); killing stays
     // operator-only. One `tmux has-session` per served bot, allowlisted names
-    // only; off-box backends (no local tmux session) report live:false.
+    // only; off-box backends (no local tmux session) report live:false. Bare
+    // VM opencode sessions ride along as always-live rows keyed by their
+    // picker id (they are listed only while fresh, so listing is liveness).
     if (url.pathname === '/api/ttys/status') {
       if (req.method !== 'GET') {
         res.writeHead(405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -1953,6 +1974,9 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
           live = false;
         }
         status.push({ bot: b, live });
+      }
+      for (const e of readVmPickerEntriesStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) })) {
+        status.push({ id: e.id, bot: e.bot, live: true });
       }
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       return res.end(JSON.stringify({ ok: true, status }));
