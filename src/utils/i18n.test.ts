@@ -34,7 +34,7 @@ describe('i18n locales', () => {
     expect([...SUPPORTED_LOCALES].sort()).toEqual(['en', 'fr', 'id', 'zh']);
   });
 
-  it('requires English and Indonesian raw packs to have the same keys as en (not English-filled)', () => {
+  it('requires every complete-locale raw pack to have the same keys as en (not English-filled)', () => {
     const sourceKeys = Object.keys(localePacks.en).sort();
     for (const locale of REQUIRED_COMPLETE_LOCALES) {
       const keys = Object.keys(localePacks[locale]).sort();
@@ -43,9 +43,13 @@ describe('i18n locales', () => {
     }
   });
 
-  it('falls back to English for a missing French/Chinese key', () => {
-    expect(t('fr', 'sendToAdmin')).toBeTruthy();
-    expect(t('zh', 'sendToAdmin')).toBeTruthy();
+  it('serves translated French/Chinese copy, falling back to English only for unknown keys', () => {
+    expect(t('fr', 'sendToAdmin')).toBe(localePacks.fr.sendToAdmin);
+    expect(t('zh', 'sendToAdmin')).toBe(localePacks.zh.sendToAdmin);
+    expect(t('fr', 'sendToAdmin')).not.toBe(localePacks.en.sendToAdmin);
+    expect(t('zh', 'sendToAdmin')).not.toBe(localePacks.en.sendToAdmin);
+    expect(t('fr', '__notAKey__')).toBe('__notAKey__');
+    expect(t('zh', '__notAKey__')).toBe('__notAKey__');
   });
 });
 
