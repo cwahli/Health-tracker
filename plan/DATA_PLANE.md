@@ -1,6 +1,6 @@
 # Data plane — one SQL, Firebase Auth, R2 blobs
 
-**Status:** D-0, D-1, D-2, and D-9 are done. **Decision 2026-10-09: keep D1.** D-3, the D-4 VPS re-run, and D-5…D-8 are cleared. D-10 (R2 orphan delete) waits for an explicit go. Muse storage audit stays input: [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md) + [R2_DELETE_CANDIDATES.json](./R2_DELETE_CANDIDATES.json).  
+**Status:** D-0, D-1, D-2, D-9, and D-10 are done (D-10 executed 2026-10-12: audit re-run + dump in R2, 13 past-grace orphans deleted, tier2 already-gone, missing keys moot, retention verified-empty). **Decision 2026-10-09: keep D1.** D-3, the D-4 VPS re-run, and D-5…D-8 are cleared. Muse storage audit stays input: [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md) + [R2_DELETE_CANDIDATES.json](./R2_DELETE_CANDIDATES.json).  
 **Execute index:** [ROADMAP.md](./ROADMAP.md) **Track D**. Supersedes parked **R-5** (“investigate D1 as primary”).  
 **Do not:** dual-write D1 + disk SQLite; install SQLite; buy Workers Paid for this app; revive Postgres/Supabase for identity; drop Firebase Auth; put photos in SQLite; mix a D-10 delete with F-13; **pay to unpause Supabase**; **run `R2_DELETE_CANDIDATES.json` without an explicit go**.
 
@@ -99,7 +99,7 @@ Do **not** mix with F-13. D-9 is code-only. D-10 is deletes.
 | ID | What | Done when | Do not |
 |---|---|---|---|
 | **D-9** | Stop R2 photo **regrowth**: content-hash check on the PUT path (`server_routes_r2.ts`) reuse existing key on ETag/MD5 match; stop writing `key` **and** `key_0` twins. Locked packet. **No object deletes.** | **DONE** (`cf19075`) — CAS bypasses killed, deduplicated logging active, 7/7 contract tests green. | Applying [R2_DELETE_CANDIDATES.json](./R2_DELETE_CANDIDATES.json); rewriting historical `image_urls` |
-| **D-10** | D-1 is done. Still off the execute list until an explicit go: re-run the audit; fix the two `missing_referenced_absent` keys; then (a) apply the candidate list with a 30-day grace for remaining orphans, (b) meal-photo delete-cascade or tombstone sweeper, (c) retention on `debug/` + `logs/` + `jobs/` + `bugs/`. | Audit re-run: duplicate groups → 0 or residual named; dump in R2. | Deleting without an explicit go; deleting keys still referenced by D1 or the recovered dump; emptying `golden/` |
+| **D-10** | D-1 is done. Executed 2026-10-12 with owner go: audit re-run (photos=2708, referenced=622, orphans=2087, dump in R2 `backlogs/`); missing keys re-checked (one absent+unreferenced, one broken literal — neither deleted); (a) 13 past-grace tier1 orphans deleted 13/13, 2 re-referenced skipped, 81 in 30-day grace; tier2 287 groups already-gone in R2 (keeps present), nothing to delete; (b) orphan sweep IS the tombstone sweeper (`scripts/r2-orphan-sweep.mjs`, sensor `assert-r2-delete-safety` 12/0); (c) retention >90d over debug/logs/jobs verified-empty, bugs/ excluded. | Duplicate groups → 0 actionable residual named (81 in grace); dumps in R2. | Deleting still-referenced keys; emptying `golden/` |
 
 ### Phase 2 and Phase 3 — cleared 2026-10-09
 
