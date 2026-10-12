@@ -5,7 +5,7 @@ export const SUPPORTED_LOCALES = ['en', 'id', 'fr', 'zh'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 /** Locales that must have every English key. Add a code here when a language is no longer English-fallback. */
-export const REQUIRED_COMPLETE_LOCALES = ['en', 'id'] as const;
+export const REQUIRED_COMPLETE_LOCALES = ['en', 'id', 'fr', 'zh'] as const;
 export type RequiredCompleteLocale = (typeof REQUIRED_COMPLETE_LOCALES)[number];
 
 const LOCALE_NAMES: Record<SupportedLocale, string> = {
