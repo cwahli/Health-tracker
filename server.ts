@@ -93,6 +93,7 @@ import { r2Router, getS3Client, CLOUDFLARE_R2_BUCKET_NAME, CLOUDFLARE_R2_PUBLIC_
 import { medicalGeminiRouter } from './server_routes_medical_gemini.js';
 import { foodAnalyzeRouter } from './server_routes_food_analyze.js';
 import { scorecardRouter } from './server_routes_scorecard.js';
+import { whatsappRouter } from './server_whatsapp.js';
 
 export const BEVERAGE_RAW_PATTERN = /\b(beverage|drink|water|juice|beer|wine|soda|cola|tea|coffee|cappuccino|espresso|latte|mocha|macchiato|boba|smoothie|shake|milk|oat\s*milk|oatmilk|almond\s*milk|almondmilk|soy\s*milk|soymilk|coconut\s*milk|dairy|yogurt|fruit|melon|watermelon|apple|orange|banana|berry|berries|grape|citrus|salad|raw|fresh|broth|soup)\b/i;
 
@@ -1316,6 +1317,9 @@ app.use((req, res, next) => {
 
 app.use(compression());
 app.use(express.static(path.join(process.cwd(), 'public')));
+// WhatsApp webhook needs the RAW body for HMAC verification — mount before
+// the JSON parser, path-scoped so nothing else changes shape.
+app.use('/api/auth/whatsapp/webhook', express.raw({ type: 'application/json', limit: '1mb' }));
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 app.use(biomarkerRouter);
@@ -1328,6 +1332,7 @@ app.use(healthConnectRouter);
 app.use(medicalGeminiRouter);
 app.use(foodAnalyzeRouter);
 app.use(scorecardRouter);
+app.use(whatsappRouter);
 
 // Nutrient table demo page
 app.get('/nutrient-table', (req, res) => {

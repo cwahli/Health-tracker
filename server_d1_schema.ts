@@ -140,6 +140,29 @@ CREATE TABLE IF NOT EXISTS app_users (
 );
 CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email);
 
+-- WA-2/WA-3 WhatsApp inverted-code login: pending session codes (hashed),
+-- phone->account bindings (first-bind-wins), webhook dedupe.
+CREATE TABLE IF NOT EXISTS wa_login_codes (
+  code_hash TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  consumed_at INTEGER,
+  wa_id TEXT,
+  verified_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_wa_login_codes_session ON wa_login_codes(session_id);
+CREATE TABLE IF NOT EXISTS phone_bindings (
+  wa_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  verified_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS wa_webhook_seen (
+  wamid TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS chain_menu_sources (
   id TEXT PRIMARY KEY,
   country_code TEXT NOT NULL DEFAULT 'GB',
