@@ -19,8 +19,8 @@ import { fr } from './translations/fr';
 import { zh } from './translations/zh';
 import { localePacks, translations } from './translations';
 
-/** Baseline recorded when the packs were split out (both packs held 1,980 keys). */
-const BASELINE_TOTAL_KEYS = 3960;
+/** Baseline recorded when the packs were split out (both packs held 1,980 keys). Lowered once for the L-5 follow-up orphan prune (16 provably-unused keys removed from all four packs; en+id now 1,977 each) — deliberate, sensor-visible, not silent. Raised by one for the ICU pilot sibling key (biomarkersExtractedStatusOne); en+id now 1,978 each. */
+const BASELINE_TOTAL_KEYS = 3956;
 /**
  * sha256 of the sorted `[key, value]` pairs, first 16 hex chars.
  *
@@ -40,11 +40,18 @@ const BASELINE_TOTAL_KEYS = 3960;
  * being. Still growth only — no existing copy value was edited, which is the
  * rule this digest is for.
  *
- * Re-recorded for L-5 (2026-10-12, owner-directed fr/zh fill): two new entries
- * below. The fr/zh packs were empty fallback shells before; their digests pin
- * the reviewed translations (FR reviewer + ZH reviewer, placeholder-verified).
+ * Re-recorded for the L-5 follow-up orphan prune (2026-10-12): 16 keys with
+ * zero textual consumers anywhere outside the packs removed from all four
+ * packs (agentCreditsLeftTitle, alreadyRanThisFingerprint, bugKpiDeclined,
+ * carbohydratesLabel, clickToManuallySync, comparisonSentenceLabel, dueDate,
+ * hasNewAttemptSinceLastLoop, maxIterations, omitAccept, parentDish,
+ * pipelineRuns, previousFingerprints, syncLabelPrefix, syncReady,
+ * transportFailed). Structural removal only — no surviving copy value edited.
+ *
+ * Re-recorded for the ICU pilot sibling (biomarkersExtractedStatusOne, all
+ * four packs): one key added for one/other routing via Intl.PluralRules.
  */
-const FROZEN_DIGESTS = { en: 'e382604d4ed04cd6', id: '39a1785088c34a73', fr: '72ed500f4099cdc5', zh: '3b37e3101fbd21d1' } as const;
+const FROZEN_DIGESTS = { en: '787a640a067670fe', id: '17cb5174b2ab9e92', fr: '91b5719f6d2d8abe', zh: 'da9e1663e1ad1a3b' } as const;
 
 const stablePairs = (pack: Record<string, unknown>) =>
   JSON.stringify(Object.keys(pack).sort().map((key) => [key, pack[key]]));

@@ -93,6 +93,24 @@ export function interpolate(template: string, vars: Record<string, string | numb
   return out;
 }
 
+/**
+ * Minimal plural routing (ICU pilot, L-5 follow-up): picks the `one` vs
+ * `other` pack string via the platform's own CLDR rules — no dependency.
+ * Only one/other categories are routed (en/id/fr/zh never need more);
+ * id/zh packs mirror the `other` form where the language marks no plural.
+ * Add a `<key>One` sibling next to any new count-sensitive key.
+ */
+export function pickPlural(
+  dict: Record<string, string>,
+  lang: unknown,
+  count: number,
+  oneKey: string,
+  otherKey: string,
+): string {
+  const category = new Intl.PluralRules(normalizeLocale(lang)).select(count);
+  return dict[category === 'one' ? oneKey : otherKey] ?? dict[otherKey];
+}
+
 const STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
   'flagged (please review log)': 'statusFlaggedReviewLog',
   'flagged (please review log).': 'statusFlaggedReviewLog',
