@@ -77,3 +77,4 @@ faf9ffbe  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (n
 b7bace08  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
 d1a43756  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
 1828e58c  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
+9e8b34ed  no-trailer queue-sync commit on main, recorded 2026-10-12 (not mine to rewrite)
