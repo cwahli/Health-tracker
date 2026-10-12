@@ -647,82 +647,54 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
     userType: 'Standard',
   });
 
-  const handleThirdPartyLogin = async (provider: 'Google' | 'X' | 'Facebook') => {
+  const handleThirdPartyLogin = async () => {
     setErrorMsg('');
     setStatus('sending');
 
-    if (provider === 'Google') {
-      const providerObj = new GoogleAuthProvider();
-      providerObj.setCustomParameters({ prompt: 'select_account' });
-      try {
-        const result = await signInWithPopup(auth, providerObj);
-        if (result?.user) {
-          onLogin(profileFromFirebaseUser(result.user));
-          setStatus('idle');
-          return;
-        }
-        // A popup that resolves without a user is not a successful login.
-        setErrorMsg('Google sign-in did not return an account. Please try again.');
-        setStatus('idle');
-        return;
-      } catch (fbErr: any) {
-        const code = String(fbErr?.code || '');
-        console.warn('Firebase Google popup auth error:', fbErr);
-
-        // User closed the popup on purpose — no error, no login.
-        if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-          setStatus('idle');
-          return;
-        }
-
-        // Popup blocked (common on mobile / strict browsers): use the real
-        // redirect flow instead of fabricating a user.
-        if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
-          try {
-            await signInWithRedirect(auth, providerObj);
-            return; // page navigates away to Google
-          } catch (redirectErr: any) {
-            console.warn('Firebase Google redirect auth error:', redirectErr);
-            setErrorMsg(redirectErr?.message || 'Google sign-in failed. Please try again.');
-            setStatus('idle');
-            return;
-          }
-        }
-
-        // Every other failure is a REAL error (unauthorized-domain,
-        // operation-not-allowed, internal-error, network…). Surface it — never
-        // silently sign the user in as a fabricated account.
-        setErrorMsg(fbErr?.message || `Google sign-in failed${code ? ` (${code})` : ''}.`);
+    const providerObj = new GoogleAuthProvider();
+    providerObj.setCustomParameters({ prompt: 'select_account' });
+    try {
+      const result = await signInWithPopup(auth, providerObj);
+      if (result?.user) {
+        onLogin(profileFromFirebaseUser(result.user));
         setStatus('idle');
         return;
       }
-    }
+      // A popup that resolves without a user is not a successful login.
+      setErrorMsg('Google sign-in did not return an account. Please try again.');
+      setStatus('idle');
+      return;
+    } catch (fbErr: any) {
+      const code = String(fbErr?.code || '');
+      console.warn('Firebase Google popup auth error:', fbErr);
 
-    // Non-Google providers: Supabase OAuth when configured.
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const providerMap: Record<string, string> = { Google: 'google', X: 'twitter', Facebook: 'facebook' };
-        const sbProvider = providerMap[provider] || provider.toLowerCase();
-        const { data, error } = await supabase.auth.signInWithOAuth({
-          provider: sbProvider as any,
-          options: {
-            redirectTo: window.location.origin
-          }
-        });
-        
-        if (error) throw error;
-        return;
-      } catch (sEx: any) {
-        console.warn(`Supabase ${provider} OAuth error:`, sEx);
-        setErrorMsg(sEx.message || `Failed to sign in with ${provider}`);
+      // User closed the popup on purpose — no error, no login.
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
         setStatus('idle');
         return;
       }
-    }
 
-    // No provider available for X/Facebook — surface it. Never fabricate a user.
-    setErrorMsg(`${provider} sign-in is unavailable right now. Please use Google or email.`);
-    setStatus('idle');
+      // Popup blocked (common on mobile / strict browsers): use the real
+      // redirect flow instead of fabricating a user.
+      if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+        try {
+          await signInWithRedirect(auth, providerObj);
+          return; // page navigates away to Google
+        } catch (redirectErr: any) {
+          console.warn('Firebase Google redirect auth error:', redirectErr);
+          setErrorMsg(redirectErr?.message || 'Google sign-in failed. Please try again.');
+          setStatus('idle');
+          return;
+        }
+      }
+
+      // Every other failure is a REAL error (unauthorized-domain,
+      // operation-not-allowed, internal-error, network…). Surface it — never
+      // silently sign the user in as a fabricated account.
+      setErrorMsg(fbErr?.message || `Google sign-in failed${code ? ` (${code})` : ''}.`);
+      setStatus('idle');
+      return;
+    }
   };
 
   return (
@@ -1003,30 +975,14 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
             </div>
 
             {/* Social Oauth Triggers */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <button
                 id="google-login-btn"
                 type="button"
-                onClick={() => handleThirdPartyLogin('Google')}
+                onClick={() => handleThirdPartyLogin()}
                 className="py-2.5 px-3 border border-theme-border/60 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl text-xs font-semibold text-theme-text-secondary flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
               >
                 <span className="w-2.5 h-2.5 bg-red-500 rounded-full" /> Google
-              </button>
-              <button
-                id="x-login-btn"
-                type="button"
-                onClick={() => handleThirdPartyLogin('X')}
-                className="py-2.5 px-3 border border-theme-border/60 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl text-xs font-semibold text-theme-text-secondary flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
-              >
-                <span className="w-2.5 h-2.5 bg-slate-800 dark:bg-slate-300 rounded-full" /> X
-              </button>
-              <button
-                id="facebook-login-btn"
-                type="button"
-                onClick={() => handleThirdPartyLogin('Facebook')}
-                className="py-2.5 px-3 border border-theme-border/60 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl text-xs font-semibold text-theme-text-secondary flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
-              >
-                <span className="w-2.5 h-2.5 bg-indigo-600 rounded-full" /> Facebook
               </button>
             </div>
           </form>
