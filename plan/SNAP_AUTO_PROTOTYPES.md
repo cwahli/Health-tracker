@@ -135,6 +135,10 @@ volume.
 Existing sync app mirrors DCIM to server/R2/webhook; server triages as in P2.
 Day-to-day: no custom native code, but fragile setup, battery/background
 kicks, per-device debugging, still full server-triage cost. Interim only.
+Phone-agent variant (2026-10-12, no Play install): rclone upload leg driven
+by mobile opencode from this repo — runbook `phone/PHONE_SETUP.md`, script
+`phone/sync-photos.sh`, schedule via cron + Termux:Boot. Human taps reduced
+to Termux install + one rclone OAuth consent + battery exemption.
 
 ### P5 — Manual share / curate (human triages)
 Share Target / chat-bot forward of food shots only. Perfect precision, cheapest,
