@@ -35,6 +35,7 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { tmuxNameFor } from './tui-bot-plumbing.mjs';
@@ -389,6 +390,18 @@ export function webPublicUrl(env = process.env) {
   const raw = String(env.OPENCODE_WEB_URL || '').trim().replace(/\/+$/, '');
   if (raw) return raw;
   return `https://${webUiHost(env)}`;
+}
+
+/** Bot id of the shared VM session viewer (one TUI pane re-pointed per View). */
+export const VMSESSION_BOT = 'vmsession';
+
+/** Where POST /api/ttys/view records the viewer's attach target.
+ * VMSESSION_TARGET_FILE is a test seam only; prod uses the bot-host state dir. */
+export function viewerTargetFile(env = process.env) {
+  const override = String(env.VMSESSION_TARGET_FILE || '').trim();
+  if (override) return override;
+  const home = String(env.HOME || os.homedir() || '/home/ubuntu');
+  return path.join(home, '.local', 'state', 'bot-host', 'vmsession', 'target.json');
 }
 
 export function isWebUiHost(req, env = process.env) {
@@ -920,6 +933,8 @@ import {
   getFleetBots as getFleetBotsStatus,
   resetFleetState as resetFleetStateStatus,
   readVmPickerEntries as readVmPickerEntriesStatus,
+  readVmOpencodeSessions as readVmOpencodeSessionsStatus,
+  findVmSessionTarget as findVmSessionTargetStatus,
   FLEET_CACHE_TTL_MS,
 } from './lib/fleet-status.mjs';
 
@@ -1980,6 +1995,67 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       }
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       return res.end(JSON.stringify({ ok: true, status }));
+    }
+
+    // Point the shared VM session viewer at one bare opencode session, so a
+    // picker row opens as a real attached TUI instead of the web UI (which
+    // already owns the Web tab — pointing there too just duplicated the view).
+    // Same door as the list: viewing is no more sensitive than listing.
+    // The viewer route itself (TUI_ROUTE_VMSESSION_PATH) is deployment config;
+    // without it this honestly 503s and the client falls back to the web UI.
+    if (url.pathname === '/api/ttys/view') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'POST only' }));
+      }
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`ttys view refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const parsed = await readJsonBody(req);
+      const id = parsed.ok ? String((parsed.json && parsed.json.id) || '').trim() : '';
+      const hit = /^opencode:(ses_[A-Za-z0-9]+)$/.exec(id);
+      if (!hit) {
+        res.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'unknown terminal' }));
+      }
+      const target = findVmSessionTargetStatus(
+        readVmOpencodeSessionsStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null }),
+        hit[1],
+      );
+      if (!target) {
+        res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'session not found or stale' }));
+      }
+      let viewerPath = '';
+      for (const [routePath, route] of Object.entries(ttydRoutes(env))) {
+        if (routePath.endsWith('/') && route && route.bot === VMSESSION_BOT) { viewerPath = routePath; break; }
+      }
+      if (!viewerPath) {
+        res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'session viewer not configured' }));
+      }
+      try {
+        const file = viewerTargetFile(env);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, JSON.stringify({ ...target, updatedAt: new Date().toISOString() }), 'utf8');
+      } catch (err) {
+        log(`ttys view target unwritable: ${err && err.message ? err.message : err}`);
+        res.writeHead(500, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'viewer unavailable' }));
+      }
+      // Reap the viewer pane so the next open attaches to the new target
+      // instead of showing the previous session (tmux -A keeps stale panes).
+      try {
+        await new Promise((resolve, reject) => {
+          execFile('tmux', ['kill-session', '-t', tmuxNameFor(VMSESSION_BOT)], { timeout: 5000 }, (err) => (err ? reject(err) : resolve()));
+        });
+      } catch {}
+      log(`ttys view session=${target.sessionId}`);
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ok: true, bot: VMSESSION_BOT, path: viewerPath, id: `tty:${VMSESSION_BOT}` }));
     }
 
     if (url.pathname === '/app/' || url.pathname === '/app' || url.pathname === '/app/index.html') {
