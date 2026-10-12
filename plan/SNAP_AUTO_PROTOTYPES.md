@@ -66,12 +66,14 @@ Drive (one-time):
 1. Create `/Meals-inbox` only. Do NOT enable any Photos sync into Drive, do
    NOT copy Photos library into it. One source only or hashes double up.
 2. Quota gate BEFORE enabling the pair: Google One manager — Photos + Drive +
-   Gmail share one pool. Require 5 GB free to start; stop rule: pause the pair
-   below 2 GB free (over-quota blocks uploads AND Photos backup together).
-3. Backlog guard: record setup timestamp T0 BEFORE enabling the pair. First
-   FolderSync run bulk-uploads years of camera history — server ignores every
-   file with `createdTime` < T0. Spike cap: process max 20 post-T0 files, then
-   stop and report. Inbox holds originals only until triaged; spike does NOT
+   Gmail share one pool. Full-DCIM rollout requires 5 GB free to start; stop
+   rule: pause the pair below 2 GB free (over-quota blocks uploads AND Photos
+   backup together). The 30-image test-folder spike needs ~100 MB.
+3. Backlog guard: record setup timestamp T0 BEFORE enabling the pair. A full
+   DCIM pair bulk-uploads years of camera history — server ignores every
+   file with `createdTime` < T0. Spike cap (agreed 2026-10-12): 30-image
+   test-folder-first — the pair points at a folder holding 30 mixed shots
+   (needs ~100 MB, not GB); full-DCIM rollout stays gated behind spike pass. Inbox holds originals only until triaged; spike does NOT
    delete (read-only scope) — purge is Phase 4 with elevated scope.
 
 Server spike (no app code yet, script-level, DRY-RUN: log-only, no real
@@ -99,7 +101,7 @@ Server spike (no app code yet, script-level, DRY-RUN: log-only, no real
    State it in-app before connect. Quota monitor runs during the spike (free
    GB logged each poll), not deferred.
 
-Spike gates (20 post-T0 shots, mostly non-food; timing measured Drive-arrival
+Spike gates (30 test-folder shots, mostly non-food; timing measured Drive-arrival
 -> report, NOT shutter -> report — FolderSync scheduling is coarse and
 battery-gated, so shutter-to-inbox is excluded): median arrival-to-report
 <10 min on Wi-Fi with a manual "Sync now" for the test; non-food leak to
@@ -109,6 +111,17 @@ above line — then P1 bridge wins and P2b stops.
 Failure modes to log: FolderSync killed by battery saver (dontkillmyapp
 steps), modified-time conflicts, token expiry, over-quota stall, missing
 md5 entries skipped.
+
+Spike evidence 2026-10-12 (30 real images, Drive inbox `Meals-inbox`):
+seeded 16 golden meal JPEGs + 13 phone screenshots + 1 PXL camera photo via
+server-side copy (zero bytes moved); polled via Drive search (= `files.list`
+path), downloaded 30/30 with 0 errors (21.5 MB); harness ingested 30/30 with
+sha256 recorded, 0 duplicates (distinct seeds; dedupe proven separately on
+fixtures: 33 in -> 30 stored + 3 duplicates caught). Contact-sheet viewed and
+labeled 30/30: 17 meal (incl. the PXL, an oatmeal pot) / 13 not-food. Leak
+and miss vs the food-gate stay unmeasured — gate is still a stub; that is the
+P1 decision input, not a pass. Remaining unreal legs: FolderSync phone leg
+(human-only) and scout submit (Phase 3 packet).
 
 ### P3 — Source-separated Snap capture (pure web, sidesteps triage)
 Site camera (`accept="image/*" capture="environment"`, existing
@@ -154,7 +167,7 @@ Phase 2 — server spike (script-level, DRY-RUN, read-only, no app code): OAuth
 `drive.readonly`, per-user refresh token, saved page token + T0 filter. 5-min
 poll, new post-T0 IDs only, sha256-on-download dedupe, thumb food-gate first,
 scout dry-run log only (no real jobs). Quota monitor runs in the spike.
-Gate on 20 post-T0 shots: arrival-to-report <10 min median, leak <30%, zero
+Gate on 30 test-folder shots: arrival-to-report <10 min median, leak <30%, zero
 missed meals, cost/100 projected. Kill line: miss meals or breach leak/cost —
 P1 bridge wins, P2b stops. Purge/HEIC-convert need elevated scope + build —
 Phase 4, never the spike.

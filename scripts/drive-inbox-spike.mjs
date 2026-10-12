@@ -6,10 +6,11 @@
 //   DRIVE_REFRESH_TOKEN=.. DRIVE_CLIENT_ID=.. DRIVE_CLIENT_SECRET=.. \
 //     DRIVE_INBOX_ID=.. DRIVE_T0=2026-10-12T00:00:00.000Z \
 //     node scripts/drive-inbox-spike.mjs --out spike-out/ [--cap 20]
+//   node scripts/drive-inbox-spike.mjs --local ./spike-photos/ --out spike-out/ [--cap 30]
 //   node scripts/drive-inbox-spike.mjs --gates --out spike-out/   (after labeling)
 
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const args = process.argv.slice(2);
@@ -55,6 +56,41 @@ const driveGet = (token) => async (path, params = {}) => {
   return res.json();
 };
 
+// Shared ingest: bytes in, dedupe + manifest entry out. Used by both the
+// Drive poll and --local (test-folder) modes so the spike measures one path.
+function ingestOne(state, outDir, id, name, createdTime, bytes, md5 = null) {
+  const hash = sha256(bytes);
+  if (state.shaSeen[hash]) {
+    state.processed[id] = { sha256: hash, verdict: 'duplicate', of: state.shaSeen[hash] };
+    return 'duplicate';
+  }
+  state.shaSeen[hash] = id;
+  writeFileSync(join(outDir, 'full', `${id}.bin`), bytes);
+  state.processed[id] = {
+    name, createdTime, md5, sha256: hash,
+    size: bytes.length, gate: classifyFoodThumb(bytes), label: null,
+  };
+  return 'stored';
+}
+
+// Test-folder mode: ingest local image files as if just polled from Drive.
+// Proves dedupe + manifest + gates on N real files with zero credentials.
+async function ingestLocal(dir, cap, outDir, state) {
+  const exts = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.gif'];
+  const files = readdirSync(dir)
+    .filter((f) => exts.some((e) => f.toLowerCase().endsWith(e)))
+    .sort()
+    .slice(0, cap);
+  let n = 0;
+  for (const f of files) {
+    const id = `local-${f}`;
+    if (state.processed[id]) continue;
+    ingestOne(state, outDir, id, f, null, readFileSync(join(dir, f)));
+    n++;
+  }
+  return n;
+}
+
 async function pollInbox({ token, inboxId, t0, cap, outDir, state }) {
   const api = driveGet(token);
   const q = `'${inboxId}' in parents and trashed = false and createdTime > '${t0}'`;
@@ -84,17 +120,7 @@ async function pollInbox({ token, inboxId, t0, cap, outDir, state }) {
     });
     if (!dl.ok) { state.errors.push(`${f.id}: download ${dl.status}`); continue; }
     const bytes = Buffer.from(await dl.arrayBuffer());
-    const hash = sha256(bytes);
-    if (state.shaSeen[hash]) {
-      state.processed[f.id] = { sha256: hash, verdict: 'duplicate', of: state.shaSeen[hash] };
-      continue;
-    }
-    state.shaSeen[hash] = f.id;
-    writeFileSync(join(outDir, 'full', `${f.id}.bin`), bytes);
-    state.processed[f.id] = {
-      name: f.name, createdTime: f.createdTime, md5: f.md5Checksum, sha256: hash,
-      size: Number(f.size || 0), gate: classifyFoodThumb(bytes), label: null,
-    };
+    ingestOne(state, outDir, f.id, f.name, f.createdTime, bytes, f.md5Checksum || null);
   }
   return fresh.length;
 }
@@ -148,6 +174,14 @@ async function main() {
     console.log(JSON.stringify(computeGates(outDir), null, 2));
     return;
   }
+  const localDir = val('--local', null);
+  if (localDir) {
+    const n = await ingestLocal(localDir, Number(val('--cap', '30')), outDir, state);
+    writeFileSync(statePath, JSON.stringify(state, null, 2));
+    writeReport(outDir, state);
+    console.log(JSON.stringify({ mode: 'local', ingested: n, processed: Object.keys(state.processed).length, errors: state.errors }));
+    return;
+  }
   const inboxId = process.env.DRIVE_INBOX_ID;
   const t0 = process.env.DRIVE_T0;
   if (!inboxId || !t0) throw new Error('missing DRIVE_INBOX_ID / DRIVE_T0');
@@ -158,7 +192,7 @@ async function main() {
   const freeGB = q.limit ? (Number(q.limit) - Number(q.usage || 0)) / 1e9 : null;
   console.log(JSON.stringify({ quotaFreeGB: freeGB === null ? 'unknown' : +freeGB.toFixed(2) }));
   if (freeGB !== null && freeGB < 2) throw new Error(`stop rule: only ${freeGB.toFixed(2)} GB free (< 2 GB)`);
-  const n = await pollInbox({ token, inboxId, t0, cap: Number(val('--cap', '20')), outDir, state });
+  const n = await pollInbox({ token, inboxId, t0, cap: Number(val('--cap', '30')), outDir, state });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
   writeReport(outDir, state);
   console.log(JSON.stringify({ fetched: n, processed: Object.keys(state.processed).length, errors: state.errors }));
