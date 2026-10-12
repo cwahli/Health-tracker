@@ -50,8 +50,13 @@ const BASELINE_TOTAL_KEYS = 3956;
  *
  * Re-recorded for the ICU pilot sibling (biomarkersExtractedStatusOne, all
  * four packs): one key added for one/other routing via Intl.PluralRules.
+ *
+ * Re-recorded for WA-3 (2026-10-12): seven WhatsApp-login keys added to all
+ * four packs (continueWithWhatsApp, waCancel, waExpired, waOpenWhatsApp,
+ * waUnavailable, waVerifyDesc, waWaiting). Growth only — no existing copy
+ * value edited.
  */
-const FROZEN_DIGESTS = { en: '787a640a067670fe', id: '17cb5174b2ab9e92', fr: '91b5719f6d2d8abe', zh: 'da9e1663e1ad1a3b' } as const;
+const FROZEN_DIGESTS = { en: '1b75377c291d3923', id: '884f9af8b9f486f4', fr: '1a976312bf84b990', zh: 'ce7128f6472bb140' } as const;
 
 const stablePairs = (pack: Record<string, unknown>) =>
   JSON.stringify(Object.keys(pack).sort().map((key) => [key, pack[key]]));
