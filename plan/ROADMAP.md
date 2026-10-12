@@ -892,7 +892,7 @@ packet. Q-9/Q-8.2 are green.
 **L-1…L-5 landed (L-5 filled 2026-10-12 per owner: fr + zh reviewed, placeholder-verified, sensor-pinned).** en/id/fr/zh are the product.
 
 **Architecture:** `src/utils/translations.ts` (`en` source of truth, `id` key-parity) · `src/utils/i18n.ts` (`t()`, English fallback, `withAgentLanguage` / `withScoutLanguage`) · named gates `src/utils/i18n.test.ts` and `agents/dietitianInstructions.i18n.test.ts`.
-**Scope:** English + Indonesian only. `fr` / `zh` stay incomplete and fall back to English. More languages later.
+**Scope:** en/id/fr/zh, all with key parity. `fr` / `zh` filled 2026-10-12 (L-5) and sensor-pinned. More languages later.
 
 ### Landed — do not redo
 

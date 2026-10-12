@@ -4,11 +4,12 @@
  *
  * A data move is only safe if someone can prove nothing was dropped, so these
  * tests pin the dictionary itself rather than trusting the diff:
- *   1. key parity between `en` and `id` (the two complete packs),
+ *   1. key parity between `en` and every complete pack (`REQUIRED_COMPLETE_LOCALES`),
  *   2. the total key count can only go up, never down,
  *   3. every value is a non-empty string,
- *   4. the frozen digest of both packs, so a silent copy edit fails here,
- *   5. the `fr`/`zh` per-key English fallback the aggregator still provides.
+ *   4. the frozen digest of each complete pack, so a silent copy edit fails here,
+ *   5. placeholder tokens identical across packs, and zh Simplified-only,
+ *   6. translated fr/zh copy served, with the English fallback kept for unknown keys.
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -93,6 +94,26 @@ describe('translations split (Q-11.8)', () => {
     expect(Object.keys(localePacks)).toEqual(['en', 'id', 'fr', 'zh']);
     expect(localePacks.en).toBe(en);
     expect(localePacks.id).toBe(id);
+  });
+
+  it('keeps every placeholder token identical across all complete packs', () => {
+    const tokens = (s: unknown) => (typeof s === 'string' ? s.match(/\{[^}]*\}/g) || [] : []);
+    for (const [locale, pack] of Object.entries({ id, fr, zh }) as [string, Record<string, unknown>][]) {
+      for (const key of Object.keys(en)) {
+        expect(tokens((pack as Record<string, unknown>)[key]), `${locale}.${key} placeholder drift`).toEqual(
+          tokens((en as unknown as Record<string, unknown>)[key]),
+        );
+      }
+    }
+  });
+
+  it('keeps zh Simplified-only', () => {
+    const traditionalOnly = '這們為麼發裡後點開關門問聽說語讓時會還過對麵髮來進遠運帳設隱緩權驗際連軟盤標籤頁網郵龍鳳龜';
+    for (const [key, value] of Object.entries(zh)) {
+      for (const ch of traditionalOnly) {
+        expect((value as string).includes(ch), `${key} contains Traditional-only ${ch}`).toBe(false);
+      }
+    }
   });
 
   it('serves translated fr/zh copy, falling back to English only for unknown keys', () => {
