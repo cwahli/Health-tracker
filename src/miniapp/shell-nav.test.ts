@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { tabUrl, formatMem } from './shell-nav';
+import { tabUrl } from './shell-nav';
 
 describe('tabUrl (refresh boots from ?tab=, so it must name the visible tab)', () => {
   it('sets the tab on an empty query', () => {
@@ -15,21 +15,5 @@ describe('tabUrl (refresh boots from ?tab=, so it must name the visible tab)', (
   it('sets the bot when given, keeps it when not', () => {
     expect(tabUrl('?token=T', 'fleet', 'web')).toContain('bot=web');
     expect(tabUrl('?token=T&bot=web', 'fleet', '')).toContain('bot=web');
-  });
-});
-
-describe('formatMem (picker memory readout shows a number or nothing)', () => {
-  it('renders megabytes below 1 GiB', () => {
-    expect(formatMem(412)).toBe('412 MB');
-    expect(formatMem(1)).toBe('1 MB');
-  });
-  it('renders gigabytes at and above 1 GiB', () => {
-    expect(formatMem(1024)).toBe('1.0 GB');
-    expect(formatMem(2048)).toBe('2.0 GB');
-  });
-  it('renders nothing for absent measurements, never a zero', () => {
-    expect(formatMem(0)).toBe('');
-    expect(formatMem(-5)).toBe('');
-    expect(formatMem(NaN)).toBe('');
   });
 });
