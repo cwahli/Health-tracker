@@ -84,6 +84,7 @@ describe('d1PullSync count-query burst separation (ALWAYS_COUNT_FALLBACK sensor)
     const res = await d1PullSync({ possibleUids: ['u1'], listOnly: true, pageSize: 15, offset: 0 });
     expect(res.foods.length).toBe(15);
     expect(res.totalFoodsCount).toBe(387);
+    expect(res.totalBiomarkersCount).toBe(40);
     expect(__concurrency.peak).toBeLessThanOrEqual(3);
   });
 });
