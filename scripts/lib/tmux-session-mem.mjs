@@ -1,14 +1,16 @@
 /**
  * tmux-session-mem.mjs — per-tmux-session memory accounting.
  *
- * The shell's terminal picker shows one row per TUI; the RSS summed over a
- * session's pane trees is the number behind each row's memory readout. RSS
- * overcounts shared pages, so every figure is an upper bound — honest for
- * "which session is worth killing", never a billing number.
+ * The shell's terminal picker shows one row per TUI; the PSS summed over a
+ * session's pane trees is the number behind each row's memory readout
+ * (proportional shares, so rows are additive; per-process RSS fallback where
+ * smaps_rollup is unreadable, tracked via `pssOk`). Figures are resident
+ * pages only — kernel slab and swapped-out pages live in no process and are
+ * named in the reconciling remainder, never forced into the rows.
  *
- * Pure parsers (unit-tested) plus one injected-seam collector. Best-effort:
- * any failure resolves to {}, and the status endpoint then renders as if
- * memory were unknown (rows as today, no number).
+ * Pure parsers (unit-tested) plus injected-seam collectors. Best-effort:
+ * any failure resolves to {} / [], and the status endpoint then renders as
+ * if memory were unknown (rows as today, no number).
  */
 import { execFile as defaultExecFile } from 'node:child_process';
 import { readFile as defaultReadFile } from 'node:fs/promises';
