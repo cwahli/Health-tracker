@@ -16,6 +16,7 @@ import { mergeFoodLogsDeduped, foodLogFingerprint, isLineageLinked } from '../ut
 import { findMasterMeal, propagateDownstream } from '../utils/savedMealLineage';
 import PreviousMealThumbnail from './PreviousMealThumbnail';
 import { fetchFoodLogDetail } from '../utils/syncUtils';
+import { missingFoodPages } from '../utils/foodPagination';
 import { resolveMealVerdict } from '../utils/verdictUtils';
 
 /** B13 — only this many history rows mount image sliders at once */
@@ -747,11 +748,19 @@ export default function FoodHistoryTab({
     if (targetPage < 1 || targetPage > totalPages) return;
     if (targetPage === currentPage) return;
 
-    const neededIndex = (targetPage - 1) * itemsPerPage;
-    if (!searchTerm && onFetchMoreFoods && neededIndex >= filteredLogs.length && filteredLogs.length < totalItemsCount) {
+    // Food-space fill (COMBINED_LIST_PAGINATION): the list mixes job cards
+    // with saved meals but the server pages meals only — measure against
+    // loaded meals, and fill every missing meal page up to the target so
+    // job-card padding or a skipped page can never leave an empty page.
+    const missing = !searchTerm && onFetchMoreFoods
+      ? missingFoodPages(activeFoodLogs.length, targetPage, itemsPerPage, totalFoodsCount)
+      : [];
+    if (missing.length > 0) {
       setIsLoadingMoreFoods(true);
       try {
-        await onFetchMoreFoods(targetPage);
+        for (const page of missing) {
+          await onFetchMoreFoods(page);
+        }
       } finally {
         setIsLoadingMoreFoods(false);
       }
