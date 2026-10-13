@@ -3837,11 +3837,19 @@ ${logsText}`);
             }
             
             const looksLikeTimeout = response.status === 504 || response.status === 502 || response.status === 503 || rawText.trim().toLowerCase().startsWith('<!doctype') || rawText.trim().toLowerCase().startsWith('<html');
-            const cleanRaw = is503 ? 'Gemini API is temporarily unavailable or over quota.' : rawText.substring(0, 500);
-            
+            // F1: never surface raw API bodies (they may carry key-validity
+            // JSON) to users — full detail stays in console + debug logs.
+            console.error(`[LogChat] Analysis request failed (status ${response.status}):`, rawText.substring(0, 1000));
+            const hadImage = !!((bodyData as any)?.image || (Array.isArray((bodyData as any)?.images) && (bodyData as any).images.length > 0));
+            const genericFailure = isAgent('food')
+              ? (hadImage
+                ? "Couldn't read this photo. Please retake or retry."
+                : "Couldn't analyze this meal. Please try again.")
+              : "Analysis failed. Please try again.";
+
             throw new Error(looksLikeTimeout || is503
               ? "This analysis took too long or the AI service is currently unavailable/over capacity. Please try again or switch models."
-              : `Request failed (${response.status}). Please try again.\n${cleanRaw ? 'Details: ' + cleanRaw : ''}`);
+              : genericFailure);
           }
           break; // success
         } catch (fetchErr: any) {
@@ -4090,11 +4098,14 @@ ${logsText}`);
           try {
             resData = rawText ? JSON.parse(rawText) : {};
           } catch (parseErr) {
-            throw new Error(`Server returned invalid JSON (${response.status}): ${rawText.substring(0, 150)}`);
+            // F1: log the raw body for debug, never render it (may hold key JSON).
+            console.error(`[LogChat] Invalid JSON (status ${response.status}):`, rawText.substring(0, 500));
+            throw new Error("Analysis failed. Please try again.");
           }
         } else {
           const rawText = await response.text().catch(() => "");
-          throw new Error(`Server returned a non-JSON response (${response.status}): ${rawText.substring(0, 150)}`);
+          console.error(`[LogChat] Non-JSON response (status ${response.status}):`, rawText.substring(0, 500));
+          throw new Error("Analysis failed. Please try again.");
         }
       }
       // Save captured agent debug logs. Prefer fetching the full, untruncated log
