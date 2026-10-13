@@ -697,8 +697,11 @@ function SessionMenu({ routes, picked, pickedLabel, open, live, mem, idle, killM
               const isTmux = r.kind === 'tmux';
               const isBox = r.kind === 'box';
               // Memory rides the main line where it can be read; the subline
-              // explains the dot — tty rows only when red, bare rows always.
-              const showSub = isSession ? look.stateText !== '' : look.dot === 'idle';
+              // explains the dot — tty rows only when red, bare rows always,
+              // box always (its detail names what the aggregate covers).
+              const showSub = isSession
+                ? look.stateText !== ''
+                : (look.dot === 'idle' || r.kind === 'box');
               return (
                 <span key={rid}
                   style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, fontSize: 13, color: '#e2e8f0', background: watching ? '#1e293b' : 'none' }}>
