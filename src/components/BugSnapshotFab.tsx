@@ -233,7 +233,7 @@ export default function BugSnapshotFab({
   biomarkers,
   profile,
 }: BugSnapshotFabProps) {
-  const [enabled, setEnabled] = useState(true);
+  const [enabled, setEnabled] = useState(() => isBugSnapshotEnabled(profile));
   const [open, setOpen] = useState(false);
   const [snapshotType, setSnapshotType] = useState<'bug' | 'meal'>('bug');
   const [goldenTitle, setGoldenTitle] = useState('');
@@ -292,8 +292,8 @@ export default function BugSnapshotFab({
     initBrowserLogRecorder();
     initNetworkRecorder();
     initInteractionRecorder();
-    setEnabled(isBugSnapshotEnabled());
-    const onStorage = () => setEnabled(isBugSnapshotEnabled());
+    setEnabled(isBugSnapshotEnabled(profile));
+    const onStorage = () => setEnabled(isBugSnapshotEnabled(profile));
     window.addEventListener('bug_snapshot_settings_changed', onStorage);
     return () => window.removeEventListener('bug_snapshot_settings_changed', onStorage);
   }, []);
@@ -2124,7 +2124,9 @@ export default function BugSnapshotFab({
 
 /** Settings toggle rows — embed in Settings panel */
 export function BugSnapshotSettingsToggle() {
-  const [on, setOn] = useState(isBugSnapshotEnabled());
+  // This toggle only renders for admins (DbInteractionsOverlay isAdmin gate),
+  // so the unset default is read in the admin context.
+  const [on, setOn] = useState(isBugSnapshotEnabled({ userType: 'Admin' }));
   const [auto, setAuto] = useState(isBugAutoTriageEnabled());
   return (
     <div className="space-y-2">

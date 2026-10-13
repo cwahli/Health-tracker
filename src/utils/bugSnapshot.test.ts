@@ -13,6 +13,7 @@ import {
   bugArtifactUrl,
   evidencePhotoSrc,
   canFileBugForProfile,
+  isBugSnapshotEnabled,
   bugReportShotFields,
   bugShotExt,
   bugShotContentType,
@@ -125,6 +126,25 @@ describe('bugSnapshot', () => {
     expect(canFileBugForProfile({ userType: 'Demo' })).toBe(false);
     expect(canFileBugForProfile(null)).toBe(false);
     expect(canFileBugForProfile(undefined)).toBe(false);
+  });
+
+  it('red capture button defaults OFF for non-admin, ON for Admin; explicit choice wins', () => {
+    const store: Record<string, string> = {};
+    (globalThis as any).localStorage = {
+      getItem: (k: string) => (k in store ? store[k] : null),
+      setItem: (k: string, v: string) => { store[k] = v; },
+    };
+    const check = isBugSnapshotEnabled;
+    expect(check({ userType: 'Standard' })).toBe(false);
+    expect(check({})).toBe(false);
+    expect(check(null)).toBe(false);
+    expect(check(undefined)).toBe(false);
+    expect(check({ userType: 'Admin' })).toBe(true);
+    store['bug_snapshot_enabled'] = '1';
+    expect(check({ userType: 'Standard' })).toBe(true);
+    store['bug_snapshot_enabled'] = '0';
+    expect(check({ userType: 'Admin' })).toBe(false);
+    delete (globalThis as any).localStorage;
   });
 
   it('an attached screenshot gets the exact fields the report reader looks for', () => {

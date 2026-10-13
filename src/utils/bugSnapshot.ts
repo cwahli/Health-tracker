@@ -10,15 +10,19 @@ export const BUG_SNAPSHOT_MAX_SHOTS = 5;
 export const BUG_SNAPSHOT_LOG = '[BugSnapshot]';
 export const BUG_TRIAGE_LOG = '[BugTriage]';
 
-/** Admin feature default ON for Admin; UI can disable via settings. */
-export function isBugSnapshotEnabled(): boolean {
-  if (typeof localStorage === 'undefined') return true;
+/**
+ * Admin feature default ON for Admin; UI can disable via settings.
+ * Everyone else defaults OFF (personas must never see the red capture button
+ * uninvited) — an explicit saved choice always wins for any role.
+ */
+export function isBugSnapshotEnabled(profile?: { userType?: string } | null): boolean {
+  if (typeof localStorage === 'undefined') return false;
   try {
     const v = localStorage.getItem(BUG_SNAPSHOT_SETTINGS_KEY);
-    if (v === null) return true; // default on
-    return v === '1' || v === 'true';
+    if (v !== null) return v === '1' || v === 'true';
+    return profile?.userType === 'Admin';
   } catch {
-    return true;
+    return false;
   }
 }
 
