@@ -36,8 +36,22 @@ const BASELINE_TOTAL_KEYS = 3960;
  * BugBoard.tsx, and `dispositionLabel()`'s second argument exists so they stop
  * being. Still growth only — no existing copy value was edited, which is the
  * rule this digest is for.
+ *
+ * Re-recorded for profile-surface i18n completion (Indonesian-persona QA):
+ * four new keys per pack (`adminControlNav`, `adminMode`, `adminControlDesc`,
+ * `openAdminControl` — previously hardcoded English in ProfileModal.tsx) plus
+ * 27 `id` values translated from English copies (editProfile, save,
+ * weight, bloodType, signOut, …). This is the deliberate exception the digest
+ * exists to force into the open: `id` values changed on purpose so Edit
+ * Profile is no longer ~50% English. No `en` value was edited.
+ *
+ * Re-recorded again for auth-surface completion (same QA): six `id` values
+ * translated (bypassVerification, checkInbox, emailVerifiedButton,
+ * resendVerificationLink, signOutTryAnother, verificationLinkSent) plus 25
+ * fr and 25 zh entries for the AuthScreen keys. Only `id` values changed;
+ * `en` untouched.
  */
-const FROZEN_DIGESTS = { en: 'e382604d4ed04cd6', id: '39a1785088c34a73' } as const;
+const FROZEN_DIGESTS = { en: 'a63869abd92e5670', id: '16e7ff856ed1e09f' } as const;
 
 const stablePairs = (pack: Record<string, unknown>) =>
   JSON.stringify(Object.keys(pack).sort().map((key) => [key, pack[key]]));

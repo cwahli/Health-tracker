@@ -352,14 +352,14 @@ export default function ProfileModal({
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <ShieldCheck className="w-4.5 h-4.5 text-indigo-600 dark:text-indigo-400" />
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Admin Control & Sync Nav</span>
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{t.adminControlNav}</span>
                   </div>
                   <span className="text-[9px] bg-indigo-600 text-white font-bold px-2 py-0.5 rounded-full uppercase">
-                    Admin Mode
+                    {t.adminMode}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 mb-2.5">
-                  Access live telemetry, manage database syncs, configure backups, and view user records.
+                  {t.adminControlDesc}
                 </p>
                 <button
                   type="button"
@@ -370,7 +370,7 @@ export default function ProfileModal({
                   className="w-full flex items-center justify-center gap-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded-xl shadow-sm transition-all cursor-pointer"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Open Admin Control & Sync Settings</span>
+                  <span>{t.openAdminControl}</span>
                 </button>
               </div>
             )}
