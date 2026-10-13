@@ -1342,6 +1342,29 @@ export function sanitizeVerdictLabel(rawLabel: string, level?: string, nutrients
   return label;
 }
 
+/**
+ * Mode-D compare verdict guard: the compare schema already constrains the
+ * model to a "3-6 word concise clinical verdict label". When the model
+ * complies, keep its label verbatim (minus wrapping quotes) instead of
+ * running the meal-mode generic-descriptor scrubber, which would flatten
+ * distinct tier labels (e.g. "Excessive Sugar & Saturated Fat") into one
+ * identical string across warning AND alert groups. Non-conforming labels
+ * (empty, <3 or >6 words) still go through sanitizeVerdictLabel.
+ */
+export function preserveSpecVerdictLabel(rawVerdict: any, fallbackNutrients?: any, lang?: unknown): any {
+  const rawLabel = rawVerdict && typeof rawVerdict === 'object' ? String(rawVerdict.label || '').trim() : '';
+  const level = rawVerdict && typeof rawVerdict === 'object' ? String(rawVerdict.level || 'neutral') : 'neutral';
+  if (!rawLabel) return rawVerdict;
+  const wordCount = rawLabel.split(/\s+/).filter(Boolean).length;
+  if (wordCount >= 3 && wordCount <= 6) {
+    return { label: rawLabel.replace(/^["']|["']$/g, '').trim(), level };
+  }
+  return {
+    label: sanitizeVerdictLabel(rawLabel, level, fallbackNutrients, lang),
+    level,
+  };
+}
+
 export function itemsMatchByName(oldName: string, newName: string): boolean {
   if (!oldName || !newName) return false;
   const o = oldName.toLowerCase().trim();
@@ -1968,7 +1991,21 @@ export function applyServerAverageNutrients(
       for (const [k, v] of Object.entries(sumMap)) {
         avgMap[k] = Math.round((v / count) * 10) / 10;
       }
-      avgServing = avgMap;
+      const llmWeight = Number((g as any).servingWeightGrams) || 0;
+      const per100Cal = Number((avg100g as any)?.calories) || 0;
+      if (!g.averageNutrients && avg100g && per100Cal > 0 && llmWeight > 0) {
+        // Mode-D derive branch: the scout emitted per-100g densities plus a
+        // serving weight but no per-serving average. Derive per-serving
+        // deterministically (per100g * wt / 100, golden Meal_03 spec) instead
+        // of ledger averages — ledgers for nutrient-less scout items collapse
+        // to one identical fallback, painting every group with the same kcal.
+        avgServing = {};
+        for (const [k, v] of Object.entries(avg100g)) {
+          avgServing[k] = Math.round(Number(v) * (llmWeight / 100) * 10) / 10;
+        }
+      } else {
+        avgServing = avgMap;
+      }
     }
 
     // Determine realistic servingWeightGrams for proportional scaling

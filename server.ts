@@ -338,7 +338,7 @@ import { generateDynamicInsight } from "./src/utils/biomarkerInsights";
 import { formatOptimalTargetValue } from "./src/utils/agentCalibration";
 import { NUTRIENT_KEYS } from "./src/utils/nutrients";
 import { t, interpolate, withAgentLanguage } from "./src/utils/i18n";
-import { extractBalancedJson, sanitizeMealWeight, findItemIndexInList, getUSDANutrientValue, extractUSDANutrientsPer100g, checkIfItemIsAlreadyPrepared, applyNutrientRealityChecks, applyCommercialSodiumFloor, checkAtwaterConsistency, synchronizeNarrativeText, evaluateNutrientWarnings, build31NutrientsMarkdownServer, enforceTitlePluralParity, sanitizeVerdictLabel } from "./server_pure_helpers";
+import { extractBalancedJson, sanitizeMealWeight, findItemIndexInList, getUSDANutrientValue, extractUSDANutrientsPer100g, checkIfItemIsAlreadyPrepared, applyNutrientRealityChecks, applyCommercialSodiumFloor, checkAtwaterConsistency, synchronizeNarrativeText, evaluateNutrientWarnings, build31NutrientsMarkdownServer, enforceTitlePluralParity, preserveSpecVerdictLabel } from "./server_pure_helpers";
 import { cleanNutrientNumber } from "./server_nutrient_aggregation";
 import { registerIssueBacklogRoutes } from './serverIssueBacklog.js';
 import { registerBugSnapshotRoutes } from './serverBugSnapshot.js';
@@ -746,11 +746,11 @@ export function resolveComparisonGroups(rawGroups: any[], scoutItems: any[], lan
     }
 
     const rawV = g.verdict;
+    // Mode-D verdict guard: keep schema-compliant 3-6 word model labels
+    // verbatim; only non-conforming labels go through the meal-mode
+    // scrubber (fed per-100g when per-serving averages are absent).
     const sanitizedVerdict = rawV && typeof rawV === 'object' && rawV.label
-      ? {
-          label: sanitizeVerdictLabel(rawV.label, rawV.level, g.averageNutrients, lang),
-          level: String(rawV.level || 'neutral')
-        }
+      ? preserveSpecVerdictLabel(rawV, g.averageNutrients || g.averageNutrientsPer100g, lang)
       : rawV;
 
     // Derive bounding box: if null or [0,0,1000,1000], compute union from member items
@@ -776,6 +776,7 @@ export function resolveComparisonGroups(rawGroups: any[], scoutItems: any[], lan
       orderingTip: g.orderingTip || null,
       averageNutrients: g.averageNutrients || null,
       averageNutrientsPer100g: g.averageNutrientsPer100g || null,
+      servingWeightGrams: Number(g.servingWeightGrams) || null,
       boundingBox2D: resolvedBox,
       scoutItemIndices: Array.from(resolvedIndices),
       itemClinicalThreats: resolvedThreats,
@@ -807,6 +808,7 @@ export function resolveComparisonGroups(rawGroups: any[], scoutItems: any[], lan
             orderingTip: "Consider your daily nutrition allowance when selecting.",
             averageNutrients: sItem.preCalcNutrients || { calories: 150, protein: 5, totalFat: 5, saturatedFat: 1, carbohydrates: 20, sodium: 100 },
             averageNutrientsPer100g: { calories: 150, protein: 5, totalFat: 5, saturatedFat: 1, carbohydrates: 20, sodium: 100 },
+            servingWeightGrams: 100,
             boundingBox2D: itemBox,
             scoutItemIndices: [idx],
             itemClinicalThreats: {},
@@ -834,6 +836,7 @@ export function resolveComparisonGroups(rawGroups: any[], scoutItems: any[], lan
             orderingTip: "Consider your daily nutrition allowance when selecting.",
             averageNutrients: s.preCalcNutrients || { calories: 150, protein: 5, totalFat: 5, saturatedFat: 1, carbohydrates: 20, sodium: 100 },
             averageNutrientsPer100g: { calories: 150, protein: 5, totalFat: 5, saturatedFat: 1, carbohydrates: 20, sodium: 100 },
+            servingWeightGrams: 100,
             boundingBox2D: itemBox,
             scoutItemIndices: [idx],
             itemClinicalThreats: {},
@@ -857,6 +860,7 @@ export function resolveComparisonGroups(rawGroups: any[], scoutItems: any[], lan
           orderingTip: "Consider your daily nutrition allowance when selecting.",
           averageNutrients: { calories: 150, protein: 5, totalFat: 5, saturatedFat: 1, carbohydrates: 20, sodium: 100 },
           averageNutrientsPer100g: { calories: 150, protein: 5, totalFat: 5, saturatedFat: 1, carbohydrates: 20, sodium: 100 },
+          servingWeightGrams: 100,
           boundingBox2D: getQuadrantBox(resolvedGroups.length, 4),
           scoutItemIndices: unassignedIdxs,
           itemClinicalThreats: {},
