@@ -16,6 +16,8 @@ import { mergeFoodLogsDeduped, foodLogFingerprint, isLineageLinked } from '../ut
 import { findMasterMeal, propagateDownstream } from '../utils/savedMealLineage';
 import PreviousMealThumbnail from './PreviousMealThumbnail';
 import { fetchFoodLogDetail } from '../utils/syncUtils';
+import { getAggregatedAppData, getStorageKey, healedBundleTotal, safeSaveToLocalStorage } from '../utils/storageUtils';
+import { missingFoodPages, shouldProbeFoodTotal } from '../utils/foodPagination';
 import { resolveMealVerdict } from '../utils/verdictUtils';
 
 /** B13 — only this many history rows mount image sliders at once */
@@ -747,11 +749,19 @@ export default function FoodHistoryTab({
     if (targetPage < 1 || targetPage > totalPages) return;
     if (targetPage === currentPage) return;
 
-    const neededIndex = (targetPage - 1) * itemsPerPage;
-    if (!searchTerm && onFetchMoreFoods && neededIndex >= filteredLogs.length && filteredLogs.length < totalItemsCount) {
+    // Food-space fill (COMBINED_LIST_PAGINATION): the list mixes job cards
+    // with saved meals but the server pages meals only — measure against
+    // loaded meals, and fill every missing meal page up to the target so
+    // job-card padding or a skipped page can never leave an empty page.
+    const missing = !searchTerm && onFetchMoreFoods
+      ? missingFoodPages(activeFoodLogs.length, targetPage, itemsPerPage, totalFoodsCount)
+      : [];
+    if (missing.length > 0) {
       setIsLoadingMoreFoods(true);
       try {
-        await onFetchMoreFoods(targetPage);
+        for (const page of missing) {
+          await onFetchMoreFoods(page);
+        }
       } finally {
         setIsLoadingMoreFoods(false);
       }
@@ -784,7 +794,53 @@ export default function FoodHistoryTab({
     onClearInitiallyExpandedFoodId?.();
   }, [initiallyExpandedFoodId, combinedItems, filteredLogs, itemsPerPage, currentPage, searchTerm, onClearInitiallyExpandedFoodId]);
 
-  // Smooth scroll into view when expandedLogId or currentPage updates
+  // Smooth scroll into view when expandedLogId or currentPage updates.
+  // Page turns start at the top of the list; only an expanded meal that is
+  // actually on the new page keeps the viewport on itself.
+  const prevPageRef = useRef(currentPage);
+  useEffect(() => {
+    if (prevPageRef.current === currentPage) return;
+    prevPageRef.current = currentPage;
+    if (expandedLogId && document.getElementById(`food-log-item-${expandedLogId}`)) return;
+    const top = document.getElementById('food-history-list-top');
+    if (top) top.scrollIntoView({ behavior: 'auto', block: 'start' });
+  }, [expandedLogId, currentPage]);
+
+  // Unknown-total self-heal (ALWAYS_COUNT_FALLBACK): if a full window is
+  // loaded but the server never reported a total, prefetch the next window
+  // once — its response carries the count and heals pagination. Throttled
+  // and mount-scoped; the page-2 fetch doubles as useful prefetched data.
+  const totalProbeAtRef = useRef<number>(0);
+  useEffect(() => {
+    if (searchTerm || !onFetchMoreFoods) return;
+    if (!shouldProbeFoodTotal({ totalFoods: totalFoodsCount, loadedFoods: activeFoodLogs.length, pageSize: itemsPerPage, lastProbeAtMs: totalProbeAtRef.current, nowMs: Date.now() })) return;
+    const pages = missingFoodPages(activeFoodLogs.length, currentPage + 1, itemsPerPage, totalFoodsCount);
+    if (pages.length === 0) return;
+    totalProbeAtRef.current = Date.now();
+    onFetchMoreFoods(pages[0]).catch(() => {});
+  }, [activeFoodLogs.length, totalFoodsCount, searchTerm, currentPage, itemsPerPage, onFetchMoreFoods]);
+
+  // Heal a poisoned stored total (ALWAYS_COUNT_FALLBACK): sync bundles can
+  // be written with a stale low count, and every remount re-reads it. When
+  // live state learns a higher total, persist the max so remounts never
+  // regress. Monotonic by design, matching the ratchet on live state.
+  useEffect(() => {
+    if (typeof totalFoodsCount !== 'number' || totalFoodsCount <= 0) return;
+    const email = profile?.email;
+    if (!email) return;
+    let cancelled = false;
+    getAggregatedAppData(email)
+      .then((cur) => {
+        if (cancelled) return;
+        const best = healedBundleTotal(totalFoodsCount, cur?.totalFoodsCount);
+        if (best != null && best !== cur?.totalFoodsCount) {
+          safeSaveToLocalStorage(getStorageKey(email), { ...(cur || {}), totalFoodsCount: best }).catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [totalFoodsCount, profile?.email]);
+
   useEffect(() => {
     if (!expandedLogId) return;
     const timer = setTimeout(() => {
@@ -1374,7 +1430,7 @@ export default function FoodHistoryTab({
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div id="food-history-list-top" className="space-y-4">
           {filteredLogs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item) => {
             if (item.type === 'job') {
               const job = item.data;

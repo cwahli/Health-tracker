@@ -365,11 +365,17 @@ export async function d1PullSync(opts: D1PullOptions): Promise<{
   const countFoodSql = `SELECT count(*) as cnt FROM food_logs WHERE firebase_uid IN (${uidPlaceholders})`;
   const countBioSql = `SELECT count(*) as cnt FROM biomarker_logs WHERE firebase_uid IN (${uidPlaceholders})`;
 
-  // Execute concurrently
-  const [foodRes, bioRes, profRes, countFoodRes, countBioRes] = await Promise.all([
+  // Execute in two waves, never one burst of 5 (class ALWAYS_COUNT_FALLBACK):
+  // on slow mobile links the Cloudflare D1 HTTP API drops queries out of a
+  // 5-way burst, and the count(*) queries are the ones that starve — the
+  // response then carries a page-sized slice with no total and history
+  // collapses to ~2 pages with no recovery. Data rows first, counts after.
+  const [foodRes, bioRes, profRes] = await Promise.all([
     d1Query<any>(foodSql, foodParams),
     d1Query<any>(bioSql, bioParams),
     d1Query<any>(profSql, profParams),
+  ]);
+  const [countFoodRes, countBioRes] = await Promise.all([
     d1Query<any>(countFoodSql, possibleUids),
     d1Query<any>(countBioSql, possibleUids)
   ]);
