@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { enabledMiniApps, miniAppById, type MiniAppDef } from './miniapp-registry';
 import { tabUrl } from './shell-nav';
+import { statusKeyMaps, lookForRow, sortByMem, type RowLook, type TmuxEntry } from './shell-session';
 import { BugBoard } from '../components/bug-board/BugBoard';
 import { useBugBoard } from '../components/bug-board/useBugBoard';
 import '../index.css';
@@ -627,6 +628,13 @@ type TtyRoute = {
   // `{bot, path}` rows keep rendering.
   id?: string; kind?: string; sessionId?: string; title?: string;
   agent?: string; status?: string; updatedAt?: string | null; url?: string;
+  // Precomputed subline for synthetic rows (the box aggregate).
+  detail?: string;
+  // Resident memory of the live tmux tree, MiB, and idle age in ms. Present
+  // only on live tty rows from a new gateway; dormant rows, bare sessions
+  // and old gateways carry nothing, and the UI renders no number rather
+  // than a zero.
+  memMiB?: number; idleMs?: number;
 };
 
 /** Stable picker key: the row id, falling back to bot for older gateways. */
@@ -634,25 +642,39 @@ function ttyRowId(r: TtyRoute): string {
   return (r && typeof r.id === 'string' && r.id) || r.bot;
 }
 
+/** Dot language for the session dropdown: green = active, red = idle kill
+ * candidate, grey = dormant. The red needs no legend hunt — its row always
+ * carries the idle age beside it. */
+const DOT_COLOR = { live: '#4ade80', idle: '#f87171', dormant: '#475569' } as const;
+const DOT_TITLE = {
+  live: 'session live',
+  idle: 'session idle — kill candidate',
+  dormant: 'session dormant',
+} as const;
+
 /** The session dropdown: the trigger shows the current bot with its live
  * dot, and the panel lists every served bot with its own liveness plus
  * View/Kill — the server info used to live behind a second floating
  * burger, now it lives here. The ☰ burger is only ever the Mini Apps nav.
  */
-function SessionMenu({ routes, picked, pickedLabel, open, live, killMsg, onView, onToggleOpen, onKill, onRefresh }: {
-  routes: TtyRoute[] | null; picked: string; pickedLabel: string; open: boolean; live: Record<string, boolean>; killMsg: string;
+function SessionMenu({ routes, picked, pickedLabel, open, live, mem, idle, killMsg, onView, onToggleOpen, onKill, onRefresh }: {
+  routes: TtyRoute[] | null; picked: string; pickedLabel: string; open: boolean; live: Record<string, boolean>; mem: Record<string, number>; idle: Record<string, number>; killMsg: string;
   onView: (id: string) => void; onToggleOpen: () => void; onKill: (bot: string) => void; onRefresh: () => void;
 }) {
   const [menu, setMenu] = useState(false);
-  const isLive = picked !== '' && live[picked] === true;
+  const pickedRoute = (routes || []).find((r) => ttyRowId(r) === picked);
+  const pickedLook: RowLook = pickedRoute && picked !== ''
+    ? lookForRow(pickedRoute, { live: live[picked] === true, memMiB: mem[picked], idleMs: idle[picked] }, Date.now())
+    : { dot: 'dormant', memText: '', stateText: '' };
+  const pickedExtra = `${pickedLook.memText ? ` · ${pickedLook.memText}` : ''}${pickedLook.stateText.startsWith('idle') ? ` · ${pickedLook.stateText}` : ''}`;
   return (
     <span style={{ position: 'relative', flex: '1 1 auto', minWidth: 0 }}>
       <button type="button" aria-label="Session" title="Sessions" disabled={!routes} onClick={() => setMenu((v) => !v)}
         style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: '4px 8px', fontSize: 13, cursor: 'pointer' }}>
-        <span title={isLive ? 'session live' : 'session dormant'}
-          style={{ width: 8, height: 8, borderRadius: 4, background: isLive ? '#4ade80' : '#475569', flex: '0 0 auto' }} />
+        <span title={DOT_TITLE[pickedLook.dot]}
+          style={{ width: 8, height: 8, borderRadius: 4, background: DOT_COLOR[pickedLook.dot], flex: '0 0 auto' }} />
         <span style={{ flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}>
-          {routes === null ? 'Loading…' : pickedLabel}
+          {routes === null ? 'Loading…' : pickedLabel}{routes === null ? '' : pickedExtra}
         </span>
         <span style={{ color: '#94a3b8' }}>▾</span>
       </button>
@@ -667,33 +689,40 @@ function SessionMenu({ routes, picked, pickedLabel, open, live, killMsg, onView,
             {(routes || []).map((r) => {
               const rid = ttyRowId(r);
               const watching = rid === picked && open;
-              const rowLive = live[rid] === true;
+              const look = lookForRow(r, { live: live[rid] === true, memMiB: mem[rid], idleMs: idle[rid] }, Date.now());
               // Bare VM sessions share bot `vm` and have no tmux to kill:
               // they show their title + model, and View opens the web UI.
+              // Raw tmux rows have no route to view — Kill by session name.
               const isSession = r.kind === 'opencode';
+              const isTmux = r.kind === 'tmux';
+              const isBox = r.kind === 'box';
+              // Memory rides the main line where it can be read; the subline
+              // explains the dot — tty rows only when red, bare rows always.
+              const showSub = isSession ? look.stateText !== '' : look.dot === 'idle';
               return (
                 <span key={rid}
                   style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, fontSize: 13, color: '#e2e8f0', background: watching ? '#1e293b' : 'none' }}>
-                  <span title={rowLive ? 'session live' : 'session dormant'}
-                    style={{ width: 8, height: 8, borderRadius: 4, background: rowLive ? '#4ade80' : '#475569', flex: '0 0 auto' }} />
+                  <span title={DOT_TITLE[look.dot]}
+                    style={{ width: 8, height: 8, borderRadius: 4, background: DOT_COLOR[look.dot], flex: '0 0 auto' }} />
                   <span style={{ flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {isSession ? (r.title || r.sessionId || r.bot) : (r.bot === 'vmsession' ? 'VM session' : r.bot)}
-                    {isSession && r.agent ? (
+                    {look.memText ? ` · ${look.memText}` : ''}
+                    {showSub ? (
                       <span style={{ display: 'block', fontSize: 11, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {r.agent}{r.status ? ` · ${r.status}` : ''}
+                        {isSession && r.agent ? `${r.agent} · ` : ''}{look.stateText}
                       </span>
                     ) : null}
                   </span>
-                  {watching ? (
-                    <span style={{ color: '#7dd3fc' }}>watching</span>
+                  {watching || isTmux || isBox ? (
+                    watching ? <span style={{ color: '#7dd3fc' }}>watching</span> : null
                   ) : (
                     <button type="button" onClick={() => { onView(rid); setMenu(false); }}
                       style={{ background: 'none', border: 0, color: '#7dd3fc', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}>
                       View
                     </button>
                   )}
-                  {isSession ? null : (
-                    <button type="button" onClick={() => onKill(r.bot)}
+                  {isSession || isBox ? null : (
+                    <button type="button" onClick={() => onKill(isTmux ? rid : r.bot)}
                       style={{ background: 'none', border: 0, color: '#f0abfc', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}>
                       Kill
                     </button>
@@ -734,7 +763,18 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   const [killMsg, setKillMsg] = useState('');
   // Per-bot liveness (green = tmux session alive). Refreshed with the list
   // and after every kill, so each row's Kill targets exactly that bot.
+  // mem/idle mirror it: resident MiB and idle age per row key, present only
+  // when the gateway reported them (live tty rows on a new gateway; never
+  // dormant/bare rows).
   const [live, setLive] = useState<Record<string, boolean>>({});
+  const [mem, setMem] = useState<Record<string, number>>({});
+  const [idle, setIdle] = useState<Record<string, number>>({});
+  // Raw tmux tracking rows (routeless sessions only): view-less, Kill by
+  // session name. Refreshed with the status call, same as the maps above.
+  const [tmuxRows, setTmuxRows] = useState<TtyRoute[]>([]);
+  // The reconciling remainder: PSS outside every tmux tree. Informational
+  // only — no View (nothing to attach), no Kill (nothing to target).
+  const [boxRow, setBoxRow] = useState<TtyRoute | null>(null);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
 
   const deadRef = useRef(false);
@@ -781,15 +821,31 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     const body = res ? await res.json().catch(() => null) : null;
     if (deadRef.current) return;
     if (!body || body.ok !== true || !Array.isArray(body.status)) return;
-    const map: Record<string, boolean> = {};
-    for (const row of body.status as { id?: string; bot: string; live: boolean }[]) {
-      if (!row || typeof row.bot !== 'string') continue;
-      // Keyed rows (bare sessions) must not paint the shared `vm` bot row:
-      // a live bare session is not a live VM tmux session.
-      if (typeof row.id === 'string' && row.id) map[row.id] = row.live === true;
-      else map[row.bot] = row.live === true;
+    // Keying lives in statusKeyMaps: bare rows paint only their own id (a
+    // live bare session is not a live VM tmux session), ttyd rows paint
+    // their tty:<bot> picker id too, or their dot never lights. Routeless
+    // tmux entries become view-less tracking rows keyed tmux:<name>.
+    const rawTmux = Array.isArray((body as { tmux?: unknown }).tmux)
+      ? (body as { tmux?: TmuxEntry[] }).tmux as TmuxEntry[]
+      : [];
+    const maps = statusKeyMaps(body.status as { id?: string; bot: string; live: boolean; memMiB?: number; idleMs?: number }[], rawTmux);
+    const box = (body as { box?: { otherMiB?: number; otherProcs?: number } }).box;
+    const boxOk = box && typeof box.otherMiB === 'number' && box.otherMiB > 0;
+    setLive(maps.live);
+    setMem(boxOk ? { ...maps.mem, 'box:other': box.otherMiB as number } : maps.mem);
+    setIdle(maps.idle);
+    if (boxOk) {
+      const n = typeof box.otherProcs === 'number' ? box.otherProcs : 0;
+      setBoxRow({
+        bot: 'other processes', path: '', id: 'box:other', kind: 'box',
+        detail: `${n} process${n === 1 ? '' : 'es'} outside tmux`,
+      });
+    } else {
+      setBoxRow(null);
     }
-    setLive(map);
+    setTmuxRows(rawTmux
+      .filter((e) => e && !e.route && typeof e.name === 'string' && e.name)
+      .map((e) => ({ bot: e.name, path: '', id: `tmux:${e.name}`, kind: 'tmux' })));
   };
 
   useEffect(() => {
@@ -820,7 +876,12 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     );
   }
 
-  const pickedRoute = (routes || []).find((r) => ttyRowId(r) === picked);
+  // Heaviest first so kill candidates surface; unmeasured rows (bare
+  // sessions with no backend here) keep their order at the bottom.
+  const displayRoutes = routes
+    ? sortByMem([...routes, ...tmuxRows, ...(boxRow ? [boxRow] : [])], mem)
+    : routes;
+  const pickedRoute = (displayRoutes || []).find((r) => ttyRowId(r) === picked);
   const pickedLabel = pickedRoute
     ? (pickedRoute.kind === 'opencode'
       ? (pickedRoute.title || pickedRoute.sessionId || picked)
@@ -869,22 +930,32 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   };
 
   // Views one session: ttyd rows open their own terminal, bare VM sessions
-  // go through the shared viewer above.
+  // go through the shared viewer above. Raw tmux and box rows have no route
+  // to view (they render no View button), so reaching here is a no-op.
   const viewRow = (rid: string) => {
-    const row = (routes || []).find((r) => ttyRowId(r) === rid);
-    if (row && row.kind === 'opencode') { void viewSession(row); return; }
+    const row = (displayRoutes || []).find((r) => ttyRowId(r) === rid);
+    if (!row || row.kind === 'tmux' || row.kind === 'box') return;
+    if (row.kind === 'opencode') { void viewSession(row); return; }
     viewBot(rid);
   };
 
-  // Frees exactly one bot's backend RAM (operator only). The attach script
-  // recreates that bot's tmux session on next open, resuming the same agent
-  // session — memory freed, conversation kept, other bots untouched.
-  const killSession = async (target: string) => {
-    setKillMsg(`Stopping ${target}…`);
+  // Frees exactly one backend's RAM (operator only). A bot's attach script
+  // recreates its tmux session on next open, resuming the same agent
+  // session — memory freed, conversation kept, other bots untouched. A raw
+  // tmux session is gone for good: the server only kills names from its own
+  // fresh listing, never free-form.
+  const killSession = async (id: string) => {
+    const isTmux = id.startsWith('tmux:');
+    const name = isTmux ? id.slice('tmux:'.length) : id;
+    if (!name) {
+      setKillMsg('Could not stop it.');
+      return;
+    }
+    setKillMsg(`Stopping ${name}…`);
     const send = () => fetch('/api/ttys/kill' + currentQuery(), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ bot: target }),
+      body: JSON.stringify(isTmux ? { tmux: name } : { bot: id }),
     });
     let res: Response | null = null;
     try {
@@ -905,15 +976,17 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
       return;
     }
     if (!body || body.ok !== true) {
-      setKillMsg(`Could not stop ${target}.`);
+      setKillMsg(`Could not stop ${name}.`);
       return;
     }
-    if (target === picked) setOpen(false);
-    const pickedRow = (routes || []).find((r) => ttyRowId(r) === picked);
-    if (pickedRow && target === pickedRow.bot) setOpen(false);
+    if (!isTmux) {
+      if (id === picked) setOpen(false);
+      const pickedRow = (displayRoutes || []).find((r) => ttyRowId(r) === picked);
+      if (pickedRow && id === pickedRow.bot) setOpen(false);
+    }
     setKillMsg(body.killed
-      ? `Stopped ${target} — memory freed. View restarts it.`
-      : `No live ${target} session — nothing was running.`);
+      ? (isTmux ? `Stopped ${name} — memory freed.` : `Stopped ${name} — memory freed. View restarts it.`)
+      : `No live ${name} session — nothing was running.`);
     loadStatus();
   };
 
@@ -946,11 +1019,13 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
           ☰
         </button>
         <SessionMenu
-          routes={routes}
+          routes={displayRoutes}
           picked={picked}
           pickedLabel={pickedLabel}
           open={open}
           live={live}
+          mem={mem}
+          idle={idle}
           killMsg={killMsg}
           onView={viewRow}
           onToggleOpen={() => {

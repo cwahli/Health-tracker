@@ -39,6 +39,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { tmuxNameFor } from './tui-bot-plumbing.mjs';
+import { collectSessionMem, collectSessionIdle, collectTmuxSessions, listTmuxNames, collectUnattributedMem } from './lib/tmux-session-mem.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..');
@@ -1931,6 +1932,30 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         return res.end(JSON.stringify({ ok: false, error: 'operator only' }));
       }
       const parsed = await readJsonBody(req);
+      const tmName = parsed.ok ? String((parsed.json && parsed.json.tmux) || '').trim() : '';
+      if (tmName !== '') {
+        // Raw tmux target for the picker's tracking rows: operator-only like
+        // the bot path, and the name must exactly match a live session in
+        // the same tick — never free-form. A session that vanished between
+        // listing and killing reports killed:false honestly.
+        const liveNow = await listTmuxNames({});
+        if (!liveNow.includes(tmName)) {
+          res.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+          return res.end(JSON.stringify({ ok: false, error: 'unknown terminal' }));
+        }
+        let killed = false;
+        try {
+          await new Promise((resolve, reject) => {
+            execFile('tmux', ['kill-session', '-t', tmName], { timeout: 10000 }, (err) => (err ? reject(err) : resolve()));
+          });
+          killed = true;
+        } catch {
+          killed = false;
+        }
+        log(`ttys kill tmux=${tmName} killed=${killed}`);
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: true, tmux: tmName, killed }));
+      }
       const target = parsed.ok ? String((parsed.json && parsed.json.bot) || '').trim() : '';
       const known = target !== '' && Object.values(ttydRoutes(env)).some((r) => r && r.bot === target);
       if (!known) {
@@ -1978,6 +2003,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       }
       bots.sort();
       const status = [];
+      const liveNames = [];
       for (const b of bots) {
         let live = false;
         try {
@@ -1989,12 +2015,43 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
           live = false;
         }
         status.push({ bot: b, live });
+        if (live) liveNames.push(tmuxNameFor(b));
+      }
+      // Memory + idle age per live tmux session, best-effort: unknown
+      // (dormant, bare rows, or a failed collection) carries neither field
+      // rather than a zero.
+      const mem = await collectSessionMem({ sessions: liveNames });
+      const idle = await collectSessionIdle({ sessions: liveNames });
+      for (const row of status) {
+        if (!row.live) continue;
+        const mib = mem[tmuxNameFor(row.bot)];
+        if (Number.isInteger(mib) && mib > 0) row.memMiB = mib;
+        const ims = idle[tmuxNameFor(row.bot)];
+        if (Number.isInteger(ims) && ims >= 0) row.idleMs = ims;
       }
       for (const e of readVmPickerEntriesStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) })) {
         status.push({ id: e.id, bot: e.bot, live: true });
       }
+      // Full tmux inventory for the picker's tracking rows: EVERY live
+      // session, not just the served bots'. `route` names the served bot
+      // when the session is that bot's attach target, else null — the client
+      // renders routeless sessions as view-less rows keyed `tmux:<name>`.
+      const served = new Map(bots.map((b) => [tmuxNameFor(b), b]));
+      const tmux = (await collectTmuxSessions({})).map((e) => ({
+        name: e.name,
+        ...(Number.isInteger(e.memMiB) ? { memMiB: e.memMiB } : {}),
+        ...(Number.isInteger(e.idleMs) ? { idleMs: e.idleMs } : {}),
+        route: served.get(e.name) || null,
+      }));
+      // The reconciling remainder: PSS outside every tmux tree. Panel
+      // sessions + box ≈ all-process PSS; the rest to `free` is kernel slab
+      // plus swapped-out pages, which live in no process. Omitted on failure.
+      const unatt = await collectUnattributedMem({});
+      const box = Number.isInteger(unatt.mib) && unatt.mib > 0
+        ? { otherMiB: unatt.mib, otherProcs: unatt.procs }
+        : null;
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      return res.end(JSON.stringify({ ok: true, status }));
+      return res.end(JSON.stringify({ ok: true, status, tmux, ...(box ? { box } : {}) }));
     }
 
     // Point the shared VM session viewer at one bare opencode session, so a
