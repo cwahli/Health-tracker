@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 
 async function measure() {
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
+  const context = await browser.newContext({ colorScheme: 'dark' }); // QA defaults to dark theme
   const page = await context.newPage();
 
   let requestCount = 0;

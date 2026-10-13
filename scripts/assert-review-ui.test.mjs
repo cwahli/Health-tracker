@@ -106,7 +106,7 @@ async function withPage(fn) {
   }
 
   const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 420, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 420, height: 900 }, colorScheme: 'dark' });
   const posts = [];
   const answers = [];
   const proofFetches = [];

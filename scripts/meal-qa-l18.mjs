@@ -52,7 +52,7 @@ async function main() {
     console.error(`[l18] cannot launch a browser: ${e.message}`);
     process.exit(1);
   }
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: 'dark' });
   const page = await ctx.newPage();
 
   // 1 — the app itself, at the sign-in wall the user actually meets first.
