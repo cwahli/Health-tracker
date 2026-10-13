@@ -25,9 +25,13 @@ export interface FoodFetchPlanArgs {
 
 /**
  * Food-log pages (1-based) still missing to fill `targetPage`.
- * Empty when the target window is already loaded, when searching (the server
- * window does not apply to a filtered list), or when no total was ever
- * reported (never fetch blindly on an unknown total).
+ *
+ * Known total: every missing window up to the target (skipped pages leave
+ * no gaps). Unknown total: only the single next window, and only when every
+ * previous window came back full — a short window means the server is
+ * exhausted, so this self-terminates with no flag and no unbounded
+ * fetching. An unknown total must never permanently disable fetching
+ * (that failure mode collapses history to ~2 pages with no recovery).
  */
 export function missingFoodPages(
   loadedFoods: number,
@@ -39,6 +43,13 @@ export function missingFoodPages(
   const safeSize = Math.max(1, Math.floor(pageSize) || 1);
   const safeTarget = Math.max(1, Math.floor(targetPage) || 1);
   const reported = typeof totalFoods === 'number' && totalFoods > 0 ? Math.floor(totalFoods) : 0;
+  if (reported <= 0) {
+    const nextPage = Math.floor(safeLoaded / safeSize) + 1;
+    if (safeTarget >= nextPage && safeLoaded >= (nextPage - 1) * safeSize) {
+      return [nextPage];
+    }
+    return [];
+  }
   const total = Math.max(reported, safeLoaded);
   const needUntil = Math.min(safeTarget * safeSize, total);
   const pages: number[] = [];
