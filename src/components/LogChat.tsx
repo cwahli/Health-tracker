@@ -2519,13 +2519,18 @@ ${logsText}`);
         };
         const fetchSubmitWithRetry = async (url: string, payload: any, maxRetries = 4, delayMs = 600, timeoutMs = 45000) => {
           let lastErr: any = null;
+          // F3: /api/jobs/submit requires the verified session credential
+          // (htk auth_token for email users, Firebase ID token otherwise).
+          // pullAuthHeaders attaches whichever exists; without it the server
+          // answers 401 and the meal never queues.
+          const submitHeaders = await pullAuthHeaders();
           for (let attempt = 1; attempt <= maxRetries; attempt++) {
             const ctrl = new AbortController();
             const timer = setTimeout(() => ctrl.abort(), timeoutMs);
             try {
               const res = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: submitHeaders,
                 body: safeJSONStringify(payload),
                 signal: ctrl.signal
               });
@@ -2632,8 +2637,13 @@ ${logsText}`);
           }
           const submitPayload = {
             jobId: currentJobId,
-            idempotencyKey: `idemp_${auth.currentUser?.uid || 'anon'}_${currentJobId}_${currentReqId}`,
-            userId: auth.currentUser?.uid || 'anonymous',
+            // F3: real server uid (email users have no Firebase session, so
+            // auth.currentUser is null for them — profile.uid is the server
+            // identity). The server derives ownership from the verified
+            // session token and ignores this field; sending the true id keeps
+            // idempotency keys and logs attributable.
+            idempotencyKey: `idemp_${auth.currentUser?.uid || profile?.uid || 'anon'}_${currentJobId}_${currentReqId}`,
+            userId: auth.currentUser?.uid || profile?.uid || 'anonymous',
             kind: family === 'D' ? 'food_compare' : 'food_log',
             mode: submissionMode,
             text: ((userContent || textToSend || '').replace(/^[+\s,.-]+/, '').trim()),
