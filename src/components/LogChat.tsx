@@ -215,6 +215,23 @@ export default function LogChat({
   const [debugLogs, setDebugLogs] = useState<{ timestamp: string, message: string }[]>([]);
   const [isDebugSendingLogs, setIsDebugSendingLogs] = useState(false);
   const [debugLogsSendStatus, setDebugLogsSendStatus] = useState<'idle' | 'success' | 'error'>('idle');
+
+  // Agent debug affordances (header Download/Terminal buttons, failure-card
+  // diagnostics button, Data-used-by-agent panel) follow the same
+  // agent_debug_mode flag as the Header toggle. Default OFF: persona users
+  // never see dev tools unless the toggle is enabled. Same-tab toggles apply
+  // on next chat open; cross-tab updates arrive via the storage event.
+  const [agentDebugMode, setAgentDebugMode] = useState(() => {
+    try { return typeof localStorage !== 'undefined' && localStorage.getItem('agent_debug_mode') === 'true'; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'agent_debug_mode') { try { setAgentDebugMode(e.newValue === 'true'); } catch { /* ignore */ } }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
   const [liveThoughts, setLiveThoughts] = useState<{scout?: string, diet?: string, dbSearchLog?: string, activeStage?: string, backendLogs?: string, globalLiveLogs?: string}>({});
   const safeParseResponse = async (res: Response, fallback: any = {}) => {
     try {
@@ -2519,13 +2536,18 @@ ${logsText}`);
         };
         const fetchSubmitWithRetry = async (url: string, payload: any, maxRetries = 4, delayMs = 600, timeoutMs = 45000) => {
           let lastErr: any = null;
+          // F3: /api/jobs/submit requires the verified session credential
+          // (htk auth_token for email users, Firebase ID token otherwise).
+          // pullAuthHeaders attaches whichever exists; without it the server
+          // answers 401 and the meal never queues.
+          const submitHeaders = await pullAuthHeaders();
           for (let attempt = 1; attempt <= maxRetries; attempt++) {
             const ctrl = new AbortController();
             const timer = setTimeout(() => ctrl.abort(), timeoutMs);
             try {
               const res = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: submitHeaders,
                 body: safeJSONStringify(payload),
                 signal: ctrl.signal
               });
@@ -2632,8 +2654,13 @@ ${logsText}`);
           }
           const submitPayload = {
             jobId: currentJobId,
-            idempotencyKey: `idemp_${auth.currentUser?.uid || 'anon'}_${currentJobId}_${currentReqId}`,
-            userId: auth.currentUser?.uid || 'anonymous',
+            // F3: real server uid (email users have no Firebase session, so
+            // auth.currentUser is null for them — profile.uid is the server
+            // identity). The server derives ownership from the verified
+            // session token and ignores this field; sending the true id keeps
+            // idempotency keys and logs attributable.
+            idempotencyKey: `idemp_${auth.currentUser?.uid || profile?.uid || 'anon'}_${currentJobId}_${currentReqId}`,
+            userId: auth.currentUser?.uid || profile?.uid || 'anonymous',
             kind: family === 'D' ? 'food_compare' : 'food_log',
             mode: submissionMode,
             text: ((userContent || textToSend || '').replace(/^[+\s,.-]+/, '').trim()),
@@ -3837,11 +3864,19 @@ ${logsText}`);
             }
             
             const looksLikeTimeout = response.status === 504 || response.status === 502 || response.status === 503 || rawText.trim().toLowerCase().startsWith('<!doctype') || rawText.trim().toLowerCase().startsWith('<html');
-            const cleanRaw = is503 ? 'Gemini API is temporarily unavailable or over quota.' : rawText.substring(0, 500);
-            
+            // F1: never surface raw API bodies (they may carry key-validity
+            // JSON) to users — full detail stays in console + debug logs.
+            console.error(`[LogChat] Analysis request failed (status ${response.status}):`, rawText.substring(0, 1000));
+            const hadImage = !!((bodyData as any)?.image || (Array.isArray((bodyData as any)?.images) && (bodyData as any).images.length > 0));
+            const genericFailure = isAgent('food')
+              ? (hadImage
+                ? "Couldn't read this photo. Please retake or retry."
+                : "Couldn't analyze this meal. Please try again.")
+              : "Analysis failed. Please try again.";
+
             throw new Error(looksLikeTimeout || is503
               ? "This analysis took too long or the AI service is currently unavailable/over capacity. Please try again or switch models."
-              : `Request failed (${response.status}). Please try again.\n${cleanRaw ? 'Details: ' + cleanRaw : ''}`);
+              : genericFailure);
           }
           break; // success
         } catch (fetchErr: any) {
@@ -4090,11 +4125,14 @@ ${logsText}`);
           try {
             resData = rawText ? JSON.parse(rawText) : {};
           } catch (parseErr) {
-            throw new Error(`Server returned invalid JSON (${response.status}): ${rawText.substring(0, 150)}`);
+            // F1: log the raw body for debug, never render it (may hold key JSON).
+            console.error(`[LogChat] Invalid JSON (status ${response.status}):`, rawText.substring(0, 500));
+            throw new Error("Analysis failed. Please try again.");
           }
         } else {
           const rawText = await response.text().catch(() => "");
-          throw new Error(`Server returned a non-JSON response (${response.status}): ${rawText.substring(0, 150)}`);
+          console.error(`[LogChat] Non-JSON response (status ${response.status}):`, rawText.substring(0, 500));
+          throw new Error("Analysis failed. Please try again.");
         }
       }
       // Save captured agent debug logs. Prefer fetching the full, untruncated log
@@ -5233,7 +5271,7 @@ ${logsText}`);
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button
+            {agentDebugMode && (<button
               type="button"
               id="download-debug-logs-header-btn"
               onClick={() => {
@@ -5245,14 +5283,14 @@ ${logsText}`);
               title={t.downloadDebugLogsTitle || t.downloadDebugLogs || "Download Debug Logs"}
             >
               <Download className="w-5 h-5" />
-            </button>
-            <button
+            </button>)}
+            {agentDebugMode && (<button
               onClick={() => setShowFullScreenDebugLogs(true)}
               className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 transition-colors"
               title={t.viewHistoricalLogs}
             >
               <Terminal className="w-5 h-5" />
-            </button>
+            </button>)}
             <button 
               id="close-food-chat-btn"
               onClick={onClose} 
@@ -5478,7 +5516,7 @@ ${logsText}`);
               </div>
             );
           })()}
-          <DataUsedByAgentPanel
+          {agentDebugMode && (<DataUsedByAgentPanel
             isAgent={isAgent}
             t={t}
             messages={messages}
@@ -5511,7 +5549,7 @@ ${logsText}`);
             payloadStorageKey={payloadStorageKey}
             chatStorageKey={chatStorageKey}
             activeConversationId={activeConversationId}
-          />
+          />)}
           {(() => {
             const revIdx = [...messages].reverse().findIndex(m => m.id?.startsWith('welcome_'));
             const lastWelcomeIndex = revIdx >= 0 ? messages.length - 1 - revIdx : -1;
@@ -5710,7 +5748,7 @@ ${logsText}`);
                                 <ChevronDown className="w-3 h-3" />
                               </button>
                             )}
-                            {isErrorMsg && (
+                            {isErrorMsg && agentDebugMode && (
                               <button
                                 type="button"
                                 onClick={() => setShowFullScreenDebugLogs(true)}

@@ -25,6 +25,7 @@ import { refundCredits } from '../jobs/credits';
 import { getSessionLog } from '../jobs/sessionLog';
 import { mergeFoodEditMessages, shouldMergeFoodEditTurn } from '../jobs/mergeFoodEditMessages';
 import { saveAgentRequestLog } from '../utils/agentLogsTracker';
+import { pullAuthHeaders } from '../utils/syncUtils';
 import { translations } from '../utils/translations';
 import { compressImage } from '../utils/imageCompressor';
 import { collectCatalogUnitMap, enrichReviewModificationCommands } from '../utils/biomarkerLifecycle';
@@ -272,11 +273,16 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
 
                   const res = await fetch('/api/jobs/submit', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    // F3: /api/jobs/submit requires the verified session
+                    // credential; the server derives ownership from it and
+                    // ignores the userId field (kept truthful here anyway —
+                    // email users have no Firebase session, so fall back to
+                    // the server-issued profile uid, never 'anonymous').
+                    headers: await pullAuthHeaders(),
                     signal: sCtrl.signal,
                     body: JSON.stringify({
                       jobId: job.id,
-                      userId: auth.currentUser?.uid || 'anonymous',
+                      userId: auth.currentUser?.uid || profileRef.current?.uid || 'anonymous',
                       kind: job.kind,
                       mode: job.mode,
                       text: job.inputSnapshot?.text || '',
@@ -375,6 +381,11 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
             const pollStartTime = Date.now();
             const maxPollTimeMs = 5 * 60 * 1000; // Extended 5 minute timeout window (was 3 min; large multi-item edits can exceed 3 min)
             let r2RetryCount = 0;
+            // F3: /api/jobs/status requires the verified session credential.
+            // Minted once per poll cycle (not per iteration) — getIdToken is
+            // cached, and the server scopes every read to this identity.
+            const pollHeaders = await pullAuthHeaders();
+            const pollUid = auth.currentUser?.uid || profileRef.current?.uid || 'anonymous';
 
             while (!done && (Date.now() - pollStartTime) < maxPollTimeMs) {
               if (abortSignal.aborted) {
@@ -391,7 +402,7 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
                 const timeoutId = setTimeout(() => statusController.abort(), 20000);
                 let statusRes: Response;
                 try {
-                  statusRes = await fetch(`/api/jobs/status?jobId=${pollJobId}&userId=${auth.currentUser?.uid || 'anonymous'}`, { signal: statusController.signal });
+                  statusRes = await fetch(`/api/jobs/status?jobId=${pollJobId}&userId=${pollUid}`, { headers: pollHeaders, signal: statusController.signal });
                 } finally {
                   clearTimeout(timeoutId);
                 }
@@ -441,7 +452,7 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
                      // overwrite the fresh edit with stale data. Always fetch the
                      // authoritative full result from the server for this poll cycle instead.
                      try {
-                        const fullRes = await fetch(`/api/jobs/status?jobId=${pollJobId}&userId=${auth.currentUser?.uid || 'anonymous'}&full=true`);
+                        const fullRes = await fetch(`/api/jobs/status?jobId=${pollJobId}&userId=${pollUid}&full=true`, { headers: pollHeaders });
                         if (fullRes.ok) {
                            const contentType = fullRes.headers.get('content-type');
                            if (contentType && contentType.includes('application/json')) {
@@ -811,7 +822,7 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
                 const timeoutId = setTimeout(() => lateController.abort(), 6000);
                 let lateRes: Response;
                 try {
-                  lateRes = await fetch(`/api/jobs/status?jobId=${pollJobId}&userId=${auth.currentUser?.uid || 'anonymous'}&full=true`, { signal: lateController.signal });
+                  lateRes = await fetch(`/api/jobs/status?jobId=${pollJobId}&userId=${pollUid}&full=true`, { headers: pollHeaders, signal: lateController.signal });
                 } finally {
                   clearTimeout(timeoutId);
                 }

@@ -13,6 +13,7 @@ import {
   mergeByRecency,
   mergeDeleteMaps,
   mergeProfiles,
+  resolveActiveSyncEmail,
   resolveInitialLanguage,
   pullAuthHeaders,
   fetchAllConsolidatedLogs,
@@ -384,6 +385,52 @@ describe('Settings Sync Indicator & Translations', () => {
     expect(syncingId.isSpinning).toBe(true);
     expect(syncingId.iconClass).toContain('animate-spin');
     expect(syncingId.label).toBe('Menyinkronkan...');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F2: reload identity — activeEmail must survive the stale-closure restore
+// ---------------------------------------------------------------------------
+describe('resolveActiveSyncEmail (F2 reload identity)', () => {
+  beforeEach(() => {
+    localStorage.removeItem('last_active_email');
+  });
+  afterEach(() => {
+    localStorage.removeItem('last_active_email');
+  });
+
+  it('prefers the live effective user over everything else', () => {
+    localStorage.setItem('last_active_email', 'stale@example.com');
+    expect(resolveActiveSyncEmail(
+      { email: 'live@example.com' },
+      { email: 'profile@example.com' },
+      'firebase@example.com',
+    )).toBe('live@example.com');
+  });
+
+  it('falls back to the render profile, then Firebase, when no effective user', () => {
+    expect(resolveActiveSyncEmail(null, { email: 'Profile@Example.com' }, null)).toBe('profile@example.com');
+    expect(resolveActiveSyncEmail(null, null, 'Fb@Example.com')).toBe('fb@example.com');
+  });
+
+  it('falls back to last_active_email when every live source is empty (the reload path)', () => {
+    // loadUserData fires checkForDbChanges in the same tick as setProfile, so
+    // the closure still sees profile === null and Firebase has no session for
+    // D1 email/password users. Without this fallback the sync ran as
+    // undefined/guest, read the wrong bundle, and blanked the restored profile.
+    localStorage.setItem('last_active_email', 'Sari@example.com');
+    expect(resolveActiveSyncEmail(null, null, null)).toBe('sari@example.com');
+    expect(resolveActiveSyncEmail(null, { email: '' }, undefined)).toBe('sari@example.com');
+  });
+
+  it('keeps demo routing intact through the fallback', () => {
+    localStorage.setItem('last_active_email', 'demo@healthcockpit.com');
+    expect(resolveActiveSyncEmail(null, null, null)).toBe('demo@healthcockpit.com');
+  });
+
+  it('returns undefined after explicit sign-out (no durable identity)', () => {
+    expect(resolveActiveSyncEmail(null, null, null)).toBeUndefined();
+    expect(resolveActiveSyncEmail(null, null, '')).toBeUndefined();
   });
 });
 

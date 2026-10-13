@@ -11,6 +11,25 @@ let isDirectClientSupabaseDisabled = true;
 
 const backendDeleteTried = new Set<string>();
 
+// F3: session credential for /api/jobs/* reads. Email-signup users have no
+// Firebase session, so prefer the Firebase ID token when present and fall
+// back to the htk session token in localStorage (same credential
+// /api/auth/me verifies server-side). Without it the server answers 401 and
+// hydration silently yields nothing.
+async function jobApiAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    if (auth.currentUser) {
+      const t = await auth.currentUser.getIdToken().catch(() => undefined);
+      if (t) return { Authorization: `Bearer ${t}` };
+    }
+    if (typeof localStorage !== 'undefined') {
+      const local = localStorage.getItem('auth_token');
+      if (local) return { Authorization: `Bearer ${local}` };
+    }
+  } catch { /* offline / signed out: server decides */ }
+  return {};
+}
+
 function forgetDeletedOnBackend(jobId: string, userId: string) {
   if (!jobId || backendDeleteTried.has(jobId)) return;
   backendDeleteTried.add(jobId);
@@ -24,7 +43,7 @@ async function fetchAndPopulateR2Job(jobId: string) {
     const r2TimeoutId = setTimeout(() => r2Controller.abort(), 20000);
     let r: Response;
     try {
-      r = await fetch(`${baseUrl}/api/jobs/status?jobId=${jobId}&full=true`, { signal: r2Controller.signal });
+      r = await fetch(`${baseUrl}/api/jobs/status?jobId=${jobId}&full=true`, { headers: await jobApiAuthHeaders(), signal: r2Controller.signal });
     } finally {
       clearTimeout(r2TimeoutId);
     }
@@ -267,7 +286,7 @@ export async function hydrateUserJobs(userId: string = 'anonymous', isFull: bool
     // so allow a full window.
     const timeoutId = setTimeout(() => controller.abort(), 25000);
     try {
-      const res = await fetch(`/api/jobs/status?userId=${encodeURIComponent(effectiveUserId)}&full=${isFull}`, { signal: controller.signal });
+      const res = await fetch(`/api/jobs/status?userId=${encodeURIComponent(effectiveUserId)}&full=${isFull}`, { headers: await jobApiAuthHeaders(), signal: controller.signal });
       if (res.ok) {
         serverHydrationSucceeded = true;
         const contentType = res.headers.get('content-type');
@@ -452,7 +471,7 @@ export function initSupabaseJobSync(userId?: string): () => void {
               const r2TimeoutId = setTimeout(() => r2Controller.abort(), 6000);
               let r: Response;
               try {
-                r = await fetch(`${baseUrl}/api/jobs/status?jobId=${row.id}&full=true`, { signal: r2Controller.signal });
+                r = await fetch(`${baseUrl}/api/jobs/status?jobId=${row.id}&full=true`, { headers: await jobApiAuthHeaders(), signal: r2Controller.signal });
               } finally {
                 clearTimeout(r2TimeoutId);
               }
@@ -683,9 +702,14 @@ export async function upsertJobToSupabase(
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
+      // F3: explicit credential (Firebase token, else htk auth_token) — the
+      // upsert route derives ownership from it and 401s without it. The
+      // global fetch interceptor also attaches it, but this must not depend
+      // on interceptor ordering.
+      const upsertHeaders: Record<string, string> = { 'Content-Type': 'application/json', ...(await jobApiAuthHeaders()) };
       const res = await fetch('/api/jobs/upsert', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(auth.currentUser ? { Authorization: `Bearer ${await auth.currentUser.getIdToken()}` } : {}) },
+        headers: upsertHeaders,
         body: JSON.stringify({ payload }),
         signal: controller.signal,
       });
@@ -796,7 +820,7 @@ export async function deleteJobFromBackend(
     const baseUrl = typeof window !== 'undefined' ? '' : 'http://localhost:3000';
     await fetch(`${baseUrl}/api/jobs/delete`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(auth.currentUser ? { Authorization: `Bearer ${await auth.currentUser.getIdToken()}` } : {}) },
+      headers: { 'Content-Type': 'application/json', ...(await jobApiAuthHeaders()) },
       body: JSON.stringify({ jobId, userId: effectiveUserId }),
     }).catch(() => {});
 

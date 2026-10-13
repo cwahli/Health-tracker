@@ -55,6 +55,7 @@ import {
   subscribeToSupabaseLogs,
   syncLogsWithTimeBuckets,
   upsertProfileToSupabase,
+  resolveActiveSyncEmail,
   resolveInitialLanguage,
 } from '../utils/syncUtils';
 import { mergeFoodLogsDeduped, rehydrateFoodImagesFromDonors } from '../utils/foodLogDedupe';
@@ -212,7 +213,10 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
     }
 
     const activeUser = getEffectiveUser();
-    const activeEmail = activeUser?.email || profile?.email || auth.currentUser?.email;
+    // F2: on reload the restore-then-sync sequence runs from a stale closure
+    // (profile still null), so live sources are empty — fall back to the
+    // durable last_active_email instead of syncing as `undefined`/`guest`.
+    const activeEmail = resolveActiveSyncEmail(activeUser, profile, auth.currentUser?.email);
     const isDemoUser = activeEmail?.toLowerCase().trim() === 'demo@healthcockpit.com';
     if (isDemoUser) {
       setSyncState('synced');

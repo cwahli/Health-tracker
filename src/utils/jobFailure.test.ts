@@ -22,4 +22,16 @@ describe('humanizeJobFailure', () => {
     const nested = humanizeJobFailure("Vision Scout Failed: Couldn't reliably read this image (Details: [Vision Scout Corrupted] foo)");
     expect(nested).not.toMatch(/Vision Scout Corrupted/);
   });
+
+  it('F1: never renders raw API JSON / key-validity text / status codes', () => {
+    const qaLeak = `Vision Scout Failed: Couldn't reliably read this image, please try again or re-upload. (Details: {"error": {"code":400,"message":"API key not valid. Please pass a valid API key."}})`;
+    const s = humanizeJobFailure(qaLeak);
+    expect(s).not.toMatch(/Details:/);
+    expect(s).not.toMatch(/API key/);
+    expect(s).not.toMatch(/\{/);
+    expect(s).not.toMatch(/400/);
+    expect(s).not.toMatch(/image/i);
+    expect(humanizeJobFailure('Request failed (400). Please try again.\nDetails: {"error":{}}')).toBe('Analysis failed. Please try again.');
+    expect(humanizeJobFailure("Vision Scout Failed: Couldn't analyze this meal. Please try again.")).toBe("Couldn't analyze this meal. Please try again.");
+  });
 });

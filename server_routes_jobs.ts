@@ -13,13 +13,20 @@ export const jobsRouter = Router();
 jobsRouter.post('/api/jobs/upsert', async (req, res) => {
   const diag4Start = Date.now();
   try {
-    const authData = await verifyFirebaseIdToken(req);
+    // F3: strict session auth (same mechanism as /api/auth/me); the stored
+    // user_id is ALWAYS the verified uid — a client-supplied user_id is
+    // overridden, never trusted.
+    const authData = await verifyFirebaseIdToken(req, { allowBodyFallback: false }).catch(() => null);
+    if (!authData) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
     console.log('[FreeTier] requireAuth jobs-upsert');
 
     const { payload } = req.body;
-    if (!payload || !payload.id || !payload.user_id) {
+    if (!payload || !payload.id) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
+    payload.user_id = authData.uid;
     const payloadSize = JSON.stringify(payload).length;
     console.log(`[DIAG4] /api/jobs/upsert starting for job ${payload.id}, payload size ${payloadSize} bytes`);
 
@@ -47,14 +54,40 @@ jobsRouter.post('/api/jobs/delete', async (req, res) => {
   // Q-6.6: diary/job delete must not prune R2 debug while a work item holds this job.
   // This route only drops the agent_jobs row — R2 keys stay. Do not add DeleteObject here.
   try {
-    const auth = await verifyFirebaseIdToken(req).catch(() => null);
+    // F3: strict session auth + ownership. A job owned by another account
+    // (or missing) yields 404 with no existence oracle; only the owner's own
+    // rows are ever deleted.
+    const auth = await verifyFirebaseIdToken(req, { allowBodyFallback: false }).catch(() => null);
     if (!auth) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    const { deleteInMemoryServerJob } = await import('./serverJobs.js');
-    deleteInMemoryServerJob(String(jobId));
-  } catch (memErr: any) {
-    console.warn('[jobs/delete] in-memory delete skipped:', memErr?.message || memErr);
+    const { getInMemoryServerJob, deleteInMemoryServerJob, isJobOwnedBy } = await import('./serverJobs.js');
+    const existingMem = getInMemoryServerJob(String(jobId));
+    if (existingMem && !isJobOwnedBy(existingMem, auth.uid)) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+    if (!existingMem && isD1Configured()) {
+      try {
+        const existingDb = await d1GetJob(String(jobId));
+        if (existingDb && !isJobOwnedBy(existingDb, auth.uid)) {
+          return res.status(404).json({ error: 'Job not found' });
+        }
+      } catch {
+        // Fail closed: ownership unknown (transient D1 error) — refuse rather
+        // than risk deleting another account's row. Client retries.
+        return res.status(503).json({ error: 'Ownership check unavailable, try again' });
+      }
+    }
+    try {
+      deleteInMemoryServerJob(String(jobId));
+    } catch (memErr: any) {
+      console.warn('[jobs/delete] in-memory delete skipped:', memErr?.message || memErr);
+    }
+  } catch (authErr: any) {
+    // Strict-auth rejection above uses explicit returns; this only guards the
+    // ownership lookups so a transient lookup failure stays an idempotent
+    // delete instead of a 500.
+    console.warn('[jobs/delete] ownership check skipped:', authErr?.message || authErr);
   }
   try {
     if (isD1Configured()) {
@@ -68,7 +101,16 @@ jobsRouter.post('/api/jobs/delete', async (req, res) => {
 
 jobsRouter.post('/api/jobs/submit', async (req, res) => {
   try {
-    const { jobId, userId, kind, mode, text, history, userProfile, engine, biomarkersNeedingImprovement, remainingAllowance, activeMeal, foodLogs, userSelectedMode, activeScoutItems } = req.body;
+    // F3: identity is derived server-side from the verified session credential
+    // (same mechanism as /api/auth/me). Any client-supplied userId is
+    // IGNORED — email-signup users have no Firebase session, so trusting the
+    // body filed every job under 'anonymous' and leaked them across accounts.
+    const auth = await verifyFirebaseIdToken(req, { allowBodyFallback: false }).catch(() => null);
+    if (!auth) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const userId = auth.uid;
+    const { jobId, kind, mode, text, history, userProfile, engine, biomarkersNeedingImprovement, remainingAllowance, activeMeal, foodLogs, userSelectedMode, activeScoutItems } = req.body;
     let { images, imageUrls } = req.body;
     if (!jobId) {
       return res.status(400).json({ error: 'jobId is required' });
@@ -101,7 +143,7 @@ jobsRouter.post('/api/jobs/submit', async (req, res) => {
     const idempResult = await checkOrRegisterIdempotentSubmission({
       ...req.body,
       jobId,
-      userId: userId || 'anonymous',
+      userId,
       kind,
       mode,
       text,
@@ -122,7 +164,7 @@ jobsRouter.post('/api/jobs/submit', async (req, res) => {
     await submitServerJob({
       ...req.body,
       jobId,
-      userId: userId || 'anonymous',
+      userId,
     });
     res.json({
       success: true,
@@ -140,12 +182,26 @@ jobsRouter.post('/api/jobs/submit', async (req, res) => {
 
 jobsRouter.get('/api/jobs/status', async (req, res) => {
   try {
-    const { jobId, userId } = req.query;
-    const { getInMemoryServerJob, listInMemoryServerJobs } = await import('./serverJobs.js');
+    // F3: strict session auth (same mechanism as /api/auth/me). The query
+    // userId is IGNORED — listing is always scoped to the verified uid, and
+    // single-job reads check ownership (foreign → 404, same as missing, so
+    // there is no existence oracle). There is no unauthenticated path and no
+    // global list anymore.
+    const auth = await verifyFirebaseIdToken(req, { allowBodyFallback: false }).catch(() => null);
+    if (!auth) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const authUid = auth.uid;
+    const { jobId } = req.query;
+    const { getInMemoryServerJob, listInMemoryServerJobs, isJobOwnedBy } = await import('./serverJobs.js');
+    const notFound = () => res.status(404).json({ error: 'Job not found' });
 
     if (jobId) {
       let memJob = getInMemoryServerJob(String(jobId));
       if (memJob) {
+        if (!isJobOwnedBy(memJob, authUid)) {
+          return notFound();
+        }
         if (req.query.full === 'true' && memJob.clean_result && (memJob.clean_result as any).is_r2) {
           try {
             const { fetchJobResultFromR2 } = await import('./src/utils/r2Storage.js');
@@ -168,7 +224,9 @@ jobsRouter.get('/api/jobs/status', async (req, res) => {
         const safeLimit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 200) : 20;
         const data = await d1ListJobs({
           jobId: jobId ? String(jobId) : undefined,
-          userId: userId ? String(userId) : undefined,
+          // byId looks up by id then ownership-checks below; list is scoped
+          // to the verified uid (never a client-supplied id, never global).
+          userId: jobId ? undefined : authUid,
           isFull,
           limit: safeLimit
         });
@@ -213,13 +271,20 @@ jobsRouter.get('/api/jobs/status', async (req, res) => {
             return job;
           }));
 
-          return res.json({ jobs: processedJobs });
+          const owned = processedJobs.filter((job: any) => isJobOwnedBy(job, authUid));
+          if (jobId && owned.length === 0) {
+            return notFound();
+          }
+          return res.json({ jobs: owned });
         } else {
           if (jobId) {
             const memJob = getInMemoryServerJob(String(jobId));
-            return res.json({ jobs: memJob ? [memJob] : [] });
+            if (!memJob || !isJobOwnedBy(memJob, authUid)) {
+              return notFound();
+            }
+            return res.json({ jobs: [memJob] });
           }
-          const memJobs = listInMemoryServerJobs(userId ? String(userId) : undefined);
+          const memJobs = listInMemoryServerJobs(authUid);
           return res.json({ jobs: memJobs });
         }
       } catch (d1Err) {
@@ -229,9 +294,12 @@ jobsRouter.get('/api/jobs/status', async (req, res) => {
 
     if (jobId) {
       const memJob = getInMemoryServerJob(String(jobId));
-      return res.json({ jobs: memJob ? [memJob] : [] });
+      if (!memJob || !isJobOwnedBy(memJob, authUid)) {
+        return notFound();
+      }
+      return res.json({ jobs: [memJob] });
     }
-    return res.json({ jobs: listInMemoryServerJobs(userId ? String(userId) : undefined) });
+    return res.json({ jobs: listInMemoryServerJobs(authUid) });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to fetch job status' });
   }

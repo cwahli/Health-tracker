@@ -307,7 +307,24 @@ describe('F-8.10 shard 11 — scout result handling', () => {
     expect(() => buildScoutFailureError({ message: 'fetch failed' }, 'en')).toThrow(/503/);
     expect(() => buildScoutFailureError({ message: 'Stream stalled: Vision Scout' }, 'en')).toThrow(/503/);
     expect(() => buildScoutFailureError({ message: 'Vision Scout Corrupted output' }, 'en')).toThrow();
-    expect(() => buildScoutFailureError({ message: 'weird' }, 'en')).toThrow(/re-upload/);
+    expect(() => buildScoutFailureError({ message: 'weird' }, 'en')).toThrow(/Couldn't analyze this meal/);
+  });
+
+  it('F1: never embeds raw API JSON / key-validity text in the thrown error', () => {
+    const leak = 'Vision Scout Failed: boom (Details: {"error": {"code":400,"message":"API key not valid. Please pass a valid API key."}})';
+    let thrown = '';
+    try {
+      buildScoutFailureError({ message: leak }, 'en');
+    } catch (e: any) {
+      thrown = String(e?.message || '');
+    }
+    expect(thrown).not.toMatch(/Details:/);
+    expect(thrown).not.toMatch(/API key/);
+    expect(thrown).not.toMatch(/\{/);
+    expect(thrown).not.toMatch(/image/i);
+    const quota = (() => { try { buildScoutFailureError({ message: '429 RESOURCE_EXHAUSTED' }, 'en'); } catch (e: any) { return String(e?.message || ''); } return ''; })();
+    expect(quota).not.toMatch(/Details:/);
+    expect(quota).not.toMatch(/\{/);
   });
 
   it('applies scout state with source defaulting and mode overrides', () => {

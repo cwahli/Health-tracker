@@ -18,6 +18,7 @@ import {
   displayNutrientName,
   displayStatusLabel,
   displayTimeTag,
+  initialUiLanguage,
   interpolate,
   normalizeLocale,
   pickPlural,
@@ -129,17 +130,36 @@ describe('agentOutputLanguageBlock', () => {
     expect(block).toContain('Bahasa Indonesia');
     expect(block).toContain('code: id');
     expect(block).toContain('JSON keys');
-    expect(block).toContain('Do not reply in English');
+    expect(block).toContain('SAME language');
   });
 
-  it('does not tell English users to avoid English', () => {
-    expect(agentOutputLanguageBlock('en')).not.toContain('Do not reply in English');
+  it('Sari case: en UI locale still orders same-message-language reply (no English default)', () => {
+    const block = agentOutputLanguageBlock('en');
+    expect(block).toContain('SAME language');
+    expect(block).toContain('Bahasa Indonesia');
+    expect(block).toContain('regardless of the UI language');
   });
 
   it('prepends the block onto an instruction', () => {
     const out = withAgentLanguage('You are the dietitian.', 'id');
     expect(out.startsWith('=== USER OUTPUT LANGUAGE ===')).toBe(true);
     expect(out).toContain('You are the dietitian.');
+  });
+});
+
+describe('initialUiLanguage', () => {
+  it('saved preference wins', () => {
+    expect(initialUiLanguage('fr', ['id-ID'])).toBe('fr');
+  });
+  it('Indonesian browser lands on Bahasa with no saved pref', () => {
+    expect(initialUiLanguage(null, ['id-ID', 'id', 'en-US'])).toBe('id');
+    expect(initialUiLanguage(null, 'id-ID')).toBe('id');
+  });
+  it('English browser stays English; junk saved falls back to browser then en', () => {
+    expect(initialUiLanguage(null, ['en-US', 'en'])).toBe('en');
+    expect(initialUiLanguage(null, null)).toBe('en');
+    expect(initialUiLanguage('xx', ['fr-FR'])).toBe('fr');
+    expect(initialUiLanguage('xx', null)).toBe('en');
   });
 });
 
