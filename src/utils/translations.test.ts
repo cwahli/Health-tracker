@@ -62,8 +62,17 @@ const BASELINE_TOTAL_KEYS = 3960;
  * Re-recorded for Wave 2 (chat/settings/errors): 310 `id` values translated
  * (72 review-flagged dev tokens left in English). Deliberate, per-value
  * reviewed; `en` untouched.
+ *
+ * Re-recorded for Wave 3 (final bulk): 563 more `id` values translated
+ * (200 consensus dev tokens intentionally left in English). One repair:
+ * `compilerMultipleMatch` overwritten correctly (naive regex broke on the
+ * original's escaped quotes — structural check added to the author's
+ * pipeline, not the suite). `en` untouched.
+ *
+ * Re-recorded for Wave 3 stragglers: `timeRoll` id + zh, `targetLabel` fr
+ * (was the awkward "Étiquette d'objectif"). `en` untouched.
  */
-const FROZEN_DIGESTS = { en: 'a63869abd92e5670', id: 'bd865d5e8c6569bf' } as const;
+const FROZEN_DIGESTS = { en: 'a63869abd92e5670', id: 'd054be929b991c77' } as const;
 
 const stablePairs = (pack: Record<string, unknown>) =>
   JSON.stringify(Object.keys(pack).sort().map((key) => [key, pack[key]]));
@@ -110,9 +119,14 @@ describe('translations split (Q-11.8)', () => {
   });
 
   it('falls back to English per key for packs that are not translated yet', () => {
-    const sampleKey = Object.keys(en)[0] as keyof typeof en;
-    expect((translations.fr as Record<string, string>)[sampleKey]).toBe(en[sampleKey]);
-    expect((translations.zh as Record<string, string>)[sampleKey]).toBe(en[sampleKey]);
+    // First en key still absent from the fr/zh packs (they are partially
+    // translated since the persona-QA waves; missing keys must still fall back).
+    const missingFr = (Object.keys(en) as (keyof typeof en)[]).find((k) => !(k in localePacks.fr) && (en[k] as string).trim() !== '');
+    const missingZh = (Object.keys(en) as (keyof typeof en)[]).find((k) => !(k in localePacks.zh) && (en[k] as string).trim() !== '');
+    expect(missingFr).toBeDefined();
+    expect(missingZh).toBeDefined();
+    expect((translations.fr as Record<string, string>)[missingFr as string]).toBe(en[missingFr as keyof typeof en]);
+    expect((translations.zh as Record<string, string>)[missingZh as string]).toBe(en[missingZh as keyof typeof en]);
     // Unknown keys keep returning the key itself (previous behaviour).
     expect((translations.fr as Record<string, string>).__notAKey__).toBe('__notAKey__');
   });
