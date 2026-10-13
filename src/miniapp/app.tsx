@@ -1,7 +1,8 @@
 import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { enabledMiniApps, miniAppById, type MiniAppDef } from './miniapp-registry';
-import { tabUrl, formatMem } from './shell-nav';
+import { tabUrl } from './shell-nav';
+import { formatMem, statusKeyMaps } from './shell-session';
 import { BugBoard } from '../components/bug-board/BugBoard';
 import { useBugBoard } from '../components/bug-board/useBugBoard';
 import '../index.css';
@@ -795,18 +796,12 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     const body = res ? await res.json().catch(() => null) : null;
     if (deadRef.current) return;
     if (!body || body.ok !== true || !Array.isArray(body.status)) return;
-    const liveMap: Record<string, boolean> = {};
-    const memMap: Record<string, number> = {};
-    for (const row of body.status as { id?: string; bot: string; live: boolean; memMiB?: number }[]) {
-      if (!row || typeof row.bot !== 'string') continue;
-      // Keyed rows (bare sessions) must not paint the shared `vm` bot row:
-      // a live bare session is not a live VM tmux session.
-      const key = (typeof row.id === 'string' && row.id) ? row.id : row.bot;
-      liveMap[key] = row.live === true;
-      if (typeof row.memMiB === 'number' && row.memMiB > 0) memMap[key] = row.memMiB;
-    }
-    setLive(liveMap);
-    setMem(memMap);
+    // Keying lives in statusKeyMaps: bare rows paint only their own id (a
+    // live bare session is not a live VM tmux session), ttyd rows paint
+    // their tty:<bot> picker id too, or their dot never lights.
+    const maps = statusKeyMaps(body.status as { id?: string; bot: string; live: boolean; memMiB?: number }[]);
+    setLive(maps.live);
+    setMem(maps.mem);
   };
 
   useEffect(() => {

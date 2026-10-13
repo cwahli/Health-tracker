@@ -8,8 +8,10 @@ allowed_files:
   - scripts/lib/tmux-session-mem.mjs
   - scripts/lib/tmux-session-mem.test.mjs
   - src/miniapp/app.tsx
-  - src/miniapp/shell-nav.ts
-  - src/miniapp/shell-nav.test.ts
+  - src/miniapp/shell-session.ts
+  - src/miniapp/shell-session.test.ts
+  # Build fallout only: vite build regenerates this stamp; never hand-edited.
+  - src/git-version.generated.ts
 frozen_files:
   - AGENTS.md
   - docs/agent/standing.json
@@ -20,7 +22,7 @@ frozen_files:
   - scripts/lib/fleet-status.mjs
 gate:
   - npx tsc --noEmit
-  - npx vitest run scripts/lib/tmux-session-mem.test.mjs src/miniapp/shell-nav.test.ts src/miniapp/frame-refusal.test.ts
+  - npx vitest run scripts/lib/tmux-session-mem.test.mjs src/miniapp/shell-session.test.ts src/miniapp/shell-nav.test.ts src/miniapp/frame-refusal.test.ts
   - node scripts/assert-tui-gateway.test.mjs
 ---
 
@@ -53,6 +55,10 @@ which sessions are worth killing without leaving the terminal app.
   pane trees (~2GB RSS across 28 panes, mainly 2× `.cline` ~155MB, opencode
   198–411MB). Per-session accounting = sum of RSS over each session's pane
   PIDs plus descendants, via one `tmux list-panes -F` + one `ps`.
+- Live-demo finding (headless Chromium against a loopback gateway + built
+  shell): ttyd rows NEVER lit — `/api/ttys/status` keys unkeyed rows by bare
+  `bot` while picker row ids are `tty:<bot>`. The client folds both keys now
+  (`statusKeyMaps`); bare rows still paint only their own id.
 - No standing.json feature applies (operator shell; no meal/biomarker/sync
   surface, no new pull/poll). No `specs/rejected/` entry covers this slug.
 - ROADMAP flag: Current work item 5 scopes META-1 P1 to two new files and
@@ -92,9 +98,10 @@ Sensitive transitions as (Condition, Action, Pitfall):
    the helper (no new gateway test file; the assert file is frozen).
 3. Shell UI: `SessionMenu` rows render `· N MB` next to the agent/status line
    when `memMiB` is present; the trigger shows the picked session's memory;
-   Refresh reloads list + status together as today. `formatMem(mib)` lives in
-   `src/miniapp/shell-nav.ts` (pure, `—` never shown — absent stays absent);
-   cases appended to `src/miniapp/shell-nav.test.ts`.
+   Refresh reloads list + status together as today. `formatMem` and the
+   `tty:<bot>` key folding (`statusKeyMaps`) live in the new
+   `src/miniapp/shell-session.ts` (pure, tested in
+   `src/miniapp/shell-session.test.ts`); `shell-nav.ts` stays untouched.
    Done when: `tsc` + shell vitest green, and a local stub-gateway render
    shows numbers on tty rows and none on bare rows.
 4. Guard + COMPLETE: `journey-guard.mjs term-session-memory`, named gates,
@@ -104,7 +111,7 @@ Sensitive transitions as (Condition, Action, Pitfall):
 
 ```text
 npx tsc --noEmit
-npx vitest run scripts/lib/tmux-session-mem.test.mjs src/miniapp/shell-nav.test.ts src/miniapp/frame-refusal.test.ts
+npx vitest run scripts/lib/tmux-session-mem.test.mjs src/miniapp/shell-session.test.ts src/miniapp/shell-nav.test.ts src/miniapp/frame-refusal.test.ts
 node scripts/assert-tui-gateway.test.mjs
 node scripts/journey-guard.mjs term-session-memory
 ```
