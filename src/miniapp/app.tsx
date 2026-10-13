@@ -2,7 +2,7 @@ import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { enabledMiniApps, miniAppById, type MiniAppDef } from './miniapp-registry';
 import { tabUrl } from './shell-nav';
-import { statusKeyMaps, lookForRow, sortByMem, filterBareRows, type RowLook, type TmuxEntry } from './shell-session';
+import { statusKeyMaps, lookForRow, sortByMem, filterBareRows, applyRouteAgents, type RowLook, type TmuxEntry } from './shell-session';
 import { BugBoard } from '../components/bug-board/BugBoard';
 import { useBugBoard } from '../components/bug-board/useBugBoard';
 import '../index.css';
@@ -833,6 +833,7 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
       ? (body as { tmux?: TmuxEntry[] }).tmux as TmuxEntry[]
       : [];
     const maps = statusKeyMaps(body.status as { id?: string; bot: string; live: boolean; memMiB?: number; idleMs?: number }[], rawTmux);
+    setRoutes((prev) => applyRouteAgents(prev, body.status as { id?: string; bot: string; agent?: string }[]));
     setStatusOk(true);
     const box = (body as { box?: { otherMiB?: number; otherProcs?: number } }).box;
     const boxOk = box && typeof box.otherMiB === 'number' && box.otherMiB > 0;

@@ -81,6 +81,26 @@ export function filterBareRows<T extends { kind?: string; bot: string; id?: stri
     return typeof m === 'number' && m > 0;
   });
 }
+/** Patch tty route objects with the agent their status row reports.
+ * Status rows for ttyd bots are unkeyed ({bot, agent}); bare rows carry
+ * their own id and paint themselves. Pure — returns the input untouched
+ * when there is nothing to apply. */
+export function applyRouteAgents<T extends { kind?: string; bot: string; agent?: string }>(
+  routes: T[] | null,
+  statusRows: { id?: string; bot: string; agent?: string }[],
+): T[] | null {
+  if (!routes) return routes;
+  const byBot: Record<string, string> = {};
+  for (const row of statusRows || []) {
+    if (!row || typeof row.bot !== 'string' || row.id) continue;
+    if (typeof row.agent === 'string' && row.agent) byBot[row.bot] = row.agent;
+  }
+  if (!Object.keys(byBot).length) return routes;
+  return routes.map((r) =>
+    r.kind === 'tty' && byBot[r.bot] ? { ...r, agent: byBot[r.bot] } : r,
+  );
+}
+
 /** Sort picker rows by memory, heaviest first; unmeasured rows keep their
  * input order at the bottom. Stable: equal keys never swap. */
 export function sortByMem<T extends { bot: string; id?: string }>(

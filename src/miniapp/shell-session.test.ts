@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMem, statusKeyMaps, formatIdle, lookForRow, sortByMem, filterBareRows, TTY_IDLE_RED_MS } from './shell-session';
+import { formatMem, statusKeyMaps, formatIdle, lookForRow, sortByMem, filterBareRows, applyRouteAgents, TTY_IDLE_RED_MS } from './shell-session';
 import type { TmuxEntry } from './shell-session';
 
 describe('formatMem (picker memory readout shows a number or nothing)', () => {
@@ -162,5 +162,26 @@ describe('filterBareRows (visible implies measurable, never numberless)', () => 
   it('hides mem-less bare rows once status is known, keeps the rest', () => {
     expect(filterBareRows(rows, { 'opencode:s1': 100 }, true).map((r) => r.bot))
       .toEqual(['vm', 's1', 'colab']);
+  });
+});
+
+describe('applyRouteAgents (tty doors inherit their session agent)', () => {
+  const routes = [
+    { bot: 'vm', id: 'tty:vm', kind: 'tty' },
+    { bot: 'vm2', id: 'tty:vm2', kind: 'tty' },
+    { bot: 'colab', id: 'tmux:colab', kind: 'tmux' },
+  ];
+  it('paints tty rows from unkeyed status rows, leaves the rest alone', () => {
+    const out = applyRouteAgents(routes, [
+      { bot: 'vm', agent: 'cline/muse-spark-1.3-contributor' },
+      { id: 'opencode:s1', bot: 'vm', agent: 'opencode/x' },
+    ]);
+    expect(out && out[0]).toMatchObject({ bot: 'vm', agent: 'cline/muse-spark-1.3-contributor' });
+    expect(out && out[1]).not.toHaveProperty('agent');
+    expect(out && out[2]).not.toHaveProperty('agent');
+  });
+  it('passes routes through when there is nothing to apply', () => {
+    expect(applyRouteAgents(routes, [])).toBe(routes);
+    expect(applyRouteAgents(null, [{ bot: 'vm', agent: 'x' }])).toBeNull();
   });
 });
