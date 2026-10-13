@@ -49,9 +49,18 @@ describe('Meal history pagination (COMBINED_LIST_PAGINATION sensor)', () => {
     ).toBe(false);
   });
 
-  it('never fetches blindly when no total was ever reported', () => {
-    expect(missingFoodPages(15, 2, PAGE, undefined)).toEqual([]);
-    expect(missingFoodPages(15, 2, PAGE, 0)).toEqual([]);
+  it('unknown total still recovers one window at a time (never stuck at ~2 pages)', () => {
+    // Count starved on a slow link: 15 loaded, total unknown, turn to page 2.
+    expect(missingFoodPages(15, 2, PAGE, undefined)).toEqual([2]);
+    expect(missingFoodPages(15, 2, PAGE, 0)).toEqual([2]);
+    // No skipping ahead blindly: a jump fills progressively, one window per turn.
+    expect(missingFoodPages(15, 3, PAGE, undefined)).toEqual([2]);
+    // Covered windows never refetch.
+    expect(missingFoodPages(30, 2, PAGE, undefined)).toEqual([]);
+    // Past the end with an exhausted server: only the next window is
+    // re-attempted (bounded, self-terminating once it comes back short).
+    expect(missingFoodPages(45, 4, PAGE, undefined)).toEqual([4]);
+    expect(missingFoodPages(45, 5, PAGE, undefined)).toEqual([4]);
   });
 
   it('stops at the reported total instead of overshooting', () => {
