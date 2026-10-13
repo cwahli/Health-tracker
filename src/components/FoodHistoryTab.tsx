@@ -16,6 +16,7 @@ import { mergeFoodLogsDeduped, foodLogFingerprint, isLineageLinked } from '../ut
 import { findMasterMeal, propagateDownstream } from '../utils/savedMealLineage';
 import PreviousMealThumbnail from './PreviousMealThumbnail';
 import { fetchFoodLogDetail } from '../utils/syncUtils';
+import { getAggregatedAppData, getStorageKey, healedBundleTotal, safeSaveToLocalStorage } from '../utils/storageUtils';
 import { missingFoodPages, shouldProbeFoodTotal } from '../utils/foodPagination';
 import { resolveMealVerdict } from '../utils/verdictUtils';
 
@@ -818,6 +819,27 @@ export default function FoodHistoryTab({
     totalProbeAtRef.current = Date.now();
     onFetchMoreFoods(pages[0]).catch(() => {});
   }, [activeFoodLogs.length, totalFoodsCount, searchTerm, currentPage, itemsPerPage, onFetchMoreFoods]);
+
+  // Heal a poisoned stored total (ALWAYS_COUNT_FALLBACK): sync bundles can
+  // be written with a stale low count, and every remount re-reads it. When
+  // live state learns a higher total, persist the max so remounts never
+  // regress. Monotonic by design, matching the ratchet on live state.
+  useEffect(() => {
+    if (typeof totalFoodsCount !== 'number' || totalFoodsCount <= 0) return;
+    const email = profile?.email;
+    if (!email) return;
+    let cancelled = false;
+    getAggregatedAppData(email)
+      .then((cur) => {
+        if (cancelled) return;
+        const best = healedBundleTotal(totalFoodsCount, cur?.totalFoodsCount);
+        if (best != null && best !== cur?.totalFoodsCount) {
+          safeSaveToLocalStorage(getStorageKey(email), { ...(cur || {}), totalFoodsCount: best }).catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [totalFoodsCount, profile?.email]);
 
   useEffect(() => {
     if (!expandedLogId) return;

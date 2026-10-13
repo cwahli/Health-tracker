@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { preserveBundleFoodTotal } from '../storageUtils';
+import { healedBundleTotal, preserveBundleFoodTotal } from '../storageUtils';
 
 /**
  * Sensor for the bundle-poisoning half of class ALWAYS_COUNT_FALLBACK: a
@@ -41,5 +41,20 @@ describe('Bundle meal-total preservation', () => {
   it('ignores non-bundle payloads', () => {
     expect(preserveBundleFoodTotal(null, bundle(387))).toBe(null);
     expect(preserveBundleFoodTotal({ a: 1 }, bundle(387))).toEqual({ a: 1 });
+  });
+});
+
+describe('healedBundleTotal — persist the max, never regress', () => {
+  it('prefers the live total when higher (heals a poisoned bundle)', () => {
+    expect(healedBundleTotal(387, 60)).toBe(387);
+  });
+
+  it('keeps a stored good total when live state knows none yet', () => {
+    expect(healedBundleTotal(undefined, 387)).toBe(387);
+  });
+
+  it('returns undefined when neither side knows a total', () => {
+    expect(healedBundleTotal(undefined, undefined)).toBeUndefined();
+    expect(healedBundleTotal(0, -3)).toBeUndefined();
   });
 });

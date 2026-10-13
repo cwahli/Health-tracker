@@ -96,6 +96,19 @@ async function preserveBundleFoodTotalStored(key: string, data: any): Promise<an
   }
 }
 
+/**
+ * Highest known meal total across live state and the stored bundle.
+ * The live value wins ties-or-better; a stored good value heals a missing
+ * live one. Returns undefined when neither side knows a positive total.
+ * Used to persist the max so remounts never regress (ALWAYS_COUNT_FALLBACK).
+ */
+export function healedBundleTotal(liveTotal: unknown, storedTotal: unknown): number | undefined {
+  const live = typeof liveTotal === 'number' && liveTotal > 0 ? Math.floor(liveTotal) : 0;
+  const stored = typeof storedTotal === 'number' && storedTotal > 0 ? Math.floor(storedTotal) : 0;
+  const best = Math.max(live, stored);
+  return best > 0 ? best : undefined;
+}
+
 export async function getAggregatedAppData(email?: string | null): Promise<any> {
   const key = getStorageKey(email);
   try {
