@@ -793,7 +793,18 @@ export default function FoodHistoryTab({
     onClearInitiallyExpandedFoodId?.();
   }, [initiallyExpandedFoodId, combinedItems, filteredLogs, itemsPerPage, currentPage, searchTerm, onClearInitiallyExpandedFoodId]);
 
-  // Smooth scroll into view when expandedLogId or currentPage updates
+  // Smooth scroll into view when expandedLogId or currentPage updates.
+  // Page turns start at the top of the list; only an expanded meal that is
+  // actually on the new page keeps the viewport on itself.
+  const prevPageRef = useRef(currentPage);
+  useEffect(() => {
+    if (prevPageRef.current === currentPage) return;
+    prevPageRef.current = currentPage;
+    if (expandedLogId && document.getElementById(`food-log-item-${expandedLogId}`)) return;
+    const top = document.getElementById('food-history-list-top');
+    if (top) top.scrollIntoView({ behavior: 'auto', block: 'start' });
+  }, [expandedLogId, currentPage]);
+
   useEffect(() => {
     if (!expandedLogId) return;
     const timer = setTimeout(() => {
@@ -1383,7 +1394,7 @@ export default function FoodHistoryTab({
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div id="food-history-list-top" className="space-y-4">
           {filteredLogs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item) => {
             if (item.type === 'job') {
               const job = item.data;
