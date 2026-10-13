@@ -215,6 +215,23 @@ export default function LogChat({
   const [debugLogs, setDebugLogs] = useState<{ timestamp: string, message: string }[]>([]);
   const [isDebugSendingLogs, setIsDebugSendingLogs] = useState(false);
   const [debugLogsSendStatus, setDebugLogsSendStatus] = useState<'idle' | 'success' | 'error'>('idle');
+
+  // Agent debug affordances (header Download/Terminal buttons, failure-card
+  // diagnostics button, Data-used-by-agent panel) follow the same
+  // agent_debug_mode flag as the Header toggle. Default OFF: persona users
+  // never see dev tools unless the toggle is enabled. Same-tab toggles apply
+  // on next chat open; cross-tab updates arrive via the storage event.
+  const [agentDebugMode, setAgentDebugMode] = useState(() => {
+    try { return typeof localStorage !== 'undefined' && localStorage.getItem('agent_debug_mode') === 'true'; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'agent_debug_mode') { try { setAgentDebugMode(e.newValue === 'true'); } catch { /* ignore */ } }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
   const [liveThoughts, setLiveThoughts] = useState<{scout?: string, diet?: string, dbSearchLog?: string, activeStage?: string, backendLogs?: string, globalLiveLogs?: string}>({});
   const safeParseResponse = async (res: Response, fallback: any = {}) => {
     try {
@@ -5254,7 +5271,7 @@ ${logsText}`);
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button
+            {agentDebugMode && (<button
               type="button"
               id="download-debug-logs-header-btn"
               onClick={() => {
@@ -5266,14 +5283,14 @@ ${logsText}`);
               title={t.downloadDebugLogsTitle || t.downloadDebugLogs || "Download Debug Logs"}
             >
               <Download className="w-5 h-5" />
-            </button>
-            <button
+            </button>)}
+            {agentDebugMode && (<button
               onClick={() => setShowFullScreenDebugLogs(true)}
               className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 transition-colors"
               title={t.viewHistoricalLogs}
             >
               <Terminal className="w-5 h-5" />
-            </button>
+            </button>)}
             <button 
               id="close-food-chat-btn"
               onClick={onClose} 
@@ -5499,7 +5516,7 @@ ${logsText}`);
               </div>
             );
           })()}
-          <DataUsedByAgentPanel
+          {agentDebugMode && (<DataUsedByAgentPanel
             isAgent={isAgent}
             t={t}
             messages={messages}
@@ -5532,7 +5549,7 @@ ${logsText}`);
             payloadStorageKey={payloadStorageKey}
             chatStorageKey={chatStorageKey}
             activeConversationId={activeConversationId}
-          />
+          />)}
           {(() => {
             const revIdx = [...messages].reverse().findIndex(m => m.id?.startsWith('welcome_'));
             const lastWelcomeIndex = revIdx >= 0 ? messages.length - 1 - revIdx : -1;
@@ -5731,7 +5748,7 @@ ${logsText}`);
                                 <ChevronDown className="w-3 h-3" />
                               </button>
                             )}
-                            {isErrorMsg && (
+                            {isErrorMsg && agentDebugMode && (
                               <button
                                 type="button"
                                 onClick={() => setShowFullScreenDebugLogs(true)}
