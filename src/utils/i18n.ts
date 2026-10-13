@@ -27,6 +27,25 @@ export function localeDisplayName(lang: unknown): string {
   return LOCALE_NAMES[normalizeLocale(lang)];
 }
 
+/**
+ * Initial UI language: saved preference wins; otherwise the browser/phone
+ * locale (first non-English supported match); otherwise English.
+ * An Indonesian phone (id-ID) lands on Bahasa from the first screen instead
+ * of English-by-default (reviewer FAIL, Sari goal run).
+ */
+export function initialUiLanguage(saved: unknown, nav?: readonly string[] | string | null): SupportedLocale {
+  const cands: string[] = [];
+  const s = String(saved || '').trim();
+  if (s) cands.push(s);
+  if (Array.isArray(nav)) cands.push(...nav);
+  else if (typeof nav === 'string' && nav) cands.push(nav);
+  for (const c of cands) {
+    const n = normalizeLocale(c);
+    if (n !== 'en') return n;
+  }
+  return 'en';
+}
+
 /** UI chrome: missing keys in a locale fall back to English. */
 export function t(lang: unknown, key: TranslationKey): string {
   const locale = normalizeLocale(lang);
@@ -51,13 +70,11 @@ export function agentOutputLanguageBlock(lang: unknown): string {
   const lines = [
     '=== USER OUTPUT LANGUAGE ===',
     `The patient's UI language is ${name} (code: ${locale}).`,
-    `Write every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in ${name}.`,
-    'Keep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.',
+    'CRITICAL — reply in the SAME language as the patient\'s latest message, always. If they wrote in Bahasa Indonesia, reply fully in Bahasa Indonesia; if French, in French; if English, in English — regardless of the UI language above. Only use the UI language when the message language is ambiguous, mixed, or empty.',
+    'Write every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in that reply language.',
+    'Keep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the reply language; never show raw keys like Saturated_fat to the patient.',
     'Keep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.',
   ];
-  if (locale !== 'en') {
-    lines.push(`Do not reply in English unless the user wrote this turn in English and is clearly asking for English.`);
-  }
   return lines.join('\n');
 }
 

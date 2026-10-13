@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../types';
 import { translations } from '../utils/translations';
+import { initialUiLanguage } from '../utils/i18n';
 import { Activity, Mail, AlertCircle, RefreshCw, KeyRound, CheckCircle } from 'lucide-react';
 import { supabase, isSupabaseConfigured, getAuthRedirectTo, cleanupAuthUrlParams } from '../utils/supabaseClient';
 import { auth } from '../firebase';
@@ -35,7 +36,8 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
   const [status, setStatus] = useState<'idle' | 'sending' | 'pending_verification'>('idle');
   const [language, setLanguage] = useState<'en' | 'fr' | 'zh' | 'id'>(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('preferred_language') as any : null;
-    return ['en', 'fr', 'zh', 'id'].includes(saved) ? saved : 'en';
+    const nav = typeof navigator !== 'undefined' ? (navigator.languages || navigator.language) : undefined;
+    return initialUiLanguage(saved, nav as any);
   });
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
