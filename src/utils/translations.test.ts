@@ -50,8 +50,16 @@ const BASELINE_TOTAL_KEYS = 3960;
  * resendVerificationLink, signOutTryAnother, verificationLinkSent) plus 25
  * fr and 25 zh entries for the AuthScreen keys. Only `id` values changed;
  * `en` untouched.
+ *
+ * Re-recorded for Wave 1 bulk (home/food/health surfaces): 283 `id` values
+ * translated from English copies (review-flagged dev tokens intentionally
+ * left in English). Deliberate, reviewed per-value; `en` untouched.
+ *
+ * Re-recorded for Wave 1 remainder: 4 more `id` values (`title`, `label`,
+ * `name`, `priority` — proven rendered in HomeTab/BugSnapshot/HealthPlanning,
+ * previously English) translated. `en` untouched.
  */
-const FROZEN_DIGESTS = { en: 'a63869abd92e5670', id: '16e7ff856ed1e09f' } as const;
+const FROZEN_DIGESTS = { en: 'a63869abd92e5670', id: '35720c923cf1c558' } as const;
 
 const stablePairs = (pack: Record<string, unknown>) =>
   JSON.stringify(Object.keys(pack).sort().map((key) => [key, pack[key]]));
