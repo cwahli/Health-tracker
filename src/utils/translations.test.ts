@@ -58,8 +58,12 @@ const BASELINE_TOTAL_KEYS = 3960;
  * Re-recorded for Wave 1 remainder: 4 more `id` values (`title`, `label`,
  * `name`, `priority` — proven rendered in HomeTab/BugSnapshot/HealthPlanning,
  * previously English) translated. `en` untouched.
+ *
+ * Re-recorded for Wave 2 (chat/settings/errors): 310 `id` values translated
+ * (72 review-flagged dev tokens left in English). Deliberate, per-value
+ * reviewed; `en` untouched.
  */
-const FROZEN_DIGESTS = { en: 'a63869abd92e5670', id: '35720c923cf1c558' } as const;
+const FROZEN_DIGESTS = { en: 'a63869abd92e5670', id: 'bd865d5e8c6569bf' } as const;
 
 const stablePairs = (pack: Record<string, unknown>) =>
   JSON.stringify(Object.keys(pack).sort().map((key) => [key, pack[key]]));
