@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { missingFoodPages, needsFoodFetch } from '../foodPagination';
+import { missingFoodPages, needsFoodFetch, shouldProbeFoodTotal } from '../foodPagination';
 
 /**
  * Sensor for class COMBINED_LIST_PAGINATION: the meals history list mixes
@@ -71,5 +71,32 @@ describe('Meal history pagination (COMBINED_LIST_PAGINATION sensor)', () => {
 
   it('handles boundary equality: exactly one window loaded still pulls the next', () => {
     expect(missingFoodPages(15, 2, PAGE, 30)).toEqual([2]);
+  });
+
+  describe('shouldProbeFoodTotal — unknown-total self-heal', () => {
+    it('probes when a full window is loaded but no total was ever learned', () => {
+      expect(
+        shouldProbeFoodTotal({ totalFoods: undefined, loadedFoods: 15, pageSize: PAGE, nowMs: 1000 }),
+      ).toBe(true);
+    });
+
+    it('never probes once the total is known', () => {
+      expect(
+        shouldProbeFoodTotal({ totalFoods: 387, loadedFoods: 15, pageSize: PAGE, nowMs: 1000 }),
+      ).toBe(false);
+    });
+
+    it('never probes on a short (exhausted) window — nothing left to count', () => {
+      expect(
+        shouldProbeFoodTotal({ totalFoods: undefined, loadedFoods: 7, pageSize: PAGE, nowMs: 1000 }),
+      ).toBe(false);
+    });
+
+    it('throttles repeat probes while the backend keeps failing', () => {
+      const base = { totalFoods: undefined, loadedFoods: 30, pageSize: PAGE, lastProbeAtMs: 1000 };
+      expect(shouldProbeFoodTotal({ ...base, nowMs: 1000 })).toBe(false);
+      expect(shouldProbeFoodTotal({ ...base, nowMs: 61_000 })).toBe(false);
+      expect(shouldProbeFoodTotal({ ...base, nowMs: 301_001 })).toBe(true);
+    });
   });
 });

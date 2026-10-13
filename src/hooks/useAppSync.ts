@@ -58,6 +58,7 @@ import {
   resolveInitialLanguage,
 } from '../utils/syncUtils';
 import { mergeFoodLogsDeduped, rehydrateFoodImagesFromDonors } from '../utils/foodLogDedupe';
+import { shouldProbeFoodTotal } from '../utils/foodPagination';
 import { isUsableImageUrl, uniqueMealImageUrls } from '../utils/foodImageSources';
 import { JobStore } from '../jobs/JobStore';
 import { hydrateUserJobs, upsertJobToSupabase } from '../jobs/BackendJobSync';
@@ -161,6 +162,19 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
   const lastSyncTrigger = useRef<number>(0);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Total-count durability (ALWAYS_COUNT_FALLBACK): bundle writes must use
+  // the freshest known total, never a stale render closure (or a bundle
+  // shape without the field) that persists undefined/low over a good value
+  // and collapses history after every remount.
+  const totalFoodsCountRef = useRef<number | undefined>(undefined);
+  const lastTotalProbeAtRef = useRef<number>(0);
+  const ratchetTotalFoodsCount = (n: unknown) => {
+    if (typeof n === 'number' && n > 0) {
+      totalFoodsCountRef.current = Math.max(totalFoodsCountRef.current || 0, n);
+      setTotalFoodsCount(prev => Math.max(prev || 0, n));
+    }
+  };
+
   const withTimeout = <T,>(promise: Promise<T> | T, timeoutMs: number, label: string): Promise<T | void> => {
     let timeoutId: any;
     return Promise.race([
@@ -189,9 +203,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
     if (newFoods.length > 0) {
       setFoodLogs(prev => mergeFoodLogsDeduped(prev, newFoods));
     }
-    if (typeof newTotal === 'number' && newTotal > 0) {
-      setTotalFoodsCount(prev => Math.max(prev || 0, newTotal));
-    }
+    ratchetTotalFoodsCount(newTotal);
   }, [profile?.uid, profile?.email]);
 
   const checkForDbChanges = async (forceUserId?: string, forcePull?: boolean, forceReplaceLocal?: boolean) => {
@@ -229,9 +241,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
     }
     // Load local storage first so we don't wipe it on page load
     const parsedLocal = await getAggregatedAppData(activeEmail) || {};
-    if (typeof parsedLocal.totalFoodsCount === 'number' && parsedLocal.totalFoodsCount > 0) {
-      setTotalFoodsCount(prev => Math.max(prev || 0, parsedLocal.totalFoodsCount));
-    }
+    ratchetTotalFoodsCount(parsedLocal.totalFoodsCount);
     // Snapshot of current local state (from storage or memory) for safe merge
     const currentEmail = activeEmail?.toLowerCase().trim() || 'guest';
     const profileEmail = profile?.email?.toLowerCase().trim();
@@ -365,9 +375,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
           userEmail,
           { lastSyncTime: (forcePull || forceReplaceLocal) ? undefined : (parsedLocal.lastSyncedAt || 0) }
         );
-        if (typeof fetchedTotalFoods === 'number' && fetchedTotalFoods > 0) {
-          setTotalFoodsCount(prev => Math.max(prev || 0, fetchedTotalFoods));
-        }
+        ratchetTotalFoodsCount(fetchedTotalFoods);
         
         let mergedBioHist = sb;
         if (serverFoods.length > 0) {
@@ -441,9 +449,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
           activeEmail,
           { timeoutMs: 90000, skipFirebaseFallback: true }
         );
-        if (typeof fetchedTotalFoods === 'number' && fetchedTotalFoods > 0) {
-          setTotalFoodsCount(prev => Math.max(prev || 0, fetchedTotalFoods));
-        }
+        ratchetTotalFoodsCount(fetchedTotalFoods);
 
         if (!serverProfile && serverBiomarkers.length === 0 && serverFoods.length === 0) {
           throw new Error('Force Pull failed: Supabase returned no profile and no logs. Force Push from the master device first.');
@@ -531,7 +537,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
           actions: mergedActions,
           dailyBenefits: mergedBenefits,
           report: resolvedReport,
-          totalFoodsCount: fetchedTotalFoods || totalFoodsCount,
+          totalFoodsCount: totalFoodsCountRef.current,
           lastSyncedAt: Date.now()
         });
 
@@ -732,9 +738,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
                   lastSyncTime: (forcePull || forceReplaceLocal || !parsedLocal.lastSyncedAt || !localFoods || localFoods.length === 0) ? undefined : (parsedLocal.lastSyncedAt || 0)
                 }
               );
-              if (typeof fetchedTotalFoods === 'number' && fetchedTotalFoods > 0) {
-                setTotalFoodsCount(prev => Math.max(prev || 0, fetchedTotalFoods));
-              }
+              ratchetTotalFoodsCount(fetchedTotalFoods);
               const isIncrementalPull = !forcePull && !forceReplaceLocal && !!parsedLocal.lastSyncedAt && Array.isArray(localFoods) && localFoods.length > 0;
               const activeDeletedFoodIds = {
                 ...(localProfile?.deletedFoodLogIds || {}),
@@ -743,6 +747,16 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
               };
               v2Foods = (forceReplaceLocal ? serverFoods : mergeFoodLogsDeduped(localFoods, serverFoods))
                 .filter(f => f && f.sync_state !== 'delete' && (!activeDeletedFoodIds[f.id] || (f.updated_at || 0) > activeDeletedFoodIds[f.id]));
+              // Unknown-total self-heal (ALWAYS_COUNT_FALLBACK): a one-row
+              // probe recovers the count so a starved count(*) can never pin
+              // history to a few pages across remounts. Throttled; best-effort.
+              if (shouldProbeFoodTotal({ totalFoods: totalFoodsCountRef.current, loadedFoods: v2Foods.length, pageSize: 15, lastProbeAtMs: lastTotalProbeAtRef.current, nowMs: Date.now() })) {
+                lastTotalProbeAtRef.current = Date.now();
+                try {
+                  const probe = await fetchFoodLogsPage(uid, 1, 1, activeEmail);
+                  ratchetTotalFoodsCount(probe.totalFoodsCount);
+                } catch { /* progressive page fetch still advances without a total */ }
+              }
               const activeDeletedBioIds = {
                 ...(localProfile?.deletedBiomarkerLogIds || {}),
                 ...(cloudProfile?.deletedBiomarkerLogIds || {}),
@@ -1319,7 +1333,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
           actions: mergedActions,
           dailyBenefits: mergedBenefits,
           report: resolvedReport,
-          totalFoodsCount,
+          totalFoodsCount: totalFoodsCountRef.current,
           lastSyncedAt: Date.now()
         };
         await safeSaveToLocalStorage(getStorageKey(mergedProfile?.email || profile?.email || auth.currentUser?.email), bundle);
@@ -1355,7 +1369,8 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
           biomarkerHistory: localBioHistory,
           actions: localActions,
           dailyBenefits: localBenefits,
-          report: localReport
+          report: localReport,
+          totalFoodsCount: totalFoodsCountRef.current
         };
         await safeSaveToLocalStorage(getStorageKey(localProfile?.email || profile?.email || auth.currentUser?.email), bundle);
         // Try syncing profile to cloud in background

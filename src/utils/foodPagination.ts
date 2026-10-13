@@ -76,3 +76,28 @@ export function needsFoodFetch(args: {
     missingFoodPages(args.loadedFoods, args.targetPage, args.pageSize, args.totalFoods).length > 0
   );
 }
+
+/**
+ * Whether a sync should fire a one-row count probe to recover an unknown
+ * meal total (class ALWAYS_COUNT_FALLBACK self-heal). Fires only when a
+ * full window is already loaded (evidence more exists) and the total was
+ * never learned, throttled to one probe per `minIntervalMs` so a persistently
+ * failing backend is not hammered on every sync.
+ */
+export function shouldProbeFoodTotal(args: {
+  totalFoods?: number;
+  loadedFoods: number;
+  pageSize: number;
+  lastProbeAtMs?: number;
+  nowMs: number;
+  minIntervalMs?: number;
+}): boolean {
+  const known = typeof args.totalFoods === 'number' && args.totalFoods > 0;
+  if (known) return false;
+  const size = Math.max(1, Math.floor(args.pageSize) || 1);
+  if (Math.floor(args.loadedFoods) < size) return false;
+  const interval = Math.max(0, args.minIntervalMs ?? 5 * 60 * 1000);
+  const last = typeof args.lastProbeAtMs === 'number' ? args.lastProbeAtMs : 0;
+  if (last <= 0) return true; // never probed: due immediately
+  return args.nowMs - last >= interval;
+}
