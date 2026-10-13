@@ -1480,14 +1480,18 @@ app.use((req, res, next) => {
     }
   });
 
-// Robust API key resolver supporting standard GEMINI_API_KEY, Google Cloud GOOGLE_API_KEY, or API_KEY
+// Robust API key resolver supporting standard GEMINI_API_KEY, Google Cloud GOOGLE_API_KEY, or API_KEY.
+// All candidates pass through cleanEnvValue (src/utils/envKey.ts): deploy .env files
+// quote secrets and systemd/dotenv strip the quotes, but any other loader (or a
+// copy-paste with spaces) must never hand a quoted key to Google (Oct-13 lesson).
 export const getGeminiApiKey = (): string => {
+  const multi = (process.env.GEMINI_API_KEYS || '')
+    .split(',')
+    .map((k) => cleanEnvValue(k))
+    .find((k) => k) || '';
   return (
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.API_KEY ||
-    process.env.GEMINI_API_KEYS?.split(',')[0]?.trim() ||
-    ''
+    firstEnvValue(['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'API_KEY']) ||
+    multi
   );
 };
 
@@ -1496,6 +1500,7 @@ export const getGeminiApiKey = (): string => {
 // the awaiting pipeline stage via takeUnifiedUsage (single-flight per stage).
 // (Store lives in src/utils/unifiedUsage.ts — leaf module, no import cycles.)
 import { recordUnifiedUsage, recordUnifiedTiming } from './src/utils/unifiedUsage.js';
+import { cleanEnvValue, firstEnvValue } from './src/utils/envKey.js';
 
 // Initialize Gemini SDK with telemetry header
 export const getGeminiClient = () => {
