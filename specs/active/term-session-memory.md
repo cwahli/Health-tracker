@@ -106,6 +106,14 @@ Sensitive transitions as (Condition, Action, Pitfall):
    shows numbers on tty rows and none on bare rows.
 4. Guard + COMPLETE: `journey-guard.mjs term-session-memory`, named gates,
    live `GET /api/ttys/status` read on the box showing `memMiB` on live rows.
+5. Kill-signal pass (user feedback 2026-10-13): memory moves onto the row's
+   main line in full-size text; idle sessions get a red dot (green = active)
+   plus idle duration (`idle 2h`), because idle is the kill criterion.
+   Server adds `idleMs` per live tty row from `tmux list-sessions`
+   `session_activity` (one extra spawn, best-effort, omitted when unknown);
+   bare rows derive idle duration client-side from their existing `updatedAt`.
+   Dormant/bare-unknown rows stay numberless. Same gates as above plus a
+   headless-Chromium dropdown screenshot re-proof.
 
 ## Test plan
 

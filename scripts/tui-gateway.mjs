@@ -39,7 +39,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { tmuxNameFor } from './tui-bot-plumbing.mjs';
-import { collectSessionMem } from './lib/tmux-session-mem.mjs';
+import { collectSessionMem, collectSessionIdle } from './lib/tmux-session-mem.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..');
@@ -1993,12 +1993,17 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         status.push({ bot: b, live });
         if (live) liveNames.push(tmuxNameFor(b));
       }
-      // Memory per live tmux session, best-effort: unknown (dormant, bare
-      // rows, or a failed collection) carries no memMiB rather than a zero.
+      // Memory + idle age per live tmux session, best-effort: unknown
+      // (dormant, bare rows, or a failed collection) carries neither field
+      // rather than a zero.
       const mem = await collectSessionMem({ sessions: liveNames });
+      const idle = await collectSessionIdle({ sessions: liveNames });
       for (const row of status) {
-        const mib = row.live ? mem[tmuxNameFor(row.bot)] : undefined;
+        if (!row.live) continue;
+        const mib = mem[tmuxNameFor(row.bot)];
         if (Number.isInteger(mib) && mib > 0) row.memMiB = mib;
+        const ims = idle[tmuxNameFor(row.bot)];
+        if (Number.isInteger(ims) && ims >= 0) row.idleMs = ims;
       }
       for (const e of readVmPickerEntriesStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) })) {
         status.push({ id: e.id, bot: e.bot, live: true });

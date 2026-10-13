@@ -3,8 +3,10 @@ import { describe, it, expect } from 'vitest';
 import {
   parsePaneLines,
   parsePsLines,
+  parseSessionActivity,
   sumSessionTrees,
   collectSessionMem,
+  collectSessionIdle,
 } from './tmux-session-mem.mjs';
 
 describe('parsePaneLines', () => {
@@ -53,8 +55,7 @@ describe('sumSessionTrees', () => {
   });
 });
 
-describe('collectSessionMem', () => {
-  const canned = (panesOut, psOut, failOn = '') => (file, _args, _opts, cb) => {
+describe('collectSessionMem', () => {  const canned = (panesOut, psOut, failOn = '') => (file, _args, _opts, cb) => {
     if (file === failOn) cb(new Error('boom'));
     else if (file === 'tmux') cb(null, panesOut);
     else cb(null, psOut);
@@ -80,6 +81,42 @@ describe('collectSessionMem', () => {
     let spawned = 0;
     const spy = () => { spawned++; };
     await expect(collectSessionMem({ sessions: [], execFile: spy })).resolves.toEqual({});
+    expect(spawned).toBe(0);
+  });
+});
+
+describe('parseSessionActivity', () => {
+  it('maps sessions to idle milliseconds', () => {
+    const now = 1791917460000;
+    expect(parseSessionActivity('VM-tui 1791917400\ncolab 1791917460\n', now))
+      .toEqual({ 'VM-tui': 60000, colab: 0 });
+  });
+  it('clamps future activity at zero and skips malformed lines', () => {
+    const now = 1000000;
+    expect(parseSessionActivity('\nnope\nVM-tui abc\nVM-tui -5\nVM-tui 2000\n', now))
+      .toEqual({ 'VM-tui': 0 });
+  });
+});
+
+describe('collectSessionIdle', () => {
+  const canned = (out, fail = false) => (file, _args, _opts, cb) => {
+    if (fail) cb(new Error('boom'));
+    else cb(null, out);
+  };
+  it('resolves idle ages for the requested sessions only', async () => {
+    const got = await collectSessionIdle({
+      sessions: ['VM-tui'],
+      now: 1791917460000,
+      execFile: canned('VM-tui 1791917400\ncolab 1791917460\n'),
+    });
+    expect(got).toEqual({ 'VM-tui': 60000 });
+  });
+  it('resolves {} on failure or empty input', async () => {
+    await expect(collectSessionIdle({ sessions: ['VM-tui'], execFile: canned('', true) }))
+      .resolves.toEqual({});
+    let spawned = 0;
+    await expect(collectSessionIdle({ sessions: [], execFile: () => { spawned++; } }))
+      .resolves.toEqual({});
     expect(spawned).toBe(0);
   });
 });

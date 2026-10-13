@@ -18,18 +18,23 @@ export function formatMem(mib: number): string {
   return `${(mib / 1024).toFixed(1)} GB`;
 }
 
-export type TtyStatusRow = { id?: string; bot: string; live: boolean; memMiB?: number };
+export type TtyStatusRow = { id?: string; bot: string; live: boolean; memMiB?: number; idleMs?: number };
 
 /**
- * Fold `/api/ttys/status` rows into the picker's live + memory maps.
+ * Fold `/api/ttys/status` rows into the picker's live + memory + idle maps.
  * Keyed rows (bare sessions) paint only their own id — a live bare session
  * must not paint the shared `vm` bot row. Unkeyed rows are ttyd terminals,
  * whose picker id is `tty:<bot>`, so they paint both keys (the bare bot key
  * keeps older lookups working).
  */
-export function statusKeyMaps(rows: TtyStatusRow[]): { live: Record<string, boolean>; mem: Record<string, number> } {
+export function statusKeyMaps(rows: TtyStatusRow[]): {
+  live: Record<string, boolean>;
+  mem: Record<string, number>;
+  idle: Record<string, number>;
+} {
   const live: Record<string, boolean> = {};
   const mem: Record<string, number> = {};
+  const idle: Record<string, number> = {};
   for (const row of rows || []) {
     if (!row || typeof row.bot !== 'string') continue;
     const id = typeof row.id === 'string' && row.id ? row.id : '';
@@ -37,7 +42,74 @@ export function statusKeyMaps(rows: TtyStatusRow[]): { live: Record<string, bool
     for (const k of keys) {
       live[k] = row.live === true;
       if (typeof row.memMiB === 'number' && row.memMiB > 0) mem[k] = row.memMiB;
+      if (typeof row.idleMs === 'number' && row.idleMs >= 0) idle[k] = row.idleMs;
     }
   }
-  return { live, mem };
+  return { live, mem, idle };
+}
+
+/** Idle at or past this long paints red: the session is a kill candidate. */
+export const TTY_IDLE_RED_MS = 15 * 60 * 1000;
+
+/** Duration readout for idle rows (`5m` / `2h` / `3d`); '' when unmeasurable. */
+export function formatIdle(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
+export type PickerRow = {
+  kind?: string;
+  bot: string;
+  agent?: string;
+  status?: string;
+  updatedAt?: string | null;
+};
+
+export type RowLook = {
+  /** live = green, idle = red kill candidate, dormant = grey. */
+  dot: 'live' | 'idle' | 'dormant';
+  /** `412 MB` / `2.0 GB`, or '' — rendered on the row's main line. */
+  memText: string;
+  /** `live`, `idle 2h`, `working`, or '' — rendered under the main line. */
+  stateText: string;
+};
+
+/**
+ * One rule for what a picker row shows. ttyd rows read the status maps;
+ * bare sessions read their own `status`/`updatedAt` (the server sends no
+ * memory or tmux idle for rows with no backend here).
+ */
+export function lookForRow(
+  r: PickerRow,
+  maps: { live: boolean; memMiB?: number; idleMs?: number },
+  nowMs: number,
+): RowLook {
+  const noMem: RowLook = { dot: 'dormant', memText: '', stateText: '' };
+  if (!r) return noMem;
+  if (r.kind === 'opencode') {
+    if (String(r.status || '').toLowerCase() === 'idle') {
+      let dur = '';
+      const t = r.updatedAt ? Date.parse(r.updatedAt) : NaN;
+      if (Number.isFinite(t)) dur = ` ${formatIdle(nowMs - t)}`;
+      return { dot: 'idle', memText: '', stateText: `idle${dur}` };
+    }
+    return {
+      dot: maps.live ? 'live' : 'dormant',
+      memText: '',
+      stateText: String(r.status || ''),
+    };
+  }
+  if (!maps.live) return noMem;
+  const memText =
+    typeof maps.memMiB === 'number' && maps.memMiB > 0 ? formatMem(maps.memMiB) : '';
+  const idleMs = typeof maps.idleMs === 'number' ? maps.idleMs : -1;
+  if (idleMs >= TTY_IDLE_RED_MS) {
+    return { dot: 'idle', memText, stateText: `idle ${formatIdle(idleMs)}` };
+  }
+  return { dot: 'live', memText, stateText: 'live' };
 }

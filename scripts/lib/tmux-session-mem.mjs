@@ -88,6 +88,45 @@ function runCmd(execFile, file, args, timeoutMs) {
 }
 
 /**
+ * `tmux list-sessions -F '#{session_name} #{session_activity}'` →
+ * { session: idleMs }. session_activity is the last pane-activity epoch
+ * (seconds); idle clamps at 0 so a skewed clock never reports negative.
+ * Malformed lines are skipped.
+ */
+export function parseSessionActivity(text, nowMs = Date.now()) {
+  const out = {};
+  for (const line of String(text || '').split('\n')) {
+    const cut = line.lastIndexOf(' ');
+    if (cut <= 0) continue;
+    const session = line.slice(0, cut).trim();
+    const at = Number(line.slice(cut + 1).trim());
+    if (!session || !Number.isFinite(at) || at <= 0) continue;
+    out[session] = Math.max(0, Math.round(nowMs - at * 1000));
+  }
+  return out;
+}
+
+/**
+ * Idle age per tmux session, best-effort like collectSessionMem: one
+ * `tmux list-sessions`, scoped to the wanted names, {} on any failure.
+ */
+export async function collectSessionIdle({ sessions = [], execFile = defaultExecFile, timeoutMs = 5000, now = Date.now() } = {}) {
+  const wanted = new Set((Array.isArray(sessions) ? sessions : []).filter(Boolean));
+  if (!wanted.size) return {};
+  try {
+    const out = await runCmd(execFile, 'tmux', ['list-sessions', '-F', '#{session_name} #{session_activity}'], timeoutMs);
+    const all = parseSessionActivity(out, now);
+    const scoped = {};
+    for (const s of wanted) {
+      if (Number.isFinite(all[s])) scoped[s] = all[s];
+    }
+    return scoped;
+  } catch {
+    return {};
+  }
+}
+
+/**
  * One `tmux list-panes` + one `ps`, mapped onto the requested tmux session
  * names. `execFile` is injectable (same callback shape as node's) so tests
  * never spawn. Resolves {} on any failure or empty input.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMem, statusKeyMaps } from './shell-session';
+import { formatMem, statusKeyMaps, formatIdle, lookForRow, TTY_IDLE_RED_MS } from './shell-session';
 
 describe('formatMem (picker memory readout shows a number or nothing)', () => {
   it('renders megabytes below 1 GiB', () => {
@@ -19,24 +19,70 @@ describe('formatMem (picker memory readout shows a number or nothing)', () => {
 
 describe('statusKeyMaps (tty rows light under their tty:<bot> picker id)', () => {
   it('paints an unkeyed tty row under both bot and tty:bot', () => {
-    const { live, mem } = statusKeyMaps([{ bot: 'vm2', live: true, memMiB: 180 }]);
+    const { live, mem, idle } = statusKeyMaps([{ bot: 'vm2', live: true, memMiB: 180, idleMs: 60000 }]);
     expect(live).toEqual({ vm2: true, 'tty:vm2': true });
     expect(mem).toEqual({ vm2: 180, 'tty:vm2': 180 });
+    expect(idle).toEqual({ vm2: 60000, 'tty:vm2': 60000 });
   });
   it('paints a keyed bare row under its own id only, never the shared bot', () => {
-    const { live, mem } = statusKeyMaps([{ id: 'opencode:ses_abc', bot: 'vm', live: true }]);
+    const { live, mem, idle } = statusKeyMaps([{ id: 'opencode:ses_abc', bot: 'vm', live: true }]);
     expect(live).toEqual({ 'opencode:ses_abc': true });
     expect(mem).toEqual({});
+    expect(idle).toEqual({});
     expect(live.vm).toBeUndefined();
   });
-  it('marks dormant rows without a memory entry', () => {
-    const { live, mem } = statusKeyMaps([{ bot: 'vm', live: false, memMiB: 0 }]);
+  it('marks dormant rows without memory or idle entries', () => {
+    const { live, mem, idle } = statusKeyMaps([{ bot: 'vm', live: false, memMiB: 0, idleMs: -1 }]);
     expect(live).toEqual({ vm: false, 'tty:vm': false });
     expect(mem).toEqual({});
+    expect(idle).toEqual({});
   });
   it('skips rows with no bot', () => {
-    const { live, mem } = statusKeyMaps([{ bot: undefined as unknown as string, live: true }]);
+    const { live, mem, idle } = statusKeyMaps([{ bot: undefined as unknown as string, live: true }]);
     expect(live).toEqual({});
     expect(mem).toEqual({});
+    expect(idle).toEqual({});
+  });
+});
+
+describe('formatIdle', () => {
+  it('reads minutes, hours, days', () => {
+    expect(formatIdle(0)).toBe('just now');
+    expect(formatIdle(5 * 60000)).toBe('5m');
+    expect(formatIdle(2 * 3600000)).toBe('2h');
+    expect(formatIdle(3 * 86400000)).toBe('3d');
+  });
+  it('is blank when unmeasurable', () => {
+    expect(formatIdle(NaN)).toBe('');
+    expect(formatIdle(-1)).toBe('');
+  });
+});
+
+describe('lookForRow (one rule for dot, memory, state)', () => {
+  it('paints a live tty row green with memory on top', () => {
+    expect(lookForRow({ bot: 'vm' }, { live: true, memMiB: 243, idleMs: 60000 }, 0))
+      .toEqual({ dot: 'live', memText: '243 MB', stateText: 'live' });
+  });
+  it('paints an idle tty row red with its idle age', () => {
+    expect(lookForRow({ bot: 'vm' }, { live: true, memMiB: 243, idleMs: TTY_IDLE_RED_MS + 1 }, 0))
+      .toEqual({ dot: 'idle', memText: '243 MB', stateText: `idle ${formatIdle(TTY_IDLE_RED_MS + 1)}` });
+  });
+  it('paints a dormant tty row grey with no numbers', () => {
+    expect(lookForRow({ bot: 'vm' }, { live: false }, 0))
+      .toEqual({ dot: 'dormant', memText: '', stateText: '' });
+  });
+  it('paints an idle bare session red with its age from updatedAt', () => {
+    const now = 1791917460000;
+    const updatedAt = new Date(now - 3 * 3600000).toISOString();
+    expect(lookForRow(
+      { kind: 'opencode', bot: 'vm', agent: 'opencode/x', status: 'idle', updatedAt },
+      { live: true }, now,
+    )).toEqual({ dot: 'idle', memText: '', stateText: 'idle 3h' });
+  });
+  it('paints a working bare session green with no memory', () => {
+    expect(lookForRow(
+      { kind: 'opencode', bot: 'vm', agent: 'opencode/x', status: 'working', updatedAt: null },
+      { live: true }, 0,
+    )).toEqual({ dot: 'live', memText: '', stateText: 'working' });
   });
 });
