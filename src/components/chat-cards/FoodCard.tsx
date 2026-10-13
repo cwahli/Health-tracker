@@ -23,7 +23,7 @@ import { extractMostRecentImageDate, getCurrentDateInTimezone } from '../../util
 import { normalizeMealImageUrl, uniqueMealImageUrls, isUsableImageUrl, collectSavedMealImageUrls } from '../../utils/foodImageSources';
 import { scaleMealPortion, scaleSingleDishPortion } from '../../utils/portionUtils';
 import { threadHasUnansweredPortionClarify } from '../../utils/chatMessageDedupe';
-import { mapDisplayedScoutItems, resolveTileImageIndex } from '../../utils/foodCompositionTiles';
+import { mapDisplayedScoutItems, resolveTileImageIndex, uniqueCropTiles } from '../../utils/foodCompositionTiles';
 import PreviousMealThumbnail from '../PreviousMealThumbnail';
 import ImageSlider from '../ImageSlider';
 import { NutrientPieChart } from '../NutrientPieChart';
@@ -1337,7 +1337,20 @@ export const FoodCard: React.FC<AgentCardProps & {
                         </h4>
                       </div>
 
-                      {/* Shared Scout Items Row for Comparison Mode */}
+                      {/* Clinician recommendation: the model's top pick (never rendered before) */}
+                      {!!comparisonData?.recommendedOption && (
+                        <div data-testid="compare-recommended" className="bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/50 rounded-xl p-3 text-left font-sans flex items-start gap-2">
+                          <span className="text-sm shrink-0">⭐</span>
+                          <div className="flex-1 min-w-0">
+                            <span className="font-bold text-emerald-900 dark:text-emerald-200 text-xs block mb-0.5">{t.recommendedOption || 'Recommended option'}</span>
+                            <span className="text-[13px] text-emerald-900 dark:text-emerald-100 font-medium leading-snug break-words">{comparisonData.recommendedOption}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Shared Scout Items Row for Comparison Mode — one tile per unique
+                          crop (items sharing identical photo + box pixels merge into a
+                          single tile with a +n badge instead of repeating the photo). */}
                       {activeScoutItems.length > 0 && (
                         <div className="bg-slate-50/50 dark:bg-slate-900/30 rounded-xl p-3 border border-theme-border/60 mb-2">
                            <div className="flex items-center justify-between mb-2">
@@ -1346,21 +1359,27 @@ export const FoodCard: React.FC<AgentCardProps & {
                                {t.identifiedIngredients || "Identified Ingredients"}
                              </div>
                            </div>
+                           {(() => {
+                             const cropTiles = uniqueCropTiles(activeScoutItems);
+                             return (
                            <div className={
-                             activeScoutItems.length > 4 
+                             cropTiles.length > 4 
                                ? "flex overflow-x-auto gap-3 pt-2 pb-2 w-full font-sans scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800" 
                                : "flex flex-wrap items-start justify-start gap-3 pt-2 pb-2 w-full font-sans"
                            }>
-                             {activeScoutItems.map((item: any, i: number) => {
+                             {cropTiles.map((tile: any) => {
+                               const item: any = activeScoutItems[tile.representativeIndex];
+                               const i = tile.representativeIndex;
+                               const extraCount = tile.memberIndices.length - 1;
                                const imgIdx = resolveTileImageIndex(item, messageImages.length);
                                const resolvedImgSrc = resolveHistoricalImgSrc(item, messageImages, foodLogs || [], imgIdx);
-                               const itemWidthClass = activeScoutItems.length > 4
+                               const itemWidthClass = cropTiles.length > 4
                                  ? 'w-[90px] sm:w-[105px] shrink-0'
-                                 : activeScoutItems.length === 1 
+                                 : cropTiles.length === 1 
                                    ? 'w-[130px] sm:w-[150px] shrink-0' 
                                    : 'w-full max-w-[160px]';
                                return (
-                                 <div key={i} className={`flex flex-col items-center gap-1 shrink-0 relative group ${itemWidthClass}`}>
+                                 <div key={tile.key} className={`flex flex-col items-center gap-1 shrink-0 relative group ${itemWidthClass}`}>
                                    <div className="relative w-full">
                                      <div 
                                        className={`w-full aspect-square rounded-xl overflow-hidden cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-sm ${
@@ -1402,8 +1421,11 @@ export const FoodCard: React.FC<AgentCardProps & {
                                        </div>
                                      )}
                                    </div>
-                                   <span className="text-[10px] text-center font-medium leading-tight break-words line-clamp-2 w-full font-sans text-slate-700 dark:text-slate-300">
+                                   <span className="text-[10px] text-center font-medium leading-tight break-words line-clamp-2 w-full font-sans text-slate-700 dark:text-slate-300" title={tile.memberIndices.map((m: number) => (activeScoutItems[m]?.keyword || activeScoutItems[m]?.originalName || activeScoutItems[m]?.name)).filter(Boolean).join(', ')}>
                                      {showTranslations.scout ? (item.keyword || item.originalName) : (item.originalName || item.keyword)}
+                                     {extraCount > 0 && (
+                                       <span className="ml-1 inline-flex items-center px-1 rounded-full bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold">+{extraCount}</span>
+                                     )}
                                    </span>
                                    {item.anomalyFlags && item.anomalyFlags.length > 0 && (
                                      <span className="text-[8px] text-center leading-tight text-amber-600 dark:text-amber-500 w-full font-sans line-clamp-2">
@@ -1414,8 +1436,10 @@ export const FoodCard: React.FC<AgentCardProps & {
                                );
                              })}
                            </div>
+                             );
+                           })()}
 
-                           {/* Uncertain Items Helper Button */}
+                            {/* Uncertain Items Helper Button */}
                            {reviewsOpen && activeScoutItems.some(isItemUnclearOrLowConfidence) && (
                              <div className="mt-2 flex flex-col gap-1.5 bg-amber-50/50 dark:bg-amber-900/10 border border-amber-200/50 dark:border-amber-800/50 rounded-lg p-2 font-sans relative">
                                <button 
@@ -1638,9 +1662,25 @@ export const FoodCard: React.FC<AgentCardProps & {
                                         </span>
                                       )}
                                     </p>
-                                    {group.averageNutrientsPer100g && (
-                                      <p data-testid="compare-per-100g-note" className="text-[11px] text-slate-500 italic pt-1.5">
-                                        * Nutritional values are estimates per 100g
+                                    {((group.servingWeightGrams && Number(group.servingWeightGrams) > 0) || group.averageNutrientsPer100g) && (
+                                      <p data-testid="compare-per-100g-note" className="text-[11px] text-slate-500 pt-1.5 leading-relaxed">
+                                        {group.servingWeightGrams && Number(group.servingWeightGrams) > 0
+                                          ? `* Values above per serving (≈${Math.round(Number(group.servingWeightGrams))}g)`
+                                          : `* Values above per serving`}
+                                        {(() => {
+                                          const p = group.averageNutrientsPer100g || {};
+                                          const num = (v: any) => (v === null || v === undefined || isNaN(Number(v)) ? null : Number(v));
+                                          const parts: string[] = [];
+                                          const kcal = num(p.calories); if (kcal !== null) parts.push(`${kcal} kcal/100g`);
+                                          const prot = num(p.protein); if (prot !== null) parts.push(`P ${prot}g`);
+                                          const fat = num(p.totalFat); if (fat !== null) parts.push(`F ${fat}g`);
+                                          const sat = num(p.saturatedFat); if (sat !== null) parts.push(`sat ${sat}g`);
+                                          const carbs = num(p.carbohydrates); if (carbs !== null) parts.push(`C ${carbs}g`);
+                                          const sugar = num(p.sugar); if (sugar !== null) parts.push(`sugar ${sugar}g`);
+                                          const sod = num(p.sodium); if (sod !== null) parts.push(`Na ${sod}mg`);
+                                          if (parts.length === 0) return null;
+                                          return ` · Per 100g: ${parts.join(' · ')}`;
+                                        })()}
                                       </p>
                                     )}
                                   </div>

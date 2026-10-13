@@ -3,6 +3,7 @@ import {
   compositionTileItems,
   mapDisplayedScoutItems,
   resolveTileImageIndex,
+  uniqueCropTiles,
 } from './foodCompositionTiles';
 
 /** Evidence-job shape: 7 foods + flattened sauce/sides (not this meal's FDC names). */
@@ -73,5 +74,38 @@ describe('foodCompositionTiles F-8.6', () => {
       { name: 'Rice', role: 'food' },
       { name: 'Soy', role: 'component' },
     ]).map((x) => x.name)).toEqual(['Rice']);
+  });
+
+  it('uniqueCropTiles merges items sharing one identical crop, keeps distinct crops apart', () => {
+    const items = [
+      { name: 'SilverQueen', scoutIndex: 0, sourceImageIndex: 0, boundingBox2D: [0, 0, 1000, 500] },
+      { name: 'Magnum', scoutIndex: 1, sourceImageIndex: 0, boundingBox2D: [0, 600, 1000, 1000] },
+      { name: 'Kinder', scoutIndex: 2, sourceImageIndex: 0, boundingBox2D: [0, 600, 1000, 1000] },
+      { name: 'Polo Choc', scoutIndex: 3, sourceImageIndex: 1, boundingBox2D: [0, 0, 1000, 1000] },
+      { name: 'Polo Cheese', scoutIndex: 4, sourceImageIndex: 1, boundingBox2D: [0, 0, 1000, 1000] },
+    ];
+    const tiles = uniqueCropTiles(items);
+    expect(tiles).toHaveLength(3);
+    expect(tiles[0].memberIndices).toEqual([0]);
+    expect(tiles[1].memberIndices).toEqual([1, 2]);
+    expect(tiles[2].memberIndices).toEqual([3, 4]);
+    expect(tiles[1].representativeIndex).toBe(1);
+  });
+
+  it('uniqueCropTiles treats a missing box as the full photo of its image', () => {
+    const tiles = uniqueCropTiles([
+      { name: 'A', scoutIndex: 0, sourceImageIndex: 1 },
+      { name: 'B', scoutIndex: 1, sourceImageIndex: 1, boundingBox2D: [0, 0, 1000, 1000] },
+    ]);
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0].memberIndices).toEqual([0, 1]);
+  });
+
+  it('uniqueCropTiles keeps same box on different photos apart', () => {
+    const tiles = uniqueCropTiles([
+      { name: 'A', scoutIndex: 0, sourceImageIndex: 0, boundingBox2D: [0, 0, 1000, 1000] },
+      { name: 'B', scoutIndex: 1, sourceImageIndex: 1, boundingBox2D: [0, 0, 1000, 1000] },
+    ]);
+    expect(tiles).toHaveLength(2);
   });
 });
