@@ -145,8 +145,9 @@ Sensitive transitions as (Condition, Action, Pitfall):
    proc and it is the VM-tui-vm2 pane root already counted in that tree.
    Rule: a bare row is listed with an EXCLUSIVE-backend annotation and shows
    only then; shared-backend and backend-less rows hide as duplicate/dead
-   once status truth arrives (fail-open before that, so a status outage never
-   blanks the viewer). The gateway keeps listing/reporting every entry — the
+   even before status truth arrives (no numberless flash — a status outage
+   degrades the viewer, but the alternative is exactly the wrongly-placed
+   numberless rows). The gateway keeps listing/reporting every entry — the
    frozen `assert-tui-gateway` gate requires it — and the hide lives
    client-side (`filterBareRows`, tested). Viewer API + Web tab unaffected;
    rows return automatically if a backend appears. Dormant tty doors stay as

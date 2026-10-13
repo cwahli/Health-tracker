@@ -56,20 +56,33 @@ describe('sumSessionTrees', () => {
   it('sums panes plus descendants, in MiB rounded', () => {
     const panes = { 'VM-tui': [100] };
     const ps = {
+      100: { ppid: 1, rssKb: 34272, pssKb: 20000 },
+      101: { ppid: 100, rssKb: 158572, pssKb: 150000 },
+      102: { ppid: 101, rssKb: 2048, pssKb: 2048 },
+      999: { ppid: 1, rssKb: 999999, pssKb: 999999 },
+    };
+    // (20000 + 150000 + 2048) / 1024 = 168.0 → 168; pid 999 is not under 100.
+    expect(sumSessionTrees(panes, ps)).toEqual({ 'VM-tui': 168 });
+  });
+  it('skips unreadable processes instead of RSS-inflating them', () => {
+    // Same tree, no pssKb anywhere: shared libraries would be counted once
+    // per process under RSS — the 4x overstatement measured live.
+    const panes = { 'VM-tui': [100] };
+    const ps = {
       100: { ppid: 1, rssKb: 34272 },
       101: { ppid: 100, rssKb: 158572 },
-      102: { ppid: 101, rssKb: 2048 },
-      999: { ppid: 1, rssKb: 999999 },
     };
-    // (34272 + 158572 + 2048) / 1024 = 190.3 → 190; pid 999 is not under 100.
-    expect(sumSessionTrees(panes, ps)).toEqual({ 'VM-tui': 190 });
+    expect(sumSessionTrees(panes, ps)).toEqual({});
   });
   it('omits sessions with no matched process instead of reporting zero', () => {
     expect(sumSessionTrees({ ghost: [555] }, { 1: { ppid: 0, rssKb: 10 } })).toEqual({});
     expect(sumSessionTrees({}, { 1: { ppid: 0, rssKb: 10 } })).toEqual({});
   });
   it('does not loop on a pid cycle', () => {
-    const ps = { 1: { ppid: 2, rssKb: 1024 }, 2: { ppid: 1, rssKb: 1024 } };
+    const ps = {
+      1: { ppid: 2, rssKb: 1024, pssKb: 1024 },
+      2: { ppid: 1, rssKb: 1024, pssKb: 1024 },
+    };
     expect(sumSessionTrees({ s: [1] }, ps)).toEqual({ s: 2 });
   });
 });
@@ -88,8 +101,9 @@ describe('collectSessionMem', () => {  const canned = (panesOut, psOut, failOn =
       execFile: canned(PANES, PS),
       readFile: noProc,
     });
-    // VM-tui: (102400 + 102400)/1024 = 200; colab not requested.
-    expect(got).toEqual({ 'VM-tui': 200 });
+    // Unreadable smaps (noProc) means nothing attributable: omitted, not
+    // RSS-inflated. The PSS path is covered by 'collectors use PSS' below.
+    expect(got).toEqual({});
   });
   it('resolves {} when tmux or ps fails', async () => {
     await expect(collectSessionMem({ sessions: ['VM-tui'], execFile: canned(PANES, PS, 'tmux'), readFile: noProc }))
@@ -170,9 +184,16 @@ describe('collectTmuxSessions', () => {
     else cb(null, byCmd.ps);
   };
   it('returns every session sorted, with memory and idle age', async () => {
-    await expect(collectTmuxSessions({ execFile, readFile: noProc, now: 1791917460000 })).resolves.toEqual([
+    const pss = async () => 'Pss: 102400 kB\n';
+    await expect(collectTmuxSessions({ execFile, readFile: pss, now: 1791917460000 })).resolves.toEqual([
       { name: 'VM-tui', memMiB: 200, idleMs: 60000 },
-      { name: 'colab', memMiB: 50, idleMs: 0 },
+      { name: 'colab', memMiB: 100, idleMs: 0 },
+    ]);
+  });
+  it('lists sessions even when nothing is readable, memory omitted', async () => {
+    await expect(collectTmuxSessions({ execFile, readFile: noProc, now: 1791917460000 })).resolves.toEqual([
+      { name: 'VM-tui', idleMs: 60000 },
+      { name: 'colab', idleMs: 0 },
     ]);
   });
   it('omits unknown figures instead of zeroing', async () => {
@@ -206,7 +227,7 @@ describe('pssForPids / applyPss (PSS wins, RSS is the tracked fallback)', () => 
     const ps = { 1: { ppid: 0, rssKb: 100 }, 2: { ppid: 1, rssKb: 200 } };
     expect(applyPss(ps, { 1: 30 })).toEqual({
       1: { ppid: 0, rssKb: 100, pssKb: 30, pssOk: true },
-      2: { ppid: 1, rssKb: 200, pssKb: 200, pssOk: false },
+      2: { ppid: 1, rssKb: 200, pssKb: null, pssOk: false },
     });
   });
   it('sumSessionTrees adds PSS, so shared pages stop double-counting', () => {
@@ -238,7 +259,8 @@ describe('collectUnattributedMem (the reconciling remainder)', () => {
       if (file === 'tmux') cb(null, 's 1\n');
       else cb(null, 'PID PPID RSS\n1 0 1024\n2 1 1024\n7 0 2048\n');
     };
-    await expect(collectUnattributedMem({ execFile: exec2, readFile: noProc }))
+    const pss2 = async (path) => (path === '/proc/7/smaps_rollup' ? 'Pss: 2048 kB\n' : 'Pss: 1 kB\n');
+    await expect(collectUnattributedMem({ execFile: exec2, readFile: pss2 }))
       .resolves.toEqual({ mib: 2, procs: 1 });
   });
   it('resolves {} on failure', async () => {
@@ -265,11 +287,11 @@ describe('matchSesPids / collectBareSessionMem (exclusive backends only)', () =>
     const got = await collectBareSessionMem({
       sessions: ['ses_in', 'ses_out', 'ses_gone'],
       execFile,
-      readFile: noProc,
+      readFile: async () => 'Pss: 102400 kB\n',
     });
     // ses_in's root (11) is a child of pane pid 10 → shared; ses_out is exclusive.
     expect(got).toEqual({
-      ses_in: { mib: 200, shared: true },
+      ses_in: { mib: 100, shared: true },
       ses_out: { mib: 100, shared: false },
     });
   });

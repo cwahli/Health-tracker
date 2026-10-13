@@ -61,16 +61,17 @@ export function statusKeyMaps(rows: TtyStatusRow[], tmux: TmuxEntry[] = []): {
 /** Idle at or past this long paints red: the session is a kill candidate. */
 export const TTY_IDLE_RED_MS = 15 * 60 * 1000;
 
-/** Hide bare rows with no backend memory once status truth arrived.
- * Before the first good status response everything shows (fail-open: a
- * status outage must not blank the session viewer). Doors, tty, tmux and
- * box rows always show — only `opencode` viewer rows are filtered. */
+/** Hide bare rows without backend memory. Status truth is required: before
+ * the first good status response nothing is known, so bare rows stay hidden
+ * rather than flashing numberless (a status outage degrades the viewer, but
+ * the alternative is exactly the wrongly-placed numberless rows). Doors,
+ * tty, tmux and box rows always show. */
 export function filterBareRows<T extends { kind?: string; bot: string; id?: string }>(
   rows: T[],
   mem: Record<string, number>,
   statusOk: boolean,
 ): T[] {
-  if (!statusOk) return rows || [];
+  if (!statusOk) return (rows || []).filter((r) => r && r.kind !== 'opencode');
   return (rows || []).filter((r) => {
     if (!r || r.kind !== 'opencode') return true;
     const key = typeof r.id === 'string' && r.id ? r.id : r.bot;

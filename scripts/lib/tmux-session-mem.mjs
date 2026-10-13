@@ -101,7 +101,7 @@ export async function collectUnattributedMem({ execFile = defaultExecFile, readF
     let procs = 0;
     for (const [pid, row] of Object.entries(ps)) {
       if (members.has(Number(pid))) continue;
-      kb += typeof row.pssKb === 'number' ? row.pssKb : row.rssKb;
+      kb += typeof row.pssKb === 'number' ? row.pssKb : 0;
       procs += 1;
     }
     return kb > 0 ? { mib: Math.round(kb / 1024), procs } : {};
@@ -152,7 +152,8 @@ export function parsePsLines(text) {
  * from two sessions counts in both — shared pages are overcounted in RSS
  * already, so the figures stay comparable upper bounds. Sessions with no
  * matched process are omitted (unknown, not zero). Each row may carry
- * `pssKb` (from applyPss); it wins over `rssKb` wherever present.
+ * `pssKb` (from applyPss) wherever present; unreadable processes add
+ * nothing (their shared pages are counted through readable sharers).
  */
 export function sumSessionTrees(panesBySession, psByPid) {
   const children = new Map();
@@ -172,7 +173,7 @@ export function sumSessionTrees(panesBySession, psByPid) {
       seen.add(p);
       const row = (psByPid || {})[p];
       if (!row) continue;
-      kb += typeof row.pssKb === 'number' ? row.pssKb : row.rssKb;
+      kb += typeof row.pssKb === 'number' ? row.pssKb : 0;
       const kids = children.get(p);
       if (kids) stack.push(...kids);
     }
@@ -201,14 +202,18 @@ export async function pssForPids(pids, { readFile = defaultReadFile } = {}) {
   return out;
 }
 
-/** Attach `pssKb`/`pssOk` to a `parsePsLines` map. Pure; returns a new map. */
+/** Attach `pssKb`/`pssOk` to a `parsePsLines` map. Pure; returns a new map.
+ * Unreadable processes get `pssKb: null` — their shared pages are already
+ * counted through readable sharers, so counting full RSS instead would
+ * double-count shared libraries per process (measured 4x on watch loops).
+ * Only their private pages go missing, which is the honest direction. */
 export function applyPss(psByPid, pssByPid) {
   const out = {};
   for (const [pid, row] of Object.entries(psByPid || {})) {
     const pssKb = (pssByPid || {})[pid];
     out[pid] = {
       ...row,
-      pssKb: typeof pssKb === 'number' ? pssKb : row.rssKb,
+      pssKb: typeof pssKb === 'number' ? pssKb : null,
       pssOk: typeof pssKb === 'number',
     };
   }
@@ -276,7 +281,7 @@ export async function collectBareSessionMem({ sessions = [], execFile = defaultE
         seen.add(p);
         const row = ps[p];
         if (!row) continue;
-        kb += typeof row.pssKb === 'number' ? row.pssKb : row.rssKb;
+        kb += typeof row.pssKb === 'number' ? row.pssKb : 0;
         stack.push(...(children.get(p) || []));
       }
       return kb;

@@ -133,16 +133,16 @@ describe('sortByMem (heaviest first, unmeasured keep order at the bottom)', () =
   });
 });
 
-describe('filterBareRows (visible implies measurable, fail-open first)', () => {
+describe('filterBareRows (visible implies measurable, never numberless)', () => {
   const rows = [
     { bot: 'vm', id: 'tty:vm', kind: 'tty' },
     { bot: 's1', id: 'opencode:s1', kind: 'opencode' },
     { bot: 's2', id: 'opencode:s2', kind: 'opencode' },
     { bot: 'colab', id: 'tmux:colab', kind: 'tmux' },
   ];
-  it('shows everything before status truth arrives', () => {
+  it('holds bare rows until status truth arrives (no numberless flash)', () => {
     expect(filterBareRows(rows, {}, false).map((r) => r.bot))
-      .toEqual(['vm', 's1', 's2', 'colab']);
+      .toEqual(['vm', 'colab']);
   });
   it('hides mem-less bare rows once status is known, keeps the rest', () => {
     expect(filterBareRows(rows, { 'opencode:s1': 100 }, true).map((r) => r.bot))
