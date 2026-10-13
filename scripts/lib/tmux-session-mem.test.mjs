@@ -10,6 +10,8 @@ import {
   applyPss,
   collectSessionMem,
   collectSessionIdle,
+  matchSesPids,
+  collectBareSessionMem,
   listTmuxNames,
   collectTmuxSessions,
   collectUnattributedMem,
@@ -36,7 +38,14 @@ describe('parsePaneLines', () => {
 describe('parsePsLines', () => {
   it('skips the header and reads pid/ppid/rss', () => {
     expect(parsePsLines('    PID    PPID   RSS\n   4113756       1  34272\n   4113785 4113756 158572\n'))
-      .toEqual({ 4113756: { ppid: 1, rssKb: 34272 }, 4113785: { ppid: 4113756, rssKb: 158572 } });
+      .toEqual({
+        4113756: { ppid: 1, rssKb: 34272, args: '' },
+        4113785: { ppid: 4113756, rssKb: 158572, args: '' },
+      });
+  });
+  it('captures argv when ps provides it', () => {
+    expect(parsePsLines('PID PPID RSS ARGS\n100 1 1024 opencode --session ses_abc\n'))
+      .toEqual({ 100: { ppid: 1, rssKb: 1024, args: 'opencode --session ses_abc' } });
   });
   it('skips malformed rows', () => {
     expect(parsePsLines('PID PPID RSS\nabc 1 2\n1 x 2\n1 2 y\n1 2\n')).toEqual({});
@@ -235,5 +244,39 @@ describe('collectUnattributedMem (the reconciling remainder)', () => {
   it('resolves {} on failure', async () => {
     const failing = (_f, _a, _o, cb) => cb(new Error('boom'));
     await expect(collectUnattributedMem({ execFile: failing, readFile: noProc })).resolves.toEqual({});
+  });
+});
+
+describe('matchSesPids / collectBareSessionMem (exclusive backends only)', () => {
+  it('matches argv containing the session id', () => {
+    const ps = {
+      1: { ppid: 0, rssKb: 10, args: 'tmux' },
+      2: { ppid: 1, rssKb: 10, args: 'opencode --session ses_abc' },
+    };
+    expect(matchSesPids(ps, 'ses_abc')).toEqual([2]);
+    expect(matchSesPids(ps, 'ses_nope')).toEqual([]);
+    expect(matchSesPids(ps, '')).toEqual([]);
+  });
+  it('reports mib + shared for in-tree backends, mib only for exclusive ones', async () => {
+    const execFile = (file, args, _opts, cb) => {
+      if (file === 'tmux') cb(null, 'VM-tui 10\n');
+      else cb(null, 'PID PPID RSS ARGS\n10 1 1024 bash\n11 10 204800 opencode --session ses_in\n12 1 102400 opencode --session ses_out\n');
+    };
+    const got = await collectBareSessionMem({
+      sessions: ['ses_in', 'ses_out', 'ses_gone'],
+      execFile,
+      readFile: noProc,
+    });
+    // ses_in's root (11) is a child of pane pid 10 → shared; ses_out is exclusive.
+    expect(got).toEqual({
+      ses_in: { mib: 200, shared: true },
+      ses_out: { mib: 100, shared: false },
+    });
+  });
+  it('resolves {} on failure or empty input', async () => {
+    const failing = (_f, _a, _o, cb) => cb(new Error('boom'));
+    await expect(collectBareSessionMem({ sessions: ['s'], execFile: failing, readFile: noProc }))
+      .resolves.toEqual({});
+    await expect(collectBareSessionMem({ sessions: [] })).resolves.toEqual({});
   });
 });

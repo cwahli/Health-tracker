@@ -39,7 +39,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { tmuxNameFor } from './tui-bot-plumbing.mjs';
-import { collectSessionMem, collectSessionIdle, collectTmuxSessions, listTmuxNames, collectUnattributedMem } from './lib/tmux-session-mem.mjs';
+import { collectSessionMem, collectSessionIdle, collectTmuxSessions, listTmuxNames, collectUnattributedMem, collectBareSessionMem } from './lib/tmux-session-mem.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..');
@@ -1898,8 +1898,19 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       ttys.sort((a, b) => String(a.bot).localeCompare(String(b.bot)));
       // VM_OPENCODE_DB_PATH is a test seam only: unset in prod, where the
       // default opencode.db under HOME is read (best-effort, never throws).
-      for (const e of readVmPickerEntriesStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) })) {
-        ttys.push(e);
+      // Every entry is listed (the picker is also the session viewer); the
+      // client hides entries the status call reports no backend memory for.
+      // memMiB annotates the rare exclusive-backend entry in place.
+      const listBare = readVmPickerEntriesStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) });
+      const listMem = await collectBareSessionMem({
+        sessions: listBare.map((e) => e && e.sessionId).filter(Boolean),
+      });
+      for (const e of listBare) {
+        const m = e && e.sessionId ? listMem[e.sessionId] : null;
+        ttys.push({
+          ...e,
+          ...(m && !m.shared && Number.isInteger(m.mib) && m.mib > 0 ? { memMiB: m.mib } : {}),
+        });
       }
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       return res.end(JSON.stringify({ ok: true, ttys }));
@@ -2029,8 +2040,22 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         const ims = idle[tmuxNameFor(row.bot)];
         if (Number.isInteger(ims) && ims >= 0) row.idleMs = ims;
       }
-      for (const e of readVmPickerEntriesStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) })) {
-        status.push({ id: e.id, bot: e.bot, live: true });
+      // Bare rows are always reported (the picker doubles as the session
+      // viewer — frozen gate); the client hides entries with no backend
+      // memory once status truth arrives. memMiB annotates the rare
+      // exclusive-backend entry in place.
+      const bareEntries = readVmPickerEntriesStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) });
+      const bareMem = await collectBareSessionMem({
+        sessions: bareEntries.map((e) => e && e.sessionId).filter(Boolean),
+      });
+      for (const e of bareEntries) {
+        const m = e && e.sessionId ? bareMem[e.sessionId] : null;
+        status.push({
+          id: e.id,
+          bot: e.bot,
+          live: true,
+          ...(m && !m.shared && Number.isInteger(m.mib) && m.mib > 0 ? { memMiB: m.mib } : {}),
+        });
       }
       // Full tmux inventory for the picker's tracking rows: EVERY live
       // session, not just the served bots'. `route` names the served bot

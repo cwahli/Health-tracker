@@ -61,6 +61,23 @@ export function statusKeyMaps(rows: TtyStatusRow[], tmux: TmuxEntry[] = []): {
 /** Idle at or past this long paints red: the session is a kill candidate. */
 export const TTY_IDLE_RED_MS = 15 * 60 * 1000;
 
+/** Hide bare rows with no backend memory once status truth arrived.
+ * Before the first good status response everything shows (fail-open: a
+ * status outage must not blank the session viewer). Doors, tty, tmux and
+ * box rows always show — only `opencode` viewer rows are filtered. */
+export function filterBareRows<T extends { kind?: string; bot: string; id?: string }>(
+  rows: T[],
+  mem: Record<string, number>,
+  statusOk: boolean,
+): T[] {
+  if (!statusOk) return rows || [];
+  return (rows || []).filter((r) => {
+    if (!r || r.kind !== 'opencode') return true;
+    const key = typeof r.id === 'string' && r.id ? r.id : r.bot;
+    const m = (mem || {})[key];
+    return typeof m === 'number' && m > 0;
+  });
+}
 /** Sort picker rows by memory, heaviest first; unmeasured rows keep their
  * input order at the bottom. Stable: equal keys never swap. */
 export function sortByMem<T extends { bot: string; id?: string }>(
@@ -120,21 +137,21 @@ export function lookForRow(
 ): RowLook {
   const noMem: RowLook = { dot: 'dormant', memText: '', stateText: '' };
   if (!r) return noMem;
+  const memText =
+    typeof maps.memMiB === 'number' && maps.memMiB > 0 ? formatMem(maps.memMiB) : '';
   if (r.kind === 'opencode') {
     if (String(r.status || '').toLowerCase() === 'idle') {
       let dur = '';
       const t = r.updatedAt ? Date.parse(r.updatedAt) : NaN;
       if (Number.isFinite(t)) dur = ` ${formatIdle(nowMs - t)}`;
-      return { dot: 'idle', memText: '', stateText: `idle${dur}` };
+      return { dot: 'idle', memText, stateText: `idle${dur}` };
     }
     return {
       dot: maps.live ? 'live' : 'dormant',
-      memText: '',
+      memText,
       stateText: String(r.status || ''),
     };
   }
-  const memText =
-    typeof maps.memMiB === 'number' && maps.memMiB > 0 ? formatMem(maps.memMiB) : '';
   if (r.kind === 'box') {
     return { dot: 'live', memText, stateText: r.detail || 'outside tmux' };
   }

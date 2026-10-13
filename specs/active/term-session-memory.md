@@ -139,6 +139,20 @@ Sensitive transitions as (Condition, Action, Pitfall):
    all-process PSS; the remainder to `free` (kernel slab, swapped-out) is
    named, never forced. Rows sort by memory desc, unmeasured last. Proof only
    after `/do-verify` passes: no screenshot shared before approval.
+8. Visible-implies-measurable (user audit 2026-10-13: bare rows numberless
+   at the bottom). Re-audited thoroughly: serve API exposes tokens/cost but
+   no per-session RAM (single heap); exactly one bare session has a live CLI
+   proc and it is the VM-tui-vm2 pane root already counted in that tree.
+   Rule: a bare row is listed with an EXCLUSIVE-backend annotation and shows
+   only then; shared-backend and backend-less rows hide as duplicate/dead
+   once status truth arrives (fail-open before that, so a status outage never
+   blanks the viewer). The gateway keeps listing/reporting every entry — the
+   frozen `assert-tui-gateway` gate requires it — and the hide lives
+   client-side (`filterBareRows`, tested). Viewer API + Web tab unaffected;
+   rows return automatically if a backend appears. Dormant tty doors stay as
+   the sole numberless exception (a door, not an agent — hiding it removes
+   the open action). Blind adversarial re-review (requirements-only brief, own
+   measurements) must approve before sharing.
 
 ## Test plan
 

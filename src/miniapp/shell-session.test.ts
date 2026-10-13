@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMem, statusKeyMaps, formatIdle, lookForRow, sortByMem, TTY_IDLE_RED_MS } from './shell-session';
+import { formatMem, statusKeyMaps, formatIdle, lookForRow, sortByMem, filterBareRows, TTY_IDLE_RED_MS } from './shell-session';
 import type { TmuxEntry } from './shell-session';
 
 describe('formatMem (picker memory readout shows a number or nothing)', () => {
@@ -107,6 +107,12 @@ describe('lookForRow (one rule for dot, memory, state)', () => {
       { live: true, memMiB: 1400 }, 0,
     )).toEqual({ dot: 'live', memText: '1.4 GB', stateText: '212 processes outside tmux' });
   });
+  it('paints a bare row with an exclusive backend like a measured row', () => {
+    expect(lookForRow(
+      { kind: 'opencode', bot: 'vm', agent: 'opencode/x', status: 'working', updatedAt: null },
+      { live: true, memMiB: 100 }, 0,
+    )).toEqual({ dot: 'live', memText: '100 MB', stateText: 'working' });
+  });
 });
 
 describe('sortByMem (heaviest first, unmeasured keep order at the bottom)', () => {
@@ -124,5 +130,22 @@ describe('sortByMem (heaviest first, unmeasured keep order at the bottom)', () =
   });
   it('tolerates missing input', () => {
     expect(sortByMem([], {})).toEqual([]);
+  });
+});
+
+describe('filterBareRows (visible implies measurable, fail-open first)', () => {
+  const rows = [
+    { bot: 'vm', id: 'tty:vm', kind: 'tty' },
+    { bot: 's1', id: 'opencode:s1', kind: 'opencode' },
+    { bot: 's2', id: 'opencode:s2', kind: 'opencode' },
+    { bot: 'colab', id: 'tmux:colab', kind: 'tmux' },
+  ];
+  it('shows everything before status truth arrives', () => {
+    expect(filterBareRows(rows, {}, false).map((r) => r.bot))
+      .toEqual(['vm', 's1', 's2', 'colab']);
+  });
+  it('hides mem-less bare rows once status is known, keeps the rest', () => {
+    expect(filterBareRows(rows, { 'opencode:s1': 100 }, true).map((r) => r.bot))
+      .toEqual(['vm', 's1', 'colab']);
   });
 });

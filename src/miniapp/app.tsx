@@ -2,7 +2,7 @@ import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { enabledMiniApps, miniAppById, type MiniAppDef } from './miniapp-registry';
 import { tabUrl } from './shell-nav';
-import { statusKeyMaps, lookForRow, sortByMem, type RowLook, type TmuxEntry } from './shell-session';
+import { statusKeyMaps, lookForRow, sortByMem, filterBareRows, type RowLook, type TmuxEntry } from './shell-session';
 import { BugBoard } from '../components/bug-board/BugBoard';
 import { useBugBoard } from '../components/bug-board/useBugBoard';
 import '../index.css';
@@ -772,6 +772,9 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   // Raw tmux tracking rows (routeless sessions only): view-less, Kill by
   // session name. Refreshed with the status call, same as the maps above.
   const [tmuxRows, setTmuxRows] = useState<TtyRoute[]>([]);
+  // Whether a good status response has arrived: only then may mem-less bare
+  // rows hide (fail-open keeps the viewer usable through a status outage).
+  const [statusOk, setStatusOk] = useState(false);
   // The reconciling remainder: PSS outside every tmux tree. Informational
   // only — no View (nothing to attach), no Kill (nothing to target).
   const [boxRow, setBoxRow] = useState<TtyRoute | null>(null);
@@ -829,6 +832,7 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
       ? (body as { tmux?: TmuxEntry[] }).tmux as TmuxEntry[]
       : [];
     const maps = statusKeyMaps(body.status as { id?: string; bot: string; live: boolean; memMiB?: number; idleMs?: number }[], rawTmux);
+    setStatusOk(true);
     const box = (body as { box?: { otherMiB?: number; otherProcs?: number } }).box;
     const boxOk = box && typeof box.otherMiB === 'number' && box.otherMiB > 0;
     setLive(maps.live);
@@ -876,10 +880,11 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     );
   }
 
-  // Heaviest first so kill candidates surface; unmeasured rows (bare
-  // sessions with no backend here) keep their order at the bottom.
+  // Heaviest first so kill candidates surface. Bare rows without backend
+  // memory hide once status truth arrives (fail-open before that); doors,
+  // tty, tmux and box rows always show.
   const displayRoutes = routes
-    ? sortByMem([...routes, ...tmuxRows, ...(boxRow ? [boxRow] : [])], mem)
+    ? sortByMem(filterBareRows([...routes, ...tmuxRows, ...(boxRow ? [boxRow] : [])], mem, statusOk), mem)
     : routes;
   const pickedRoute = (displayRoutes || []).find((r) => ttyRowId(r) === picked);
   const pickedLabel = pickedRoute

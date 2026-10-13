@@ -126,8 +126,9 @@ export function parsePaneLines(text) {
 }
 
 /**
- * `ps -eo pid,ppid,rss` → { pid: { ppid, rssKb } }. The header and any
- * malformed row are skipped (first token must be numeric).
+ * `ps -eo pid,ppid,rss[,args]` → { pid: { ppid, rssKb, args } }. The header
+ * and any malformed row are skipped (first token must be numeric). `args`
+ * (when the caller asks ps for it) powers session→process attribution.
  */
 export function parsePsLines(text) {
   const out = {};
@@ -135,7 +136,11 @@ export function parsePsLines(text) {
     const parts = line.trim().split(/\s+/);
     if (parts.length < 3 || !/^\d+$/.test(parts[0] || '')) continue;
     if (!/^\d+$/.test(parts[1]) || !/^\d+$/.test(parts[2])) continue;
-    out[Number(parts[0])] = { ppid: Number(parts[1]), rssKb: Number(parts[2]) };
+    out[Number(parts[0])] = {
+      ppid: Number(parts[1]),
+      rssKb: Number(parts[2]),
+      args: parts.slice(3).join(' '),
+    };
   }
   return out;
 }
@@ -200,8 +205,7 @@ export function applyPss(psByPid, pssByPid) {
   for (const [pid, row] of Object.entries(psByPid || {})) {
     const pssKb = (pssByPid || {})[pid];
     out[pid] = {
-      ppid: row.ppid,
-      rssKb: row.rssKb,
+      ...row,
       pssKb: typeof pssKb === 'number' ? pssKb : row.rssKb,
       pssOk: typeof pssKb === 'number',
     };
@@ -211,9 +215,82 @@ export function applyPss(psByPid, pssByPid) {
 
 /** One `ps` plus PSS enrichment — the shared root of the collectors below. */
 async function procMap({ execFile = defaultExecFile, readFile = defaultReadFile, timeoutMs = 5000 } = {}) {
-  const psOut = await runCmd(execFile, 'ps', ['-eo', 'pid,ppid,rss'], timeoutMs);
+  const psOut = await runCmd(execFile, 'ps', ['-eo', 'pid,ppid,rss,args'], timeoutMs);
   const ps = parsePsLines(psOut);
   return applyPss(ps, await pssForPids(Object.keys(ps), { readFile }));
+}
+
+/**
+ * Pids whose argv names a session id (bare-session backend candidates).
+ * Pure over a `parsePsLines` map.
+ */
+export function matchSesPids(psByPid, sesId) {
+  const sid = String(sesId || '').trim();
+  if (!sid) return [];
+  const out = [];
+  for (const [pid, row] of Object.entries(psByPid || {})) {
+    if (row && typeof row.args === 'string' && row.args.includes(sid)) out.push(Number(pid));
+  }
+  return out.sort((a, b) => a - b);
+}
+
+/**
+ * Exclusive-backend memory per bare session: `{ sesId: { mib, shared } }`.
+ * Roots are argv-matched CLI processes; `shared` is true when any root sits
+ * inside a tmux pane tree (already counted there — attributing it again
+ * would double-count). Best-effort ({} on any failure).
+ */
+export async function collectBareSessionMem({ sessions = [], execFile = defaultExecFile, readFile = defaultReadFile, timeoutMs = 5000 } = {}) {
+  const wanted = (Array.isArray(sessions) ? sessions : []).map((s) => String(s || '').trim()).filter(Boolean);
+  if (!wanted.length) return {};
+  try {
+    const [panesOut, ps] = await Promise.all([
+      runCmd(execFile, 'tmux', ['list-panes', '-a', '-F', '#{session_name} #{pane_pid}'], timeoutMs),
+      procMap({ execFile, readFile, timeoutMs }),
+    ]);
+    const panes = parsePaneLines(panesOut);
+    const children = new Map();
+    for (const [pid, row] of Object.entries(ps)) {
+      if (!children.has(row.ppid)) children.set(row.ppid, []);
+      children.get(row.ppid).push(Number(pid));
+    }
+    const treeMembers = new Set();
+    {
+      const stack = Object.values(panes).flat();
+      while (stack.length) {
+        const p = stack.pop();
+        if (treeMembers.has(p)) continue;
+        treeMembers.add(p);
+        if (ps[p]) stack.push(...(children.get(p) || []));
+      }
+    }
+    const sumTree = (roots) => {
+      let kb = 0;
+      const seen = new Set();
+      const stack = [...roots];
+      while (stack.length) {
+        const p = stack.pop();
+        if (seen.has(p)) continue;
+        seen.add(p);
+        const row = ps[p];
+        if (!row) continue;
+        kb += typeof row.pssKb === 'number' ? row.pssKb : row.rssKb;
+        stack.push(...(children.get(p) || []));
+      }
+      return kb;
+    };
+    const out = {};
+    for (const sid of wanted) {
+      const roots = matchSesPids(ps, sid);
+      if (!roots.length) continue;
+      const kb = sumTree(roots);
+      if (kb <= 0) continue;
+      out[sid] = { mib: Math.round(kb / 1024), shared: roots.some((r) => treeMembers.has(r)) };
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 function runCmd(execFile, file, args, timeoutMs) {
