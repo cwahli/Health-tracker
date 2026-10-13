@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatMem, statusKeyMaps, formatIdle, lookForRow, TTY_IDLE_RED_MS } from './shell-session';
+import type { TmuxEntry } from './shell-session';
 
 describe('formatMem (picker memory readout shows a number or nothing)', () => {
   it('renders megabytes below 1 GiB', () => {
@@ -43,6 +44,17 @@ describe('statusKeyMaps (tty rows light under their tty:<bot> picker id)', () =>
     expect(mem).toEqual({});
     expect(idle).toEqual({});
   });
+  it('folds routeless tmux entries under tmux:<name> and skips routed ones', () => {
+    const tmux: TmuxEntry[] = [
+      { name: 'colab', memMiB: 300, idleMs: 3600000, route: null },
+      { name: 'VM-tui-vm2', memMiB: 150, idleMs: 1000, route: 'vm2' },
+      { name: '', memMiB: 1, idleMs: 1, route: null },
+    ];
+    const { live, mem, idle } = statusKeyMaps([], tmux);
+    expect(live).toEqual({ 'tmux:colab': true });
+    expect(mem).toEqual({ 'tmux:colab': 300 });
+    expect(idle).toEqual({ 'tmux:colab': 3600000 });
+  });
 });
 
 describe('formatIdle', () => {
@@ -84,5 +96,9 @@ describe('lookForRow (one rule for dot, memory, state)', () => {
       { kind: 'opencode', bot: 'vm', agent: 'opencode/x', status: 'working', updatedAt: null },
       { live: true }, 0,
     )).toEqual({ dot: 'live', memText: '', stateText: 'working' });
+  });
+  it('paints a raw tmux row like a tty row (red when idle, memory on top)', () => {
+    expect(lookForRow({ kind: 'tmux', bot: 'colab' }, { live: true, memMiB: 300, idleMs: 3600000 }, 0))
+      .toEqual({ dot: 'idle', memText: '300 MB', stateText: 'idle 1h' });
   });
 });

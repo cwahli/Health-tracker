@@ -20,14 +20,19 @@ export function formatMem(mib: number): string {
 
 export type TtyStatusRow = { id?: string; bot: string; live: boolean; memMiB?: number; idleMs?: number };
 
+/** One live tmux session from `/api/ttys/status`. `route` names the served
+ * bot when the session is that bot's attach target, else null. */
+export type TmuxEntry = { name: string; memMiB?: number; idleMs?: number; route: string | null };
+
 /**
  * Fold `/api/ttys/status` rows into the picker's live + memory + idle maps.
  * Keyed rows (bare sessions) paint only their own id — a live bare session
  * must not paint the shared `vm` bot row. Unkeyed rows are ttyd terminals,
  * whose picker id is `tty:<bot>`, so they paint both keys (the bare bot key
- * keeps older lookups working).
+ * keeps older lookups working). Routeless tmux entries paint `tmux:<name>`
+ * tracking keys; routed ones are skipped — their tty row already carries it.
  */
-export function statusKeyMaps(rows: TtyStatusRow[]): {
+export function statusKeyMaps(rows: TtyStatusRow[], tmux: TmuxEntry[] = []): {
   live: Record<string, boolean>;
   mem: Record<string, number>;
   idle: Record<string, number>;
@@ -35,15 +40,20 @@ export function statusKeyMaps(rows: TtyStatusRow[]): {
   const live: Record<string, boolean> = {};
   const mem: Record<string, number> = {};
   const idle: Record<string, number> = {};
+  const paint = (k: string, memMiB?: number, idleMs?: number, isLive = true) => {
+    live[k] = isLive;
+    if (typeof memMiB === 'number' && memMiB > 0) mem[k] = memMiB;
+    if (typeof idleMs === 'number' && idleMs >= 0) idle[k] = idleMs;
+  };
   for (const row of rows || []) {
     if (!row || typeof row.bot !== 'string') continue;
     const id = typeof row.id === 'string' && row.id ? row.id : '';
-    const keys = id ? [id] : [row.bot, `tty:${row.bot}`];
-    for (const k of keys) {
-      live[k] = row.live === true;
-      if (typeof row.memMiB === 'number' && row.memMiB > 0) mem[k] = row.memMiB;
-      if (typeof row.idleMs === 'number' && row.idleMs >= 0) idle[k] = row.idleMs;
-    }
+    if (id) paint(id, row.memMiB, row.idleMs, row.live === true);
+    else for (const k of [row.bot, `tty:${row.bot}`]) paint(k, row.memMiB, row.idleMs, row.live === true);
+  }
+  for (const e of tmux || []) {
+    if (!e || typeof e.name !== 'string' || !e.name || e.route) continue;
+    paint(`tmux:${e.name}`, e.memMiB, e.idleMs, true);
   }
   return { live, mem, idle };
 }

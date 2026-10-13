@@ -4,9 +4,12 @@ import {
   parsePaneLines,
   parsePsLines,
   parseSessionActivity,
+  parseSessionNames,
   sumSessionTrees,
   collectSessionMem,
   collectSessionIdle,
+  listTmuxNames,
+  collectTmuxSessions,
 } from './tmux-session-mem.mjs';
 
 describe('parsePaneLines', () => {
@@ -118,5 +121,55 @@ describe('collectSessionIdle', () => {
     await expect(collectSessionIdle({ sessions: [], execFile: () => { spawned++; } }))
       .resolves.toEqual({});
     expect(spawned).toBe(0);
+  });
+});
+
+describe('parseSessionNames', () => {
+  it('lists non-blank names', () => {
+    expect(parseSessionNames('VM-tui\n\ncolab\n')).toEqual(['VM-tui', 'colab']);
+  });
+});
+
+describe('listTmuxNames', () => {
+  it('resolves the live names', async () => {
+    const execFile = (file, _args, _opts, cb) => cb(null, 'a\nb\n');
+    await expect(listTmuxNames({ execFile })).resolves.toEqual(['a', 'b']);
+  });
+  it('resolves [] on failure', async () => {
+    const execFile = (_f, _a, _o, cb) => cb(new Error('no tmux'));
+    await expect(listTmuxNames({ execFile })).resolves.toEqual([]);
+  });
+});
+
+describe('collectTmuxSessions', () => {
+  const byCmd = {
+    sessions: 'VM-tui 1791917400\ncolab 1791917460\n',
+    panes: 'VM-tui 100\nVM-tui 101\ncolab 200\n',
+    ps: 'PID PPID RSS\n100 1 102400\n101 100 102400\n200 1 51200\n',
+  };
+  const execFile = (file, args, _opts, cb) => {
+    if (file === 'tmux' && args[0] === 'list-sessions') cb(null, byCmd.sessions);
+    else if (file === 'tmux') cb(null, byCmd.panes);
+    else cb(null, byCmd.ps);
+  };
+  it('returns every session sorted, with memory and idle age', async () => {
+    await expect(collectTmuxSessions({ execFile, now: 1791917460000 })).resolves.toEqual([
+      { name: 'VM-tui', memMiB: 200, idleMs: 60000 },
+      { name: 'colab', memMiB: 50, idleMs: 0 },
+    ]);
+  });
+  it('omits unknown figures instead of zeroing', async () => {
+    const partial = (file, args, _opts, cb) => {
+      if (file === 'tmux' && args[0] === 'list-sessions') cb(null, 'ghost 1791917400\n');
+      else if (file === 'tmux') cb(null, '');
+      else cb(null, 'PID PPID RSS\n');
+    };
+    await expect(collectTmuxSessions({ execFile: partial, now: 1791917460000 })).resolves.toEqual([
+      { name: 'ghost', idleMs: 60000 },
+    ]);
+  });
+  it('resolves [] on failure', async () => {
+    const failing = (_f, _a, _o, cb) => cb(new Error('boom'));
+    await expect(collectTmuxSessions({ execFile: failing })).resolves.toEqual([]);
   });
 });

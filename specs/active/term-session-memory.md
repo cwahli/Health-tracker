@@ -114,6 +114,18 @@ Sensitive transitions as (Condition, Action, Pitfall):
    bare rows derive idle duration client-side from their existing `updatedAt`.
    Dormant/bare-unknown rows stay numberless. Same gates as above plus a
    headless-Chromium dropdown screenshot re-proof.
+6. Full tmux inventory (user feedback 2026-10-13: the panel covered 2 of 15
+   tmux sessions — both cline TUIs, all colab viewers/sessions and the
+   opencode session were invisible). `/api/ttys/status` adds a `tmux` array
+   with `{ name, memMiB?, idleMs?, route }` for EVERY live tmux session
+   (`route` = served bot when the session is a bot's attach target, else
+   null); routeless sessions render as view-less rows with mem + idle + red
+   dot, keyed `tmux:<name>`. Bare opencode rows stay memory-less by design
+   (DB rows with no backend here; their cost is inside the tmux trees).
+   Kill extends to `{ tmux }` targets: operator-only, exact-match validated
+   against a fresh `tmux list-sessions` in the same tick, never free-form;
+   the `{ bot }` path behaves byte-identically. Same gates; live proof must
+   show panel tmux-row count equal to `tmux ls` count.
 
 ## Test plan
 

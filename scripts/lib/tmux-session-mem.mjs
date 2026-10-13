@@ -13,6 +13,61 @@
 import { execFile as defaultExecFile } from 'node:child_process';
 
 /**
+ * `tmux list-sessions -F '#{session_name}'` → [name]. Skips blanks.
+ */
+export function parseSessionNames(text) {
+  const out = [];
+  for (const line of String(text || '').split('\n')) {
+    const name = line.trim();
+    if (name) out.push(name);
+  }
+  return out;
+}
+
+/**
+ * Live tmux session names, best-effort ([] on any failure). The kill
+ * endpoint validates its target against this same listing in the same tick,
+ * so the name is allowlisted, never free-form.
+ */
+export async function listTmuxNames({ execFile = defaultExecFile, timeoutMs = 5000 } = {}) {
+  try {
+    return parseSessionNames(
+      await runCmd(execFile, 'tmux', ['list-sessions', '-F', '#{session_name}'], timeoutMs),
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Every live tmux session with its tree memory + idle age:
+ * `[{ name, memMiB?, idleMs? }]`. Three spawns, one tick, best-effort ([] on
+ * any failure). Unknown figures are omitted, never zeroed.
+ */
+export async function collectTmuxSessions({ execFile = defaultExecFile, timeoutMs = 5000, now = Date.now() } = {}) {
+  try {
+    const [sessOut, panesOut, psOut] = await Promise.all([
+      runCmd(execFile, 'tmux', ['list-sessions', '-F', '#{session_name} #{session_activity}'], timeoutMs),
+      runCmd(execFile, 'tmux', ['list-panes', '-a', '-F', '#{session_name} #{pane_pid}'], timeoutMs),
+      runCmd(execFile, 'ps', ['-eo', 'pid,ppid,rss'], timeoutMs),
+    ]);
+    const activity = parseSessionActivity(sessOut, now);
+    const panes = parsePaneLines(panesOut);
+    const mem = sumSessionTrees(panes, parsePsLines(psOut));
+    const names = new Set([...Object.keys(activity), ...Object.keys(panes)]);
+    const out = [];
+    for (const name of [...names].sort()) {
+      const entry = { name };
+      if (Number.isInteger(mem[name]) && mem[name] > 0) entry.memMiB = mem[name];
+      if (Number.isFinite(activity[name])) entry.idleMs = activity[name];
+      out.push(entry);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+/**
  * `tmux list-panes -a -F '#{session_name} #{pane_pid}'` → { session: [pid] }.
  * Split on the LAST space: the pid is always the final token, so a session
  * name containing a space still parses. Malformed lines are skipped.
