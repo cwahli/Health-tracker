@@ -16,3 +16,14 @@ export function tabUrl(search: string, tabId: string, bot: string): string {
   if (bot) q.set('bot', bot);
   return `?${q.toString()}`;
 }
+
+/**
+ * Memory readout for the terminal picker (MiB in, `412 MB` / `2.0 GB` out).
+ * Non-positive or non-finite input renders as '' — the row shows no number
+ * rather than a zero, because dormant and bare rows carry no measurement.
+ */
+export function formatMem(mib: number): string {
+  if (!Number.isFinite(mib) || mib <= 0) return '';
+  if (mib < 1024) return `${Math.round(mib)} MB`;
+  return `${(mib / 1024).toFixed(1)} GB`;
+}

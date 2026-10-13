@@ -39,6 +39,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { tmuxNameFor } from './tui-bot-plumbing.mjs';
+import { collectSessionMem } from './lib/tmux-session-mem.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..');
@@ -1978,6 +1979,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       }
       bots.sort();
       const status = [];
+      const liveNames = [];
       for (const b of bots) {
         let live = false;
         try {
@@ -1989,6 +1991,14 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
           live = false;
         }
         status.push({ bot: b, live });
+        if (live) liveNames.push(tmuxNameFor(b));
+      }
+      // Memory per live tmux session, best-effort: unknown (dormant, bare
+      // rows, or a failed collection) carries no memMiB rather than a zero.
+      const mem = await collectSessionMem({ sessions: liveNames });
+      for (const row of status) {
+        const mib = row.live ? mem[tmuxNameFor(row.bot)] : undefined;
+        if (Number.isInteger(mib) && mib > 0) row.memMiB = mib;
       }
       for (const e of readVmPickerEntriesStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) })) {
         status.push({ id: e.id, bot: e.bot, live: true });

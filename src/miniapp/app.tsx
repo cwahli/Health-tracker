@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { enabledMiniApps, miniAppById, type MiniAppDef } from './miniapp-registry';
-import { tabUrl } from './shell-nav';
+import { tabUrl, formatMem } from './shell-nav';
 import { BugBoard } from '../components/bug-board/BugBoard';
 import { useBugBoard } from '../components/bug-board/useBugBoard';
 import '../index.css';
@@ -627,6 +627,10 @@ type TtyRoute = {
   // `{bot, path}` rows keep rendering.
   id?: string; kind?: string; sessionId?: string; title?: string;
   agent?: string; status?: string; updatedAt?: string | null; url?: string;
+  // Resident memory of the live tmux tree, MiB. Present only on live tty
+  // rows from a new gateway; dormant rows, bare sessions and old gateways
+  // carry nothing, and the UI renders no number rather than a zero.
+  memMiB?: number;
 };
 
 /** Stable picker key: the row id, falling back to bot for older gateways. */
@@ -639,12 +643,13 @@ function ttyRowId(r: TtyRoute): string {
  * View/Kill — the server info used to live behind a second floating
  * burger, now it lives here. The ☰ burger is only ever the Mini Apps nav.
  */
-function SessionMenu({ routes, picked, pickedLabel, open, live, killMsg, onView, onToggleOpen, onKill, onRefresh }: {
-  routes: TtyRoute[] | null; picked: string; pickedLabel: string; open: boolean; live: Record<string, boolean>; killMsg: string;
+function SessionMenu({ routes, picked, pickedLabel, open, live, mem, killMsg, onView, onToggleOpen, onKill, onRefresh }: {
+  routes: TtyRoute[] | null; picked: string; pickedLabel: string; open: boolean; live: Record<string, boolean>; mem: Record<string, number>; killMsg: string;
   onView: (id: string) => void; onToggleOpen: () => void; onKill: (bot: string) => void; onRefresh: () => void;
 }) {
   const [menu, setMenu] = useState(false);
   const isLive = picked !== '' && live[picked] === true;
+  const pickedMem = typeof mem[picked] === 'number' && mem[picked] > 0 ? ` · ${formatMem(mem[picked])}` : '';
   return (
     <span style={{ position: 'relative', flex: '1 1 auto', minWidth: 0 }}>
       <button type="button" aria-label="Session" title="Sessions" disabled={!routes} onClick={() => setMenu((v) => !v)}
@@ -652,7 +657,7 @@ function SessionMenu({ routes, picked, pickedLabel, open, live, killMsg, onView,
         <span title={isLive ? 'session live' : 'session dormant'}
           style={{ width: 8, height: 8, borderRadius: 4, background: isLive ? '#4ade80' : '#475569', flex: '0 0 auto' }} />
         <span style={{ flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}>
-          {routes === null ? 'Loading…' : pickedLabel}
+          {routes === null ? 'Loading…' : pickedLabel}{routes === null ? '' : pickedMem}
         </span>
         <span style={{ color: '#94a3b8' }}>▾</span>
       </button>
@@ -671,6 +676,7 @@ function SessionMenu({ routes, picked, pickedLabel, open, live, killMsg, onView,
               // Bare VM sessions share bot `vm` and have no tmux to kill:
               // they show their title + model, and View opens the web UI.
               const isSession = r.kind === 'opencode';
+              const rowMem = typeof mem[rid] === 'number' && mem[rid] > 0 ? formatMem(mem[rid]) : '';
               return (
                 <span key={rid}
                   style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, fontSize: 13, color: '#e2e8f0', background: watching ? '#1e293b' : 'none' }}>
@@ -681,6 +687,11 @@ function SessionMenu({ routes, picked, pickedLabel, open, live, killMsg, onView,
                     {isSession && r.agent ? (
                       <span style={{ display: 'block', fontSize: 11, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {r.agent}{r.status ? ` · ${r.status}` : ''}
+                      </span>
+                    ) : null}
+                    {!isSession && (rowLive || rowMem) ? (
+                      <span style={{ display: 'block', fontSize: 11, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {rowLive ? 'live' : 'dormant'}{rowMem ? ` · ${rowMem}` : ''}
                       </span>
                     ) : null}
                   </span>
@@ -734,7 +745,10 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   const [killMsg, setKillMsg] = useState('');
   // Per-bot liveness (green = tmux session alive). Refreshed with the list
   // and after every kill, so each row's Kill targets exactly that bot.
+  // mem mirrors it: resident MiB per row key, present only when the gateway
+  // reported one (live tty rows on a new gateway; never dormant/bare rows).
   const [live, setLive] = useState<Record<string, boolean>>({});
+  const [mem, setMem] = useState<Record<string, number>>({});
   const frameRef = useRef<HTMLIFrameElement | null>(null);
 
   const deadRef = useRef(false);
@@ -781,15 +795,18 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     const body = res ? await res.json().catch(() => null) : null;
     if (deadRef.current) return;
     if (!body || body.ok !== true || !Array.isArray(body.status)) return;
-    const map: Record<string, boolean> = {};
-    for (const row of body.status as { id?: string; bot: string; live: boolean }[]) {
+    const liveMap: Record<string, boolean> = {};
+    const memMap: Record<string, number> = {};
+    for (const row of body.status as { id?: string; bot: string; live: boolean; memMiB?: number }[]) {
       if (!row || typeof row.bot !== 'string') continue;
       // Keyed rows (bare sessions) must not paint the shared `vm` bot row:
       // a live bare session is not a live VM tmux session.
-      if (typeof row.id === 'string' && row.id) map[row.id] = row.live === true;
-      else map[row.bot] = row.live === true;
+      const key = (typeof row.id === 'string' && row.id) ? row.id : row.bot;
+      liveMap[key] = row.live === true;
+      if (typeof row.memMiB === 'number' && row.memMiB > 0) memMap[key] = row.memMiB;
     }
-    setLive(map);
+    setLive(liveMap);
+    setMem(memMap);
   };
 
   useEffect(() => {
@@ -951,6 +968,7 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
           pickedLabel={pickedLabel}
           open={open}
           live={live}
+          mem={mem}
           killMsg={killMsg}
           onView={viewRow}
           onToggleOpen={() => {
