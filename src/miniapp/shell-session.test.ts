@@ -71,9 +71,24 @@ describe('formatIdle', () => {
 });
 
 describe('lookForRow (one rule for dot, memory, state)', () => {
-  it('paints a live tty row green with memory on top', () => {
+  it('paints a live tty row green with memory on top, dot-only without agent', () => {
     expect(lookForRow({ bot: 'vm' }, { live: true, memMiB: 243, idleMs: 60000 }, 0))
-      .toEqual({ dot: 'live', memText: '243 MB', stateText: 'live' });
+      .toEqual({ dot: 'live', memText: '243 MB', stateText: '' });
+  });
+  it('paints a live tty row with its agent when known', () => {
+    expect(lookForRow(
+      { bot: 'vm', agent: 'cline/muse-spark-1.3-contributor' },
+      { live: true, memMiB: 243, idleMs: 60000 }, 0,
+    )).toEqual({ dot: 'live', memText: '243 MB', stateText: 'cline/muse-spark-1.3-contributor · live' });
+  });
+  it('paints an idle tty row red with agent and idle age', () => {
+    expect(lookForRow(
+      { bot: 'vm', agent: 'cline/muse-spark-1.3-contributor' },
+      { live: true, memMiB: 243, idleMs: TTY_IDLE_RED_MS + 1 }, 0,
+    )).toEqual({
+      dot: 'idle', memText: '243 MB',
+      stateText: `cline/muse-spark-1.3-contributor · idle ${formatIdle(TTY_IDLE_RED_MS + 1)}`,
+    });
   });
   it('paints an idle tty row red with its idle age', () => {
     expect(lookForRow({ bot: 'vm' }, { live: true, memMiB: 243, idleMs: TTY_IDLE_RED_MS + 1 }, 0))

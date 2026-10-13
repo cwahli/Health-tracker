@@ -12,6 +12,9 @@ import {
   collectSessionIdle,
   matchSesPids,
   collectBareSessionMem,
+  shortModel,
+  agentForArgv,
+  deriveSessionAgent,
   listTmuxNames,
   collectTmuxSessions,
   collectUnattributedMem,
@@ -300,5 +303,58 @@ describe('matchSesPids / collectBareSessionMem (exclusive backends only)', () =>
     await expect(collectBareSessionMem({ sessions: ['s'], execFile: failing, readFile: noProc }))
       .resolves.toEqual({});
     await expect(collectBareSessionMem({ sessions: [] })).resolves.toEqual({});
+  });
+});
+
+describe('agentForArgv / deriveSessionAgent (argv structure, never bare substring)', () => {
+  it('names cline with its shortened model', () => {
+    expect(agentForArgv('/home/u/.npm-global/lib/node_modules/cline/bin/.cline -i -P cline -m cline-free/muse-spark-1.3-contributor -c /ws --id 1'))
+      .toEqual({ kind: 'cline', model: 'muse-spark-1.3-contributor' });
+    expect(agentForArgv('/home/u/.npm-global/bin/cline -i')).toEqual({ kind: 'cline', model: '' });
+  });
+  it('names opencode lanes and serve apart', () => {
+    expect(agentForArgv('/home/u/.opencode/bin/opencode --session ses_abc')).toEqual({ kind: 'opencode' });
+    expect(agentForArgv('/home/u/.opencode/bin/opencode')).toEqual({ kind: 'opencode' });
+    expect(agentForArgv('/home/u/.opencode/bin/opencode serve --service')).toEqual({ kind: 'serve' });
+    expect(agentForArgv('/home/u/bin/colab-tabs __watch job')).toEqual({ kind: 'colab-tabs' });
+  });
+  it('refuses bare-substring matches', () => {
+    // A picker id or a prose mention is not an invocation.
+    expect(agentForArgv('opencode:ses_abc')).toBeNull();
+    expect(agentForArgv('/bin/bash -c echo hello')).toBeNull();
+    expect(agentForArgv('')).toBeNull();
+  });
+  it('picks the highest-priority backend per tree', () => {
+    expect(deriveSessionAgent(['-bash', '/home/u/bin/colab-tabs __watch j'])).toBe('colab-tabs');
+    expect(deriveSessionAgent(['/home/u/.opencode/bin/opencode serve --service', '-bash'])).toBe('serve');
+    expect(deriveSessionAgent([
+      '/home/u/.opencode/bin/opencode serve --service',
+      '/home/u/.opencode/bin/opencode --session ses_x',
+    ])).toBe('opencode');
+    expect(deriveSessionAgent([
+      '/home/u/bin/colab-tabs __watch j',
+      '/x/bin/.cline -m a/b-model',
+    ])).toBe('cline/b-model');
+    expect(deriveSessionAgent(['-bash', 'ps -ef'])).toBe('');
+    expect(deriveSessionAgent([])).toBe('');
+  });
+  it('shortens models to the last segment, capped', () => {
+    expect(shortModel('cline-free/muse-spark-1.3-contributor')).toBe('muse-spark-1.3-contributor');
+    expect(shortModel('big-pickle')).toBe('big-pickle');
+  });
+});
+
+describe('collectTmuxSessions agent labels', () => {
+  it('attaches the derived backend label per session', async () => {
+    const execFile = (file, args, _opts, cb) => {
+      if (file === 'tmux' && args[0] === 'list-sessions') cb(null, 'VM-tui 1791917400\nplain 1791917400\n');
+      else if (file === 'tmux') cb(null, 'VM-tui 100\nplain 200\n');
+      else cb(null, 'PID PPID RSS ARGS\n100 1 1024 /x/bin/.cline -m a/b-model\n200 1 1024 -bash\n');
+    };
+    const readFile = async () => 'Pss: 10240 kB\n';
+    await expect(collectTmuxSessions({ execFile, readFile, now: 1791917460000 })).resolves.toEqual([
+      { name: 'VM-tui', memMiB: 10, idleMs: 60000, agent: 'cline/b-model' },
+      { name: 'plain', memMiB: 10, idleMs: 60000 },
+    ]);
   });
 });

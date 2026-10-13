@@ -21,8 +21,10 @@ export function formatMem(mib: number): string {
 export type TtyStatusRow = { id?: string; bot: string; live: boolean; memMiB?: number; idleMs?: number };
 
 /** One live tmux session from `/api/ttys/status`. `route` names the served
- * bot when the session is that bot's attach target, else null. */
-export type TmuxEntry = { name: string; memMiB?: number; idleMs?: number; route: string | null };
+ * bot when the session is that bot's attach target, else null. `agent`
+ * names the backend running inside (cline/model, opencode, serve,
+ * colab-tabs), omitted for generic shells. */
+export type TmuxEntry = { name: string; memMiB?: number; idleMs?: number; route: string | null; agent?: string };
 
 /**
  * Fold `/api/ttys/status` rows into the picker's live + memory + idle maps.
@@ -158,8 +160,12 @@ export function lookForRow(
   }
   if (!maps.live) return noMem;
   const idleMs = typeof maps.idleMs === 'number' ? maps.idleMs : -1;
+  const agent = typeof r.agent === 'string' ? r.agent : '';
+  const tag = agent ? `${agent} · ` : '';
   if (idleMs >= TTY_IDLE_RED_MS) {
-    return { dot: 'idle', memText, stateText: `idle ${formatIdle(idleMs)}` };
+    return { dot: 'idle', memText, stateText: `${tag}idle ${formatIdle(idleMs)}` };
   }
-  return { dot: 'live', memText, stateText: 'live' };
+  return agent
+    ? { dot: 'live', memText, stateText: `${agent} · live` }
+    : { dot: 'live', memText, stateText: '' };
 }

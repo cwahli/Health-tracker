@@ -155,6 +155,16 @@ Sensitive transitions as (Condition, Action, Pitfall):
    the open action). Blind adversarial re-review (requirements-only brief, own
    measurements) must approve before sharing.
 
+9. Agent labels (user feedback: cline invisible, bare agent subtitles lost
+   with hiding). Every measured row names its backend, derived server-side
+   from member argv (argv[0] basename + flags, never bare substring): cline
+   with model (`cline/muse-spark-1.3-contributor`), opencode (session/run /
+   TUI/serve), colab-tabs, else omitted (generic shells stay unlabeled —
+   an honest blank, not a guess). Bare exclusive-backend rows keep their DB
+   agent string. Client subline becomes uniform: shown whenever there is
+   text (`agent · live`, `agent · idle 2h`); live-no-agent rows keep dot-only.
+   Memory math untouched — labels ride alongside memMiB, totals reconcile as
+   before. Same gates + headless re-proof + blind approval before sharing.
 ## Test plan
 
 ```text

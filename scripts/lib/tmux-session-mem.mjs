@@ -15,6 +15,59 @@
 import { execFile as defaultExecFile } from 'node:child_process';
 import { readFile as defaultReadFile } from 'node:fs/promises';
 
+
+/** Shorten a model id to its last path segment, capped. */
+export function shortModel(model) {
+  const s = String(model || '').trim();
+  const cut = s.lastIndexOf('/');
+  return (cut === -1 ? s : s.slice(cut + 1)).trim().slice(0, 48);
+}
+
+const CLINE_RE = /(?:^|\s)(?:\S*\/)?\.?cline(?:\s|$)/;
+const CLINE_MODEL_RE = /(?:^|\s)-m\s+(\S+)/;
+const OPENCODE_RE = /(?:^|\s)(?:\S*\/)?opencode(?:\s|$)/;
+const SERVE_RE = /(?:^|\s)serve(?:\s|$)/;
+const COLAB_RE = /(?:^|\/)colab-tabs(?:\s|$)/;
+
+/**
+ * Backend label from ONE process's command line. Matches on argv structure
+ * (path-anchored binary names plus flags) — never a bare substring, so a
+ * shell merely mentioning a tool in its command text is not mistaken for
+ * the tool itself. Returns { kind, model? } or null.
+ */
+export function agentForArgv(args) {
+  const text = String(args || '');
+  if (CLINE_RE.test(text)) {
+    const m = CLINE_MODEL_RE.exec(text);
+    return { kind: 'cline', model: m ? shortModel(m[1]) : '' };
+  }
+  if (OPENCODE_RE.test(text)) {
+    if (SERVE_RE.test(text)) return { kind: 'serve' };
+    return { kind: 'opencode' };
+  }
+  if (COLAB_RE.test(text)) return { kind: 'colab-tabs' };
+  return null;
+}
+
+const AGENT_RANK = { cline: 0, opencode: 1, serve: 2, 'colab-tabs': 3 };
+
+/**
+ * One label for a session tree: the highest-priority backend found across
+ * its member command lines, else '' (generic shells stay unlabeled — an
+ * honest blank, not a guess). cline carries its model.
+ */
+export function deriveSessionAgent(memberArgs) {
+  let best = null;
+  for (const args of memberArgs || []) {
+    const hit = agentForArgv(args);
+    if (!hit) continue;
+    if (!best || AGENT_RANK[hit.kind] < AGENT_RANK[best.kind]) best = hit;
+    if (best.kind === 'cline') break;
+  }
+  if (!best) return '';
+  if (best.kind === 'cline') return best.model ? `cline/${best.model}` : 'cline';
+  return best.kind;
+}
 /**
  * `tmux list-sessions -F '#{session_name}'` → [name]. Skips blanks.
  */
@@ -57,12 +110,38 @@ export async function collectTmuxSessions({ execFile = defaultExecFile, readFile
     const activity = parseSessionActivity(sessOut, now);
     const panes = parsePaneLines(panesOut);
     const mem = sumSessionTrees(panes, ps);
+    // Backend labels from member argv (one extra walk; labels ride free).
+    const agents = {};
+    {
+      const children = new Map();
+      for (const [pid, row] of Object.entries(ps)) {
+        if (!children.has(row.ppid)) children.set(row.ppid, []);
+        children.get(row.ppid).push(Number(pid));
+      }
+      for (const [name, roots] of Object.entries(panes)) {
+        const args = [];
+        const seen = new Set();
+        const stack = [...(Array.isArray(roots) ? roots : [])];
+        while (stack.length) {
+          const p = stack.pop();
+          if (seen.has(p)) continue;
+          seen.add(p);
+          const row = ps[p];
+          if (!row) continue;
+          if (row.args) args.push(row.args);
+          stack.push(...(children.get(p) || []));
+        }
+        const label = deriveSessionAgent(args);
+        if (label) agents[name] = label;
+      }
+    }
     const names = new Set([...Object.keys(activity), ...Object.keys(panes)]);
     const out = [];
     for (const name of [...names].sort()) {
       const entry = { name };
       if (Number.isInteger(mem[name]) && mem[name] > 0) entry.memMiB = mem[name];
       if (Number.isFinite(activity[name])) entry.idleMs = activity[name];
+      if (agents[name]) entry.agent = agents[name];
       out.push(entry);
     }
     return out;

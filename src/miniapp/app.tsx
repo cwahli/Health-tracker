@@ -697,11 +697,9 @@ function SessionMenu({ routes, picked, pickedLabel, open, live, mem, idle, killM
               const isTmux = r.kind === 'tmux';
               const isBox = r.kind === 'box';
               // Memory rides the main line where it can be read; the subline
-              // explains the dot — tty rows only when red, bare rows always,
-              // box always (its detail names what the aggregate covers).
-              const showSub = isSession
-                ? look.stateText !== ''
-                : (look.dot === 'idle' || r.kind === 'box');
+              // shows whenever there is text to show (agent, state, or both).
+              // Live-no-agent rows keep dot-only; dormant rows show nothing.
+              const showSub = look.stateText !== '';
               return (
                 <span key={rid}
                   style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, fontSize: 13, color: '#e2e8f0', background: watching ? '#1e293b' : 'none' }}>
@@ -852,7 +850,13 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     }
     setTmuxRows(rawTmux
       .filter((e) => e && !e.route && typeof e.name === 'string' && e.name)
-      .map((e) => ({ bot: e.name, path: '', id: `tmux:${e.name}`, kind: 'tmux' })));
+      .map((e) => ({
+        bot: e.name,
+        path: '',
+        id: `tmux:${e.name}`,
+        kind: 'tmux',
+        ...(e.agent ? { agent: e.agent } : {}),
+      })));
   };
 
   useEffect(() => {
