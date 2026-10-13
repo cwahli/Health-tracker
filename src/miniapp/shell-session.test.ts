@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMem, statusKeyMaps, formatIdle, lookForRow, TTY_IDLE_RED_MS } from './shell-session';
+import { formatMem, statusKeyMaps, formatIdle, lookForRow, sortByMem, TTY_IDLE_RED_MS } from './shell-session';
 import type { TmuxEntry } from './shell-session';
 
 describe('formatMem (picker memory readout shows a number or nothing)', () => {
@@ -100,5 +100,29 @@ describe('lookForRow (one rule for dot, memory, state)', () => {
   it('paints a raw tmux row like a tty row (red when idle, memory on top)', () => {
     expect(lookForRow({ kind: 'tmux', bot: 'colab' }, { live: true, memMiB: 300, idleMs: 3600000 }, 0))
       .toEqual({ dot: 'idle', memText: '300 MB', stateText: 'idle 1h' });
+  });
+  it('paints the box aggregate green with its detail line', () => {
+    expect(lookForRow(
+      { kind: 'box', bot: 'other processes', detail: '212 processes outside tmux' },
+      { live: true, memMiB: 1400 }, 0,
+    )).toEqual({ dot: 'live', memText: '1.4 GB', stateText: '212 processes outside tmux' });
+  });
+});
+
+describe('sortByMem (heaviest first, unmeasured keep order at the bottom)', () => {
+  it('sorts measured rows down and unmeasured last, stably', () => {
+    const rows = [
+      { bot: 'bare-b' },
+      { bot: 'vm', id: 'tty:vm' },
+      { bot: 'bare-a' },
+      { bot: 'colab', id: 'tmux:colab' },
+      { bot: 'vm2', id: 'tty:vm2' },
+    ];
+    const mem = { 'tty:vm': 200, 'tmux:colab': 400, 'tty:vm2': 200 };
+    expect(sortByMem(rows, mem).map((r) => r.bot))
+      .toEqual(['colab', 'vm', 'vm2', 'bare-b', 'bare-a']);
+  });
+  it('tolerates missing input', () => {
+    expect(sortByMem([], {})).toEqual([]);
   });
 });

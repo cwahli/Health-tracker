@@ -126,6 +126,20 @@ Sensitive transitions as (Condition, Action, Pitfall):
    against a fresh `tmux list-sessions` in the same tick, never free-form;
    the `{ bot }` path behaves byte-identically. Same gates; live proof must
    show panel tmux-row count equal to `tmux ls` count.
+7. Honest accounting (user audit 2026-10-13, measured with PSS, not RSS):
+   RSS double-counts shared pages (the `opencode` 1.6 GB was ~740 MB PSS +
+   transients: CLI ~300 + serve ~428 + build/audit children). Session figures
+   switch to PSS (`smaps_rollup` per pid, RSS fallback per process, tracked).
+   `opencode` is NOT the sum of agents — it is its own tree; cline backends
+   are verified inside the `VM-tui`/`VM-tui-vm4` trees, plus a standalone
+   cline-hub-daemon covered by the new aggregate row. Bare rows stay
+   memory-less by evidence (the single bare session with a live CLI proc is
+   the same process already counted in its tmux tree — attributing it would
+   double-count; the rest are serve-side). A new `other processes` aggregate
+   row (non-tmux PSS + count) makes panel sessions + aggregate reconcile with
+   all-process PSS; the remainder to `free` (kernel slab, swapped-out) is
+   named, never forced. Rows sort by memory desc, unmeasured last. Proof only
+   after `/do-verify` passes: no screenshot shared before approval.
 
 ## Test plan
 

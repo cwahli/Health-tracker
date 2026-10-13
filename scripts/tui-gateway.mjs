@@ -39,7 +39,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { tmuxNameFor } from './tui-bot-plumbing.mjs';
-import { collectSessionMem, collectSessionIdle, collectTmuxSessions, listTmuxNames } from './lib/tmux-session-mem.mjs';
+import { collectSessionMem, collectSessionIdle, collectTmuxSessions, listTmuxNames, collectUnattributedMem } from './lib/tmux-session-mem.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..');
@@ -2043,8 +2043,15 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         ...(Number.isInteger(e.idleMs) ? { idleMs: e.idleMs } : {}),
         route: served.get(e.name) || null,
       }));
+      // The reconciling remainder: PSS outside every tmux tree. Panel
+      // sessions + box ≈ all-process PSS; the rest to `free` is kernel slab
+      // plus swapped-out pages, which live in no process. Omitted on failure.
+      const unatt = await collectUnattributedMem({});
+      const box = Number.isInteger(unatt.mib) && unatt.mib > 0
+        ? { otherMiB: unatt.mib, otherProcs: unatt.procs }
+        : null;
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      return res.end(JSON.stringify({ ok: true, status, tmux }));
+      return res.end(JSON.stringify({ ok: true, status, tmux, ...(box ? { box } : {}) }));
     }
 
     // Point the shared VM session viewer at one bare opencode session, so a

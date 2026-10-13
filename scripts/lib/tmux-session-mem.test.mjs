@@ -6,11 +6,18 @@ import {
   parseSessionActivity,
   parseSessionNames,
   sumSessionTrees,
+  pssForPids,
+  applyPss,
   collectSessionMem,
   collectSessionIdle,
   listTmuxNames,
   collectTmuxSessions,
+  collectUnattributedMem,
 } from './tmux-session-mem.mjs';
+
+// PSS must never reach the real /proc in unit tests: every collector test
+// below pins either the RSS-fallback path (noProc) or a canned reader.
+const noProc = async () => { throw new Error('no proc in tests'); };
 
 describe('parsePaneLines', () => {
   it('maps sessions to pane pids', () => {
@@ -70,14 +77,15 @@ describe('collectSessionMem', () => {  const canned = (panesOut, psOut, failOn =
     const got = await collectSessionMem({
       sessions: ['VM-tui'],
       execFile: canned(PANES, PS),
+      readFile: noProc,
     });
     // VM-tui: (102400 + 102400)/1024 = 200; colab not requested.
     expect(got).toEqual({ 'VM-tui': 200 });
   });
   it('resolves {} when tmux or ps fails', async () => {
-    await expect(collectSessionMem({ sessions: ['VM-tui'], execFile: canned(PANES, PS, 'tmux') }))
+    await expect(collectSessionMem({ sessions: ['VM-tui'], execFile: canned(PANES, PS, 'tmux'), readFile: noProc }))
       .resolves.toEqual({});
-    await expect(collectSessionMem({ sessions: ['VM-tui'], execFile: canned(PANES, PS, 'ps') }))
+    await expect(collectSessionMem({ sessions: ['VM-tui'], execFile: canned(PANES, PS, 'ps'), readFile: noProc }))
       .resolves.toEqual({});
   });
   it('resolves {} for empty input without spawning', async () => {
@@ -153,7 +161,7 @@ describe('collectTmuxSessions', () => {
     else cb(null, byCmd.ps);
   };
   it('returns every session sorted, with memory and idle age', async () => {
-    await expect(collectTmuxSessions({ execFile, now: 1791917460000 })).resolves.toEqual([
+    await expect(collectTmuxSessions({ execFile, readFile: noProc, now: 1791917460000 })).resolves.toEqual([
       { name: 'VM-tui', memMiB: 200, idleMs: 60000 },
       { name: 'colab', memMiB: 50, idleMs: 0 },
     ]);
@@ -164,12 +172,68 @@ describe('collectTmuxSessions', () => {
       else if (file === 'tmux') cb(null, '');
       else cb(null, 'PID PPID RSS\n');
     };
-    await expect(collectTmuxSessions({ execFile: partial, now: 1791917460000 })).resolves.toEqual([
+    await expect(collectTmuxSessions({ execFile: partial, readFile: noProc, now: 1791917460000 })).resolves.toEqual([
       { name: 'ghost', idleMs: 60000 },
     ]);
   });
   it('resolves [] on failure', async () => {
     const failing = (_f, _a, _o, cb) => cb(new Error('boom'));
-    await expect(collectTmuxSessions({ execFile: failing })).resolves.toEqual([]);
+    await expect(collectTmuxSessions({ execFile: failing, readFile: noProc })).resolves.toEqual([]);
+  });
+});
+
+describe('pssForPids / applyPss (PSS wins, RSS is the tracked fallback)', () => {
+  const canned = (files) => async (path) => {
+    if (!(path in files)) throw new Error('unreadable');
+    return files[path];
+  };
+  it('reads Pss lines and skips unreadable pids', async () => {
+    const got = await pssForPids([100, 101], {
+      readFile: canned({ '/proc/100/smaps_rollup': 'Rss:  100 kB\nPss:   40 kB\n' }),
+    });
+    expect(got).toEqual({ 100: 40 });
+  });
+  it('applyPss prefers PSS and flags the fallback', () => {
+    const ps = { 1: { ppid: 0, rssKb: 100 }, 2: { ppid: 1, rssKb: 200 } };
+    expect(applyPss(ps, { 1: 30 })).toEqual({
+      1: { ppid: 0, rssKb: 100, pssKb: 30, pssOk: true },
+      2: { ppid: 1, rssKb: 200, pssKb: 200, pssOk: false },
+    });
+  });
+  it('sumSessionTrees adds PSS, so shared pages stop double-counting', () => {
+    const panes = { s: [1] };
+    const ps = { 1: { ppid: 0, rssKb: 100, pssKb: 30, pssOk: true } };
+    expect(sumSessionTrees(panes, ps)).toEqual({ s: 0 + 0 }); // 30KB rounds to 0
+    const ps2 = { 1: { ppid: 0, rssKb: 102400, pssKb: 30720, pssOk: true } };
+    expect(sumSessionTrees({ s: [1] }, ps2)).toEqual({ s: 30 });
+  });
+  it('collectors use PSS when the reader serves it', async () => {
+    const execFile = (file, args, _opts, cb) => {
+      if (file === 'tmux') cb(null, 's 1\n');
+      else cb(null, 'PID PPID RSS\n1 0 102400\n');
+    };
+    const readFile = async () => 'Pss:  30720 kB\n';
+    await expect(collectSessionMem({ sessions: ['s'], execFile, readFile })).resolves.toEqual({ s: 30 });
+  });
+});
+
+describe('collectUnattributedMem (the reconciling remainder)', () => {
+  const execFile = (file, _args, _opts, cb) => {
+    if (file === 'tmux') cb(null, 's 1\n');
+    else cb(null, 'PID PPID RSS\n1 0 102400\n2 1 51200\n9 1 1024\n');
+  };
+  it('sums PSS outside pane trees with a process count', async () => {
+    // pid 1 + child 2 are in session s; pid 9's ppid 1 — also a member.
+    // A lone outsider first:
+    const exec2 = (file, _args, _opts, cb) => {
+      if (file === 'tmux') cb(null, 's 1\n');
+      else cb(null, 'PID PPID RSS\n1 0 1024\n2 1 1024\n7 0 2048\n');
+    };
+    await expect(collectUnattributedMem({ execFile: exec2, readFile: noProc }))
+      .resolves.toEqual({ mib: 2, procs: 1 });
+  });
+  it('resolves {} on failure', async () => {
+    const failing = (_f, _a, _o, cb) => cb(new Error('boom'));
+    await expect(collectUnattributedMem({ execFile: failing, readFile: noProc })).resolves.toEqual({});
   });
 });

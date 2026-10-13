@@ -11,6 +11,7 @@
  * memory were unknown (rows as today, no number).
  */
 import { execFile as defaultExecFile } from 'node:child_process';
+import { readFile as defaultReadFile } from 'node:fs/promises';
 
 /**
  * `tmux list-sessions -F '#{session_name}'` → [name]. Skips blanks.
@@ -44,16 +45,16 @@ export async function listTmuxNames({ execFile = defaultExecFile, timeoutMs = 50
  * `[{ name, memMiB?, idleMs? }]`. Three spawns, one tick, best-effort ([] on
  * any failure). Unknown figures are omitted, never zeroed.
  */
-export async function collectTmuxSessions({ execFile = defaultExecFile, timeoutMs = 5000, now = Date.now() } = {}) {
+export async function collectTmuxSessions({ execFile = defaultExecFile, readFile = defaultReadFile, timeoutMs = 5000, now = Date.now() } = {}) {
   try {
-    const [sessOut, panesOut, psOut] = await Promise.all([
+    const [sessOut, panesOut, ps] = await Promise.all([
       runCmd(execFile, 'tmux', ['list-sessions', '-F', '#{session_name} #{session_activity}'], timeoutMs),
       runCmd(execFile, 'tmux', ['list-panes', '-a', '-F', '#{session_name} #{pane_pid}'], timeoutMs),
-      runCmd(execFile, 'ps', ['-eo', 'pid,ppid,rss'], timeoutMs),
+      procMap({ execFile, readFile, timeoutMs }),
     ]);
     const activity = parseSessionActivity(sessOut, now);
     const panes = parsePaneLines(panesOut);
-    const mem = sumSessionTrees(panes, parsePsLines(psOut));
+    const mem = sumSessionTrees(panes, ps);
     const names = new Set([...Object.keys(activity), ...Object.keys(panes)]);
     const out = [];
     for (const name of [...names].sort()) {
@@ -65,6 +66,45 @@ export async function collectTmuxSessions({ execFile = defaultExecFile, timeoutM
     return out;
   } catch {
     return [];
+  }
+}
+
+/**
+ * PSS of everything OUTSIDE tmux pane trees: `{ mib, procs }`. Together
+ * with the session inventory this reconciles against all-process PSS —
+ * the remainder to `free` is kernel slab plus swapped-out pages, which live
+ * in no process and are named, never forced. Best-effort ({} on failure).
+ */
+export async function collectUnattributedMem({ execFile = defaultExecFile, readFile = defaultReadFile, timeoutMs = 5000 } = {}) {
+  try {
+    const [panesOut, ps] = await Promise.all([
+      runCmd(execFile, 'tmux', ['list-panes', '-a', '-F', '#{session_name} #{pane_pid}'], timeoutMs),
+      procMap({ execFile, readFile, timeoutMs }),
+    ]);
+    const panes = parsePaneLines(panesOut);
+    const children = new Map();
+    for (const [pid, row] of Object.entries(ps)) {
+      if (!children.has(row.ppid)) children.set(row.ppid, []);
+      children.get(row.ppid).push(Number(pid));
+    }
+    const members = new Set();
+    const stack = Object.values(panes).flat();
+    while (stack.length) {
+      const p = stack.pop();
+      if (members.has(p)) continue;
+      members.add(p);
+      if (ps[p]) stack.push(...(children.get(p) || []));
+    }
+    let kb = 0;
+    let procs = 0;
+    for (const [pid, row] of Object.entries(ps)) {
+      if (members.has(Number(pid))) continue;
+      kb += typeof row.pssKb === 'number' ? row.pssKb : row.rssKb;
+      procs += 1;
+    }
+    return kb > 0 ? { mib: Math.round(kb / 1024), procs } : {};
+  } catch {
+    return {};
   }
 }
 /**
@@ -104,7 +144,8 @@ export function parsePsLines(text) {
  * Sum RSS (MiB, rounded) over each session's pane trees. A process reachable
  * from two sessions counts in both — shared pages are overcounted in RSS
  * already, so the figures stay comparable upper bounds. Sessions with no
- * matched process are omitted (unknown, not zero).
+ * matched process are omitted (unknown, not zero). Each row may carry
+ * `pssKb` (from applyPss); it wins over `rssKb` wherever present.
  */
 export function sumSessionTrees(panesBySession, psByPid) {
   const children = new Map();
@@ -124,13 +165,55 @@ export function sumSessionTrees(panesBySession, psByPid) {
       seen.add(p);
       const row = (psByPid || {})[p];
       if (!row) continue;
-      kb += row.rssKb;
+      kb += typeof row.pssKb === 'number' ? row.pssKb : row.rssKb;
       const kids = children.get(p);
       if (kids) stack.push(...kids);
     }
     if (kb > 0) out[session] = Math.round(kb / 1024);
   }
   return out;
+}
+
+/**
+ * Proportional Set Size per pid from `smaps_rollup` (shared pages split
+ * among sharers, so per-session sums are additive instead of RSS's
+ * double-count). Returns { pid: pssKb } for readable processes only —
+ * callers fall back to RSS per process, tracked via `pssOk`.
+ */
+export async function pssForPids(pids, { readFile = defaultReadFile } = {}) {
+  const out = {};
+  await Promise.all((Array.isArray(pids) ? pids : []).map(async (pid) => {
+    try {
+      const text = await readFile(`/proc/${Number(pid)}/smaps_rollup`, 'utf8');
+      const m = /^Pss:\s+(\d+)\s+kB/m.exec(String(text));
+      if (m) out[Number(pid)] = Number(m[1]);
+    } catch {
+      /* unreadable (kernel thread, other user, vanished) — RSS fallback */
+    }
+  }));
+  return out;
+}
+
+/** Attach `pssKb`/`pssOk` to a `parsePsLines` map. Pure; returns a new map. */
+export function applyPss(psByPid, pssByPid) {
+  const out = {};
+  for (const [pid, row] of Object.entries(psByPid || {})) {
+    const pssKb = (pssByPid || {})[pid];
+    out[pid] = {
+      ppid: row.ppid,
+      rssKb: row.rssKb,
+      pssKb: typeof pssKb === 'number' ? pssKb : row.rssKb,
+      pssOk: typeof pssKb === 'number',
+    };
+  }
+  return out;
+}
+
+/** One `ps` plus PSS enrichment — the shared root of the collectors below. */
+async function procMap({ execFile = defaultExecFile, readFile = defaultReadFile, timeoutMs = 5000 } = {}) {
+  const psOut = await runCmd(execFile, 'ps', ['-eo', 'pid,ppid,rss'], timeoutMs);
+  const ps = parsePsLines(psOut);
+  return applyPss(ps, await pssForPids(Object.keys(ps), { readFile }));
 }
 
 function runCmd(execFile, file, args, timeoutMs) {
@@ -186,16 +269,15 @@ export async function collectSessionIdle({ sessions = [], execFile = defaultExec
  * names. `execFile` is injectable (same callback shape as node's) so tests
  * never spawn. Resolves {} on any failure or empty input.
  */
-export async function collectSessionMem({ sessions = [], execFile = defaultExecFile, timeoutMs = 5000 } = {}) {
+export async function collectSessionMem({ sessions = [], execFile = defaultExecFile, readFile = defaultReadFile, timeoutMs = 5000 } = {}) {
   const wanted = new Set((Array.isArray(sessions) ? sessions : []).filter(Boolean));
   if (!wanted.size) return {};
   try {
-    const [panesOut, psOut] = await Promise.all([
+    const [panesOut, ps] = await Promise.all([
       runCmd(execFile, 'tmux', ['list-panes', '-a', '-F', '#{session_name} #{pane_pid}'], timeoutMs),
-      runCmd(execFile, 'ps', ['-eo', 'pid,ppid,rss'], timeoutMs),
+      procMap({ execFile, readFile, timeoutMs }),
     ]);
     const panes = parsePaneLines(panesOut);
-    const ps = parsePsLines(psOut);
     const scoped = {};
     for (const s of wanted) {
       if (panes[s]) scoped[s] = panes[s];

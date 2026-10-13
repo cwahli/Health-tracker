@@ -61,6 +61,23 @@ export function statusKeyMaps(rows: TtyStatusRow[], tmux: TmuxEntry[] = []): {
 /** Idle at or past this long paints red: the session is a kill candidate. */
 export const TTY_IDLE_RED_MS = 15 * 60 * 1000;
 
+/** Sort picker rows by memory, heaviest first; unmeasured rows keep their
+ * input order at the bottom. Stable: equal keys never swap. */
+export function sortByMem<T extends { bot: string; id?: string }>(
+  rows: T[],
+  mem: Record<string, number>,
+): T[] {
+  const keyOf = (r: T) => (typeof r.id === 'string' && r.id ? r.id : r.bot);
+  const val = (r: T) => {
+    const m = (mem || {})[keyOf(r)];
+    return typeof m === 'number' && m > 0 ? m : -1;
+  };
+  return (rows || [])
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => val(b.r) - val(a.r) || a.i - b.i)
+    .map((e) => e.r);
+}
+
 /** Duration readout for idle rows (`5m` / `2h` / `3d`); '' when unmeasurable. */
 export function formatIdle(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return '';
@@ -78,6 +95,8 @@ export type PickerRow = {
   agent?: string;
   status?: string;
   updatedAt?: string | null;
+  /** Precomputed subline for synthetic rows (the box aggregate). */
+  detail?: string;
 };
 
 export type RowLook = {
@@ -114,9 +133,12 @@ export function lookForRow(
       stateText: String(r.status || ''),
     };
   }
-  if (!maps.live) return noMem;
   const memText =
     typeof maps.memMiB === 'number' && maps.memMiB > 0 ? formatMem(maps.memMiB) : '';
+  if (r.kind === 'box') {
+    return { dot: 'live', memText, stateText: r.detail || 'outside tmux' };
+  }
+  if (!maps.live) return noMem;
   const idleMs = typeof maps.idleMs === 'number' ? maps.idleMs : -1;
   if (idleMs >= TTY_IDLE_RED_MS) {
     return { dot: 'idle', memText, stateText: `idle ${formatIdle(idleMs)}` };
