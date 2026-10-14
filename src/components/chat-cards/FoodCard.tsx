@@ -21,7 +21,8 @@ import { toPendingFoodLog } from '../../mealBuild/adapters';
 import { namesReferToSameFood } from '../../../server_scout_reconcile';
 import { extractMostRecentImageDate, getCurrentDateInTimezone } from '../../utils/dateUtils';
 import { normalizeMealImageUrl, uniqueMealImageUrls, isUsableImageUrl, collectSavedMealImageUrls } from '../../utils/foodImageSources';
-import { scaleMealPortion, scaleSingleDishPortion } from '../../utils/portionUtils';
+import { scaleMealPortion, scaleSingleDishPortion, applyStagedComponentWeights } from '../../utils/portionUtils';
+import { dishKeyFor, resolveBreakdownIndex } from '../../utils/portionStaging';
 import { threadHasUnansweredPortionClarify } from '../../utils/chatMessageDedupe';
 import { mapDisplayedScoutItems, resolveTileImageIndex, uniqueCropTiles } from '../../utils/foodCompositionTiles';
 import PreviousMealThumbnail from '../PreviousMealThumbnail';
@@ -658,18 +659,23 @@ export const FoodCard: React.FC<AgentCardProps & {
     }
   };
 
-  const handleScaleSingleDish = (dishIdx: number, ratio: number) => {
-    const currentLog = msg.data?.pendingFoodLog || msg.pendingFoodLog;
-    if (!currentLog) return;
-    const initialWeight = currentLog.initialWeightGrams || currentLog.weightGrams || 100;
-    if (!currentLog.initialWeightGrams && currentLog.weightGrams) {
-      currentLog.initialWeightGrams = currentLog.weightGrams;
-    }
+  // PORTION_MIXUP: the displayed dish list filters out flattened component
+  // rows, so a displayed position is NOT an itemsBreakdown index. Resolve by
+  // stable identity (scoutIndex) so a dropdown always scales its own dish.
+  const resolveDishBreakdownIndex = (displayedIdx: number): number => {
+    const currentLog = msg.data?.pendingFoodLog || (msg as any).pendingFoodLog;
+    const rows = currentLog?.itemsBreakdown;
+    if (!Array.isArray(rows)) return displayedIdx;
+    const displayed = displayedScoutItems[displayedIdx];
+    if (!displayed) return displayedIdx;
+    return resolveBreakdownIndex(rows, dishKeyFor(displayed, displayedIdx), displayedIdx);
+  };
 
-    const updatedLog = scaleSingleDishPortion(currentLog, dishIdx, ratio);
+  const commitScaledLog = (currentLog: any, updatedLog: any, breakdownIdx: number, dishLabel: string) => {
+    const initialWeight = currentLog.initialWeightGrams || currentLog.weightGrams || 100;
     updatedLog.initialWeightGrams = initialWeight;
     const newTotalWeight = updatedLog.weightGrams || initialWeight;
-    const diffRatio = Math.abs(newTotalWeight - initialWeight) / initialWeight;
+    const diffRatio = initialWeight > 0 ? Math.abs(newTotalWeight - initialWeight) / initialWeight : 0;
     const diffPercent = Math.round(diffRatio * 100);
     const isOverThreshold = diffRatio > 0.30;
 
@@ -713,7 +719,7 @@ export const FoodCard: React.FC<AgentCardProps & {
 
     // Over 30% threshold: triggers agent review call
     if (isOverThreshold && handleSend) {
-      const dishName = updatedLog.itemsBreakdown?.[dishIdx]?.name || `dish #${dishIdx + 1}`;
+      const dishName = updatedLog.itemsBreakdown?.[breakdownIdx]?.name || dishLabel || `dish #${breakdownIdx + 1}`;
       const diffSign = newTotalWeight > initialWeight ? `+${diffPercent}%` : `-${diffPercent}%`;
       handleSend({
         text: `Adjust portion of ${dishName} (total meal now ${newTotalWeight}g vs initial ${initialWeight}g, ${diffSign}). Please review the nutrition breakdown and dietary advice.`,
@@ -721,6 +727,33 @@ export const FoodCard: React.FC<AgentCardProps & {
         sourceMsgId: msg.id,
       });
     }
+  };
+
+  const handleScaleSingleDish = (displayedIdx: number, ratio: number) => {
+    const currentLog = msg.data?.pendingFoodLog || (msg as any).pendingFoodLog;
+    if (!currentLog) return;
+    if (!currentLog.initialWeightGrams && currentLog.weightGrams) {
+      currentLog.initialWeightGrams = currentLog.weightGrams;
+    }
+    const breakdownIdx = resolveDishBreakdownIndex(displayedIdx);
+    if (breakdownIdx < 0 || !currentLog.itemsBreakdown?.[breakdownIdx]) return;
+
+    const updatedLog = scaleSingleDishPortion(currentLog, breakdownIdx, ratio);
+    commitScaledLog(currentLog, updatedLog, breakdownIdx, `dish #${breakdownIdx + 1}`);
+  };
+
+  // Staged multi-dropdown commit: one recalculation for the whole selection set.
+  const handleApplyStagedWeights = (displayedIdx: number, stagedByCompIdx: Record<number, number>) => {
+    const currentLog = msg.data?.pendingFoodLog || (msg as any).pendingFoodLog;
+    if (!currentLog) return;
+    if (!currentLog.initialWeightGrams && currentLog.weightGrams) {
+      currentLog.initialWeightGrams = currentLog.weightGrams;
+    }
+    const breakdownIdx = resolveDishBreakdownIndex(displayedIdx);
+    if (breakdownIdx < 0 || !currentLog.itemsBreakdown?.[breakdownIdx]) return;
+
+    const updatedLog = applyStagedComponentWeights(currentLog, breakdownIdx, stagedByCompIdx);
+    commitScaledLog(currentLog, updatedLog, breakdownIdx, `dish #${breakdownIdx + 1}`);
   };
 
   // Card-wide parent image search state hooks
@@ -2383,6 +2416,8 @@ export const FoodCard: React.FC<AgentCardProps & {
                                     onScalePortion={(ratio) => handleScaleSingleDish(openLabelIdx, ratio)}
                                     currentPortionRatio={displayedScoutItems[openLabelIdx]?.portionRatio || 1.0}
                                     language={language}
+                                    scopeKey={openLabelIdx}
+                                    onApplyComponentWeights={(staged) => handleApplyStagedWeights(openLabelIdx, staged)}
                                   />
                                 </div>
                              )}
@@ -3095,6 +3130,8 @@ export const FoodCard: React.FC<AgentCardProps & {
                       onScalePortion={(ratio) => handleScaleSingleDish(openLabelIdx, ratio)}
                       currentPortionRatio={displayedScoutItems[openLabelIdx]?.portionRatio || 1.0}
                                     language={language}
+                                    scopeKey={openLabelIdx}
+                                    onApplyComponentWeights={(staged) => handleApplyStagedWeights(openLabelIdx, staged)}
                                   />
                   </div>
                 )}
