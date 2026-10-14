@@ -5,7 +5,7 @@ import { translations } from '../../utils/translations';
 import { PositionedTooltip } from '../ui/PositionedTooltip';
 import { PortionDropdown } from './PortionDropdown';
 import { PackPortionRow } from './PackPortionRow';
-import { dishKeyFor, stagedPortionKey, combineStagedDishWeight } from '../../utils/portionStaging';
+import { dishKeyFor, stagedPortionKey, combineStagedDishWeight, staticBaseWeight } from '../../utils/portionStaging';
 
 function parseLabelCalories(raw: any): number | null {
   if (raw == null) return null;
@@ -590,6 +590,9 @@ export function NutritionLabelTable({
             const dishKey = `${scopeKey ?? i}::${dishKeyFor(rootItem, i)}`;
             const stagedKeyFor = (tab: number) => stagedPortionKey(dishKey, tab);
             const staticDishTotalWeight = getResolvedItemWeightGrams(rootItem) || 0;
+            // Whole-dish ratios divide by the stable 1.0 base, never by the
+            // live weight (which already includes earlier scalings).
+            const wholeDishBaseWeight = staticBaseWeight(staticDishTotalWeight, (rootItem as any)?.portionRatio);
             // Staged multi-dropdown commit. While provided, component dropdowns
             // only stage locally; the parent recalculates once on apply.
             const useStaging = typeof onApplyComponentWeights === 'function';
@@ -953,11 +956,11 @@ export function NutritionLabelTable({
                         if (onScalePortion && staticDishTotalWeight > 0 && newDishWeight > 0) {
                           onScalePortion(newDishWeight / staticDishTotalWeight);
                         }
-                      } else if (onScalePortion && staticDishTotalWeight > 0) {
+                      } else if (onScalePortion && wholeDishBaseWeight > 0) {
                         // Whole-dish pick is a complete selection: apply at once
-                        // against the static base, and drop superseded staged picks.
+                        // against the stable base, and drop superseded staged picks.
                         clearDishStaged();
-                        onScalePortion(newWeight / staticDishTotalWeight);
+                        onScalePortion(newWeight / wholeDishBaseWeight);
                       }
                     }}
                   />
@@ -970,11 +973,11 @@ export function NutritionLabelTable({
                       <span className="font-semibold text-slate-800 dark:text-slate-100">{activeTitle}</span>
                       <span className="text-slate-500 dark:text-slate-400 font-normal">{t.weightLabel}:</span>
                       <PortionDropdown
-                        baseWeight={activeTab > 0 ? (resolveComponentWeightGrams(subComps[activeTab - 1], staticDishTotalWeight, subComps.length) || 100) : (staticDishTotalWeight || 100)}
+                        baseWeight={activeTab > 0 ? (resolveComponentWeightGrams(subComps[activeTab - 1], staticDishTotalWeight, subComps.length) || 100) : wholeDishBaseWeight}
                         currentWeight={resolvedWeight || 100}
                         language={language}
                         onScale={(ratio) => {
-                          const baseW = activeTab > 0 ? (resolveComponentWeightGrams(subComps[activeTab - 1], staticDishTotalWeight, subComps.length) || 100) : (staticDishTotalWeight || 100);
+                          const baseW = activeTab > 0 ? (resolveComponentWeightGrams(subComps[activeTab - 1], staticDishTotalWeight, subComps.length) || 100) : wholeDishBaseWeight;
                           const newWeight = Math.round(baseW * ratio);
                           if (activeTab > 0) {
                             if (useStaging) {
@@ -993,12 +996,12 @@ export function NutritionLabelTable({
                             if (onScalePortion && staticDishTotalWeight > 0 && newDishWeight > 0) {
                               onScalePortion(newDishWeight / staticDishTotalWeight);
                             }
-                          } else if (onScalePortion && staticDishTotalWeight > 0) {
+                          } else if (onScalePortion && wholeDishBaseWeight > 0) {
                             // Whole-dish pick is a complete selection: apply at
-                            // once against the static base, and drop superseded
+                            // once against the stable base, and drop superseded
                             // staged picks.
                             clearDishStaged();
-                            onScalePortion(newWeight / staticDishTotalWeight);
+                            onScalePortion(newWeight / wholeDishBaseWeight);
                           }
                         }}
                       />

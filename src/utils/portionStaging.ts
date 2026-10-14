@@ -36,6 +36,18 @@ export function stagedPortionKey(dishKey: string, tab: number): string {
 }
 
 /**
+ * The stable (1.0-ratio) base weight of a dish: the weight its current
+ * `portionRatio` was measured from. Whole-dish dropdown ratios must divide by
+ * this base — never by the live weight, which already includes earlier
+ * scalings (dividing by the live weight compounds them).
+ */
+export function staticBaseWeight(currentWeightGrams: number, portionRatio?: number | null): number {
+  const ratio = Number(portionRatio) || 1.0;
+  if (!(currentWeightGrams > 0) || !(ratio > 0)) return currentWeightGrams > 0 ? Math.round(currentWeightGrams) : 100;
+  return Math.max(1, Math.round(currentWeightGrams / ratio));
+}
+
+/**
  * Resolve a displayed-dish reference to its `itemsBreakdown` row.
  * The displayed list filters out flattened component rows
  * (`role === 'component'`), so a displayed position is NOT a breakdown

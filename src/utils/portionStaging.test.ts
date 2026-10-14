@@ -4,6 +4,7 @@ import {
   stagedPortionKey,
   resolveBreakdownIndex,
   combineStagedDishWeight,
+  staticBaseWeight,
 } from './portionStaging';
 
 /**
@@ -101,5 +102,13 @@ describe('portionStaging (PORTION_MIXUP sensor)', () => {
     const res = combineStagedDishWeight(comps, {}, dishKey, 300, 300, defaultWeight);
     expect(res.allSelected).toBe(false);
     expect(res.dirty).toBe(false);
+  });
+
+  it('derives the stable base from the live weight and its ratio (no compounding)', () => {
+    expect(staticBaseWeight(220, 1.0)).toBe(220);
+    expect(staticBaseWeight(330, 1.5)).toBe(220);
+    expect(staticBaseWeight(165, 1.5)).toBe(110);
+    expect(staticBaseWeight(165, undefined)).toBe(165);
+    expect(staticBaseWeight(0, 1.5)).toBe(100);
   });
 });
