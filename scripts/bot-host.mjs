@@ -79,6 +79,7 @@ import { issueToken } from './tui-gateway.mjs';
 import { listModelCatalog } from './lib/opencode-api.mjs';
 import { KNOWN_HOSTS, workerStatus, isLocalHost, machineLabel } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
+import { validateAttachTarget, attachNeedsConfirm, formatBytes, unorphan, recordOrphan } from './lib/session-orphans.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
 import { enqueueJob, awaitJob, requeueJob, getJob, DEFAULT_LEASE_MS } from './lib/worker-jobs.mjs';
 import { preflightWorkerTurn, classifyWorkerFailure, retryDelayMs, preflightSummary, relayUrl } from './lib/swap-guards.mjs';
@@ -3120,6 +3121,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
 
     case 'new':
+      // The dropped binding's server session outlives the chat: register it
+      // as an orphan instead of losing it silently (the reaper is dry-run
+      // first, archive only — /new itself changes nothing else).
+      {
+        const prev = unscopeSessionId(sessions.get(String(chatId)));
+        if (prev && prev.sessionId) recordOrphan({ sessionId: prev.sessionId, workspace: prev.workspace, reason: '/new' });
+      }
       sessions.delete(chatId);
       saveSessions(config.id, sessions);
       clearFollowups(chatId);
@@ -3681,6 +3689,49 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'attach': {
+      // On-demand landing on a session from the operator's own opencode
+      // session list — deliberately no always-attach mode (a shared
+      // mega-thread taxes every turn with its full history and serializes
+      // turns; measured 2026-10-14). Rebind only: no turn starts, nothing
+      // is spent, no lane changes.
+      const parts = String(cmd.args || '').trim().split(/\s+/).filter(Boolean);
+      const want = parts[0] || '';
+      const force = parts.slice(1).some((a) => /^(force|yes)$/i.test(a));
+      if (!want) {
+        await api.sendMessage(chatId, 'Usage: /attach <session-id> [force] — land this chat on a session from your opencode session list (same workspace only, opencode lanes only). Nothing runs and nothing is spent.');
+        return;
+      }
+      const attachProject = getChatProject(chatId);
+      const attachWorkspace = attachProject.type === 'external' ? attachProject.workspace : config.agent.workspace;
+      if (sessionForWorkspace(sessions, chatId, attachWorkspace) === want) {
+        await api.sendMessage(chatId, 'Already on that session — nothing changed.');
+        return;
+      }
+      const chk = validateAttachTarget({ sessionId: want, workspace: attachWorkspace });
+      if (!chk.ok) {
+        await api.sendMessage(chatId, `Cannot attach: ${chk.reason}`, { parse_mode: 'Markdown' });
+        return;
+      }
+      if (!force && attachNeedsConfirm(chk)) {
+        await api.sendMessage(
+          chatId,
+          `⚠️ \`${chk.title || chk.sessionId}\` is heavy (${chk.msgs} messages, ${formatBytes(chk.bytes)}) — every turn here will carry that history, slower and pricier. Send \`/attach ${chk.sessionId} force\` to attach anyway, or pick a smaller session.`,
+          { parse_mode: 'Markdown' },
+        );
+        return;
+      }
+      bindSessionForWorkspace(sessions, chatId, attachWorkspace, chk.sessionId);
+      saveSessions(config.id, sessions);
+      unorphan({ sessionId: chk.sessionId });
+      await api.sendMessage(
+        chatId,
+        `Attached this chat to \`${chk.title || chk.sessionId}\` (${chk.msgs} messages) in this workspace. The next turn continues that conversation — watch it live in your terminal on the same session. Nothing ran and nothing was spent.`,
+        { parse_mode: 'Markdown' },
+      );
+      return;
+    }
+
     case 'notify': {
       // Finish alerts for runs started outside Telegram (finish-watch.mjs
       // reads the same prefs file). Default on; `notify: false` silences.
@@ -3726,7 +3777,12 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         // Drop the old project's session row. Without this the chat kept a
         // session id from the workspace it just left, and the TUI — which
         // resolves its session from this same file — went on attaching the
-        // previous project's conversation after a switch.
+        // previous project's conversation after a switch. The dropped id is
+        // registered as an orphan (dry-run-first reaper, archive only).
+        {
+          const prev = unscopeSessionId(sessions.get(String(chatId)));
+          if (prev && prev.sessionId) recordOrphan({ sessionId: prev.sessionId, workspace: prev.workspace, reason: `/project ${proj.name}` });
+        }
         sessions.delete(String(chatId));
         saveSessions(config.id, sessions);
         const roleInfo =
@@ -6701,12 +6757,13 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         : `⌨️ A ${openSurface.tool} terminal is open, but ${openSurface.tool} cannot resume a thread headlessly — this turn will not appear there. The terminal stays on the last ${openSurface.tool} thread.`
       ).catch(() => {});
     }
-    // TEMP-TEST 2026-10-05: pings run IN the chat session, not throwaway.
-    // Throwaway kept Telegram and the web UI permanently incoherent (the
-    // answer exists nowhere the UI reads, so the UI can never update). With
-    // PONG humanized at delivery, the transcript cost is one bracketed user
-    // line in the TUI — worth coherent surfaces. Branch owner decides final.
-    // if (isPingTurn) turnSessionId = null;
+    // FINAL 2026-10-14 (bot-visibility-hub node 6): pings run IN the chat
+    // session, not throwaway. Throwaway kept Telegram and the web UI
+    // permanently incoherent (the answer exists nowhere the UI reads, so the
+    // UI can never update) and minted one orphan server session per
+    // greeting. With PONG humanized at delivery, the transcript cost is one
+    // bracketed user line in the TUI — worth coherent surfaces and zero
+    // orphans. turnSessionId stays as resolved: no override here.
 
     // A TUI is open on this same conversation, so the user can watch this turn
     // happen in the terminal as well. It shares the session, so what runs here
@@ -7192,9 +7249,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // turn stored nothing at all (runCline always resolved null), so the TUI
     // kept attaching to whatever stale opencode id was left in the map.
     const resultSurface = parseModelRef(lastAttemptModel).surface;
-    // Ping turns never bind back: the throwaway session belongs to the
-    // check, not the chat. Everything else (usage, ledger, sticky lane)
-    // behaves exactly like a normal turn.
+    // Ping turns never bind back: they run in the chat's own session, so
+    // writing back the same id is a no-op map write. Everything else
+    // (usage, ledger, sticky lane) behaves exactly like a normal turn.
     if (result.sessionID && !isPingTurn) {
       if (resultSurface === 'cline') {
         const clineSessions = loadClineSessions(config.id);
