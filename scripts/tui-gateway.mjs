@@ -40,6 +40,7 @@ import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { tmuxNameFor } from './tui-bot-plumbing.mjs';
 import { collectSessionMem, collectSessionIdle, collectTmuxSessions, listTmuxNames, collectUnattributedMem } from './lib/tmux-session-mem.mjs';
+import { collectActivity, readActivityInputs } from './lib/activity-hub.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..');
@@ -2050,8 +2051,18 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       const box = Number.isInteger(unatt.mib) && unatt.mib > 0
         ? { otherMiB: unatt.mib, otherProcs: unatt.procs }
         : null;
+      // Live bot-turn activity for the picker's working badges: every bot
+      // turn already writes observer logs + leases, this only joins them.
+      // Best-effort and additive — a failed read yields `activity: []`, never
+      // a failed status.
+      let activity = [];
+      try {
+        activity = collectActivity(readActivityInputs({}));
+      } catch {
+        activity = [];
+      }
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      return res.end(JSON.stringify({ ok: true, status, tmux, ...(box ? { box } : {}) }));
+      return res.end(JSON.stringify({ ok: true, status, tmux, ...(box ? { box } : {}), activity }));
     }
 
     // Point the shared VM session viewer at one bare opencode session, so a

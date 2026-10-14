@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMem, statusKeyMaps, formatIdle, lookForRow, sortByMem, TTY_IDLE_RED_MS } from './shell-session';
+import { formatMem, statusKeyMaps, formatIdle, lookForRow, sortByMem, activityKeyMaps, TTY_IDLE_RED_MS } from './shell-session';
 import type { TmuxEntry } from './shell-session';
 
 describe('formatMem (picker memory readout shows a number or nothing)', () => {
@@ -106,6 +106,43 @@ describe('lookForRow (one rule for dot, memory, state)', () => {
       { kind: 'box', bot: 'other processes', detail: '212 processes outside tmux' },
       { live: true, memMiB: 1400 }, 0,
     )).toEqual({ dot: 'live', memText: '1.4 GB', stateText: '212 processes outside tmux' });
+  });
+});
+
+describe('activityKeyMaps (working/held badges key tty:<bot> and ses:<id12>)', () => {
+  const entries = [
+    { chat: '1', sessionId8: 'ses_abc00000', bots: ['vm'], lane: 'opencode', host: 'vps', state: 'working', elapsedMs: 90000 },
+    { chat: '2', sessionId8: 'ses_zzz00000', bots: ['vm'], lane: 'cline', host: 'grok', state: 'held', elapsedMs: null },
+    { chat: '3', sessionId8: '', bots: ['vm2'], lane: 'opencode', host: 'vps', state: 'idle', elapsedMs: null },
+  ] as Parameters<typeof activityKeyMaps>[0];
+  it('badges bots and sessions; working wins ties by elapsed', () => {
+    const { act } = activityKeyMaps(entries);
+    expect(act['tty:vm']).toEqual({ state: 'working', lane: 'opencode', elapsedMs: 90000, host: 'vps' });
+    expect(act['ses:ses_abc00000']).toEqual(act['tty:vm']);
+    expect(act['ses:ses_zzz00000']).toEqual({ state: 'held', lane: 'cline', elapsedMs: null, host: 'grok' });
+    expect(act['tty:vm2']).toBe(undefined);
+  });
+  it('a working badge greens the row with lane and elapsed', () => {
+    expect(lookForRow(
+      { bot: 'vm' },
+      { live: true, memMiB: 100, act: { state: 'working', lane: 'opencode', elapsedMs: 90000, host: 'vps' } }, 0,
+    )).toEqual({ dot: 'live', memText: '100 MB', stateText: 'working opencode 1m' });
+  });
+  it('a working badge shows on a dormant pane (headless turns are the invisible ones)', () => {
+    expect(lookForRow(
+      { bot: 'vm' },
+      { live: false, act: { state: 'working', lane: 'opencode', elapsedMs: 1000, host: 'vps' } }, 0,
+    )).toEqual({ dot: 'dormant', memText: '', stateText: 'working opencode just now' });
+  });
+  it('a held badge keeps the dot and names the host', () => {
+    expect(lookForRow(
+      { bot: 'vm' },
+      { live: false, act: { state: 'held', lane: 'cline', elapsedMs: null, host: 'grok' } }, 0,
+    )).toEqual({ dot: 'dormant', memText: '', stateText: 'held grok' });
+    expect(lookForRow(
+      { kind: 'opencode', bot: 'vm', status: 'idle', updatedAt: null },
+      { live: false, act: { state: 'held', lane: 'opencode', elapsedMs: null, host: 'mobile' } }, 0,
+    )).toEqual({ dot: 'idle', memText: '', stateText: 'held mobile' });
   });
 });
 

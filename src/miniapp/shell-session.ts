@@ -104,9 +104,70 @@ export type RowLook = {
   dot: 'live' | 'idle' | 'dormant';
   /** `412 MB` / `2.0 GB`, or '' — rendered on the row's main line. */
   memText: string;
-  /** `live`, `idle 2h`, `working`, or '' — rendered under the main line. */
+  /** `live`, `idle 2h`, `working cline just now`, `held grok`, or '' —
+   * rendered under the main line. */
   stateText: string;
 };
+
+/** One live bot-turn activity from `/api/ttys/status` (see activity-hub). */
+export type ActivityEntry = {
+  chat: string;
+  sessionId8: string;
+  bots: string[];
+  lane: string;
+  host: string;
+  state: 'working' | 'held' | 'idle';
+  elapsedMs: number | null;
+};
+
+/** The badge a picker row shows for a working/held turn. Idle badges nothing. */
+export type ActivityBadge = {
+  state: 'working' | 'held';
+  lane: string;
+  elapsedMs: number | null;
+  host: string;
+};
+
+/**
+ * Fold activity rows into the picker's badge map. Keys: `tty:<bot>` for
+ * every bot on the row, plus `ses:<sessionId8>` so bare `opencode:` rows
+ * badge when their session is being worked. Working wins over held; ties
+ * keep the longest elapsed. Idle rows badge nothing — the row's own
+ * live/idle/memory already says it.
+ */
+export function activityKeyMaps(activity: ActivityEntry[] = []): {
+  act: Record<string, ActivityBadge>;
+} {
+  const act: Record<string, ActivityBadge> = {};
+  const rank: Record<string, number> = { working: 0, held: 1, idle: 2 };
+  const consider = (k: string, e: ActivityEntry) => {
+    if (e.state !== 'working' && e.state !== 'held') return;
+    const cur = act[k];
+    const r = rank[e.state] ?? 3;
+    const badge: ActivityBadge = {
+      state: e.state,
+      lane: String(e.lane || ''),
+      elapsedMs: typeof e.elapsedMs === 'number' ? e.elapsedMs : null,
+      host: String(e.host || ''),
+    };
+    if (!cur) {
+      act[k] = badge;
+      return;
+    }
+    const cr = rank[cur.state] ?? 3;
+    if (r < cr || (r === cr && (badge.elapsedMs ?? -1) > (cur.elapsedMs ?? -1))) {
+      act[k] = badge;
+    }
+  };
+  for (const e of activity || []) {
+    if (!e || typeof e !== 'object') continue;
+    for (const b of e.bots || []) {
+      if (typeof b === 'string' && b) consider(`tty:${b}`, e);
+    }
+    if (typeof e.sessionId8 === 'string' && e.sessionId8) consider(`ses:${e.sessionId8}`, e);
+  }
+  return { act };
+}
 
 /**
  * One rule for what a picker row shows. ttyd rows read the status maps;
@@ -115,12 +176,21 @@ export type RowLook = {
  */
 export function lookForRow(
   r: PickerRow,
-  maps: { live: boolean; memMiB?: number; idleMs?: number },
+  maps: { live: boolean; memMiB?: number; idleMs?: number; act?: ActivityBadge },
   nowMs: number,
 ): RowLook {
   const noMem: RowLook = { dot: 'dormant', memText: '', stateText: '' };
   if (!r) return noMem;
+  // A working/held turn badges its row even with no live pane: headless
+  // turns are exactly the ones you cannot see otherwise.
+  const act = maps.act && (maps.act.state === 'working' || maps.act.state === 'held') ? maps.act : null;
+  const actText = !act
+    ? ''
+    : act.state === 'working'
+      ? `working${act.lane ? ` ${act.lane}` : ''}${act.elapsedMs != null ? ` ${formatIdle(act.elapsedMs)}` : ''}`
+      : `held${act.host ? ` ${act.host}` : ''}`;
   if (r.kind === 'opencode') {
+    if (act) return { dot: act.state === 'working' ? 'live' : 'idle', memText: '', stateText: actText };
     if (String(r.status || '').toLowerCase() === 'idle') {
       let dur = '';
       const t = r.updatedAt ? Date.parse(r.updatedAt) : NaN;
@@ -138,7 +208,16 @@ export function lookForRow(
   if (r.kind === 'box') {
     return { dot: 'live', memText, stateText: r.detail || 'outside tmux' };
   }
-  if (!maps.live) return noMem;
+  if (!maps.live) {
+    // Badges show on dormant panes too — with the dormant dot kept honest:
+    // the pane is down, the turn is not. The hold is actionable
+    // (`/location vps`) whether or not a terminal is open.
+    if (act && act.state === 'working') return { dot: 'dormant', memText, stateText: actText };
+    if (act && act.state === 'held') return { dot: 'dormant', memText, stateText: actText };
+    return noMem;
+  }
+  if (act && act.state === 'working') return { dot: 'live', memText, stateText: actText };
+  if (act && act.state === 'held') return { dot: 'live', memText, stateText: actText };
   const idleMs = typeof maps.idleMs === 'number' ? maps.idleMs : -1;
   if (idleMs >= TTY_IDLE_RED_MS) {
     return { dot: 'idle', memText, stateText: `idle ${formatIdle(idleMs)}` };
