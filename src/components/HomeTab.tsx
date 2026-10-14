@@ -1859,7 +1859,7 @@ export default function HomeTab({
 
 
       {/* Health status to improve (Previously Health & BMI Summary) */}
-      <div id="health-summary-section" className="space-y-5">
+      <div id="health-summary-section" className="space-y-5" data-hero>
         <div className="flex justify-between items-center pb-2 border-b border-theme-border/50">
           <h3 className="font-bold text-theme-text text-sm flex items-center gap-2 font-display">
             <Heart className="w-4.5 h-4.5 text-indigo-600" />
