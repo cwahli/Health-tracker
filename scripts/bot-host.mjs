@@ -6422,9 +6422,31 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     } else {
       await api.sendMessage(
         chatId,
-        `⏸ Held: you asked for \`${heldLocation.requested}\` and it is still unreachable (${status.reason}). Nothing was run and no allowance was spent. Send \`/location vps\` to run here, or retry when the worker connects.`
+        `⏸ Held: you asked for \`${heldLocation.requested}\` and it is still unreachable (${status.reason}). Nothing was run and no allowance was spent — lane \`${eff.model}\` never started there. Send \`/location vps\` to run here, or retry when the worker connects.`
       );
       return;
+    }
+  }
+
+  // A saved remote /location that went silent must hold BEFORE the headline
+  // paints. Announcing "starting…" and then "nothing ran" is a contradiction:
+  // the lane (eff.model) and the host (desiredLocation) are different axes,
+  // and the reachability check used to run only deep inside runRemoteTurn,
+  // after the headline paints. This pre-check holds fast with no headline,
+  // no claim, and no ledger touch. runRemoteTurn keeps its own check as the
+  // race safety for a worker that dies mid-turn.
+  {
+    const earlyLocation = desiredLocation(prefs, chatId) || workLocation();
+    if (!isLocalHost(earlyLocation)) {
+      const earlyStatus = workerStatus(earlyLocation);
+      if (!earlyStatus.reachable) {
+        setBlockedLocation(chatId, earlyLocation, earlyStatus.reason);
+        await api.sendMessage(
+          chatId,
+          `⏸ Held: \`${earlyLocation}\` is unreachable (${earlyStatus.reason}). Nothing was run and no allowance was spent — lane \`${eff.model}\` never started there. Send \`/location vps\` to run here, or retry when the worker connects.`
+        );
+        return;
+      }
     }
   }
 
