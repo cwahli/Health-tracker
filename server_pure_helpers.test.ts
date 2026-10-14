@@ -545,7 +545,7 @@ describe('server_pure_helpers', () => {
   });
 });
 
-import { isLabelPanelItem, sanitizeVerdictLabel } from "./server_pure_helpers.js";
+import { isLabelPanelItem, sanitizeVerdictLabel, preserveSpecVerdictLabel, applyServerAverageNutrients } from "./server_pure_helpers.js";
 
 describe("isLabelPanelItem", () => {
   it("rejects items containing fillet as a label", () => {
@@ -612,5 +612,65 @@ describe("isLabelPanelItem", () => {
       expect(nutrients.carbohydrates).toBe(50);
       expect(nutrients.protein).toBe(4.5);
     });
+  });
+});
+
+describe("compare-mode verdict & per-serving guards (Meal_03 audit)", () => {
+  it("preserveSpecVerdictLabel keeps schema-compliant 3-6 word model labels verbatim", () => {
+    expect(preserveSpecVerdictLabel({ label: "Excessive Sugar & Saturated Fat", level: "alert" }, null)).toEqual({
+      label: "Excessive Sugar & Saturated Fat",
+      level: "alert",
+    });
+    expect(preserveSpecVerdictLabel({ label: "Moderate Refined Carbs & Dairy Fat", level: "warning" }, { saturatedFat: 1 })).toEqual({
+      label: "Moderate Refined Carbs & Dairy Fat",
+      level: "warning",
+    });
+  });
+
+  it("preserveSpecVerdictLabel still scrubs non-conforming labels via the meal-mode path", () => {
+    const out = preserveSpecVerdictLabel({ label: "Good", level: "good" }, {});
+    expect(out).toEqual({ label: "Supports sustained metabolic energy", level: "good" });
+    const long = preserveSpecVerdictLabel({ label: "This is a far too long verdict label indeed", level: "neutral" }, {});
+    expect(long.label.split(/\s+/).length).toBeLessThanOrEqual(6);
+  });
+
+  it("applyServerAverageNutrients derives per-serving from per100g x weight when the model omits averages", () => {
+    const groups = [{
+      groupName: "Tier 3 - Warning: Cheese-Topped Bakery Buns",
+      averageNutrients: null,
+      averageNutrientsPer100g: { calories: 340, protein: 9.5, totalFat: 14, saturatedFat: 6.5, carbohydrates: 44, sugar: 12, totalFibre: 1.5, sodium: 420, addedSugar: 10, transFat: 0.2 },
+      servingWeightGrams: 80,
+      scoutItemIndices: [0, 1],
+      comparisonSentence: "s",
+      orderingTip: "t",
+      boundingBox2D: [650, 680, 950, 990],
+    }];
+    const flatLedger = {
+      0: { calories: 157, protein: 8, totalFat: 5, saturatedFat: 1, carbohydrates: 20, sugar: 12.5, sodium: 200 },
+      1: { calories: 157, protein: 8, totalFat: 5, saturatedFat: 1, carbohydrates: 20, sugar: 12.5, sodium: 200 },
+    };
+    const [out] = applyServerAverageNutrients(groups, flatLedger);
+    // 340 * 80 / 100 — deterministic math, NOT the flat 157 ledger fallback.
+    expect(out.averageNutrients.calories).toBe(272);
+    expect(out.averageNutrients.protein).toBe(7.6);
+    expect(out.averageNutrients.saturatedFat).toBe(5.2);
+    expect(out.averageNutrients.sodium).toBe(336);
+    expect(out.servingWeightGrams).toBe(80);
+  });
+
+  it("applyServerAverageNutrients keeps the ledger path when no per100g basis exists", () => {
+    const groups = [{
+      groupName: "g",
+      averageNutrients: null,
+      averageNutrientsPer100g: null,
+      servingWeightGrams: null,
+      scoutItemIndices: [0],
+      comparisonSentence: "s",
+      orderingTip: null,
+      boundingBox2D: null,
+    }];
+    const ledger = { 0: { calories: 157, protein: 8 } };
+    const [out] = applyServerAverageNutrients(groups, ledger);
+    expect(out.averageNutrients.calories).toBe(157);
   });
 });
