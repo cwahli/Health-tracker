@@ -22,6 +22,7 @@ import {
   itemsShareSubstance,
   mergeLocksFromCommands,
   reaggregateDishWeightFromComponents,
+  sanitizeWeightEditCommands,
   type UserLockedSlot,
 } from './server_edit_patch_ledger.js';
 
@@ -647,7 +648,18 @@ export async function applyMealEdits(opts: {
   }
 
   const coalesced = coalesceLegacyCommands(commandsIn, original, opts.userMessage || '');
-  const commands = dedupeModifierCommands(coalesced);
+  let commands: MealEditCommand[] = dedupeModifierCommands(coalesced) as MealEditCommand[];
+  // PORTION-SMEAR containment (job_1791997001237): a portion adjust on one
+  // dish must not rewrite untouched dishes with the message meal total.
+  // Covers diet-LLM, diff-synthesized, and message-synthesized origins alike.
+  const sanitized = sanitizeWeightEditCommands({
+    commands,
+    priorItems: original,
+    userMessage: opts.userMessage || '',
+    portionChoices: (opts as any).portionChoices,
+  });
+  commands = sanitized.commands as MealEditCommand[];
+  notes.push(...sanitized.notes);
   let items = original;
 
   for (const raw of commands) {
