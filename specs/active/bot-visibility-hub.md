@@ -1,6 +1,6 @@
 ---
 id: bot-visibility-hub
-status: draft
+status: locked
 skill: tui-shell
 edit_mode: patch
 allowed_files:
@@ -80,6 +80,18 @@ for the existing pile. Nothing invisible, nothing ownerless.
 - Not a ROADMAP ID (explicit user ask 2026-10-14); touches no Current-work
   files. Hub files (`bot-host.mjs`, `tui-gateway.mjs`) need this packet's go
   (no auto-go on later phases per JOURNEY.md).
+- Attach performance (measured read-only 2026-10-14, `~/.local/share/opencode/opencode.db`
+  `session_message`): 906 sessions with messages, 553.9 MB total history;
+  median 24 KB, p90 ~1.2 MB, max 36 MB / 1,853 msgs (~9M tokens @4B/tok).
+  Heap correlation measured earlier: 145 MB TUI at 2 MB history vs 709 MB at
+  6 MB. A run carries its session's history as context, so attach-by-default
+  would tax every small TG turn with the shared thread's full weight, plus
+  serialize turns (one at a time per session) vs parallel separate sessions.
+  Decision (user 2026-10-14): NO always-attach. `/attach` is on-demand only,
+  and only to sessions the operator can already see in their normal opencode
+  UI (same background service the TUI uses) — never to hidden bot-internal
+  ids. Honest caveat: server-side context windowing not verifiable from here;
+  token math is directional, heap math is measured.
 
 ## Plan
 
@@ -122,11 +134,17 @@ Sensitive transitions as (Condition, Action, Pitfall):
    `○ idle <age>` from `activity` keyed by session/bot; pure formatting in
    `src/miniapp/shell-session.ts` (+ tests). Done when: `tsc` + shell vitest
    green and a stub-gateway render shows badges on working rows only.
-5. `/attach <session-id>` bot command: validate on the shared server,
-   workspace-exact, opencode lanes only; rebind via `bindSessionForWorkspace`
-   + `saveSessions`; no turn started, nothing spent. Done when: wrong-
-   workspace and Cline-id refusals proven in chat-visible copies, happy path
-   lands the next turn on the attached session.
+5. `/attach <session-id>` bot command (on-demand only — there is deliberately
+   no always-attach mode): validate the id against the session list of the
+   SAME background service the operator's TUI uses (so the target is always
+   one the operator can already see in their normal opencode UI); workspace-
+   exact match; opencode lanes only; Cline ids refused with the reason said
+   out loud. Size guardrail: target over ~500 msgs / ~2 MB history → warn in
+   chat with the measured size and suggest `/compact` first (attach proceeds
+   only on explicit confirmation). Rebind via `bindSessionForWorkspace` +
+   `saveSessions`; no turn started, nothing spent.
+   Done when: unknown-id, wrong-workspace, Cline-id, and oversize-warning
+   copies proven; happy path lands the next turn on the attached session.
 6. Orphan prevention in `scripts/bot-host.mjs` (narrow): ping TEMP-TEST
    resolved finally (in-chat stays unless the coherence proof passes for a
    dedicated per-workspace ping session that is never TUI-attached);
