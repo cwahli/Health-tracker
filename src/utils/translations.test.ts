@@ -55,8 +55,13 @@ const BASELINE_TOTAL_KEYS = 3956;
  * four packs (continueWithWhatsApp, waCancel, waExpired, waOpenWhatsApp,
  * waUnavailable, waVerifyDesc, waWaiting). Growth only — no existing copy
  * value edited.
+ *
+ * Re-recorded for the portion-mixup fix (2026-10-14): four staged-portion
+ * keys added to all four packs (applyPortions, portionsSelected,
+ * selectAllPortionsHint, stagedBadge) for the composite-dish Apply bar.
+ * Growth only — no existing copy value edited.
  */
-const FROZEN_DIGESTS = { en: '1b75377c291d3923', id: '884f9af8b9f486f4', fr: '1a976312bf84b990', zh: 'ce7128f6472bb140' } as const;
+const FROZEN_DIGESTS = { en: '8f67b6a431e1ab39', id: 'f0fe4be58077f598', fr: '2f996389d041f12c', zh: '8be15e8d619ef213' } as const;
 
 const stablePairs = (pack: Record<string, unknown>) =>
   JSON.stringify(Object.keys(pack).sort().map((key) => [key, pack[key]]));
