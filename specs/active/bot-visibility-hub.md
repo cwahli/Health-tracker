@@ -80,6 +80,13 @@ for the existing pile. Nothing invisible, nothing ownerless.
 - Not a ROADMAP ID (explicit user ask 2026-10-14); touches no Current-work
   files. Hub files (`bot-host.mjs`, `tui-gateway.mjs`) need this packet's go
   (no auto-go on later phases per JOURNEY.md).
+- Node-7 dry run (2026-10-15, read-only, script `/tmp/opencode/orphan-dryrun.py`):
+  487 live sessions, 11 bindings — archive candidates under the rule
+  (unbound + 14d+ inactive + bot workspaces): **0**. The 3 known 8-day
+  bot-workspace orphans from node 1 have not aged into the 14d rule yet;
+  305 sessions active <7d and 117 non-bot-workspace unbound are excluded by
+  design. Archive node correctly does nothing; rerun the report (not a new
+  packet) when the list is non-empty.
 - Attach performance (measured read-only 2026-10-14, `~/.local/share/opencode/opencode.db`
   `session_message`): 906 sessions with messages, 553.9 MB total history;
   median 24 KB, p90 ~1.2 MB, max 36 MB / 1,853 msgs (~9M tokens @4B/tok).
