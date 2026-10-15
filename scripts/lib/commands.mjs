@@ -70,6 +70,9 @@ export const HIDDEN_COMMANDS = {
   review: 'moved: the review queue is web-only now — answers as a pointer to the Review tab',
   forge: 'moved: the bot forge is web-only now — answers as a pointer to the Forge tab',
   app: 'moved: the mini-app shell is a browser page now — answers as a pointer to the web shell',
+  // Operator power tool (2026-10-14): landing a chat on a session from the
+  // operator's own opencode list is typed on demand, not a menu entry.
+  attach: 'ops: land this chat on one of your opencode sessions (/attach <session-id> [force]) — same workspace only, starts no turn',
 };
 
 /**
@@ -115,6 +118,10 @@ export const HELP_USAGE = {
     ],
   },
   debug: { args: '', text: 'show the active work-session debug view' },
+  attach: {
+    args: '<session-id> [force]',
+    text: 'land this chat on one of your opencode sessions (same workspace only; starts no turn, spends nothing)',
+  },
   handoff: { args: '', text: 'checkpoint this work session for continuation' },
   resume: { args: '[n]', text: 'print the current bug-ticket packet (n = card #)' },
   tx: { args: '[on|off|status|debug]', text: 'shared work view for this chat' },

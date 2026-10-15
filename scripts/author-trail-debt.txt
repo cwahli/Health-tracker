@@ -81,3 +81,6 @@ d1a43756  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (n
 745cfd1b  no-trailer queue-sync commit on main, recorded 2026-10-13 (not mine to rewrite)
 68174aca  no-trailer queue-sync commit on main, recorded 2026-10-14 (not mine to rewrite)
 0f398ada  no-trailer bot-host squash on main (#796), recorded 2026-10-15 (not mine to rewrite)
+58f4dd45  no-trailer colab direct-to-main commit on main, recorded 2026-10-15 (not mine to rewrite)
+af32be32  no-trailer queue-sync commit on main, recorded 2026-10-15 (not mine to rewrite)
+0f398ada  no-trailer squash-merge of #796 dropped the branch trailer; authorship in branch commit 7cdd6771 + PR #796, recorded 2026-10-15 (not mine to rewrite)
