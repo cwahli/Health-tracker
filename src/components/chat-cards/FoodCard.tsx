@@ -2991,6 +2991,25 @@ export const FoodCard: React.FC<AgentCardProps & {
                           msg.data?.pendingFoodLog?.savable !== false &&
                           (msg as any).savable !== false
                         );
+                        // STAGED-PORTION: pending dropdown edits turn the action
+                        // into Review — one tap sends the whole set for full
+                        // re-analysis instead of firing per dropdown. This
+                        // comes before the saved/unsavable branches so a
+                        // staged change on a saved meal still has a path to
+                        // agent re-analysis (otherwise it would be local-only).
+                        if (stagedDishEdits.length > 0) {
+                          const reviewLabel = (t.reviewMealWithPortion as string) || 'Review meal with new portion ({summary})';
+                          return (
+                            <button
+                              type="button"
+                              onClick={handleReviewStagedPortions}
+                              className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer font-sans"
+                            >
+                              <Sparkles className="w-4 h-4" />
+                              {reviewLabel.replace('{summary}', stagedPortionSummary)}
+                            </button>
+                          );
+                        }
                         if (isAlreadyLogged) {
                           return (
                             <div className="w-full py-2 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/50 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 animation-fade-in font-sans">
@@ -3010,22 +3029,6 @@ export const FoodCard: React.FC<AgentCardProps & {
                                 {gate?.summary || (Array.isArray(gate?.failures) && gate.failures[0]?.message) || (t.nutrientValidationFailedDefault || 'Nutrient validation failed. Meal contains missing or contradictory values.')}
                               </span>
                             </div>
-                          );
-                        }
-                        // STAGED-PORTION: pending dropdown edits turn Save into
-                        // Review — one tap sends the whole set for full
-                        // re-analysis instead of firing per dropdown.
-                        if (stagedDishEdits.length > 0) {
-                          const reviewLabel = (t.reviewMealWithPortion as string) || 'Review meal with new portion ({summary})';
-                          return (
-                            <button
-                              type="button"
-                              onClick={handleReviewStagedPortions}
-                              className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer font-sans"
-                            >
-                              <Sparkles className="w-4 h-4" />
-                              {reviewLabel.replace('{summary}', stagedPortionSummary)}
-                            </button>
                           );
                         }
                         return (
