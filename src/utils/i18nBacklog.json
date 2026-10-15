@@ -1,0 +1,4 @@
+{
+  "_README": "Experimental English-only backlog. en is source of truth; new UI must still use t.* keys (no hardcoded English chrome). If a new key ships with id as English-copy and fr/zh missing, list it here so it can be picked up. Remove the entry in the same commit that lands the translations (stale entries fail the forward guardrail).",
+  "experimental": []
+}
