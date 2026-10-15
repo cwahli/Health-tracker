@@ -1,18 +1,73 @@
 /**
  * tmux-session-mem.mjs — per-tmux-session memory accounting.
  *
- * The shell's terminal picker shows one row per TUI; the RSS summed over a
- * session's pane trees is the number behind each row's memory readout. RSS
- * overcounts shared pages, so every figure is an upper bound — honest for
- * "which session is worth killing", never a billing number.
+ * The shell's terminal picker shows one row per TUI; the PSS summed over a
+ * session's pane trees is the number behind each row's memory readout
+ * (proportional shares, so rows are additive; per-process RSS fallback where
+ * smaps_rollup is unreadable, tracked via `pssOk`). Figures are resident
+ * pages only — kernel slab and swapped-out pages live in no process and are
+ * named in the reconciling remainder, never forced into the rows.
  *
- * Pure parsers (unit-tested) plus one injected-seam collector. Best-effort:
- * any failure resolves to {}, and the status endpoint then renders as if
- * memory were unknown (rows as today, no number).
+ * Pure parsers (unit-tested) plus injected-seam collectors. Best-effort:
+ * any failure resolves to {} / [], and the status endpoint then renders as
+ * if memory were unknown (rows as today, no number).
  */
 import { execFile as defaultExecFile } from 'node:child_process';
 import { readFile as defaultReadFile } from 'node:fs/promises';
 
+
+/** Shorten a model id to its last path segment, capped. */
+export function shortModel(model) {
+  const s = String(model || '').trim();
+  const cut = s.lastIndexOf('/');
+  return (cut === -1 ? s : s.slice(cut + 1)).trim().slice(0, 48);
+}
+
+const CLINE_RE = /(?:^|\s)(?:\S*\/)?\.?cline(?:\s|$)/;
+const CLINE_MODEL_RE = /(?:^|\s)-m\s+(\S+)/;
+const OPENCODE_RE = /(?:^|\s)(?:\S*\/)?opencode(?:\s|$)/;
+const SERVE_RE = /(?:^|\s)serve(?:\s|$)/;
+const COLAB_RE = /(?:^|\/)colab-tabs(?:\s|$)/;
+
+/**
+ * Backend label from ONE process's command line. Matches on argv structure
+ * (path-anchored binary names plus flags) — never a bare substring, so a
+ * shell merely mentioning a tool in its command text is not mistaken for
+ * the tool itself. Returns { kind, model? } or null.
+ */
+export function agentForArgv(args) {
+  const text = String(args || '');
+  if (CLINE_RE.test(text)) {
+    const m = CLINE_MODEL_RE.exec(text);
+    return { kind: 'cline', model: m ? shortModel(m[1]) : '' };
+  }
+  if (OPENCODE_RE.test(text)) {
+    if (SERVE_RE.test(text)) return { kind: 'serve' };
+    return { kind: 'opencode' };
+  }
+  if (COLAB_RE.test(text)) return { kind: 'colab-tabs' };
+  return null;
+}
+
+const AGENT_RANK = { cline: 0, opencode: 1, serve: 2, 'colab-tabs': 3 };
+
+/**
+ * One label for a session tree: the highest-priority backend found across
+ * its member command lines, else '' (generic shells stay unlabeled — an
+ * honest blank, not a guess). cline carries its model.
+ */
+export function deriveSessionAgent(memberArgs) {
+  let best = null;
+  for (const args of memberArgs || []) {
+    const hit = agentForArgv(args);
+    if (!hit) continue;
+    if (!best || AGENT_RANK[hit.kind] < AGENT_RANK[best.kind]) best = hit;
+    if (best.kind === 'cline') break;
+  }
+  if (!best) return '';
+  if (best.kind === 'cline') return best.model ? `cline/${best.model}` : 'cline';
+  return best.kind;
+}
 /**
  * `tmux list-sessions -F '#{session_name}'` → [name]. Skips blanks.
  */
@@ -55,12 +110,38 @@ export async function collectTmuxSessions({ execFile = defaultExecFile, readFile
     const activity = parseSessionActivity(sessOut, now);
     const panes = parsePaneLines(panesOut);
     const mem = sumSessionTrees(panes, ps);
+    // Backend labels from member argv (one extra walk; labels ride free).
+    const agents = {};
+    {
+      const children = new Map();
+      for (const [pid, row] of Object.entries(ps)) {
+        if (!children.has(row.ppid)) children.set(row.ppid, []);
+        children.get(row.ppid).push(Number(pid));
+      }
+      for (const [name, roots] of Object.entries(panes)) {
+        const args = [];
+        const seen = new Set();
+        const stack = [...(Array.isArray(roots) ? roots : [])];
+        while (stack.length) {
+          const p = stack.pop();
+          if (seen.has(p)) continue;
+          seen.add(p);
+          const row = ps[p];
+          if (!row) continue;
+          if (row.args) args.push(row.args);
+          stack.push(...(children.get(p) || []));
+        }
+        const label = deriveSessionAgent(args);
+        if (label) agents[name] = label;
+      }
+    }
     const names = new Set([...Object.keys(activity), ...Object.keys(panes)]);
     const out = [];
     for (const name of [...names].sort()) {
       const entry = { name };
       if (Number.isInteger(mem[name]) && mem[name] > 0) entry.memMiB = mem[name];
       if (Number.isFinite(activity[name])) entry.idleMs = activity[name];
+      if (agents[name]) entry.agent = agents[name];
       out.push(entry);
     }
     return out;
@@ -99,7 +180,7 @@ export async function collectUnattributedMem({ execFile = defaultExecFile, readF
     let procs = 0;
     for (const [pid, row] of Object.entries(ps)) {
       if (members.has(Number(pid))) continue;
-      kb += typeof row.pssKb === 'number' ? row.pssKb : row.rssKb;
+      kb += typeof row.pssKb === 'number' ? row.pssKb : 0;
       procs += 1;
     }
     return kb > 0 ? { mib: Math.round(kb / 1024), procs } : {};
@@ -126,8 +207,9 @@ export function parsePaneLines(text) {
 }
 
 /**
- * `ps -eo pid,ppid,rss` → { pid: { ppid, rssKb } }. The header and any
- * malformed row are skipped (first token must be numeric).
+ * `ps -eo pid,ppid,rss[,args]` → { pid: { ppid, rssKb, args } }. The header
+ * and any malformed row are skipped (first token must be numeric). `args`
+ * (when the caller asks ps for it) powers session→process attribution.
  */
 export function parsePsLines(text) {
   const out = {};
@@ -135,7 +217,11 @@ export function parsePsLines(text) {
     const parts = line.trim().split(/\s+/);
     if (parts.length < 3 || !/^\d+$/.test(parts[0] || '')) continue;
     if (!/^\d+$/.test(parts[1]) || !/^\d+$/.test(parts[2])) continue;
-    out[Number(parts[0])] = { ppid: Number(parts[1]), rssKb: Number(parts[2]) };
+    out[Number(parts[0])] = {
+      ppid: Number(parts[1]),
+      rssKb: Number(parts[2]),
+      args: parts.slice(3).join(' '),
+    };
   }
   return out;
 }
@@ -145,7 +231,8 @@ export function parsePsLines(text) {
  * from two sessions counts in both — shared pages are overcounted in RSS
  * already, so the figures stay comparable upper bounds. Sessions with no
  * matched process are omitted (unknown, not zero). Each row may carry
- * `pssKb` (from applyPss); it wins over `rssKb` wherever present.
+ * `pssKb` (from applyPss) wherever present; unreadable processes add
+ * nothing (their shared pages are counted through readable sharers).
  */
 export function sumSessionTrees(panesBySession, psByPid) {
   const children = new Map();
@@ -165,7 +252,7 @@ export function sumSessionTrees(panesBySession, psByPid) {
       seen.add(p);
       const row = (psByPid || {})[p];
       if (!row) continue;
-      kb += typeof row.pssKb === 'number' ? row.pssKb : row.rssKb;
+      kb += typeof row.pssKb === 'number' ? row.pssKb : 0;
       const kids = children.get(p);
       if (kids) stack.push(...kids);
     }
@@ -194,15 +281,18 @@ export async function pssForPids(pids, { readFile = defaultReadFile } = {}) {
   return out;
 }
 
-/** Attach `pssKb`/`pssOk` to a `parsePsLines` map. Pure; returns a new map. */
+/** Attach `pssKb`/`pssOk` to a `parsePsLines` map. Pure; returns a new map.
+ * Unreadable processes get `pssKb: null` — their shared pages are already
+ * counted through readable sharers, so counting full RSS instead would
+ * double-count shared libraries per process (measured 4x on watch loops).
+ * Only their private pages go missing, which is the honest direction. */
 export function applyPss(psByPid, pssByPid) {
   const out = {};
   for (const [pid, row] of Object.entries(psByPid || {})) {
     const pssKb = (pssByPid || {})[pid];
     out[pid] = {
-      ppid: row.ppid,
-      rssKb: row.rssKb,
-      pssKb: typeof pssKb === 'number' ? pssKb : row.rssKb,
+      ...row,
+      pssKb: typeof pssKb === 'number' ? pssKb : null,
       pssOk: typeof pssKb === 'number',
     };
   }
@@ -211,9 +301,82 @@ export function applyPss(psByPid, pssByPid) {
 
 /** One `ps` plus PSS enrichment — the shared root of the collectors below. */
 async function procMap({ execFile = defaultExecFile, readFile = defaultReadFile, timeoutMs = 5000 } = {}) {
-  const psOut = await runCmd(execFile, 'ps', ['-eo', 'pid,ppid,rss'], timeoutMs);
+  const psOut = await runCmd(execFile, 'ps', ['-eo', 'pid,ppid,rss,args'], timeoutMs);
   const ps = parsePsLines(psOut);
   return applyPss(ps, await pssForPids(Object.keys(ps), { readFile }));
+}
+
+/**
+ * Pids whose argv names a session id (bare-session backend candidates).
+ * Pure over a `parsePsLines` map.
+ */
+export function matchSesPids(psByPid, sesId) {
+  const sid = String(sesId || '').trim();
+  if (!sid) return [];
+  const out = [];
+  for (const [pid, row] of Object.entries(psByPid || {})) {
+    if (row && typeof row.args === 'string' && row.args.includes(sid)) out.push(Number(pid));
+  }
+  return out.sort((a, b) => a - b);
+}
+
+/**
+ * Exclusive-backend memory per bare session: `{ sesId: { mib, shared } }`.
+ * Roots are argv-matched CLI processes; `shared` is true when any root sits
+ * inside a tmux pane tree (already counted there — attributing it again
+ * would double-count). Best-effort ({} on any failure).
+ */
+export async function collectBareSessionMem({ sessions = [], execFile = defaultExecFile, readFile = defaultReadFile, timeoutMs = 5000 } = {}) {
+  const wanted = (Array.isArray(sessions) ? sessions : []).map((s) => String(s || '').trim()).filter(Boolean);
+  if (!wanted.length) return {};
+  try {
+    const [panesOut, ps] = await Promise.all([
+      runCmd(execFile, 'tmux', ['list-panes', '-a', '-F', '#{session_name} #{pane_pid}'], timeoutMs),
+      procMap({ execFile, readFile, timeoutMs }),
+    ]);
+    const panes = parsePaneLines(panesOut);
+    const children = new Map();
+    for (const [pid, row] of Object.entries(ps)) {
+      if (!children.has(row.ppid)) children.set(row.ppid, []);
+      children.get(row.ppid).push(Number(pid));
+    }
+    const treeMembers = new Set();
+    {
+      const stack = Object.values(panes).flat();
+      while (stack.length) {
+        const p = stack.pop();
+        if (treeMembers.has(p)) continue;
+        treeMembers.add(p);
+        if (ps[p]) stack.push(...(children.get(p) || []));
+      }
+    }
+    const sumTree = (roots) => {
+      let kb = 0;
+      const seen = new Set();
+      const stack = [...roots];
+      while (stack.length) {
+        const p = stack.pop();
+        if (seen.has(p)) continue;
+        seen.add(p);
+        const row = ps[p];
+        if (!row) continue;
+        kb += typeof row.pssKb === 'number' ? row.pssKb : 0;
+        stack.push(...(children.get(p) || []));
+      }
+      return kb;
+    };
+    const out = {};
+    for (const sid of wanted) {
+      const roots = matchSesPids(ps, sid);
+      if (!roots.length) continue;
+      const kb = sumTree(roots);
+      if (kb <= 0) continue;
+      out[sid] = { mib: Math.round(kb / 1024), shared: roots.some((r) => treeMembers.has(r)) };
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 function runCmd(execFile, file, args, timeoutMs) {

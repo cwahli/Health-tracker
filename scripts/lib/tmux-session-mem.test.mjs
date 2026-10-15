@@ -10,6 +10,11 @@ import {
   applyPss,
   collectSessionMem,
   collectSessionIdle,
+  matchSesPids,
+  collectBareSessionMem,
+  shortModel,
+  agentForArgv,
+  deriveSessionAgent,
   listTmuxNames,
   collectTmuxSessions,
   collectUnattributedMem,
@@ -36,7 +41,14 @@ describe('parsePaneLines', () => {
 describe('parsePsLines', () => {
   it('skips the header and reads pid/ppid/rss', () => {
     expect(parsePsLines('    PID    PPID   RSS\n   4113756       1  34272\n   4113785 4113756 158572\n'))
-      .toEqual({ 4113756: { ppid: 1, rssKb: 34272 }, 4113785: { ppid: 4113756, rssKb: 158572 } });
+      .toEqual({
+        4113756: { ppid: 1, rssKb: 34272, args: '' },
+        4113785: { ppid: 4113756, rssKb: 158572, args: '' },
+      });
+  });
+  it('captures argv when ps provides it', () => {
+    expect(parsePsLines('PID PPID RSS ARGS\n100 1 1024 opencode --session ses_abc\n'))
+      .toEqual({ 100: { ppid: 1, rssKb: 1024, args: 'opencode --session ses_abc' } });
   });
   it('skips malformed rows', () => {
     expect(parsePsLines('PID PPID RSS\nabc 1 2\n1 x 2\n1 2 y\n1 2\n')).toEqual({});
@@ -47,20 +59,33 @@ describe('sumSessionTrees', () => {
   it('sums panes plus descendants, in MiB rounded', () => {
     const panes = { 'VM-tui': [100] };
     const ps = {
+      100: { ppid: 1, rssKb: 34272, pssKb: 20000 },
+      101: { ppid: 100, rssKb: 158572, pssKb: 150000 },
+      102: { ppid: 101, rssKb: 2048, pssKb: 2048 },
+      999: { ppid: 1, rssKb: 999999, pssKb: 999999 },
+    };
+    // (20000 + 150000 + 2048) / 1024 = 168.0 → 168; pid 999 is not under 100.
+    expect(sumSessionTrees(panes, ps)).toEqual({ 'VM-tui': 168 });
+  });
+  it('skips unreadable processes instead of RSS-inflating them', () => {
+    // Same tree, no pssKb anywhere: shared libraries would be counted once
+    // per process under RSS — the 4x overstatement measured live.
+    const panes = { 'VM-tui': [100] };
+    const ps = {
       100: { ppid: 1, rssKb: 34272 },
       101: { ppid: 100, rssKb: 158572 },
-      102: { ppid: 101, rssKb: 2048 },
-      999: { ppid: 1, rssKb: 999999 },
     };
-    // (34272 + 158572 + 2048) / 1024 = 190.3 → 190; pid 999 is not under 100.
-    expect(sumSessionTrees(panes, ps)).toEqual({ 'VM-tui': 190 });
+    expect(sumSessionTrees(panes, ps)).toEqual({});
   });
   it('omits sessions with no matched process instead of reporting zero', () => {
     expect(sumSessionTrees({ ghost: [555] }, { 1: { ppid: 0, rssKb: 10 } })).toEqual({});
     expect(sumSessionTrees({}, { 1: { ppid: 0, rssKb: 10 } })).toEqual({});
   });
   it('does not loop on a pid cycle', () => {
-    const ps = { 1: { ppid: 2, rssKb: 1024 }, 2: { ppid: 1, rssKb: 1024 } };
+    const ps = {
+      1: { ppid: 2, rssKb: 1024, pssKb: 1024 },
+      2: { ppid: 1, rssKb: 1024, pssKb: 1024 },
+    };
     expect(sumSessionTrees({ s: [1] }, ps)).toEqual({ s: 2 });
   });
 });
@@ -79,8 +104,9 @@ describe('collectSessionMem', () => {  const canned = (panesOut, psOut, failOn =
       execFile: canned(PANES, PS),
       readFile: noProc,
     });
-    // VM-tui: (102400 + 102400)/1024 = 200; colab not requested.
-    expect(got).toEqual({ 'VM-tui': 200 });
+    // Unreadable smaps (noProc) means nothing attributable: omitted, not
+    // RSS-inflated. The PSS path is covered by 'collectors use PSS' below.
+    expect(got).toEqual({});
   });
   it('resolves {} when tmux or ps fails', async () => {
     await expect(collectSessionMem({ sessions: ['VM-tui'], execFile: canned(PANES, PS, 'tmux'), readFile: noProc }))
@@ -161,9 +187,16 @@ describe('collectTmuxSessions', () => {
     else cb(null, byCmd.ps);
   };
   it('returns every session sorted, with memory and idle age', async () => {
-    await expect(collectTmuxSessions({ execFile, readFile: noProc, now: 1791917460000 })).resolves.toEqual([
+    const pss = async () => 'Pss: 102400 kB\n';
+    await expect(collectTmuxSessions({ execFile, readFile: pss, now: 1791917460000 })).resolves.toEqual([
       { name: 'VM-tui', memMiB: 200, idleMs: 60000 },
-      { name: 'colab', memMiB: 50, idleMs: 0 },
+      { name: 'colab', memMiB: 100, idleMs: 0 },
+    ]);
+  });
+  it('lists sessions even when nothing is readable, memory omitted', async () => {
+    await expect(collectTmuxSessions({ execFile, readFile: noProc, now: 1791917460000 })).resolves.toEqual([
+      { name: 'VM-tui', idleMs: 60000 },
+      { name: 'colab', idleMs: 0 },
     ]);
   });
   it('omits unknown figures instead of zeroing', async () => {
@@ -197,7 +230,7 @@ describe('pssForPids / applyPss (PSS wins, RSS is the tracked fallback)', () => 
     const ps = { 1: { ppid: 0, rssKb: 100 }, 2: { ppid: 1, rssKb: 200 } };
     expect(applyPss(ps, { 1: 30 })).toEqual({
       1: { ppid: 0, rssKb: 100, pssKb: 30, pssOk: true },
-      2: { ppid: 1, rssKb: 200, pssKb: 200, pssOk: false },
+      2: { ppid: 1, rssKb: 200, pssKb: null, pssOk: false },
     });
   });
   it('sumSessionTrees adds PSS, so shared pages stop double-counting', () => {
@@ -229,11 +262,99 @@ describe('collectUnattributedMem (the reconciling remainder)', () => {
       if (file === 'tmux') cb(null, 's 1\n');
       else cb(null, 'PID PPID RSS\n1 0 1024\n2 1 1024\n7 0 2048\n');
     };
-    await expect(collectUnattributedMem({ execFile: exec2, readFile: noProc }))
+    const pss2 = async (path) => (path === '/proc/7/smaps_rollup' ? 'Pss: 2048 kB\n' : 'Pss: 1 kB\n');
+    await expect(collectUnattributedMem({ execFile: exec2, readFile: pss2 }))
       .resolves.toEqual({ mib: 2, procs: 1 });
   });
   it('resolves {} on failure', async () => {
     const failing = (_f, _a, _o, cb) => cb(new Error('boom'));
     await expect(collectUnattributedMem({ execFile: failing, readFile: noProc })).resolves.toEqual({});
+  });
+});
+
+describe('matchSesPids / collectBareSessionMem (exclusive backends only)', () => {
+  it('matches argv containing the session id', () => {
+    const ps = {
+      1: { ppid: 0, rssKb: 10, args: 'tmux' },
+      2: { ppid: 1, rssKb: 10, args: 'opencode --session ses_abc' },
+    };
+    expect(matchSesPids(ps, 'ses_abc')).toEqual([2]);
+    expect(matchSesPids(ps, 'ses_nope')).toEqual([]);
+    expect(matchSesPids(ps, '')).toEqual([]);
+  });
+  it('reports mib + shared for in-tree backends, mib only for exclusive ones', async () => {
+    const execFile = (file, args, _opts, cb) => {
+      if (file === 'tmux') cb(null, 'VM-tui 10\n');
+      else cb(null, 'PID PPID RSS ARGS\n10 1 1024 bash\n11 10 204800 opencode --session ses_in\n12 1 102400 opencode --session ses_out\n');
+    };
+    const got = await collectBareSessionMem({
+      sessions: ['ses_in', 'ses_out', 'ses_gone'],
+      execFile,
+      readFile: async () => 'Pss: 102400 kB\n',
+    });
+    // ses_in's root (11) is a child of pane pid 10 → shared; ses_out is exclusive.
+    expect(got).toEqual({
+      ses_in: { mib: 100, shared: true },
+      ses_out: { mib: 100, shared: false },
+    });
+  });
+  it('resolves {} on failure or empty input', async () => {
+    const failing = (_f, _a, _o, cb) => cb(new Error('boom'));
+    await expect(collectBareSessionMem({ sessions: ['s'], execFile: failing, readFile: noProc }))
+      .resolves.toEqual({});
+    await expect(collectBareSessionMem({ sessions: [] })).resolves.toEqual({});
+  });
+});
+
+describe('agentForArgv / deriveSessionAgent (argv structure, never bare substring)', () => {
+  it('names cline with its shortened model', () => {
+    expect(agentForArgv('/home/u/.npm-global/lib/node_modules/cline/bin/.cline -i -P cline -m cline-free/muse-spark-1.3-contributor -c /ws --id 1'))
+      .toEqual({ kind: 'cline', model: 'muse-spark-1.3-contributor' });
+    expect(agentForArgv('/home/u/.npm-global/bin/cline -i')).toEqual({ kind: 'cline', model: '' });
+  });
+  it('names opencode lanes and serve apart', () => {
+    expect(agentForArgv('/home/u/.opencode/bin/opencode --session ses_abc')).toEqual({ kind: 'opencode' });
+    expect(agentForArgv('/home/u/.opencode/bin/opencode')).toEqual({ kind: 'opencode' });
+    expect(agentForArgv('/home/u/.opencode/bin/opencode serve --service')).toEqual({ kind: 'serve' });
+    expect(agentForArgv('/home/u/bin/colab-tabs __watch job')).toEqual({ kind: 'colab-tabs' });
+  });
+  it('refuses bare-substring matches', () => {
+    // A picker id or a prose mention is not an invocation.
+    expect(agentForArgv('opencode:ses_abc')).toBeNull();
+    expect(agentForArgv('/bin/bash -c echo hello')).toBeNull();
+    expect(agentForArgv('')).toBeNull();
+  });
+  it('picks the highest-priority backend per tree', () => {
+    expect(deriveSessionAgent(['-bash', '/home/u/bin/colab-tabs __watch j'])).toBe('colab-tabs');
+    expect(deriveSessionAgent(['/home/u/.opencode/bin/opencode serve --service', '-bash'])).toBe('serve');
+    expect(deriveSessionAgent([
+      '/home/u/.opencode/bin/opencode serve --service',
+      '/home/u/.opencode/bin/opencode --session ses_x',
+    ])).toBe('opencode');
+    expect(deriveSessionAgent([
+      '/home/u/bin/colab-tabs __watch j',
+      '/x/bin/.cline -m a/b-model',
+    ])).toBe('cline/b-model');
+    expect(deriveSessionAgent(['-bash', 'ps -ef'])).toBe('');
+    expect(deriveSessionAgent([])).toBe('');
+  });
+  it('shortens models to the last segment, capped', () => {
+    expect(shortModel('cline-free/muse-spark-1.3-contributor')).toBe('muse-spark-1.3-contributor');
+    expect(shortModel('big-pickle')).toBe('big-pickle');
+  });
+});
+
+describe('collectTmuxSessions agent labels', () => {
+  it('attaches the derived backend label per session', async () => {
+    const execFile = (file, args, _opts, cb) => {
+      if (file === 'tmux' && args[0] === 'list-sessions') cb(null, 'VM-tui 1791917400\nplain 1791917400\n');
+      else if (file === 'tmux') cb(null, 'VM-tui 100\nplain 200\n');
+      else cb(null, 'PID PPID RSS ARGS\n100 1 1024 /x/bin/.cline -m a/b-model\n200 1 1024 -bash\n');
+    };
+    const readFile = async () => 'Pss: 10240 kB\n';
+    await expect(collectTmuxSessions({ execFile, readFile, now: 1791917460000 })).resolves.toEqual([
+      { name: 'VM-tui', memMiB: 10, idleMs: 60000, agent: 'cline/b-model' },
+      { name: 'plain', memMiB: 10, idleMs: 60000 },
+    ]);
   });
 });

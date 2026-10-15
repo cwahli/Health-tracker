@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMem, statusKeyMaps, formatIdle, lookForRow, sortByMem, activityKeyMaps, TTY_IDLE_RED_MS } from './shell-session';
+import { formatMem, statusKeyMaps, formatIdle, lookForRow, sortByMem, filterBareRows, applyRouteAgents, activityKeyMaps, TTY_IDLE_RED_MS } from './shell-session';
 import type { TmuxEntry } from './shell-session';
 
 describe('formatMem (picker memory readout shows a number or nothing)', () => {
@@ -71,9 +71,24 @@ describe('formatIdle', () => {
 });
 
 describe('lookForRow (one rule for dot, memory, state)', () => {
-  it('paints a live tty row green with memory on top', () => {
+  it('paints a live tty row green with memory on top, dot-only without agent', () => {
     expect(lookForRow({ bot: 'vm' }, { live: true, memMiB: 243, idleMs: 60000 }, 0))
-      .toEqual({ dot: 'live', memText: '243 MB', stateText: 'live' });
+      .toEqual({ dot: 'live', memText: '243 MB', stateText: '' });
+  });
+  it('paints a live tty row with its agent when known', () => {
+    expect(lookForRow(
+      { bot: 'vm', agent: 'cline/muse-spark-1.3-contributor' },
+      { live: true, memMiB: 243, idleMs: 60000 }, 0,
+    )).toEqual({ dot: 'live', memText: '243 MB', stateText: 'cline/muse-spark-1.3-contributor · live' });
+  });
+  it('paints an idle tty row red with agent and idle age', () => {
+    expect(lookForRow(
+      { bot: 'vm', agent: 'cline/muse-spark-1.3-contributor' },
+      { live: true, memMiB: 243, idleMs: TTY_IDLE_RED_MS + 1 }, 0,
+    )).toEqual({
+      dot: 'idle', memText: '243 MB',
+      stateText: `cline/muse-spark-1.3-contributor · idle ${formatIdle(TTY_IDLE_RED_MS + 1)}`,
+    });
   });
   it('paints an idle tty row red with its idle age', () => {
     expect(lookForRow({ bot: 'vm' }, { live: true, memMiB: 243, idleMs: TTY_IDLE_RED_MS + 1 }, 0))
@@ -107,6 +122,12 @@ describe('lookForRow (one rule for dot, memory, state)', () => {
       { live: true, memMiB: 1400 }, 0,
     )).toEqual({ dot: 'live', memText: '1.4 GB', stateText: '212 processes outside tmux' });
   });
+  it('paints a bare row with an exclusive backend like a measured row', () => {
+    expect(lookForRow(
+      { kind: 'opencode', bot: 'vm', agent: 'opencode/x', status: 'working', updatedAt: null },
+      { live: true, memMiB: 100 }, 0,
+    )).toEqual({ dot: 'live', memText: '100 MB', stateText: 'working' });
+  });
 });
 
 describe('activityKeyMaps (working/held badges key tty:<bot> and ses:<id12>)', () => {
@@ -134,6 +155,12 @@ describe('activityKeyMaps (working/held badges key tty:<bot> and ses:<id12>)', (
       { live: false, act: { state: 'working', lane: 'opencode', elapsedMs: 1000, host: 'vps' } }, 0,
     )).toEqual({ dot: 'dormant', memText: '', stateText: 'working opencode just now' });
   });
+  it('a working badge wins the subline over the static agent tag', () => {
+    expect(lookForRow(
+      { bot: 'vm', agent: 'cline/muse-spark-1.3-contributor' },
+      { live: true, memMiB: 100, act: { state: 'working', lane: 'opencode', elapsedMs: 60000, host: 'vps' } }, 0,
+    )).toEqual({ dot: 'live', memText: '100 MB', stateText: 'working opencode 1m' });
+  });
   it('a held badge keeps the dot and names the host', () => {
     expect(lookForRow(
       { bot: 'vm' },
@@ -143,6 +170,44 @@ describe('activityKeyMaps (working/held badges key tty:<bot> and ses:<id12>)', (
       { kind: 'opencode', bot: 'vm', status: 'idle', updatedAt: null },
       { live: false, act: { state: 'held', lane: 'opencode', elapsedMs: null, host: 'mobile' } }, 0,
     )).toEqual({ dot: 'idle', memText: '', stateText: 'held mobile' });
+  });
+});
+
+describe('filterBareRows (visible implies measurable, never numberless)', () => {
+  const rows = [
+    { bot: 'vm', id: 'tty:vm', kind: 'tty' },
+    { bot: 's1', id: 'opencode:s1', kind: 'opencode' },
+    { bot: 's2', id: 'opencode:s2', kind: 'opencode' },
+    { bot: 'colab', id: 'tmux:colab', kind: 'tmux' },
+  ];
+  it('holds bare rows until status truth arrives (no numberless flash)', () => {
+    expect(filterBareRows(rows, {}, false).map((r) => r.bot))
+      .toEqual(['vm', 'colab']);
+  });
+  it('hides mem-less bare rows once status is known, keeps the rest', () => {
+    expect(filterBareRows(rows, { 'opencode:s1': 100 }, true).map((r) => r.bot))
+      .toEqual(['vm', 's1', 'colab']);
+  });
+});
+
+describe('applyRouteAgents (tty doors inherit their session agent)', () => {
+  const routes = [
+    { bot: 'vm', id: 'tty:vm', kind: 'tty' },
+    { bot: 'vm2', id: 'tty:vm2', kind: 'tty' },
+    { bot: 'colab', id: 'tmux:colab', kind: 'tmux' },
+  ];
+  it('paints tty rows from unkeyed status rows, leaves the rest alone', () => {
+    const out = applyRouteAgents(routes, [
+      { bot: 'vm', agent: 'cline/muse-spark-1.3-contributor' },
+      { id: 'opencode:s1', bot: 'vm', agent: 'opencode/x' },
+    ]);
+    expect(out && out[0]).toMatchObject({ bot: 'vm', agent: 'cline/muse-spark-1.3-contributor' });
+    expect(out && out[1]).not.toHaveProperty('agent');
+    expect(out && out[2]).not.toHaveProperty('agent');
+  });
+  it('passes routes through when there is nothing to apply', () => {
+    expect(applyRouteAgents(routes, [])).toBe(routes);
+    expect(applyRouteAgents(null, [{ bot: 'vm', agent: 'x' }])).toBeNull();
   });
 });
 

@@ -2,7 +2,7 @@ import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { enabledMiniApps, miniAppById, type MiniAppDef } from './miniapp-registry';
 import { tabUrl } from './shell-nav';
-import { statusKeyMaps, lookForRow, sortByMem, activityKeyMaps, type RowLook, type TmuxEntry, type ActivityBadge, type ActivityEntry } from './shell-session';
+import { statusKeyMaps, lookForRow, sortByMem, filterBareRows, applyRouteAgents, activityKeyMaps, type RowLook, type TmuxEntry, type ActivityBadge, type ActivityEntry } from './shell-session';
 import { BugBoard } from '../components/bug-board/BugBoard';
 import { useBugBoard } from '../components/bug-board/useBugBoard';
 import '../index.css';
@@ -703,11 +703,9 @@ function SessionMenu({ routes, picked, pickedLabel, open, live, mem, idle, act, 
               const isTmux = r.kind === 'tmux';
               const isBox = r.kind === 'box';
               // Memory rides the main line where it can be read; the subline
-              // explains the dot — tty rows only when red, bare rows always —
-              // plus any working/held badge, which is the whole point of it.
-              const showSub = isSession
-                ? look.stateText !== ''
-                : look.dot === 'idle' || look.stateText.startsWith('working') || look.stateText.startsWith('held');
+              // shows whenever there is text to show (agent, state, or both).
+              // Live-no-agent rows keep dot-only; dormant rows show nothing.
+              const showSub = look.stateText !== '';
               return (
                 <span key={rid}
                   style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, fontSize: 13, color: '#e2e8f0', background: watching ? '#1e293b' : 'none' }}>
@@ -782,6 +780,9 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   // Raw tmux tracking rows (routeless sessions only): view-less, Kill by
   // session name. Refreshed with the status call, same as the maps above.
   const [tmuxRows, setTmuxRows] = useState<TtyRoute[]>([]);
+  // Whether a good status response has arrived: only then may mem-less bare
+  // rows hide (fail-open keeps the viewer usable through a status outage).
+  const [statusOk, setStatusOk] = useState(false);
   // The reconciling remainder: PSS outside every tmux tree. Informational
   // only — no View (nothing to attach), no Kill (nothing to target).
   const [boxRow, setBoxRow] = useState<TtyRoute | null>(null);
@@ -839,6 +840,8 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
       ? (body as { tmux?: TmuxEntry[] }).tmux as TmuxEntry[]
       : [];
     const maps = statusKeyMaps(body.status as { id?: string; bot: string; live: boolean; memMiB?: number; idleMs?: number }[], rawTmux);
+    setRoutes((prev) => applyRouteAgents(prev, body.status as { id?: string; bot: string; agent?: string }[]));
+    setStatusOk(true);
     // Working/held badges ride the same refresh: a headless turn is the one
     // you cannot see otherwise. Unknown shape degrades to no badges.
     const rawActivity = Array.isArray((body as { activity?: unknown }).activity)
@@ -861,7 +864,13 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     }
     setTmuxRows(rawTmux
       .filter((e) => e && !e.route && typeof e.name === 'string' && e.name)
-      .map((e) => ({ bot: e.name, path: '', id: `tmux:${e.name}`, kind: 'tmux' })));
+      .map((e) => ({
+        bot: e.name,
+        path: '',
+        id: `tmux:${e.name}`,
+        kind: 'tmux',
+        ...(e.agent ? { agent: e.agent } : {}),
+      })));
   };
 
   useEffect(() => {
@@ -892,10 +901,11 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     );
   }
 
-  // Heaviest first so kill candidates surface; unmeasured rows (bare
-  // sessions with no backend here) keep their order at the bottom.
+  // Heaviest first so kill candidates surface. Bare rows without backend
+  // memory hide once status truth arrives (fail-open before that); doors,
+  // tty, tmux and box rows always show.
   const displayRoutes = routes
-    ? sortByMem([...routes, ...tmuxRows, ...(boxRow ? [boxRow] : [])], mem)
+    ? sortByMem(filterBareRows([...routes, ...tmuxRows, ...(boxRow ? [boxRow] : [])], mem, statusOk), mem)
     : routes;
   const pickedRoute = (displayRoutes || []).find((r) => ttyRowId(r) === picked);
   const pickedLabel = pickedRoute

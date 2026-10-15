@@ -21,8 +21,10 @@ export function formatMem(mib: number): string {
 export type TtyStatusRow = { id?: string; bot: string; live: boolean; memMiB?: number; idleMs?: number };
 
 /** One live tmux session from `/api/ttys/status`. `route` names the served
- * bot when the session is that bot's attach target, else null. */
-export type TmuxEntry = { name: string; memMiB?: number; idleMs?: number; route: string | null };
+ * bot when the session is that bot's attach target, else null. `agent`
+ * names the backend running inside (cline/model, opencode, serve,
+ * colab-tabs), omitted for generic shells. */
+export type TmuxEntry = { name: string; memMiB?: number; idleMs?: number; route: string | null; agent?: string };
 
 /**
  * Fold `/api/ttys/status` rows into the picker's live + memory + idle maps.
@@ -60,6 +62,44 @@ export function statusKeyMaps(rows: TtyStatusRow[], tmux: TmuxEntry[] = []): {
 
 /** Idle at or past this long paints red: the session is a kill candidate. */
 export const TTY_IDLE_RED_MS = 15 * 60 * 1000;
+
+/** Hide bare rows without backend memory. Status truth is required: before
+ * the first good status response nothing is known, so bare rows stay hidden
+ * rather than flashing numberless (a status outage degrades the viewer, but
+ * the alternative is exactly the wrongly-placed numberless rows). Doors,
+ * tty, tmux and box rows always show. */
+export function filterBareRows<T extends { kind?: string; bot: string; id?: string }>(
+  rows: T[],
+  mem: Record<string, number>,
+  statusOk: boolean,
+): T[] {
+  if (!statusOk) return (rows || []).filter((r) => r && r.kind !== 'opencode');
+  return (rows || []).filter((r) => {
+    if (!r || r.kind !== 'opencode') return true;
+    const key = typeof r.id === 'string' && r.id ? r.id : r.bot;
+    const m = (mem || {})[key];
+    return typeof m === 'number' && m > 0;
+  });
+}
+/** Patch tty route objects with the agent their status row reports.
+ * Status rows for ttyd bots are unkeyed ({bot, agent}); bare rows carry
+ * their own id and paint themselves. Pure — returns the input untouched
+ * when there is nothing to apply. */
+export function applyRouteAgents<T extends { kind?: string; bot: string; agent?: string }>(
+  routes: T[] | null,
+  statusRows: { id?: string; bot: string; agent?: string }[],
+): T[] | null {
+  if (!routes) return routes;
+  const byBot: Record<string, string> = {};
+  for (const row of statusRows || []) {
+    if (!row || typeof row.bot !== 'string' || row.id) continue;
+    if (typeof row.agent === 'string' && row.agent) byBot[row.bot] = row.agent;
+  }
+  if (!Object.keys(byBot).length) return routes;
+  return routes.map((r) =>
+    r.kind === 'tty' && byBot[r.bot] ? { ...r, agent: byBot[r.bot] } : r,
+  );
+}
 
 /** Sort picker rows by memory, heaviest first; unmeasured rows keep their
  * input order at the bottom. Stable: equal keys never swap. */
@@ -189,22 +229,22 @@ export function lookForRow(
     : act.state === 'working'
       ? `working${act.lane ? ` ${act.lane}` : ''}${act.elapsedMs != null ? ` ${formatIdle(act.elapsedMs)}` : ''}`
       : `held${act.host ? ` ${act.host}` : ''}`;
+  const memText =
+    typeof maps.memMiB === 'number' && maps.memMiB > 0 ? formatMem(maps.memMiB) : '';
   if (r.kind === 'opencode') {
-    if (act) return { dot: act.state === 'working' ? 'live' : 'idle', memText: '', stateText: actText };
+    if (act) return { dot: act.state === 'working' ? 'live' : 'idle', memText, stateText: actText };
     if (String(r.status || '').toLowerCase() === 'idle') {
       let dur = '';
       const t = r.updatedAt ? Date.parse(r.updatedAt) : NaN;
       if (Number.isFinite(t)) dur = ` ${formatIdle(nowMs - t)}`;
-      return { dot: 'idle', memText: '', stateText: `idle${dur}` };
+      return { dot: 'idle', memText, stateText: `idle${dur}` };
     }
     return {
       dot: maps.live ? 'live' : 'dormant',
-      memText: '',
+      memText,
       stateText: String(r.status || ''),
     };
   }
-  const memText =
-    typeof maps.memMiB === 'number' && maps.memMiB > 0 ? formatMem(maps.memMiB) : '';
   if (r.kind === 'box') {
     return { dot: 'live', memText, stateText: r.detail || 'outside tmux' };
   }
@@ -216,11 +256,17 @@ export function lookForRow(
     if (act && act.state === 'held') return { dot: 'dormant', memText, stateText: actText };
     return noMem;
   }
+  // A working/held badge wins the subline over the static agent tag below:
+  // live action outranks the label. Without a badge the agent tag rides.
   if (act && act.state === 'working') return { dot: 'live', memText, stateText: actText };
   if (act && act.state === 'held') return { dot: 'live', memText, stateText: actText };
   const idleMs = typeof maps.idleMs === 'number' ? maps.idleMs : -1;
+  const agent = typeof r.agent === 'string' ? r.agent : '';
+  const tag = agent ? `${agent} · ` : '';
   if (idleMs >= TTY_IDLE_RED_MS) {
-    return { dot: 'idle', memText, stateText: `idle ${formatIdle(idleMs)}` };
+    return { dot: 'idle', memText, stateText: `${tag}idle ${formatIdle(idleMs)}` };
   }
-  return { dot: 'live', memText, stateText: 'live' };
+  return agent
+    ? { dot: 'live', memText, stateText: `${agent} · live` }
+    : { dot: 'live', memText, stateText: '' };
 }
