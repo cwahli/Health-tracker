@@ -62,7 +62,7 @@ except Exception:
 ALLOWED_USER_ID = int(os.environ.get("COLLAB_CHAT_ID", "6218257274"))
 DEFAULT_REPO = "https://github.com/cwahli/Health-tracker.git"
 REPO_DIR = os.environ.get("REPO_DIR", "/content/Health-tracker")
-IDLE_TIMEOUT_MINUTES = 20
+IDLE_TIMEOUT_MINUTES = 45
 
 # Active engine state inside Colab
 CURRENT_ENGINE = "muse-spark-1.3"  # or "qwen-3.8"
@@ -243,12 +243,40 @@ def handle_telegram_command(chat_id, text):
     # ANY natural text goes straight to the autonomous AI Agent!
     run_agent_turn(chat_id, t)
 
+def _worker_busy(fresh_s=180):
+    """Queue jobs, opencode/ollama/bake processes, fresh job heartbeats or GPU load count as activity."""
+    import glob
+    now = time.time()
+    try:
+        if subprocess.run("pgrep -f 'opencode run|ollama runner|bake.sh' >/dev/null", shell=True).returncode == 0:
+            return True
+    except Exception:
+        pass
+    home = os.path.expanduser("~")
+    pats = ["/home/colabq/queue/running/*", f"{home}/.grokq.active", f"{home}/.grokq.run/*",
+            f"{home}/jobs/*/run.log", f"{home}/jobs/*/REPORT.md"]
+    for pat in pats:
+        for f in glob.glob(pat):
+            try:
+                if now - os.path.getmtime(f) < fresh_s:
+                    return True
+            except OSError:
+                pass
+    try:
+        u = subprocess.run("nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits",
+                           shell=True, capture_output=True, text=True, timeout=10).stdout.strip()
+        return bool(u) and int(u.splitlines()[0]) > 5
+    except Exception:
+        return False
+
 def polling_loop():
     global LAST_ACTIVE_TIME
     offset = 0
     print("\nColab Telegram polling loop started. Waiting for Telegram commands...")
     
     while True:
+        if _worker_busy():
+            LAST_ACTIVE_TIME = time.time()
         idle_min = (time.time() - LAST_ACTIVE_TIME) / 60
         if idle_min >= IDLE_TIMEOUT_MINUTES:
             gpu_state = get_gpu_info()
