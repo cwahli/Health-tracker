@@ -1142,6 +1142,7 @@ export const en = {
   "previousMeal": "Previous Meal",
   "savedMealTag": "Saved meal",
   "reviewMeal": "Review",
+  "reviewMealWithPortion": "Review meal with new portion ({summary})",
   "previousOutcomes": "Previous Outcomes",
   "previousPage": "Previous Page",
   "primaryBase100g": "Primary Base100g",

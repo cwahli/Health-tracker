@@ -83,6 +83,55 @@ export function resolveBreakdownIndex(
   return -1;
 }
 
+export interface StagedDishEdit {
+  /** Index into itemsBreakdown. */
+  breakdownIdx: number;
+  name: string;
+  fromGrams: number;
+  toGrams: number;
+}
+
+function dishDisplayName(it: any, fallback: string): string {
+  return String(it?.originalName || it?.keyword || it?.name || it?.canonicalDbName || fallback);
+}
+
+function rowGrams(it: any): number {
+  return Math.round(Number(it?.weightGrams ?? it?.estimatedWeightGrams ?? 0));
+}
+
+/**
+ * Diff an original itemsBreakdown snapshot against the current rows.
+ * Rows with unchanged (or zero) weights are omitted — the result is the
+ * exact pending set the Review button must send. Pure: no mutation.
+ */
+export function getStagedDishEdits(originalItems: any[], currentItems: any[]): StagedDishEdit[] {
+  const orig = Array.isArray(originalItems) ? originalItems : [];
+  const cur = Array.isArray(currentItems) ? currentItems : [];
+  const edits: StagedDishEdit[] = [];
+  orig.forEach((o: any, idx: number) => {
+    const c = cur[idx];
+    if (!c) return;
+    const from = rowGrams(o);
+    const to = rowGrams(c);
+    if (!from || !to || from === to) return;
+    edits.push({
+      breakdownIdx: idx,
+      name: dishDisplayName(c, dishDisplayName(o, `Dish ${idx + 1}`)),
+      fromGrams: from,
+      toGrams: to,
+    });
+  });
+  return edits;
+}
+
+/**
+ * "ham: 50g → 100g, scrambled egg: 120g → 200g". Empty list renders ''.
+ */
+export function buildStagedPortionSummary(edits: StagedDishEdit[]): string {
+  return (Array.isArray(edits) ? edits : [])
+    .map((e) => `${e.name}: ${e.fromGrams}g → ${e.toGrams}g`)
+    .join(', ');
+}
 export interface StagedDishTotal {
   /** Combined dish weight from staged component selections + untouched defaults. */
   totalGrams: number;
