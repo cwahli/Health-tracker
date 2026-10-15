@@ -1131,6 +1131,7 @@ export const fr = {
   "savedMealTag": "Repas enregistré",
   "reviewMeal": "Vérifier",
   "reviewMealWithPortion": "Revoir le repas avec la nouvelle portion ({summary})",
+  "reviewMealWithPortionShort": "Revoir le repas avec la nouvelle portion",
   "previousOutcomes": "Résultats précédents",
   "previousPage": "Page précédente",
   "primaryBase100g": "Base principale 100g",

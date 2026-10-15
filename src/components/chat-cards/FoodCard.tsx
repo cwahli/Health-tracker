@@ -2998,16 +2998,26 @@ export const FoodCard: React.FC<AgentCardProps & {
                         // staged change on a saved meal still has a path to
                         // agent re-analysis (otherwise it would be local-only).
                         if (stagedDishEdits.length > 0) {
-                          const reviewLabel = (t.reviewMealWithPortion as string) || 'Review meal with new portion ({summary})';
+                          const shortLabel = (t.reviewMealWithPortionShort as string) || 'Review meal with new portion';
                           return (
-                            <button
-                              type="button"
-                              onClick={handleReviewStagedPortions}
-                              className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer font-sans"
-                            >
-                              <Sparkles className="w-4 h-4" />
-                              {reviewLabel.replace('{summary}', stagedPortionSummary)}
-                            </button>
+                            <div className="w-full flex flex-col gap-1.5 animation-fade-in">
+                              <ul className="w-full px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-[11px] font-sans text-amber-900 dark:text-amber-200 text-left list-none space-y-0.5">
+                                {stagedDishEdits.map((e) => (
+                                  <li key={e.breakdownIdx} className="flex items-start gap-1.5">
+                                    <span aria-hidden="true">•</span>
+                                    <span>{e.name}: {e.fromGrams}g → {e.toGrams}g</span>
+                                  </li>
+                                ))}
+                              </ul>
+                              <button
+                                type="button"
+                                onClick={handleReviewStagedPortions}
+                                className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer font-sans"
+                              >
+                                <Sparkles className="w-4 h-4" />
+                                {shortLabel}
+                              </button>
+                            </div>
                           );
                         }
                         if (isAlreadyLogged) {

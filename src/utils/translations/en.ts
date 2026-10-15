@@ -1143,6 +1143,7 @@ export const en = {
   "savedMealTag": "Saved meal",
   "reviewMeal": "Review",
   "reviewMealWithPortion": "Review meal with new portion ({summary})",
+  "reviewMealWithPortionShort": "Review meal with new portion",
   "previousOutcomes": "Previous Outcomes",
   "previousPage": "Previous Page",
   "primaryBase100g": "Primary Base100g",

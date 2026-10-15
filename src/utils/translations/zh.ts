@@ -1131,6 +1131,7 @@ export const zh = {
   "savedMealTag": "已保存的餐食",
   "reviewMeal": "审核",
   "reviewMealWithPortion": "按新份量复核餐食 ({summary})",
+  "reviewMealWithPortionShort": "按新份量复核餐食",
   "previousOutcomes": "历史结果",
   "previousPage": "上一页",
   "primaryBase100g": "主要基准 100g",
