@@ -3794,9 +3794,12 @@ describe('TG ping turns leave no scaffolding in the chat transcript', () => {
     expect(src.indexOf('isPingTurn = true;')).toBeGreaterThan(declAt);
   });
 
-  it('ping turns force a fresh session and never bind back', () => {
+  it('ping turns run in the chat session and never bind back', () => {
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    expect(src).toContain('if (isPingTurn) turnSessionId = null;');
+    // FINAL 2026-10-14 (bot-visibility-hub node 6): throwaway sessions minted
+    // one orphan per greeting and split Telegram from the web UI — pings run
+    // where the UI reads, and binding back the same id stays skipped.
+    expect(src).not.toContain('if (isPingTurn) turnSessionId = null;');
     expect(src).toContain('if (result.sessionID && !isPingTurn) {');
   });
 });
@@ -4723,9 +4726,12 @@ describe('TG ping turns leave no scaffolding in the chat transcript', () => {
     expect(src.indexOf('isPingTurn = true;')).toBeGreaterThan(declAt);
   });
 
-  it('ping turns force a fresh session and never bind back', () => {
+  it('ping turns run in the chat session and never bind back', () => {
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    expect(src).toContain('if (isPingTurn) turnSessionId = null;');
+    // FINAL 2026-10-14 (bot-visibility-hub node 6): throwaway sessions minted
+    // one orphan per greeting and split Telegram from the web UI — pings run
+    // where the UI reads, and binding back the same id stays skipped.
+    expect(src).not.toContain('if (isPingTurn) turnSessionId = null;');
     expect(src).toContain('if (result.sessionID && !isPingTurn) {');
   });
 });

@@ -13,6 +13,7 @@ allowed_files:
   - src/miniapp/app.tsx
   - src/miniapp/shell-session.ts
   - src/miniapp/shell-session.test.ts
+  - tests/bot-host.test.ts
   - src/git-version.generated.ts
 frozen_files:
   - AGENTS.md
@@ -167,6 +168,23 @@ Sensitive transitions as (Condition, Action, Pitfall):
 8. Guard + COMPLETE: `journey-guard.mjs bot-visibility-hub`, named gates,
    live proof = hub `working` count equals leases running count, picker rows
    equal `tmux ls` count, orphan report before/after.
+9. Absorb agent/term-session-memory (#791, same owner, reaped, blocked):
+   claim-guard fails #797 on 4 shared files and #791's branch is unmergable
+   whole (stale food divergence — untouched). Port ONLY its 5 picker/memory
+   files' unique behaviors onto current main: agent labels
+   (agentForArgv/deriveSessionAgent, `agent` on tmux/status rows, agent tags),
+   bare-hide (filterBareRows + statusOk fail-open), bare memText
+   (collectBareSessionMem, exclusive-backend only), pssKb:0 skip-unreadable.
+   Product rule where they meet badges: a working/held badge wins the
+   stateText over the static agent tag; hidden unmeasured bare rows badge
+   nothing (the work still shows on the bot's `tty:` row). Port their tests
+   with the code (tmux-session-mem.test additions, shell-session filter/
+   apply/agent cases). Close #791 as absorbed with reason, never merged.
+   Done when: full gate list green on the merged result + #791 closed.
+10. Reverts declarations for the merge gate (no-undo): every cde8865d-owned
+    line this PR supersedes (extended, not deleted) recorded as
+    `Reverts:` lines in the PR body; rerun CI to green; squash-merge;
+    verify on main; delete merged branches/worktrees; packet → specs/done.
 
 ## Test plan
 
@@ -191,7 +209,8 @@ node scripts/journey-guard.mjs bot-visibility-hub
    turn, not the thread); remote far-machine detail limited to relayed
    events; interactive TUI turns never enter the observer system (presence
    only); `time_archived` sessions keep disk rows (DB file won't shrink
-   without VACUUM — RAM is what matters).
+   without VACUUM — RAM is what matters). Node 9 absorbs #791's picker
+   half only — its food-file divergence stays on its branch, untouched.
 
 ## Blast radius
 
