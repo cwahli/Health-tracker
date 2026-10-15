@@ -5,6 +5,8 @@ import {
   resolveBreakdownIndex,
   combineStagedDishWeight,
   staticBaseWeight,
+  getStagedDishEdits,
+  buildStagedPortionSummary,
 } from './portionStaging';
 
 /**
@@ -110,5 +112,32 @@ describe('portionStaging (PORTION_MIXUP sensor)', () => {
     expect(staticBaseWeight(165, 1.5)).toBe(110);
     expect(staticBaseWeight(165, undefined)).toBe(165);
     expect(staticBaseWeight(0, 1.5)).toBe(100);
+  });
+
+  it('diffs original vs current rows into the exact Review set (4-dish change)', () => {
+    const orig = [
+      { originalName: 'ham', weightGrams: 50 },
+      { originalName: 'scrambled egg', weightGrams: 120 },
+      { originalName: 'toast', weightGrams: 60 },
+      { originalName: 'salad', weightGrams: 80 },
+    ];
+    const cur = [
+      { originalName: 'ham', weightGrams: 100 },
+      { originalName: 'scrambled egg', weightGrams: 200 },
+      { originalName: 'toast', weightGrams: 60 },
+      { originalName: 'salad', weightGrams: 40 },
+    ];
+    const edits = getStagedDishEdits(orig, cur);
+    expect(edits).toHaveLength(3);
+    expect(edits[0]).toMatchObject({ breakdownIdx: 0, name: 'ham', fromGrams: 50, toGrams: 100 });
+    expect(edits[1]).toMatchObject({ breakdownIdx: 1, name: 'scrambled egg', fromGrams: 120, toGrams: 200 });
+    expect(buildStagedPortionSummary(edits)).toBe(
+      'ham: 50g → 100g, scrambled egg: 120g → 200g, salad: 80g → 40g'
+    );
+  });
+
+  it('empty diff renders no summary (Save stays Save)', () => {
+    expect(getStagedDishEdits([{ weightGrams: 50 }], [{ weightGrams: 50 }])).toEqual([]);
+    expect(buildStagedPortionSummary([])).toBe('');
   });
 });

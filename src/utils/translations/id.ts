@@ -1142,6 +1142,7 @@ export const id = {
   "previousMeal": "Previous Meal",
   "savedMealTag": "Makanan tersimpan",
   "reviewMeal": "Ulas",
+  "reviewMealWithPortion": "Ulas makanan dengan porsi baru ({summary})",
   "previousOutcomes": "Previous Outcomes",
   "previousPage": "Previous Page",
   "primaryBase100g": "Primary Base100g",
