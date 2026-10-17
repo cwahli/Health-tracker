@@ -4914,7 +4914,7 @@ async function collectInboundMedia(api, message, config) {
  * buffered parts — same exposure as any in-flight turn today, and the window
  * is 2.5s.
  */
-function bufferAlbumPart(snapshot, message, route, cmd) {
+export function bufferAlbumPart(snapshot, message, route, cmd) {
   const key = snapshot.key;
   let entry = albumBuffers.get(key);
   if (!entry) {
@@ -4928,35 +4928,38 @@ function bufferAlbumPart(snapshot, message, route, cmd) {
       console.error(`[album] flush failed: ${err && err.message ? err.message : err}`);
     });
   }, ALBUM_WINDOW_MS);
+  console.log(`[album] buffered part ${entry.parts.length} for ${key}`);
 }
 
-async function flushAlbum(snapshot) {
+export async function flushAlbum(snapshot) {
   const entry = albumBuffers.get(snapshot.key);
   if (entry && entry.timer) clearTimeout(entry.timer);
   albumBuffers.delete(snapshot.key);
   const parts = entry ? entry.parts : [];
   if (!parts.length) return;
   const decision = resolveAlbumAction(parts);
+  console.log(`[album] flush ${snapshot.key}: ${decision.action} (${parts.length} parts)`);
   if (decision.action === 'ignore') return;
   if (decision.action === 'stash') {
-    const count = stashTrayRefs(snapshot.config.id, snapshot.chatId, decision.refs, decision.note);
+    const count = stashTrayRefs(snapshot.ctx.config.id, snapshot.chatId, decision.refs, decision.note);
     if (count == null) {
-      await snapshot.api.sendMessage(snapshot.chatId, `Tray is full (${TRAY_MAX_ITEMS} photos max). Send /done to review them first, then /send more.`).catch(() => {});
+      await snapshot.ctx.api.sendMessage(snapshot.chatId, `Tray is full (${TRAY_MAX_ITEMS} photos max). Send /done to review them first, then /send more.`).catch(() => {});
       return;
     }
-    await snapshot.api.sendMessage(snapshot.chatId, `📥 Stashed ${decision.refs.length} photo${decision.refs.length === 1 ? '' : 's'} (${count} in tray). Send more with /send, or /done to review them all in one turn.`).catch(() => {});
+    await snapshot.ctx.api.sendMessage(snapshot.chatId, `📥 Stashed ${decision.refs.length} photo${decision.refs.length === 1 ? '' : 's'} (${count} in tray). Send more with /send, or /done to review them all in one turn.`).catch(() => {});
     return;
   }
   for (const p of decision.ordered) {
-    await snapshot.handleMessage({
-      ...snapshot.runContext,
+    await snapshot.ctx.handleMessage({
+      ...snapshot.ctx,
       message: { ...p.message, _albumFlushed: true },
       depth: 0,
     });
   }
 }
 
-async function handleBatchPhotoCommand({ api, config, handleMessage, runContext, message, chatId, route, cmd }) {
+export async function handleBatchPhotoCommand({ ctx, message, chatId, route, cmd }) {
+  const { api, config } = ctx;
   if (route === 'send') {
     const refs = selectInboundMedia(message);
     if (!refs.length) {
@@ -4977,7 +4980,7 @@ async function handleBatchPhotoCommand({ api, config, handleMessage, runContext,
     return;
   }
   const label = tray.notes.length ? tray.notes.join('\n') : `Review these ${tray.items.length} photos`;
-  if (runContext.busy.has(chatId)) {
+  if (ctx.busy.has(chatId)) {
     if (queuedFollowups(chatId).length >= MAX_FOLLOWUPS) {
       await api.sendMessage(chatId, `Follow-up queue is full (${MAX_FOLLOWUPS}). Wait for the current run to finish, then send /done again — your tray is kept.`);
       return;
@@ -4992,8 +4995,8 @@ async function handleBatchPhotoCommand({ api, config, handleMessage, runContext,
     return;
   }
   clearTray(config.id, chatId);
-  await handleMessage({
-    ...runContext,
+  await ctx.handleMessage({
+    ...ctx,
     message: {
       message_id: message.message_id,
       date: Math.floor(Date.now() / 1000),
@@ -6423,14 +6426,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   const route = cmd ? resolveCommandName(cmd) : null;
   // BOT-11 batch photo mode: one album dispatches once (stash on /send,
   // otherwise replay in order); /send stashes without a turn, /done runs one
-  // turn with the whole tray. Works busy or idle.
+  // turn with the whole tray. Works busy or idle. The snapshot carries the
+  // FULL turn ctx — replay and /done re-enter handleMessage, which needs
+  // api/config (BOT-12: a runContext subset crashed the replay here).
+  const turnCtx = { api, config, handleMessage, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy };
   if (message.media_group_id && !message._albumFlushed) {
     bufferAlbumPart(
       {
-        api,
-        config,
-        handleMessage,
-        runContext: { throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy },
+        ctx: turnCtx,
         chatId,
         key: albumKey(chatId, message.media_group_id),
       },
@@ -6441,11 +6444,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     return;
   }
   if (cmd && (route === 'send' || route === 'done')) {
-    await handleBatchPhotoCommand({
-      api, config, handleMessage,
-      runContext: { throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy },
-      message, chatId, route, cmd,
-    });
+    await handleBatchPhotoCommand({ ctx: turnCtx, message, chatId, route, cmd });
     return;
   }
   if (cmd && isKnownCommand(route)) {

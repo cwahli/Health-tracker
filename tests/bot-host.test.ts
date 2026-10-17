@@ -4898,3 +4898,54 @@ describe('BOT-11 send tray and album grouping', () => {
     expect(albumKey(7, 'g1')).not.toBe(albumKey(7, 'g2'));
   });
 });
+
+describe('BOT-12 album flush carries full turn ctx', () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  it('replay re-enters handleMessage with api and config (live crash: config.telegram read)', async () => {
+    const { bufferAlbumPart, flushAlbum, albumKey, ALBUM_WINDOW_MS } = await import('../scripts/bot-host.mjs');
+    const seen = [];
+    const fakeApi = { sendMessage: async () => {} };
+    const fakeConfig = { id: 'ctx-test', telegram: { allowedUserIds: [7] } };
+    const ctx = {
+      api: fakeApi, config: fakeConfig, handleMessage: async (args) => { seen.push(args); },
+      busy: new Set(),
+    };
+    const chatId = `album-ctx-${Date.now()}`;
+    const key = albumKey(chatId, 'grp1');
+    const part = (id, fid) => ({ message_id: id, chat: { id: 7 }, photo: [{ file_id: fid }], media_group_id: 'grp1' });
+    bufferAlbumPart({ ctx, chatId, key }, part(11, 'r1'), null, null);
+    bufferAlbumPart({ ctx, chatId, key }, part(12, 'r2'), null, null);
+    await sleep(ALBUM_WINDOW_MS + 400);
+    expect(seen).toHaveLength(2);
+    for (const call of seen) {
+      expect(call.api).toBe(fakeApi);
+      expect(call.config).toBe(fakeConfig);
+      expect(call.message._albumFlushed).toBe(true);
+    }
+    expect(seen.map((c) => c.message.message_id)).toEqual([11, 12]);
+  });
+
+  it('stash flush writes tray refs and confirms, without waking a turn', async () => {
+    const { bufferAlbumPart, readTray, clearTray, albumKey, ALBUM_WINDOW_MS } = await import('../scripts/bot-host.mjs');
+    const sent = [];
+    const bot = `tray-flush-${Date.now()}`;
+    const ctx = {
+      api: { sendMessage: async (_chat, text) => { sent.push(String(text)); } },
+      config: { id: bot, telegram: { allowedUserIds: [7] } },
+      handleMessage: async () => { throw new Error('stash must not start a turn'); },
+      busy: new Set(),
+    };
+    const chatId = `chat-${Date.now()}`;
+    const key = albumKey(chatId, 'grp9');
+    const part = (id, fid) => ({ message_id: id, chat: { id: 7 }, photo: [{ file_id: fid }], media_group_id: 'grp9' });
+    bufferAlbumPart({ ctx, chatId, key }, { ...part(21, 's1'), caption: '/send labs' }, 'send', { name: 'send', args: 'labs' });
+    bufferAlbumPart({ ctx, chatId, key }, part(22, 's2'), null, null);
+    await sleep(ALBUM_WINDOW_MS + 400);
+    const tray = readTray(bot, chatId);
+    expect(tray.items.map((i) => i.fileId)).toEqual(['s1', 's2']);
+    expect(tray.notes).toEqual(['labs']);
+    expect(sent.some((t) => /Stashed 2 photos/.test(t))).toBe(true);
+    clearTray(bot, chatId);
+  });
+});
