@@ -60,4 +60,29 @@ a02318e4  no Author/Agent trailer: [queue-sync] bot commit pushed straight to ma
 ae821f9a  no Author trailer: R-14.1 card-3 landing (1 of 3 duplicate merges) without trailer; shared history, not rewritten; authored 2026-10-08; recorded 2026-10-08
 fd801199  no Author trailer: R-14.1 card-3 landing (2 of 3 duplicate merges) without trailer; shared history, not rewritten; authored 2026-10-08; recorded 2026-10-08
 21febc0c  no Author trailer: R-14.1 card-3 landing (3 of 3 duplicate merges) without trailer; shared history, not rewritten; authored 2026-10-08; recorded 2026-10-08
-0283afac  no Author/Agent trailer on queue-sync refresh commit; authored 2026-10-16; recorded 2026-10-17
+69194691  no Author/Agent trailer: [queue-sync] bot commit pushed straight to main by github-actions[bot], refreshing WORK_QUEUE.md only; a range gate judges what a change ADDS and a bot push adds the commit without passing through a PR, so it was never judged, and a GitHub Actions identity cannot carry an Author trailer; authored 2026-10-09; recorded 2026-10-09
+ddef00a2  queue-sync bot refresh landed on main without Author trailer, recorded 2026-10-10
+58318516  queue-sync bot refresh landed on main without Author trailer, recorded 2026-10-11
+90b0bf53  no-trailer colab grok-queue commits on main, recorded 2026-10-11 (not mine to rewrite)
+3a77fa66  no-trailer colab grok-queue commits on main, recorded 2026-10-11 (not mine to rewrite)
+c12bac3e  no-trailer colab grok-queue commit on main, recorded 2026-10-11 (not mine to rewrite)
+7678bf24  no-trailer colab grok-queue commit on main, recorded 2026-10-11 (not mine to rewrite)
+5ccd1857  no-trailer colab grok-queue commit on main, recorded 2026-10-11 (not mine to rewrite)
+10e5e08c  no-trailer colab grok-queue commit on main, recorded 2026-10-11 (not mine to rewrite)
+455f5bb6  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
+de12c179  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
+5c1fd451  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
+faf9ffbe  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
+488e73a2  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
+b7bace08  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
+d1a43756  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
+1828e58c  no-trailer colab direct-to-main commit on main, recorded 2026-10-11 (not mine to rewrite)
+9e8b34ed  no-trailer queue-sync commit on main, recorded 2026-10-12 (not mine to rewrite)
+745cfd1b  no-trailer queue-sync commit on main, recorded 2026-10-13 (not mine to rewrite)
+68174aca  no-trailer queue-sync commit on main, recorded 2026-10-14 (not mine to rewrite)
+0f398ada  no-trailer bot-host squash on main (#796), recorded 2026-10-15 (not mine to rewrite)
+58f4dd45  no-trailer colab direct-to-main commit on main, recorded 2026-10-15 (not mine to rewrite)
+af32be32  no-trailer queue-sync commit on main, recorded 2026-10-15 (not mine to rewrite)
+0f398ada  no-trailer squash-merge of #796 dropped the branch trailer; authorship in branch commit 7cdd6771 + PR #796, recorded 2026-10-15 (not mine to rewrite)
+a5e1b6ac  no Author/Agent trailer on main: [queue-sync] refresh WORK_QUEUE.md; authored 2026-10-17; recorded 2026-10-17
+0283afac  no Author/Agent trailer on main: [queue-sync] refresh WORK_QUEUE.md; authored 2026-10-16; recorded 2026-10-17
