@@ -1,7 +1,12 @@
+import { deepSeaThemePalette } from '../utils/themeRegistry';
+
 export const getDynamicStyles = (profile: any) => {
   if (!profile) return '';
-  const p = profile.themePalette || {};
-  const fontSize = profile.fontSize || 'normal';
+  // Deep Sea (Accessible) is the default theme: its values are the base, and
+  // any explicit themePalette entry overrides them. Clearing the palette
+  // (System Default) therefore renders Deep Sea; Classic restores the old look.
+  const p = { ...deepSeaThemePalette, ...(profile.themePalette || {}) };
+  const fontSize = profile.fontSize || 'large';
   const fontFamily = profile.fontFamily || 'Inter';
   const fontMono = profile.fontMono || 'JetBrains Mono';
   
@@ -47,17 +52,17 @@ export const getDynamicStyles = (profile: any) => {
   const subtitleSize = profile.fontSizeSubtitle ? sizeMap[profile.fontSizeSubtitle as keyof typeof sizeMap] : '';
   const descSize = profile.fontSizeDescription ? sizeMap[profile.fontSizeDescription as keyof typeof sizeMap] : '';
   const smallSize = profile.fontSizeBodySmall ? sizeMap[profile.fontSizeBodySmall as keyof typeof sizeMap] : '';
-  const subtitleSmallSize = profile.fontSizeSubtitleSmall ? sizeMap[profile.fontSizeSubtitleSmall as keyof typeof sizeMap] : '14px';
+  const subtitleSmallSize = profile.fontSizeSubtitleSmall ? sizeMap[profile.fontSizeSubtitleSmall as keyof typeof sizeMap] : '16px';
   const keyMetricSize = profile.fontSizeKeyMetric ? sizeMap[profile.fontSizeKeyMetric as keyof typeof sizeMap] : '36px';
-  const xsSize = profile.fontSizeXS ? sizeMap[profile.fontSizeXS as keyof typeof sizeMap] : '10px';
-  const bodySize = profile.fontSizeBody ? sizeMap[profile.fontSizeBody as keyof typeof sizeMap] : '16px';
+  const xsSize = profile.fontSizeXS ? sizeMap[profile.fontSizeXS as keyof typeof sizeMap] : '14px';
+  const bodySize = profile.fontSizeBody ? sizeMap[profile.fontSizeBody as keyof typeof sizeMap] : '18px';
   fontSizeCss += `
     :root {
-      --font-size-title: ${titleSize || '24px'} !important;
-      --font-size-subtitle: ${subtitleSize || '18px'} !important;
+      --font-size-title: ${titleSize || '26px'} !important;
+      --font-size-subtitle: ${subtitleSize || '20px'} !important;
       --font-size-subtitle-small: ${subtitleSmallSize} !important;
       --font-size-body: ${bodySize} !important;
-      --font-size-body-small: ${smallSize || '12px'} !important;
+      --font-size-body-small: ${smallSize || '16px'} !important;
       --font-size-key-metric: ${keyMetricSize} !important;
       --font-size-xs: ${xsSize} !important;
     }
@@ -141,7 +146,6 @@ export const getDynamicStyles = (profile: any) => {
   if (p.text) {
     colorCss += `
       --app-text: ${p.text} !important;
-      --color-slate-900: ${p.text} !important;
     `;
   }
   if (p.textSecondary) {
@@ -183,7 +187,6 @@ export const getDynamicStyles = (profile: any) => {
   if (p.neutralSetting) {
     colorCss += `
       --app-neutral: ${p.neutralSetting} !important;
-      --color-slate-700: ${p.neutralSetting} !important;
     `;
   }
   if (p.info) {
