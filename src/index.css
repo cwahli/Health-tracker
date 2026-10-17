@@ -7,13 +7,13 @@
   --font-display: "Space Grotesk", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --text-xs: var(--fs-body-small, 14px);
-  --text-sm: var(--fs-body, 16px);
-  --text-base: var(--fs-body, 18px);
-  --text-lg: var(--fs-subtitle, 20px);
-  --text-xl: var(--fs-subtitle, 22px);
-  --text-2xl: var(--fs-title, 26px);
-  --text-3xl: var(--fs-title, 32px);
+  --text-xs: calc(var(--fs-body-small, 14px) * var(--font-scale, 1));
+  --text-sm: calc(var(--fs-body, 16px) * var(--font-scale, 1));
+  --text-base: calc(var(--fs-body, 18px) * var(--font-scale, 1));
+  --text-lg: calc(var(--fs-subtitle, 20px) * var(--font-scale, 1));
+  --text-xl: calc(var(--fs-subtitle, 22px) * var(--font-scale, 1));
+  --text-2xl: calc(var(--fs-title, 26px) * var(--font-scale, 1));
+  --text-3xl: calc(var(--fs-title, 32px) * var(--font-scale, 1));
 
   /* Deep Sea (Accessible) default surfaces: every dark elevation step resolves
      to the AAA palette so no dark surface falls back to a light default. */

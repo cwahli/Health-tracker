@@ -9,31 +9,44 @@ export const getDynamicStyles = (profile: any) => {
   const fontSize = profile.fontSize || 'large';
   const fontFamily = profile.fontFamily || 'Inter';
   const fontMono = profile.fontMono || 'JetBrains Mono';
-  
+  // Global proportional text scale from the theme editor stepper (0.8–1.3).
+  // Sanitized: non-finite or out-of-range values fall back to 1 (no scaling).
+  const _rawScale = profile.fontScale === undefined || profile.fontScale === null || profile.fontScale === ''
+    ? 1
+    : Number(profile.fontScale);
+  const fontScale = Number.isFinite(_rawScale) ? Math.min(1.3, Math.max(0.8, _rawScale)) : 1;
+  /** Multiply a '<number>px' size by the global scale, rounded to 0.1px. */
+  const scaled = (pxValue: string): string => {
+    const n = parseFloat(pxValue);
+    if (!Number.isFinite(n)) return pxValue;
+    const unit = pxValue.replace(/[\d.\s-]/g, '') || 'px';
+    return `${Math.round(n * fontScale * 10) / 10}${unit}`;
+  };
+
   let fontSizeCss = '';
   if (fontSize === 'tiny') {
     fontSizeCss = `
-      :root, html { font-size: 12px !important; }
+      :root, html { font-size: ${scaled('12px')} !important; --font-scale: ${fontScale} !important; }
     `;
   } else if (fontSize === 'small') {
     fontSizeCss = `
-      :root, html { font-size: 14px !important; }
+      :root, html { font-size: ${scaled('14px')} !important; --font-scale: ${fontScale} !important; }
     `;
   } else if (fontSize === 'normal') {
     fontSizeCss = `
-      :root, html { font-size: 16px !important; }
+      :root, html { font-size: ${scaled('16px')} !important; --font-scale: ${fontScale} !important; }
     `;
   } else if (fontSize === 'large') {
     fontSizeCss = `
-      :root, html { font-size: 18px !important; }
+      :root, html { font-size: ${scaled('18px')} !important; --font-scale: ${fontScale} !important; }
     `;
   } else if (fontSize === 'xl') {
     fontSizeCss = `
-      :root, html { font-size: 20px !important; }
+      :root, html { font-size: ${scaled('20px')} !important; --font-scale: ${fontScale} !important; }
     `;
   } else if (fontSize === 'xxl') {
     fontSizeCss = `
-      :root, html { font-size: 24px !important; }
+      :root, html { font-size: ${scaled('24px')} !important; --font-scale: ${fontScale} !important; }
     `;
   }
   const sizeMap = {
@@ -48,29 +61,30 @@ export const getDynamicStyles = (profile: any) => {
     '5xl': '48px',
     '6xl': '60px'
   };
-  const titleSize = profile.fontSizeTitle ? sizeMap[profile.fontSizeTitle as keyof typeof sizeMap] : '';
-  const subtitleSize = profile.fontSizeSubtitle ? sizeMap[profile.fontSizeSubtitle as keyof typeof sizeMap] : '';
-  const descSize = profile.fontSizeDescription ? sizeMap[profile.fontSizeDescription as keyof typeof sizeMap] : '';
-  const smallSize = profile.fontSizeBodySmall ? sizeMap[profile.fontSizeBodySmall as keyof typeof sizeMap] : '';
-  const subtitleSmallSize = profile.fontSizeSubtitleSmall ? sizeMap[profile.fontSizeSubtitleSmall as keyof typeof sizeMap] : '16px';
-  const keyMetricSize = profile.fontSizeKeyMetric ? sizeMap[profile.fontSizeKeyMetric as keyof typeof sizeMap] : '36px';
-  const xsSize = profile.fontSizeXS ? sizeMap[profile.fontSizeXS as keyof typeof sizeMap] : '14px';
-  const bodySize = profile.fontSizeBody ? sizeMap[profile.fontSizeBody as keyof typeof sizeMap] : '18px';
+  const titleSize = profile.fontSizeTitle ? scaled(sizeMap[profile.fontSizeTitle as keyof typeof sizeMap]) : '';
+  const subtitleSize = profile.fontSizeSubtitle ? scaled(sizeMap[profile.fontSizeSubtitle as keyof typeof sizeMap]) : '';
+  const descSize = profile.fontSizeDescription ? scaled(sizeMap[profile.fontSizeDescription as keyof typeof sizeMap]) : '';
+  const smallSize = profile.fontSizeBodySmall ? scaled(sizeMap[profile.fontSizeBodySmall as keyof typeof sizeMap]) : '';
+  const subtitleSmallSize = profile.fontSizeSubtitleSmall ? scaled(sizeMap[profile.fontSizeSubtitleSmall as keyof typeof sizeMap]) : scaled('16px');
+  const keyMetricSize = profile.fontSizeKeyMetric ? scaled(sizeMap[profile.fontSizeKeyMetric as keyof typeof sizeMap]) : scaled('36px');
+  const xsSize = profile.fontSizeXS ? scaled(sizeMap[profile.fontSizeXS as keyof typeof sizeMap]) : scaled('14px');
+  const bodySize = profile.fontSizeBody ? scaled(sizeMap[profile.fontSizeBody as keyof typeof sizeMap]) : scaled('18px');
   fontSizeCss += `
     :root {
-      --font-size-title: ${titleSize || '26px'} !important;
-      --font-size-subtitle: ${subtitleSize || '20px'} !important;
+      --font-scale: ${fontScale} !important;
+      --font-size-title: ${titleSize || scaled('26px')} !important;
+      --font-size-subtitle: ${subtitleSize || scaled('20px')} !important;
       --font-size-subtitle-small: ${subtitleSmallSize} !important;
       --font-size-body: ${bodySize} !important;
-      --font-size-body-small: ${smallSize || '16px'} !important;
+      --font-size-body-small: ${smallSize || scaled('16px')} !important;
       --font-size-key-metric: ${keyMetricSize} !important;
       --font-size-xs: ${xsSize} !important;
     }
-    .font-size-title { font-size: ${titleSize || '24px'} !important; }
-    .font-size-subtitle { font-size: ${subtitleSize || '18px'} !important; }
+    .font-size-title { font-size: ${titleSize || scaled('24px')} !important; }
+    .font-size-subtitle { font-size: ${subtitleSize || scaled('18px')} !important; }
     .font-size-subtitle-small { font-size: ${subtitleSmallSize} !important; }
     .font-size-body { font-size: ${bodySize} !important; }
-    .font-size-body-small { font-size: ${smallSize || '12px'} !important; }
+    .font-size-body-small { font-size: ${smallSize || scaled('12px')} !important; }
     .font-size-key-metric { font-size: ${keyMetricSize} !important; }
     .font-size-xs { font-size: ${xsSize} !important; }
   `;

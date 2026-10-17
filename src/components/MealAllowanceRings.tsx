@@ -106,7 +106,7 @@ export function computeMealAllowanceRings(input: {
 }
 
 const RING_SIZE = 96;
-const RING_STROKE = 13;
+const RING_STROKE = 10;
 const RING_R = (RING_SIZE - RING_STROKE) / 2 - 2;
 const RING_C = 2 * Math.PI * RING_R;
 
@@ -140,10 +140,10 @@ export const MealAllowanceRings: React.FC<MealAllowanceRingsProps> = ({
                 stroke={ring.color} strokeWidth={RING_STROKE}
                 strokeDasharray={`${(frac * RING_C).toFixed(1)} ${RING_C.toFixed(1)}`}
                 strokeLinecap="butt" transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`} />
-              <text x="50%" y="47%" textAnchor="middle" dominantBaseline="central" fontSize="17" fontWeight="700" fill="currentColor">
+              <text x="50%" y="42%" textAnchor="middle" dominantBaseline="central" fontSize="17" fontWeight="700" fill="currentColor">
                 {formatRingNumber(ring.value)}{ring.unit === 'kcal' ? '' : ring.unit}
               </text>
-              <text x="50%" y="66%" textAnchor="middle" fontSize="12.5" fill="currentColor" opacity="0.75">
+              <text x="50%" y="70%" textAnchor="middle" fontSize="12.5" fill="currentColor" opacity="0.75">
                 / {formatRingNumber(ring.max)}{ring.unit}
               </text>
             </svg>

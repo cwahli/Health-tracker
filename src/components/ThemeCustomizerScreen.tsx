@@ -939,7 +939,8 @@ export default function ThemeCustomizerScreen({ theme }: ThemeCustomizerScreenPr
                               fontSizeSubtitleSmall: undefined,
                               fontSizeKeyMetric: undefined,
                               fontSizeXS: undefined,
-                              fontSizeBody: undefined
+                              fontSizeBody: undefined,
+                              fontScale: undefined
                             })}
                             className="px-4 py-2 bg-slate-150 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold cursor-pointer transition-all shadow-sm"
                           >
@@ -996,6 +997,41 @@ export default function ThemeCustomizerScreen({ theme }: ThemeCustomizerScreenPr
                       {value: 'Courier New', label: 'Courier New'}
                     ]} onChange={(val) => setProfile({ ...profile, fontMono: val })} />
                   </div>
+                </div>
+              )}
+
+              {/* GLOBAL TEXT SIZE — proportional scale for every dynamic font */}
+              {themeActiveSection === 'fonts' && (
+                <div className="mt-3 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 shadow-sm">
+                  <span className="block text-[11px] font-bold text-slate-800 dark:text-slate-100 text-center">Text Size</span>
+                  <div className="flex items-center justify-center gap-4 mt-2">
+                    <button
+                      type="button"
+                      aria-label="Decrease text size"
+                      onClick={() => {
+                        const cur = Number.isFinite(Number(profile.fontScale)) ? Number(profile.fontScale) : 1;
+                        setProfile({ ...profile, fontScale: Math.max(0.8, Math.round((cur - 0.05) * 100) / 100) });
+                      }}
+                      className="w-11 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xl font-bold cursor-pointer transition-all"
+                    >
+                      −
+                    </button>
+                    <span className="text-sm font-bold text-slate-800 dark:text-slate-100 w-14 text-center">
+                      {Math.round((Number.isFinite(Number(profile.fontScale)) ? Number(profile.fontScale) : 1) * 100)}%
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Increase text size"
+                      onClick={() => {
+                        const cur = Number.isFinite(Number(profile.fontScale)) ? Number(profile.fontScale) : 1;
+                        setProfile({ ...profile, fontScale: Math.min(1.3, Math.round((cur + 0.05) * 100) / 100) });
+                      }}
+                      className="w-11 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xl font-bold cursor-pointer transition-all"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 text-center mt-2">Scales all text up or down together</p>
                 </div>
               )}
 

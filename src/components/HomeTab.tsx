@@ -1225,7 +1225,13 @@ export default function HomeTab({
                     : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
-                {t.viewTimeframeToday || 'Today'}
+                {(() => {
+                  const parts = String(todayStr || '').split('-');
+                  if (parts.length !== 3) return t.viewTimeframeToday || 'Today';
+                  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                  if (isNaN(d.getTime())) return t.viewTimeframeToday || 'Today';
+                  return d.toLocaleDateString(profile?.language || 'en', { month: 'short', day: 'numeric' });
+                })()}
               </button>
               <button
                 type="button"
@@ -1240,9 +1246,6 @@ export default function HomeTab({
               </button>
             </div>
           </div>
-          <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
-            <Calendar className="w-3 h-3" /> {viewTimeframe === '1' ? todayStr : (t.rolling7Day || 'Rolling 7-Day')}
-          </span>
         </div>
 
         {/* Live progress bars comparing actual todaysTotals vs targets */}

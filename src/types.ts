@@ -86,6 +86,9 @@ export interface UserProfile {
   fontSizeSubtitleSmall?: string;
   fontSizeKeyMetric?: string;
   fontSizeXS?: string;
+  /** Global proportional text scale (0.8–1.3, default 1): multiplies every
+   *  dynamic font size so the whole site grows or shrinks together. */
+  fontScale?: number;
   fontFamily?: string;
   fontMono?: string;
   marginScale?: 'compact' | 'normal' | 'relaxed';
