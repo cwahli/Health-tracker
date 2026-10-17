@@ -1047,7 +1047,8 @@ export default function FoodHistoryTab({
       
       {/* Search Input and Manual Entry Link */}
       <div className="space-y-2 px-4">
-        <div className="relative">
+        <div className="flex flex-col gap-2">
+          <div className="relative w-full">
           <Search className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-400" />
           <input
             id="food-search-input"
@@ -1055,12 +1056,13 @@ export default function FoodHistoryTab({
             placeholder={t.searchFoodPlaceholder}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-theme-bg-card border border-theme-border/80 rounded-2xl pl-10 pr-28 py-3 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
+            className="w-full bg-theme-bg-card border border-theme-border/80 rounded-2xl pl-10 pr-3 py-3 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
           />
+          </div>
           <button
             type="button"
             onClick={() => setIsManualEntryOpen(true)}
-            className="absolute right-2.5 top-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold transition-all cursor-pointer"
+            className="w-full px-4 py-3 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 rounded-2xl text-sm font-bold transition-all cursor-pointer whitespace-nowrap"
           >
             {t.manualEntry}
           </button>
@@ -1098,7 +1100,7 @@ export default function FoodHistoryTab({
 
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4 text-left">
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">{t.foodNameRequired}</label>
                   <input
@@ -1121,7 +1123,7 @@ export default function FoodHistoryTab({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">{t.weightGramsLabel}</label>
                   <input
@@ -1894,7 +1896,7 @@ export default function FoodHistoryTab({
                     <>
                       <div className="flex justify-between items-start">
                         <div className="min-w-0 flex-1 text-left">
-                          <h3 className="font-bold text-theme-text text-sm truncate">
+                          <h3 className="font-bold text-theme-text text-sm">
                             {log.name}
                           </h3>
                           
@@ -1927,7 +1929,7 @@ export default function FoodHistoryTab({
                                   e.stopPropagation();
                                   handleDownloadDebugLog(log);
                                 }}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800"
+                                className="p-4 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800"
                                 title={t.downloadDebugLog || 'Download Debug Log'}
                               >
                                 <Download className="w-4 h-4" />
@@ -1941,7 +1943,7 @@ export default function FoodHistoryTab({
                               e.stopPropagation();
                               handleStartEdit(log);
                             }}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800"
+                            className="p-4 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800"
                             title={t.editFoodLog}
                           >
                             <Edit2 className="w-4 h-4" />
@@ -1953,7 +1955,7 @@ export default function FoodHistoryTab({
                               e.stopPropagation();
                               onDeleteFoodLog(log.id);
                             }}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+                            className="p-4 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
                             title={t.deleteEntry}
                           >
                             <Trash2 className="w-4 h-4" />
@@ -1982,6 +1984,7 @@ export default function FoodHistoryTab({
                           activeFoodLogs={activeFoodLogs}
                           logDate={log.date}
                           logId={log.id}
+                          wrap
                         />
 
                         {/* Reduce link shown below top nutrients when card is expanded */}
