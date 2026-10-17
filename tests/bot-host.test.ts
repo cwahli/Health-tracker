@@ -4800,9 +4800,8 @@ describe('BOT-10 queued media follow-ups', () => {
     }
   });
 
-  it('messageWithQueuedMedia re-attaches queued file_ids and drops the finished turn media', async () => {
-    const { messageWithQueuedMedia, queueFollowup, clearFollowups } = await import('../scripts/bot-host.mjs');
-    const { selectInboundMedia } = await import('../scripts/lib/inbound-media.mjs');
+  it('messageWithQueuedMedia carries refs in _batchMedia and drops the finished turn media', async () => {
+    const { messageWithQueuedMedia, collectMediaItems, queueFollowup, clearFollowups } = await import('../scripts/bot-host.mjs');
     const chat = `mediaq-msg-${Date.now()}`;
     try {
       queueFollowup(chat, '', [{ fileId: 'queued-photo', name: 'photo.jpg', kind: 'photo' }]);
@@ -4813,22 +4812,89 @@ describe('BOT-10 queued media follow-ups', () => {
       const msg = messageWithQueuedMedia(base, entry);
       expect(msg.text).toBe('');
       expect(msg.caption).toBeUndefined();
-      expect(selectInboundMedia(msg)).toEqual([{ fileId: 'queued-photo', name: 'photo.jpg', kind: 'photo' }]);
+      expect(msg.photo).toBeUndefined();
+      expect(msg._batchMedia).toEqual([{ fileId: 'queued-photo', name: 'photo.jpg', kind: 'photo' }]);
+      expect(collectMediaItems(msg)).toEqual([{ fileId: 'queued-photo', name: 'photo.jpg', kind: 'photo' }]);
       // Text-only follow-up after a photo turn carries no media.
       const plain = messageWithQueuedMedia(base, { text: 'thanks', media: [] });
-      expect(selectInboundMedia(plain)).toEqual([]);
+      expect(plain._batchMedia).toEqual([]);
+      expect(collectMediaItems(plain)).toEqual([]);
     } finally {
       clearFollowups(chat);
     }
   });
 
   it('messageWithQueuedMedia restores an uncompressed document by filename', async () => {
-    const { messageWithQueuedMedia } = await import('../scripts/bot-host.mjs');
-    const { selectInboundMedia } = await import('../scripts/lib/inbound-media.mjs');
+    const { messageWithQueuedMedia, collectMediaItems } = await import('../scripts/bot-host.mjs');
     const msg = messageWithQueuedMedia(
       { message_id: 2, chat: { id: 7 } },
       { text: 'meal scan', media: [{ fileId: 'doc-9', name: 'meal.png', kind: 'document' }] },
     );
-    expect(selectInboundMedia(msg)).toEqual([{ fileId: 'doc-9', name: 'meal.png', kind: 'document' }]);
+    expect(collectMediaItems(msg)).toEqual([{ fileId: 'doc-9', name: 'meal.png', kind: 'document' }]);
+  });
+
+  it('collectMediaItems merges batch refs with message media and dedupes', async () => {
+    const { collectMediaItems } = await import('../scripts/bot-host.mjs');
+    const msg = {
+      photo: [{ file_id: 'p1' }],
+      _batchMedia: [
+        { fileId: 'p1', name: 'photo.jpg', kind: 'photo' },
+        { fileId: 'p2', name: 'photo.jpg', kind: 'photo' },
+      ],
+    };
+    expect(collectMediaItems(msg)).toEqual([
+      { fileId: 'p1', name: 'photo.jpg', kind: 'photo' },
+      { fileId: 'p2', name: 'photo.jpg', kind: 'photo' },
+    ]);
+  });
+});
+
+describe('BOT-11 send tray and album grouping', () => {
+  it('tray stash/read/clear round-trips refs and notes with a cap', async () => {
+    const { stashTrayRefs, readTray, clearTray, TRAY_MAX_ITEMS } = await import('../scripts/bot-host.mjs');
+    const bot = `tray-test-${Date.now()}`;
+    const chat = `chat-${Date.now()}`;
+    try {
+      expect(readTray(bot, chat)).toEqual({ items: [], notes: [] });
+      expect(stashTrayRefs(bot, chat, [{ fileId: 'a1', name: 'photo.jpg', kind: 'photo' }], 'labs')).toBe(1);
+      expect(stashTrayRefs(bot, chat, [{ fileId: 'a2', name: 'm.png', kind: 'document' }], '')).toBe(2);
+      expect(readTray(bot, chat)).toEqual({
+        items: [
+          { fileId: 'a1', name: 'photo.jpg', kind: 'photo' },
+          { fileId: 'a2', name: 'm.png', kind: 'document' },
+        ],
+        notes: ['labs'],
+      });
+      const fillers = Array.from({ length: TRAY_MAX_ITEMS }, (_, i) => ({ fileId: `f${i}`, name: 'p.jpg', kind: 'photo' }));
+      expect(stashTrayRefs(bot, chat, fillers, '')).toBeNull();
+    } finally {
+      clearTray(bot, chat);
+      expect(readTray(bot, chat)).toEqual({ items: [], notes: [] });
+    }
+  });
+
+  it('resolveAlbumAction stashes a /send album and replays an ordinary one in order', async () => {
+    const { resolveAlbumAction } = await import('../scripts/bot-host.mjs');
+    const photoMsg = (id, fileId) => ({ message_id: id, photo: [{ file_id: fileId }] });
+    const stash = resolveAlbumAction([
+      { message: photoMsg(30, 'c'), route: null, cmd: null },
+      { message: photoMsg(28, 'a'), route: null, cmd: null },
+      { message: { ...photoMsg(29, 'b'), caption: '/send labs' }, route: 'send', cmd: { name: 'send', args: 'labs' } },
+    ]);
+    expect(stash.action).toBe('stash');
+    expect(stash.note).toBe('labs');
+    expect(stash.refs.map((r) => r.fileId)).toEqual(['a', 'b', 'c']);
+    const replay = resolveAlbumAction([
+      { message: photoMsg(2, 'y'), route: null, cmd: null },
+      { message: photoMsg(1, 'x'), route: null, cmd: null },
+    ]);
+    expect(replay.action).toBe('replay');
+    expect(replay.ordered.map((p) => p.message.message_id)).toEqual([1, 2]);
+  });
+
+  it('albumKey scopes buffers per chat and group', async () => {
+    const { albumKey } = await import('../scripts/bot-host.mjs');
+    expect(albumKey(7, 'grp')).not.toBe(albumKey(8, 'grp'));
+    expect(albumKey(7, 'g1')).not.toBe(albumKey(7, 'g2'));
   });
 });
