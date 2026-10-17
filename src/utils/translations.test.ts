@@ -71,8 +71,12 @@ const BASELINE_TOTAL_KEYS = 3960;
  *
  * Re-recorded for Wave 3 stragglers: `timeRoll` id + zh, `targetLabel` fr
  * (was the awkward "Étiquette d'objectif"). `en` untouched.
+ *
+ * Re-recorded for Wave 4 key creation (localisation audit): 238 previously
+ * hardcoded JSX strings become dictionary keys (en + id English-copy).
+ * Values untranslated by design at this step; Wave 4 fills id/fr/zh.
  */
-const FROZEN_DIGESTS = { en: 'a63869abd92e5670', id: 'd054be929b991c77' } as const;
+const FROZEN_DIGESTS = { en: '51d2de8cd8479894', id: '0aa3cb2d10cbfef1' } as const;
 
 const stablePairs = (pack: Record<string, unknown>) =>
   JSON.stringify(Object.keys(pack).sort().map((key) => [key, pack[key]]));

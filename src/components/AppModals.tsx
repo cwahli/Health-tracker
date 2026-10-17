@@ -185,6 +185,7 @@ export default function AppModals(p: AppViewProps) {
     val,
     values
   } = p;
+  const t = translations[p.profile?.language || 'en'] || translations.en;
   return (
     <>
       {/* Slide-over interactive dialogs */}
@@ -1386,7 +1387,7 @@ export default function AppModals(p: AppViewProps) {
               <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
                 <span className="w-5 h-5 border-2 border-indigo-600 dark:border-indigo-400 border-t-transparent rounded-full animate-spin" />
               </div>
-              <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Opening Health Coach...</p>
+              <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">{t.openingHealthCoach}</p>
             </div>
           </div>
         ) : null

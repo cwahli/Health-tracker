@@ -252,7 +252,7 @@ export const BiomarkerExpandedSection: React.FC<BiomarkerExpandedSectionProps> =
         </div>
         {val !== undefined && (
           <div className="text-right">
-            <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Latest Value</span>
+            <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">{t.latestValue}</span>
             <span className="text-xs font-bold font-mono text-slate-700 dark:text-slate-200">
               {val} {def.unit || ''}
             </span>

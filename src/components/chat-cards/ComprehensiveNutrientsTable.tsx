@@ -78,8 +78,8 @@ export const ComprehensiveNutrientsTable: React.FC<{
                 onChange={(e) => setTempBasis(e.target.value)}
                 className="bg-slate-900 border border-white/10 rounded px-1.5 py-0.5 text-[9px] text-white"
               >
-                <option value="per_dish">Per Dish / Portion</option>
-                <option value="per_100g">Per 100g</option>
+                <option value="per_dish">{t.perDishPortion}</option>
+                <option value="per_100g">{t.per100g}</option>
               </select>
               <input
                 type="number"

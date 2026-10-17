@@ -1338,12 +1338,12 @@ export default function FullScreenLogViewer({
             {isFetchingR2 ? (
               <>
                 <Loader className="w-3.5 h-3.5 animate-spin text-white" />
-                <span className="hidden sm:inline">Fetching R2...</span>
+                <span className="hidden sm:inline">{t.fetchingR2}</span>
               </>
             ) : (
               <>
                 <Download className="w-3.5 h-3.5" />
-                <span className="hidden xs:inline">Download Logs</span>
+                <span className="hidden xs:inline">{t.downloadLogs}</span>
               </>
             )}
           </button>
@@ -1712,19 +1712,19 @@ export default function FullScreenLogViewer({
             <div className="flex items-center gap-4 flex-wrap">
               {agentSummary.startTime && (
                 <div>
-                  <span className="text-indigo-400 font-bold uppercase text-[10px] block">Start Time</span>
+                  <span className="text-indigo-400 font-bold uppercase text-[10px] block">{t.startTime}</span>
                   <span>{agentSummary.startTime}</span>
                 </div>
               )}
               {agentSummary.endTime && (
                 <div>
-                  <span className="text-indigo-400 font-bold uppercase text-[10px] block">End Time</span>
+                  <span className="text-indigo-400 font-bold uppercase text-[10px] block">{t.endTime}</span>
                   <span>{agentSummary.endTime}</span>
                 </div>
               )}
               {agentSummary.durationText && (
                 <div>
-                  <span className="text-indigo-400 font-bold uppercase text-[10px] block">Total Duration</span>
+                  <span className="text-indigo-400 font-bold uppercase text-[10px] block">{t.totalDuration}</span>
                   <span className="text-emerald-400 font-bold">{agentSummary.durationText}</span>
                 </div>
               )}
@@ -1823,12 +1823,12 @@ export default function FullScreenLogViewer({
             {isFetchingR2 ? (
               <>
                 <Loader className="w-4 h-4 animate-spin text-white" />
-                <span>Fetching R2...</span>
+                <span>{t.fetchingR2}</span>
               </>
             ) : (
               <>
                 <Download className="w-4 h-4" />
-                <span>Download All Log</span>
+                <span>{t.downloadAllLog}</span>
               </>
             )}
           </button>

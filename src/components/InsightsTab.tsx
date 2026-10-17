@@ -1653,7 +1653,7 @@ export default function InsightsTab({
                 </div>
               </details>
             ) : (
-              <p className="text-[11px] text-slate-500 italic">No biomarker data available. Using general population defaults.</p>
+              <p className="text-[11px] text-slate-500 italic">{t.noBiomarkerDataAvailableUsingGeneralPopu}</p>
             )}
             
             {isSpecialUser && (

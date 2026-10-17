@@ -5424,8 +5424,8 @@ ${logsText}`);
                           <table className="w-full text-left border-collapse">
                             <thead>
                               <tr className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-slate-500 font-bold">
-                                <th className="p-2">Biomarker</th>
-                                <th className="p-2 text-right">Unit Calibration Status</th>
+                                <th className="p-2">{t.biomarker}</th>
+                                <th className="p-2 text-right">{t.unitCalibrationStatus}</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
@@ -5472,8 +5472,8 @@ ${logsText}`);
                           <div className="p-3 bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200/50 dark:border-amber-900/10 rounded-xl flex gap-2 text-amber-800 dark:text-amber-400">
                             <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
                             <div className="space-y-0.5 text-[11px] leading-normal font-medium">
-                              <span className="font-bold">Calibration Locked</span>
-                              <p className="opacity-90">Please define the units for all biomarkers above before calibrating with the clinical agent. Raw data cannot be standardized without units.</p>
+                              <span className="font-bold">{t.calibrationLocked}</span>
+                              <p className="opacity-90">{t.pleaseDefineTheUnitsForAllBiomarkersAbov}</p>
                             </div>
                           </div>
                         ) : (
@@ -5506,7 +5506,7 @@ ${logsText}`);
                     {result && (
                       <div className="space-y-3">
                         <div className="text-[11px] text-slate-600 dark:text-slate-400 leading-normal space-y-1 bg-indigo-50/30 dark:bg-indigo-950/10 p-2.5 rounded-xl border border-indigo-100/50 dark:border-indigo-900/10">
-                          <span className="font-bold text-indigo-700 dark:text-indigo-400 block">Clinical Calibration Active</span>
+                          <span className="font-bold text-indigo-700 dark:text-indigo-400 block">{t.clinicalCalibrationActive}</span>
                           <p className="opacity-90">{result.clinicalSummary || 'The clinical agent has verified referencing brackets, demographic cohorts, and unit scales for this batch.'}</p>
                         </div>
                       </div>

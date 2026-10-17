@@ -415,7 +415,7 @@ export const BiomarkerReviewCard: React.FC<AgentCardProps> = ({ msg, onLogMedica
             <div className="space-y-3 pt-1">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Name</label>
+                  <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">{t.name2}</label>
                   <input
                     type="text"
                     value={localProposal.name || ''}
@@ -424,7 +424,7 @@ export const BiomarkerReviewCard: React.FC<AgentCardProps> = ({ msg, onLogMedica
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Unit</label>
+                  <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">{t.unit}</label>
                   <input
                     type="text"
                     list="proposal-units-list"
@@ -444,7 +444,7 @@ export const BiomarkerReviewCard: React.FC<AgentCardProps> = ({ msg, onLogMedica
                 </div>
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Range</label>
+                <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">{t.recepColRange}</label>
                 <input
                   type="text"
                   value={localProposal.range || ''}
@@ -454,7 +454,7 @@ export const BiomarkerReviewCard: React.FC<AgentCardProps> = ({ msg, onLogMedica
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Description</label>
+                <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">{t.description}</label>
                 <textarea
                   value={localProposal.description || ''}
                   onChange={(e) => setLocalProposal({ ...localProposal, description: e.target.value })}
@@ -467,18 +467,18 @@ export const BiomarkerReviewCard: React.FC<AgentCardProps> = ({ msg, onLogMedica
             <div className="space-y-4">
               {/* Current Baseline Box */}
               <div className="bg-slate-50/50 dark:bg-slate-800/30 rounded-xl p-3 border border-slate-100 dark:border-slate-800">
-                <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-2 block">Current Baseline</span>
+                <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-2 block">{t.currentBaseline}</span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase">Name</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase">{t.name2}</span>
                     <span className="font-medium text-slate-700 dark:text-slate-300">{currentDef.name || '—'}</span>
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase">Unit</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase">{t.unit}</span>
                     <span className="font-mono text-slate-700 dark:text-slate-300">{currentDef.unit || '—'}</span>
                   </div>
                   <div className="flex flex-col sm:col-span-2">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase">Reference Range</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase">{t.referenceRange}</span>
                     <span className="font-mono text-slate-700 dark:text-slate-300">{currentDef.normalRange || (currentDef as any).range || '—'}</span>
                   </div>
                 </div>
@@ -497,7 +497,7 @@ export const BiomarkerReviewCard: React.FC<AgentCardProps> = ({ msg, onLogMedica
                 return (
                   <div className="space-y-2">
                     {Boolean(isNameChanged || isUnitChanged || isRangeChanged || isDescChanged || (localProposal.rangeBrackets && localProposal.rangeBrackets.length > 0)) && (
-                      <span className="text-[10px] uppercase font-bold text-indigo-500 tracking-wider mb-1 block">Proposed Updates</span>
+                      <span className="text-[10px] uppercase font-bold text-indigo-500 tracking-wider mb-1 block">{t.proposedUpdates}</span>
                     )}
                     
                     {isNameChanged && (
@@ -525,7 +525,7 @@ export const BiomarkerReviewCard: React.FC<AgentCardProps> = ({ msg, onLogMedica
                     {localProposal.rangeBrackets && localProposal.rangeBrackets.length > 0 && (
                       <div className="flex flex-col gap-1.5 py-3 border-b border-slate-100 dark:border-slate-800/50 last:border-0">
                         <div className="flex items-center gap-1.5 shrink-0 sm:w-32 mb-1">
-                          <span className="text-[11px] text-slate-400 font-medium uppercase tracking-wide">Range Brackets</span>
+                          <span className="text-[11px] text-slate-400 font-medium uppercase tracking-wide">{t.rangeBrackets}</span>
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300">
                             Upgraded
                           </span>
@@ -620,7 +620,7 @@ export const BiomarkerReviewCard: React.FC<AgentCardProps> = ({ msg, onLogMedica
       {hasModifications && (
         <div className="space-y-3 bg-white/80 dark:bg-slate-900/60 p-3.5 rounded-xl border border-indigo-100/80 dark:border-indigo-800/40 shadow-xs">
           <div className="text-xs font-bold text-indigo-950 dark:text-indigo-200 uppercase tracking-wider mb-2 flex items-center justify-between">
-            <span>Proposed Log Modifications</span>
+            <span>{t.proposedLogModifications}</span>
             <span className="text-[10px] font-normal text-indigo-600 dark:text-indigo-400 font-mono bg-indigo-100/80 dark:bg-indigo-900/50 px-2 py-0.5 rounded-full font-bold">
               {localMods.length} {localMods.length === 1 ? 'entry change' : 'entry changes'}
             </span>
@@ -651,7 +651,7 @@ export const BiomarkerReviewCard: React.FC<AgentCardProps> = ({ msg, onLogMedica
                   <div className="text-rose-600 dark:text-rose-400 font-medium text-[11px] flex items-center gap-2 pt-0.5">
                     <span>{t.currentColon} <span className="line-through font-bold">{oldValStr || 'Flagged value'}</span></span>
                     <ArrowRight className="w-3 h-3 shrink-0" />
-                    <span className="font-bold text-rose-600">Entry Removed</span>
+                    <span className="font-bold text-rose-600">{t.entryRemoved}</span>
                   </div>
                 ) : (
                   <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between bg-white/40 dark:bg-slate-900/30 p-2.5 rounded-lg border border-indigo-100/30 dark:border-indigo-900/10">
@@ -723,7 +723,7 @@ export const BiomarkerReviewCard: React.FC<AgentCardProps> = ({ msg, onLogMedica
         <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-xl flex items-center justify-between">
           <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-200 text-xs font-semibold">
             <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>Proposal changes successfully accepted and applied to your health records.</span>
+            <span>{t.proposalChangesSuccessfullyAcceptedAndAp}</span>
           </div>
           <button
             type="button"
@@ -740,7 +740,7 @@ export const BiomarkerReviewCard: React.FC<AgentCardProps> = ({ msg, onLogMedica
         <div className="p-3 bg-slate-100 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between">
           <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 text-xs font-semibold">
             <AlertCircle className="w-4 h-4 text-slate-500 shrink-0" />
-            <span>Proposal declined. Original settings and records were kept unchanged.</span>
+            <span>{t.proposalDeclinedOriginalSettingsAndRecor}</span>
           </div>
           <button
             type="button"

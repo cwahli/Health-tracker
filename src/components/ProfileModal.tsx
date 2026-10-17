@@ -404,7 +404,7 @@ export default function ProfileModal({
                     <option value="en">English (EN)</option>
                     <option value="fr">Français (FR)</option>
                     <option value="zh">中文 (ZH)</option>
-                    <option value="id">Bahasa Indonesia (ID)</option>
+                    <option value="id">{t.bahasaIndonesiaId}</option>
                   </select>
                 </div>
 

@@ -60,6 +60,7 @@ export function AllAnalysesModal({
   onNavigateTab,
   onViewJob
 }: AllAnalysesModalProps) {
+  const t = translations[profile?.language || 'en'] || translations.en;
   const [jobs, setJobs] = useState<AgentJob[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'ready' | 'active' | 'completed'>('all');
   const [kindFilter, setKindFilter] = useState<'all' | 'food' | 'medical' | 'other'>('all');
@@ -391,7 +392,7 @@ export function AllAnalysesModal({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg sm:text-xl font-black tracking-tight text-white">All AI Analyses & Tasks</h2>
+              <h2 className="text-lg sm:text-xl font-black tracking-tight text-white">{t.allAiAnalysesTasks}</h2>
               <span className="text-xs px-2.5 py-0.5 rounded-full font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">
                 {jobs.length} total
               </span>
@@ -420,7 +421,7 @@ export function AllAnalysesModal({
               title="Mark ready badge as read"
             >
               <Check className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Mark Read</span>
+              <span className="hidden sm:inline">{t.markRead}</span>
             </button>
           )}
 
@@ -434,7 +435,7 @@ export function AllAnalysesModal({
               {isDeletingAll ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
-                  <span className="text-xs font-bold text-slate-300 pr-1">Deleting...</span>
+                  <span className="text-xs font-bold text-slate-300 pr-1">{t.deleting}</span>
                 </>
               ) : (
                 <Trash2 className="w-5 h-5" />
@@ -492,7 +493,7 @@ export function AllAnalysesModal({
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Ready</span>
+            <span>{t.syncReady}</span>
             <span className="font-mono text-[10px]">({readyJobs.length})</span>
           </button>
 
@@ -505,7 +506,7 @@ export function AllAnalysesModal({
             }`}
           >
             {activeJobs.length > 0 && <Loader2 className="w-3 h-3 animate-spin text-indigo-300" />}
-            <span>In Progress</span>
+            <span>{t.inProgress}</span>
             <span className="font-mono text-[10px]">({activeJobs.length})</span>
           </button>
 
@@ -517,7 +518,7 @@ export function AllAnalysesModal({
                 : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
             }`}
           >
-            <span>Saved & History</span>
+            <span>{t.savedHistory}</span>
             <span className="font-mono text-[10px]">({completedJobs.length})</span>
           </button>
         </div>
@@ -530,7 +531,7 @@ export function AllAnalysesModal({
             onChange={(e) => setKindFilter(e.target.value as any)}
             className="px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 text-xs font-medium cursor-pointer focus:outline-none focus:border-indigo-500"
           >
-            <option value="all">All Types</option>
+            <option value="all">{t.allTypes}</option>
             <option value="food">🥗 Food & Nutrition</option>
             <option value="medical">🩺 Medical & Labs</option>
             <option value="other">📊 Other Analyses</option>
@@ -565,7 +566,7 @@ export function AllAnalysesModal({
             <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 mb-3 text-slate-500">
               <Search className="w-10 h-10 opacity-60" />
             </div>
-            <h3 className="text-base font-bold text-slate-200">No matching analyses found</h3>
+            <h3 className="text-base font-bold text-slate-200">{t.noMatchingAnalysesFound}</h3>
             <p className="text-xs text-slate-500 max-w-sm mt-1">
               {searchQuery
                 ? `No results match "${searchQuery}". Try clearing your search query or switching tabs.`
@@ -591,6 +592,7 @@ export function AllAnalysesModal({
                   setExpandedLogIds(prev => ({ ...prev, [job.id]: !prev[job.id] }))
                 }
                 onPreviewImage={(src, name) => setPreviewImage({ src, foodName: name })}
+                language={profile?.language}
               />
             ))}
           </div>
@@ -625,6 +627,7 @@ interface AnalysisCardProps {
   isExpanded: boolean;
   onToggleExpand: () => void;
   onPreviewImage: (src: string, foodName?: string) => void;
+  language?: string;
 }
 
 function AnalysisCard({
@@ -637,8 +640,10 @@ function AnalysisCard({
   onRetry,
   isExpanded,
   onToggleExpand,
-  onPreviewImage
+  onPreviewImage,
+  language
 }: AnalysisCardProps) {
+  const t = translations[language || 'en'] || translations.en;
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
@@ -821,18 +826,18 @@ function AnalysisCard({
         {isFood && calories > 0 && (
           <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between text-xs font-mono">
             <div>
-              <span className="text-slate-400 text-[10px] block font-sans font-medium uppercase">Calories</span>
+              <span className="text-slate-400 text-[10px] block font-sans font-medium uppercase">{t.calories}</span>
               <span className="text-emerald-400 font-bold text-sm">{calories} kcal</span>
             </div>
             {nutrients.protein !== undefined && (
               <div className="text-right">
-                <span className="text-slate-400 text-[10px] block font-sans font-medium uppercase">Protein</span>
+                <span className="text-slate-400 text-[10px] block font-sans font-medium uppercase">{t.protein}</span>
                 <span className="text-slate-200 font-semibold">{nutrients.protein}g</span>
               </div>
             )}
             {nutrients.carbs !== undefined && (
               <div className="text-right">
-                <span className="text-slate-400 text-[10px] block font-sans font-medium uppercase">Carbs</span>
+                <span className="text-slate-400 text-[10px] block font-sans font-medium uppercase">{t.carbohydratesLabel}</span>
                 <span className="text-slate-200 font-semibold">{nutrients.carbs}g</span>
               </div>
             )}
@@ -848,7 +853,7 @@ function AnalysisCard({
         {/* Items Breakdown list */}
         {items && items.length > 0 && (
           <div className="space-y-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Items Analyzed</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{t.itemsAnalyzed}</span>
             <div className="space-y-1">
               {items.slice(0, 3).map((item: any, idx: number) => (
                 <div key={idx} className="text-xs px-2.5 py-1 rounded-lg bg-slate-800/60 border border-slate-800 flex items-center justify-between">
@@ -877,7 +882,7 @@ function AnalysisCard({
           <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300 space-y-1">
             <div className="flex items-center gap-1.5 font-bold">
               <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
-              <span>Analysis Error</span>
+              <span>{t.analysisError}</span>
             </div>
             <p className="text-[11px] opacity-90">{job.error.message}</p>
           </div>
@@ -925,13 +930,13 @@ function AnalysisCard({
             title="Jump to this analysis in log"
           >
             <Eye className="w-3.5 h-3.5 text-indigo-400" />
-            <span>View</span>
+            <span>{t.view}</span>
           </button>
 
           {isDeleting ? (
             <div className="flex items-center gap-1.5 px-2 py-1 rounded-xl bg-slate-900 border border-slate-800">
               <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500" />
-              <span className="text-[10px] font-bold text-slate-400">Deleting..</span>
+              <span className="text-[10px] font-bold text-slate-400">{t.deleting2}</span>
             </div>
           ) : isConfirmingDelete ? (
             <div className="flex items-center gap-1 bg-rose-950/40 rounded-xl px-1 border border-rose-900/50">
@@ -972,7 +977,7 @@ function AnalysisCard({
               ) : (
                 <Save className="w-3.5 h-3.5" />
               )}
-              <span>Save to History</span>
+              <span>{t.saveToHistory}</span>
             </button>
           ) : isFailed ? (
             <button
@@ -980,7 +985,7 @@ function AnalysisCard({
               className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>Retry</span>
+              <span>{t.retry}</span>
             </button>
           ) : null}
         </div>

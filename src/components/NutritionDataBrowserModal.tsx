@@ -1049,7 +1049,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                             />
                           </div>
                           <div className="space-y-1">
-                            <label className="text-[9px] text-white/50 block font-bold">Image URL / Photo</label>
+                            <label className="text-[9px] text-white/50 block font-bold">{t.imageUrlPhoto}</label>
                             <div className="flex items-center gap-2">
                               {editForm.image_url ? (
                                 <img
@@ -1223,7 +1223,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                               {deletingItemId === itemKey || deletingItemId === item.dish_name_key ? (
                                 <>
                                   <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
-                                  <span className="text-[10px] font-bold">Deleting...</span>
+                                  <span className="text-[10px] font-bold">{t.deleting}</span>
                                 </>
                               ) : (
                                 <>
@@ -1420,7 +1420,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                               {deletingChainId === (s.id || key) ? (
                                 <>
                                   <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
-                                  <span className="text-[10px] font-bold">Deleting...</span>
+                                  <span className="text-[10px] font-bold">{t.deleting}</span>
                                 </>
                               ) : (
                                 <>
@@ -1503,8 +1503,8 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                                         value={editForm.basis_type}
                                         onChange={(e) => setEditForm({ ...editForm, basis_type: e.target.value })}
                                       >
-                                        <option value="per_dish">Per Dish / Portion</option>
-                                        <option value="per_100g">Per 100g</option>
+                                        <option value="per_dish">{t.perDishPortion}</option>
+                                        <option value="per_100g">{t.per100g}</option>
                                       </select>
                                     </div>
                                     <div className="space-y-0.5">
@@ -1607,7 +1607,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                                     />
                                   </div>
                                   <div className="space-y-1">
-                                    <label className="text-[9px] text-white/50 block font-bold">Image URL / Photo</label>
+                                    <label className="text-[9px] text-white/50 block font-bold">{t.imageUrlPhoto}</label>
                                     <div className="flex items-center gap-2">
                                       {editForm.image_url ? (
                                         <img
@@ -1740,7 +1740,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                                       {deletingItemId === item.dish_name_key || deletingItemId === `${key}:${item.dish_name_key}` ? (
                                         <>
                                           <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
-                                          <span className="text-[10px] font-bold">Deleting...</span>
+                                          <span className="text-[10px] font-bold">{t.deleting}</span>
                                         </>
                                       ) : (
                                         <>
@@ -2092,15 +2092,15 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                           <div className="pt-3 mt-3 border-t border-white/10 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
                             <div className="grid grid-cols-2 gap-3 text-xs">
                               <div><span className="text-white/40 block">Key</span><span className="font-mono text-[10px] break-all">{key}</span></div>
-                              {item.provenance && <div><span className="text-white/40 block">Provenance</span><span>{item.provenance}</span></div>}
-                              {item.confidence && <div><span className="text-white/40 block">Confidence</span><span>{item.confidence}</span></div>}
-                              {item.capture_count !== undefined && <div><span className="text-white/40 block">Captures</span><span>{item.capture_count}</span></div>}
-                              {item.serving_grams && <div><span className="text-white/40 block">Serving</span><span>{item.serving_grams}g</span></div>}
+                              {item.provenance && <div><span className="text-white/40 block">{t.provenance}</span><span>{item.provenance}</span></div>}
+                              {item.confidence && <div><span className="text-white/40 block">{t.confidence}</span><span>{item.confidence}</span></div>}
+                              {item.capture_count !== undefined && <div><span className="text-white/40 block">{t.captures}</span><span>{item.capture_count}</span></div>}
+                              {item.serving_grams && <div><span className="text-white/40 block">{t.serving}</span><span>{item.serving_grams}g</span></div>}
                             </div>
                             
                             {item.form_tags && item.form_tags.length > 0 && (
                               <div>
-                                <span className="text-white/40 text-[10px] uppercase block mb-1">Tags</span>
+                                <span className="text-white/40 text-[10px] uppercase block mb-1">{t.tags}</span>
                                 <div className="flex flex-wrap gap-1">
                                   {item.form_tags.map((t: string) => (
                                     <span key={t} className="px-1.5 py-0.5 bg-white/10 rounded text-[10px] text-white/70">{t}</span>
@@ -2217,7 +2217,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                 {loadingMealsWithPhotos ? (
                   <div className="flex items-center justify-center py-12 text-white/50 gap-2">
                     <RefreshCw className="w-4 h-4 animate-spin text-violet-400" />
-                    <span className="text-xs">Loading recent meals with photos...</span>
+                    <span className="text-xs">{t.loadingRecentMealsWithPhotos}</span>
                   </div>
                 ) : mealsWithPhotos.length === 0 ? (
                   <div className="text-center py-12 text-white/50 text-xs">
@@ -2305,7 +2305,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                     onChange={(e) => setCopyNutrientsOnLink(e.target.checked)}
                     className="rounded border-white/20 bg-slate-900 text-violet-600 focus:ring-violet-500"
                   />
-                  <span>Also copy nutrients from selected meal (calories, protein, carbs, fat, sodium)</span>
+                  <span>{t.alsoCopyNutrientsFromSelectedMealCalorie}</span>
                 </label>
 
                 <div className="flex items-center justify-end gap-2">
