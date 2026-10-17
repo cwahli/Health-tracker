@@ -1638,11 +1638,12 @@ export function queuedFollowups(chatId) {
   return followupQueues.get(String(chatId)) || [];
 }
 
-export function queueFollowup(chatId, text) {
+export function queueFollowup(chatId, text, media = []) {
   const key = String(chatId);
   const queue = followupQueues.get(key) || [];
   if (queue.length >= MAX_FOLLOWUPS) return null;
-  queue.push(String(text));
+  const refs = cleanMediaRefs(media);
+  queue.push({ text: String(text ?? ''), media: refs });
   followupQueues.set(key, queue);
   return queue.length;
 }
@@ -1658,6 +1659,95 @@ export function shiftFollowup(chatId) {
 
 export function clearFollowups(chatId) {
   followupQueues.delete(String(chatId));
+}
+
+/**
+ * BOT-11 /send batch photo mode. Photos stashed here wake no turn; /done runs
+ * one turn with the whole tray. Tray refs are Telegram file_ids (stable
+ * server-side), re-downloaded at turn time — no bytes are held in memory and
+ * the tray survives a bot restart.
+ */
+export const TRAY_MAX_ITEMS = 10;
+/** Window to collect one Telegram album (media_group_id) before dispatch. */
+export const ALBUM_WINDOW_MS = 2500;
+const albumBuffers = new Map();
+
+const trayPath = (configId, chatId) =>
+  path.join(stateDir(String(configId)), 'tray', `${String(chatId)}.json`);
+
+const cleanMediaRefs = (refs) =>
+  (Array.isArray(refs) ? refs : [])
+    .filter((m) => m && m.fileId)
+    .map((m) => ({
+      fileId: String(m.fileId),
+      name: String(m.name || (m.kind === 'document' ? 'document' : 'photo.jpg')),
+      kind: m.kind === 'document' ? 'document' : 'photo',
+    }));
+
+export function readTray(configId, chatId) {
+  const data = readJson(trayPath(configId, chatId), null);
+  if (!data || !Array.isArray(data.items)) return { items: [], notes: [] };
+  return {
+    items: cleanMediaRefs(data.items),
+    notes: (Array.isArray(data.notes) ? data.notes : []).map(String).filter(Boolean),
+  };
+}
+
+/** Appends refs; returns the tray size, or null when the tray is full. */
+export function stashTrayRefs(configId, chatId, refs, note) {
+  const tray = readTray(configId, chatId);
+  const clean = cleanMediaRefs(refs);
+  if (tray.items.length + clean.length > TRAY_MAX_ITEMS) return null;
+  tray.items.push(...clean);
+  const text = String(note || '').trim();
+  if (text) tray.notes.push(text);
+  fs.mkdirSync(path.dirname(trayPath(configId, chatId)), { recursive: true });
+  writeJson(trayPath(configId, chatId), tray);
+  return tray.items.length;
+}
+
+export function clearTray(configId, chatId) {
+  try {
+    fs.rmSync(trayPath(configId, chatId), { force: true });
+  } catch {
+    /* tray already empty */
+  }
+}
+
+export const albumKey = (chatId, groupId) => `${String(chatId)}:${String(groupId)}`;
+
+/**
+ * Pure album decision (no timers, no I/O): an album whose caption part says
+ * /send stashes every part; any other album replays in send order through the
+ * normal path (first starts the turn, the rest queue behind it).
+ */
+export function resolveAlbumAction(parts) {
+  const ordered = [...(Array.isArray(parts) ? parts : [])].sort(
+    (a, b) => Number(a.message?.message_id || 0) - Number(b.message?.message_id || 0),
+  );
+  const sendPart = ordered.find((p) => p && p.route === 'send');
+  if (!sendPart) return { action: 'replay', ordered };
+  const refs = [];
+  for (const p of ordered) refs.push(...selectInboundMedia(p.message));
+  if (!refs.length) return { action: 'ignore', ordered };
+  return { action: 'stash', ordered, refs, note: String(sendPart.cmd?.args || '').trim() };
+}
+
+/**
+ * Follow-up turns are hermetic: the drain re-dispatches with ONLY the queued
+ * entry's media, never the finished turn's message media. Entries hold
+ * _batchMedia refs (see collectMediaItems), so multi-photo batches survive
+ * the queue alongside single photos.
+ */
+export function messageWithQueuedMedia(baseMessage, entry) {
+  return {
+    ...(baseMessage || {}),
+    text: String(entry?.text ?? ''),
+    caption: undefined,
+    photo: undefined,
+    document: undefined,
+    _batchMedia: cleanMediaRefs(entry?.media),
+  };
 }
 
 /** Relay live-channel helpers: same bearer token as the job hand-off. */
@@ -4779,8 +4869,23 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
   }
 }
 
-async function collectInboundMedia(api, message, config) {
+/**
+ * Every media ref one turn downloads: the message's own photo/document plus
+ * any queued/tray batch carried in _batchMedia (BOT-10/BOT-11), deduped by
+ * file_id so a ref present in both downloads once.
+ */
+export function collectMediaItems(message) {
   const items = selectInboundMedia(message);
+  const batch = Array.isArray(message?._batchMedia) ? message._batchMedia : [];
+  for (const b of cleanMediaRefs(batch)) {
+    if (items.some((i) => i.fileId === b.fileId)) continue;
+    items.push(b);
+  }
+  return items;
+}
+
+async function collectInboundMedia(api, message, config) {
+  const items = collectMediaItems(message);
   if (!items.length) return [];
   const dir = inboundMediaDir({
     workspace: config.agent.workspace,
@@ -4799,6 +4904,106 @@ async function collectInboundMedia(api, message, config) {
     }
   }
   return saved;
+}
+
+/**
+ * BOT-11 album grouping + /send tray. Album parts (media_group_id) are held
+ * ALBUM_WINDOW_MS so one album dispatches once: stashed when captioned /send,
+ * otherwise replayed in send order through the normal path (first starts the
+ * turn, the rest queue behind it). A restart inside the window drops the
+ * buffered parts — same exposure as any in-flight turn today, and the window
+ * is 2.5s.
+ */
+function bufferAlbumPart(snapshot, message, route, cmd) {
+  const key = snapshot.key;
+  let entry = albumBuffers.get(key);
+  if (!entry) {
+    entry = { parts: [], timer: null };
+    albumBuffers.set(key, entry);
+  }
+  entry.parts.push({ message, route, cmd });
+  if (entry.timer) clearTimeout(entry.timer);
+  entry.timer = setTimeout(() => {
+    flushAlbum(snapshot).catch((err) => {
+      console.error(`[album] flush failed: ${err && err.message ? err.message : err}`);
+    });
+  }, ALBUM_WINDOW_MS);
+}
+
+async function flushAlbum(snapshot) {
+  const entry = albumBuffers.get(snapshot.key);
+  if (entry && entry.timer) clearTimeout(entry.timer);
+  albumBuffers.delete(snapshot.key);
+  const parts = entry ? entry.parts : [];
+  if (!parts.length) return;
+  const decision = resolveAlbumAction(parts);
+  if (decision.action === 'ignore') return;
+  if (decision.action === 'stash') {
+    const count = stashTrayRefs(snapshot.config.id, snapshot.chatId, decision.refs, decision.note);
+    if (count == null) {
+      await snapshot.api.sendMessage(snapshot.chatId, `Tray is full (${TRAY_MAX_ITEMS} photos max). Send /done to review them first, then /send more.`).catch(() => {});
+      return;
+    }
+    await snapshot.api.sendMessage(snapshot.chatId, `📥 Stashed ${decision.refs.length} photo${decision.refs.length === 1 ? '' : 's'} (${count} in tray). Send more with /send, or /done to review them all in one turn.`).catch(() => {});
+    return;
+  }
+  for (const p of decision.ordered) {
+    await snapshot.handleMessage({
+      ...snapshot.runContext,
+      message: { ...p.message, _albumFlushed: true },
+      depth: 0,
+    });
+  }
+}
+
+async function handleBatchPhotoCommand({ api, config, handleMessage, runContext, message, chatId, route, cmd }) {
+  if (route === 'send') {
+    const refs = selectInboundMedia(message);
+    if (!refs.length) {
+      await api.sendMessage(chatId, 'Attach photo(s) with the caption /send — each is stashed without starting a turn. /done reviews the whole tray at once.');
+      return;
+    }
+    const count = stashTrayRefs(config.id, chatId, refs, String(cmd?.args || ''));
+    if (count == null) {
+      await api.sendMessage(chatId, `Tray is full (${TRAY_MAX_ITEMS} photos max). Send /done to review them first, then /send more.`);
+      return;
+    }
+    await api.sendMessage(chatId, `📥 Stashed ${refs.length} photo${refs.length === 1 ? '' : 's'} (${count} in tray). Send more with /send, or /done to review them all in one turn.`);
+    return;
+  }
+  const tray = readTray(config.id, chatId);
+  if (!tray.items.length) {
+    await api.sendMessage(chatId, 'Tray is empty — send photos captioned /send first.');
+    return;
+  }
+  const label = tray.notes.length ? tray.notes.join('\n') : `Review these ${tray.items.length} photos`;
+  if (runContext.busy.has(chatId)) {
+    if (queuedFollowups(chatId).length >= MAX_FOLLOWUPS) {
+      await api.sendMessage(chatId, `Follow-up queue is full (${MAX_FOLLOWUPS}). Wait for the current run to finish, then send /done again — your tray is kept.`);
+      return;
+    }
+    const pos = queueFollowup(chatId, label, tray.items);
+    if (pos == null) {
+      await api.sendMessage(chatId, 'Tray is kept — send /done again when the current run finishes.');
+      return;
+    }
+    clearTray(config.id, chatId);
+    await api.sendMessage(chatId, `⏳ Queued tray (${tray.items.length} photos) as follow-up #${pos} — runs when the current turn finishes.`);
+    return;
+  }
+  clearTray(config.id, chatId);
+  await handleMessage({
+    ...runContext,
+    message: {
+      message_id: message.message_id,
+      date: Math.floor(Date.now() / 1000),
+      chat: message.chat,
+      from: message.from,
+      text: label,
+      _batchMedia: cleanMediaRefs(tray.items),
+    },
+    depth: 0,
+  });
 }
 
 /**
@@ -6208,7 +6413,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   // hyphens in commands). Restore the hyphen form before anything parses, so
   // a tap behaves exactly like the typed line.
   text = normalizeSkillCommand(text);
-  const hasMedia = selectInboundMedia(message).length > 0;
+  const hasMedia = collectMediaItems(message).length > 0;
   if (!text && !hasMedia) return;
 
   const cmd = text ? parseCommand(text) : null;
@@ -6216,6 +6421,33 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   // through to the turn path as the user prompt (plan/TG_TOOL_SURFACE.md M3).
   // That is how typed `/do-*` skills reach the tool. Bot commands win.
   const route = cmd ? resolveCommandName(cmd) : null;
+  // BOT-11 batch photo mode: one album dispatches once (stash on /send,
+  // otherwise replay in order); /send stashes without a turn, /done runs one
+  // turn with the whole tray. Works busy or idle.
+  if (message.media_group_id && !message._albumFlushed) {
+    bufferAlbumPart(
+      {
+        api,
+        config,
+        handleMessage,
+        runContext: { throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy },
+        chatId,
+        key: albumKey(chatId, message.media_group_id),
+      },
+      message,
+      route,
+      cmd,
+    );
+    return;
+  }
+  if (cmd && (route === 'send' || route === 'done')) {
+    await handleBatchPhotoCommand({
+      api, config, handleMessage,
+      runContext: { throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy },
+      message, chatId, route, cmd,
+    });
+    return;
+  }
   if (cmd && isKnownCommand(route)) {
     await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd: { ...cmd, name: route }, userId, kind: chatKind(message) });
     return;
@@ -6442,7 +6674,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // turn instead of being rejected. Commands still run (handled above)
     // while the queue stays queued.
     if (hasMedia) {
-      await api.sendMessage(chatId, 'Still working — photos/files cannot queue, please resend them when this turn finishes.');
+      // Mid-run photos/files queue like text does: the file_id refs are held
+      // in the queue entry and re-downloaded when the follow-up turn runs, so
+      // sending several photos at once no longer loses all but the first.
+      const pos = queueFollowup(chatId, text, selectInboundMedia(message));
+      if (pos == null) {
+        await api.sendMessage(chatId, `Follow-up queue is full (${MAX_FOLLOWUPS}). Wait for the current run to finish, then try again.`);
+        return;
+      }
+      await api.sendMessage(chatId, `⏳ Queued as follow-up #${pos} with your photo/file — runs when the current turn finishes.`);
       return;
     }
     if (!text) return;
@@ -7466,7 +7706,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         await api.sendMessage(chatId, `▶️ Running queued follow-up (${queuedFollowups(chatId).length} left in queue)…`).catch(() => {});
         await handleMessage({
           api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy,
-          message: { ...message, text: next, caption: undefined },
+          message: messageWithQueuedMedia(message, typeof next === 'string' ? { text: next, media: [] } : next),
           depth: depth + 1,
         });
       }
