@@ -23,7 +23,7 @@ import { resolveMealVerdict } from '../utils/verdictUtils';
 /** B13 — only this many history rows mount image sliders at once */
 export const FOOD_HISTORY_PAGE_SIZE = 15;
 import { NutrientPieChart } from './NutrientPieChart';
-import { NutrientTargetRow } from './NutrientTargetRow';
+import { MealAllowanceRings } from './MealAllowanceRings';
 import { NutritionLabelTable } from './chat-cards/NutritionLabelTable';
 import { MealPortionController } from './chat-cards/MealPortionController';
 import { scaleMealPortion, scaleSingleDishPortion } from '../utils/portionUtils';
@@ -1045,7 +1045,7 @@ export default function FoodHistoryTab({
   return (
     <div className="space-y-4 pb-40 animation-fade-in max-w-md mx-auto px-0 mt-4 font-sans text-theme-text">
       
-      {/* Search Input and Manual Entry Link */}
+      {/* Search Input */}
       <div className="space-y-2 px-4">
         <div className="flex flex-col gap-2">
           <div className="relative w-full">
@@ -1059,13 +1059,6 @@ export default function FoodHistoryTab({
             className="w-full bg-theme-bg-card border border-theme-border/80 rounded-2xl pl-10 pr-3 py-3 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
           />
           </div>
-          <button
-            type="button"
-            onClick={() => setIsManualEntryOpen(true)}
-            className="w-full px-4 py-3 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 rounded-2xl text-sm font-bold transition-all cursor-pointer whitespace-nowrap"
-          >
-            {t.manualEntry}
-          </button>
         </div>
       </div>
 
@@ -1975,16 +1968,15 @@ export default function FoodHistoryTab({
                       })()}
                       
 
-                      {/* Calories Badge & Top Targets & Expand Indicator */}
+                      {/* Meal allowance rings: sat fat / sodium / calories vs daily targets */}
                       <div className="flex flex-wrap items-center justify-between pt-1 gap-2">
-                        <NutrientTargetRow
+                        <MealAllowanceRings
                           nutrients={log.nutrients}
                           report={report}
                           profile={profile}
                           activeFoodLogs={activeFoodLogs}
                           logDate={log.date}
                           logId={log.id}
-                          wrap
                         />
 
                         {/* Reduce link shown below top nutrients when card is expanded */}
