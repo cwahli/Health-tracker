@@ -11,8 +11,11 @@
  * the second one is the point of this file.
  *
  * WHAT IT ASSERTS
- *   1. tapping Info shows the card; tapping it again folds it and the picture
- *      takes the WHOLE panel area (stage height == panel height)
+ *   0. Request lands first: the request text with the result screenshot
+ *      directly below it — the point of truth every review starts from.
+ *   1. tapping Info shows the card over the stage; tapping it again folds
+ *      it and the picture takes the WHOLE panel area
+ *      (stage height == panel height)
  *   2. one finger on an un-zoomed picture swipes to the next shot (counter)
  *   3. two fingers pinch the picture larger (the <img> transform scale grows)
  *   4. once zoomed, one finger pans instead of swiping (offset changes, the
@@ -142,6 +145,15 @@ async function withPage(fn) {
     status: 200, contentType: 'application/json',
     body: JSON.stringify({ ok: true, google: true, items: QUEUE }),
   }));
+  // The page also opens the live-push SSE stream, and the test gateway
+  // admits it and immediately pushes the REAL queue. Unstubbed, that event
+  // rebuilds the page mid-test with live items (intermittent fixture
+  // failures showing real keys). Hold the stream quiet: sensors test user
+  // gestures, not the push channel.
+  await page.route('**/review/api/events**', (r) => r.fulfill({
+    status: 200, contentType: 'text/event-stream',
+    body: ': test-quiet\nretry: 60000\n\n',
+  }));
   await page.route('**/review/api/proof**', (route) => {
     const id = new URL(route.request().url()).searchParams.get('file') || '';
     return route.fulfill({ status: 200, contentType: 'image/png', body: id === 'file-0' ? PNG_TALL : PNG_WIDE });
@@ -205,7 +217,7 @@ async function withPage(fn) {
   const heights = () => page.evaluate(() => {
     const panel = document.getElementById('panel');
     const info = document.querySelector('.view[data-view="info"]');
-    const stage = document.querySelector('.stage');
+    const stage = document.querySelector('[data-view="proof"] .stage');
     return {
       panel: Math.round(panel.getBoundingClientRect().height),
       info: info && !info.hidden ? Math.round(info.getBoundingClientRect().height) : 0,
@@ -215,25 +227,37 @@ async function withPage(fn) {
 
   try {
     await page.goto(`${base}/review/app?token=x`);
-    await page.waitForSelector('.stage img');
+    // Landing contract: the Request tab opens first (request text with the
+    // result screenshot below it). The swipeable stage is two Info taps
+    // away: open the card over it, fold it back, picture full-bleed.
+    await page.waitForSelector('.view[data-view="request"].on');
     await page.waitForTimeout(200);
-    return await fn({ page, swipe, pinch, doubleTap, shot, heights, cdp });
+    async function fullBleed() {
+      await page.click('#tabs button[data-tab="info"]');
+      await page.waitForTimeout(80);
+      await page.click('#tabs button[data-tab="info"]');
+      await page.waitForTimeout(80);
+    }
+    return await fn({ page, swipe, pinch, doubleTap, shot, heights, cdp, fullBleed });
   } finally {
     await browser.close();
     server.close();
   }
 }
 
-test('Info folds away on a second tap and the picture takes the whole panel', async (t) => {
+test('Request lands first with the result below; Info folds the card over the picture', async (t) => {
   const ran = await withPage(async ({ page, heights }) => {
-    const folded = await heights();
-    assert.equal(folded.info, 0, 'the card starts folded, picture full-bleed');
-    assert.equal(folded.stage, folded.panel, 'the picture must own the entire panel');
+    const requestOn = await page.$eval('.view[data-view="request"]', (v) => v.classList.contains('on'));
+    assert.equal(requestOn, true, 'the Request tab opens first');
+    const resultSrc = await page.$eval('.view[data-view="request"] .result img', (img) => img.getAttribute('src') || '');
+    assert.match(resultSrc, /\/review\/api\/proof/, 'the result screenshot rides below the request');
+    const landed = await heights();
+    assert.equal(landed.info, 0, 'no card open on landing');
 
     await page.click('#tabs button[data-tab="info"]');
     await page.waitForTimeout(80);
     const open = await heights();
-    assert.ok(open.info > 0, 'one tap opens the card');
+    assert.ok(open.info > 0, 'one tap opens the card over the stage');
     assert.ok(open.stage < open.panel, 'and the picture gives up the room it needs');
 
     await page.click('#tabs button[data-tab="info"]');
@@ -249,8 +273,40 @@ test('Info folds away on a second tap and the picture takes the whole panel', as
   if (ran === null) t.skip('playwright not installed');
 });
 
+test('the request result swipes through every shot like the stage', async (t) => {
+  const ran = await withPage(async ({ page, swipe }) => {
+    // Still on the Request landing: swipe inside the result frame.
+    const count = () => page.textContent('[data-view="request"] .result .count');
+    const before = await count();
+    assert.match(before, /1\/3/, 'three shots, first showing');
+    await swipe({ x: 340, y: 550 }, { x: 60, y: 550 });
+    await page.waitForTimeout(320);
+    assert.match(await count(), /2\/3/, 'the result swipes to the next shot');
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
+
+test('the request result zooms with the same gestures as the stage', async (t) => {
+  const ran = await withPage(async ({ page, pinch }) => {
+    // Still on the Request landing: pinch the result screenshot itself.
+    const before = await page.evaluate(() => {
+      const img = document.querySelector('[data-view="request"] .stage.req .slide img');
+      return new DOMMatrixReadOnly(getComputedStyle(img).transform).a;
+    });
+    await pinch(210, 430, 80, 320);
+    await page.waitForTimeout(120);
+    const after = await page.evaluate(() => {
+      const img = document.querySelector('[data-view="request"] .stage.req .slide img');
+      return new DOMMatrixReadOnly(getComputedStyle(img).transform).a;
+    });
+    assert.ok(after > before + 0.2, `request result must zoom: ${before} -> ${after}`);
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
+
 test('one finger swipes between shots; two fingers pinch to zoom', async (t) => {
-  const ran = await withPage(async ({ page, swipe, pinch, shot }) => {
+  const ran = await withPage(async ({ page, swipe, pinch, shot, fullBleed }) => {
+    await fullBleed();
     // 1. Swipe left → next shot.
     assert.equal(await page.textContent('#imgcount'), '1/3');
     await swipe({ x: 340, y: 430 }, { x: 60, y: 430 });
@@ -274,7 +330,8 @@ test('one finger swipes between shots; two fingers pinch to zoom', async (t) => 
 });
 
 test('zoomed in, one finger pans instead of swiping, and stays clamped', async (t) => {
-  const ran = await withPage(async ({ page, swipe, pinch, shot }) => {
+  const ran = await withPage(async ({ page, swipe, pinch, shot, fullBleed }) => {
+    await fullBleed();
     await pinch(210, 430, 80, 340);
     await page.waitForTimeout(120);
     const zoomed = await shot();
@@ -313,7 +370,8 @@ test('zoomed in, one finger pans instead of swiping, and stays clamped', async (
 });
 
 test('a double tap zooms on that point and a second double tap returns to fit', async (t) => {
-  const ran = await withPage(async ({ page, doubleTap, shot }) => {
+  const ran = await withPage(async ({ page, doubleTap, shot, fullBleed }) => {
+    await fullBleed();
     const fit = await shot();
     await doubleTap(120, 300);
     await page.waitForTimeout(140);
@@ -329,22 +387,23 @@ test('a double tap zooms on that point and a second double tap returns to fit', 
 });
 
 test('zooming never rebuilds the picture node (the blink stays fixed)', async (t) => {
-  const ran = await withPage(async ({ page, pinch, doubleTap }) => {
+  const ran = await withPage(async ({ page, pinch, doubleTap, fullBleed }) => {
+    await fullBleed();
     const kept = await page.evaluate(async () => {
-      const img = document.querySelector('.slide img');
+      const img = document.querySelector('#track .slide img');
       document.querySelector('#tabs button[data-tab="info"]').click();
       await new Promise((r) => setTimeout(r, 120));
       document.querySelector('#tabs button[data-tab="info"]').click();
       await new Promise((r) => setTimeout(r, 120));
-      return document.querySelector('.slide img') === img;
+      return document.querySelector('#track .slide img') === img;
     });
     assert.equal(kept, true, 'the Info toggle must not rebuild the image');
     await pinch(210, 430, 80, 300);
     await page.waitForTimeout(120);
     await doubleTap(210, 430);
     await page.waitForTimeout(120);
-    const nodes = await page.evaluate(() => document.querySelectorAll('.slide img').length);
-    assert.equal(nodes, 3, 'all three shots stay in the DOM across gestures');
+    const nodes = await page.evaluate(() => document.querySelectorAll('#track .slide img').length);
+    assert.equal(nodes, 3, 'all three stage shots stay in the DOM across gestures');
   });
   if (ran === null) t.skip('playwright not installed');
 });

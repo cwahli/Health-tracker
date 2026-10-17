@@ -55,10 +55,21 @@ export function isLoopback(address) {
  */
 export function authorizeForge({ initData = '', remoteAddress = '', registry = {}, env = process.env, allowLocal = false, now = Date.now() } = {}) {
   const candidates = fleetTokenCandidates(registry, env);
+  // Optional operator allowlist: comma-separated Telegram chat ids. Unset =
+  // any verified chat (today's posture, unchanged). Set = only listed chats
+  // may create or attach bots; loopback stays operator-local either way.
+  const allowed = String(env.FORGE_ALLOWED_CHAT_IDS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (initData) {
     for (const candidate of candidates) {
       const verdict = validateInitData(initData, candidate.token, { now });
-      if (verdict.ok) return { ok: true, via: `initData:${candidate.botId}`, chatId: verdict.chatId };
+      if (!verdict.ok) continue;
+      if (allowed.length > 0 && !allowed.includes(String(verdict.chatId))) {
+        return { ok: false, status: 403, reason: 'chat is not in FORGE_ALLOWED_CHAT_IDS' };
+      }
+      return { ok: true, via: `initData:${candidate.botId}`, chatId: verdict.chatId };
     }
     return { ok: false, status: 401, reason: 'initData did not verify against any bot token this host holds (stale, forged, or from a bot that is not in the registry)' };
   }
@@ -461,6 +472,8 @@ export function createForgeHandler({
           return true;
         }
         const result = await runCreate(input, { via: auth.via });
+        // Audit: who created what, never the pasted token.
+        log(`forge create admitted via=${auth.via} chat=${auth.chatId || 'loopback'} name=${input.name || ''} ok=${result.ok}`);
         sendJson(res, result.ok ? 200 : 422, result);
         return true;
       }

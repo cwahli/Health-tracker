@@ -391,6 +391,118 @@ export function applySameMealClarification(args: {
 }
 
 /**
+ * PORTION-SMEAR containment (live job_1791997001237_ywvfn9jzz, 2026-10-14).
+ * A portion adjust on one dish rewrote untouched dishes with the message's
+ * meal total (Porridge 150g→1407g and Smoothie 250g→1407g from
+ * "total meal now 1407g"), then locked the corruption so every later edit
+ * ratcheted it (→2536g→5882g). Three invariants enforced below:
+ *  1. On a portion-adjust turn, weight commands may only touch dishes the
+ *     user targeted (named in userMessage, keyed in portionChoices, or
+ *     scout-explicit). Scout drift on untouched dishes keeps prior.
+ *  2. A dish weight equal to the message's stated meal total is never
+ *     legitimate (single-dish meals excepted) — drop it.
+ *  3. Weight locks are never minted for the message total.
+ */
+export function parseMessageMealTotal(userMessage?: string): number | null {
+  if (!userMessage) return null;
+  const m = String(userMessage).match(/total meal now\s*(\d+(?:\.\d+)?)\s*g/i);
+  if (!m) return null;
+  const v = Math.round(Number(m[1]));
+  return v > 0 ? v : null;
+}
+
+export function isPortionAdjustTurn(userMessage?: string, portionChoices?: any): boolean {
+  if (portionChoices && typeof portionChoices === 'object' && Object.keys(portionChoices).length > 0) return true;
+  const msg = String(userMessage || '');
+  return /adjust\s+(the\s+)?portion\s+of/i.test(msg)
+    || /Portion Selection:/i.test(msg)
+    || /:\s*\d+(?:\.\d+)?\s*g\s*(?:➔|->)\s*\d/i.test(msg);
+}
+
+function messageWithoutTotalClause(userMessage?: string): string {
+  return String(userMessage || '').replace(/\(total meal now[^)]*\)/i, '');
+}
+
+export function editAnchoredPriorIndices(
+  priorItems: any[],
+  userMessage?: string,
+  portionChoices?: any,
+): Set<number> {
+  const out = new Set<number>();
+  if (!Array.isArray(priorItems)) return out;
+  // portionChoices keys: scoutIndex, positional index, or dish name.
+  if (portionChoices && typeof portionChoices === 'object') {
+    const keys = Array.isArray(portionChoices)
+      ? portionChoices.map((c: any) => c?.scoutIndex ?? c?.name)
+      : Object.keys(portionChoices);
+    for (const k of keys) {
+      const idx = priorItems.findIndex((p, i) => {
+        if (p?.scoutIndex != null && String(p.scoutIndex) === String(k)) return true;
+        if (String(i) === String(k)) return true;
+        return namesReferSame(displayName(p), String(k)) || namesShareSubstance(displayName(p), String(k));
+      });
+      if (idx >= 0) out.add(idx);
+    }
+  }
+  // Dish names stated in the user message. The total clause is excluded so
+  // the total's grams can never anchor a dish.
+  const msg = messageWithoutTotalClause(userMessage);
+  priorItems.forEach((p, i) => {
+    if (itemAllNames(p).some((n) => namesReferSame(n, msg) || namesShareSubstance(n, msg))) out.add(i);
+  });
+  return out;
+}
+
+const CONTAINED_WEIGHT_ACTIONS = new Set(['set_weight', 'update_weight', 'update_component_weight']);
+
+export function sanitizeWeightEditCommands(args: {
+  commands: any[];
+  priorItems: any[];
+  userMessage?: string;
+  portionChoices?: any;
+}): { commands: any[]; notes: string[] } {
+  const cmds = Array.isArray(args.commands) ? args.commands : [];
+  const prior = Array.isArray(args.priorItems) ? args.priorItems : [];
+  const notes: string[] = [];
+  if (!cmds.length || !prior.length) return { commands: cmds, notes };
+  const messageTotal = parseMessageMealTotal(args.userMessage);
+  const portionTurn = isPortionAdjustTurn(args.userMessage, args.portionChoices);
+  const anchored = portionTurn ? editAnchoredPriorIndices(prior, args.userMessage, args.portionChoices) : null;
+  const out: any[] = [];
+  for (const cmd of cmds) {
+    const action = String(cmd?.action || '').toLowerCase();
+    const w = Number(cmd?.newWeightGrams);
+    const carriesWeight = Number.isFinite(w) && w > 0
+      && (CONTAINED_WEIGHT_ACTIONS.has(action) || action === 'replace_component');
+    if (!carriesWeight) {
+      out.push(cmd);
+      continue;
+    }
+    const label = `"${cmd.itemName || cmd.componentName || '?'}"`;
+    // Guard 1 — the meal total is never a dish weight (single-dish meals excepted).
+    if (messageTotal != null && prior.length > 1 && Math.abs(w - messageTotal) <= 1) {
+      notes.push(`[PatchLedger] drop ${action} ${label}: ${w}g equals the message meal total, not a dish weight (prior kept)`);
+      continue;
+    }
+    // Guard 2 — portion-adjust containment: only user-targeted dishes may change weight.
+    if (portionTurn && CONTAINED_WEIGHT_ACTIONS.has(action) && anchored) {
+      const si = Number(cmd.scoutIndex);
+      let idx = Number.isFinite(si) ? prior.findIndex((p, i) => scoutIndexOf(p, i) === si) : -1;
+      if (idx < 0) {
+        const nm = String(cmd.itemName || '');
+        idx = prior.findIndex((p) => namesReferSame(displayName(p), nm) || namesShareSubstance(displayName(p), nm));
+      }
+      if (idx < 0 || !anchored.has(idx)) {
+        notes.push(`[PatchLedger] drop ${action} ${label}: dish not targeted by this portion adjust (prior kept)`);
+        continue;
+      }
+    }
+    out.push(cmd);
+  }
+  return { commands: out, notes };
+}
+
+/**
  * Align prior ledger rows to scout emission (scoutIndex, else positional)
  * and emit structural patch commands for identity/weight/component drifts.
  */
@@ -888,7 +1000,7 @@ export function applyUserLockedSlots(args: {
   if (!locks.length || !Array.isArray(args.scoutItems)) {
     return { items: args.scoutItems || [], notes };
   }
-  const msg = normName(args.userMessage || '');
+  const msg = normName(messageWithoutTotalClause(args.userMessage));
   const items = args.scoutItems.map((it, idx) => {
     const sIdx = scoutIndexOf(it, idx);
     const slotLocks = locks.filter((l) => l.scoutIndex === sIdx);
@@ -1010,7 +1122,10 @@ export function mergeLocksFromCommands(args: {
       }
     } else if (action === 'set_weight' || action === 'update_weight' || action === 'update_component_weight') {
       const w = weightOf(found.item) || Number(cmd.newWeightGrams);
-      if (w > 0) {
+      // Never mint a lock for the message's meal total as a dish weight
+      // (portion-smear ratchet: job_1791997001237 locked 1407g then 2536g).
+      const messageTotal = parseMessageMealTotal(args.userMessage);
+      if (w > 0 && !(messageTotal != null && items.length > 1 && Math.abs(w - messageTotal) <= 1)) {
         byKey.set(`${sIdx}:weightGrams`, {
           scoutIndex: sIdx,
           field: 'weightGrams',

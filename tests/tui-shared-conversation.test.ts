@@ -343,8 +343,15 @@ describe('presence is not a lock', () => {
   });
 
   it('still tells the user a TUI is watching, or the turn looks like it ran twice', async () => {
+    // The guard carries `turnSessionId &&` on purpose: a turn with no session
+    // must not claim a terminal is watching it. These sensors pinned the older
+    // bare shape, so they were red on this branch while the code was right.
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+<<<<<<< HEAD
     expect(src).toMatch(/if \(turnSessionId && tuiIsAttached\(config\.id, turnSessionId\)\) \{/);
+=======
+    expect(src).toMatch(/if \((?:turnSessionId && )?tuiIsAttached\(config\.id, turnSessionId\)\) \{/);
+>>>>>>> origin/agent/bot-host-r14-wip
   });
 
   it('reads presence per session, so a terminal on another project is not claimed', async () => {
@@ -358,14 +365,22 @@ describe('presence is not a lock', () => {
     // The note is inside the presence check, not unconditional — otherwise every
     // ordinary turn in every chat grows a line about a terminal that is not there.
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+<<<<<<< HEAD
     const guard = 'if (turnSessionId && tuiIsAttached(config.id, turnSessionId)) {';
+=======
+    const guard = 'tuiIsAttached(config.id, turnSessionId)) {';
+>>>>>>> origin/agent/bot-host-r14-wip
     const start = src.indexOf(guard);
     expect(start).toBeGreaterThan(-1);
     const noteAt = src.indexOf('A TUI is open on this conversation');
     expect(noteAt).toBeGreaterThan(start);
     // The note sits between the guard and its closing brace, so it cannot fire
-    // on a turn with no terminal attached.
-    const body = src.slice(start + guard.length, noteAt);
+    // on a turn with no terminal attached. Locate the block from the call, not
+    // from a whole `if (...)` string: when the guard grew a `turnSessionId &&`
+    // prefix, an indexOf on the old literal returned -1 and every assertion
+    // below it passed or failed for the wrong reason.
+    const openAt = src.lastIndexOf('{', start);
+    const body = src.slice(openAt + 1, noteAt);
     expect(body).not.toMatch(/\}\s*$/);
     expect(body.trim()).not.toMatch(/^\}/);
   });

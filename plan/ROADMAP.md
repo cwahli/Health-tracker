@@ -33,13 +33,13 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 ## Current work — sequence closed on the VM fleet (2026-10-09)
 
-R-14.1 through R-16 are closed. Do not restart them. Do not give two agents the same file (`scripts/bot-host.mjs`, `scripts/lib/free-lanes.mjs`, `scripts/lib/work-session.mjs`). The open list under this sequence is F-13.2, D-10, and V-17b.
+R-14.1 through R-16 are closed. Do not restart them. Do not give two agents the same file (`scripts/bot-host.mjs`, `scripts/lib/free-lanes.mjs`, `scripts/lib/work-session.mjs`). The open list under this sequence is V-17b (console checks); D-10 DONE 2026-10-12.
 
 1. **R-14.1 COMPLETE (2026-10-06).** Cards in [R14_1_AGENT_PLAN.md](./R14_1_AGENT_PLAN.md), card state and evidence in [R14_1_LIVE_PASS.md](./R14_1_LIVE_PASS.md) — cards 1–8 proven live on `@VM_19485_bot`, card 9 re-scoped on the record to the VM-fleet baseline per owner directive. Location-agnostic spine built and verified.
 2. **TUI steps 1–4 COMPLETE (2026-10-06).** [TUI_IMPLEMENTATION.md](./TUI_IMPLEMENTATION.md) rows S1–S8 landed and deployed (`tui-gateway`, `/tui` Telegram Mini App auth/door, HMAC token renewal, line-by-line scrolling at `linePx = 18`). Mobile on-device touch feel is an open user checkpoint.
 3. **R-16 closed on the VM fleet (2026-10-09).** QS-2, QS-6, QS-7, QS-8, QS-12, QS-13, QS-14, and QS-15 stay green in [R16_QS_MATRIX.md](./R16_QS_MATRIX.md). QS-1, QS-3, QS-4, QS-9, and the phone, Colab, and Grok halves of QS-5, QS-10, and QS-11 are cleared. Do not run another cross-device pass. BOT-26 code is on main. L18 and the Cloudflare lane decision are cleared; the Cloudflare lane stays off. BOT-24's unstarted packets are cleared.
 4. **R-15 COMPLETE (2026-10-02).** Omni-agent lanes formally declared in `scripts/lib/lane-contract.mjs` (`freebuff` degraded for headless/resume, `laneSupports` probe); gates green in `specs/done/r15-omni-agent-lanes.md`.
-5. **META-1 P1 is go (2026-10-09).** Packet `specs/active/meta-miniapp.md`. The go is the two new files only: `src/miniapp/miniapp-registry.ts` and `scripts/lib/tg-oauth.mjs`. No hub edits, no behavior change, and do not ask for another go. Later phases that would edit `scripts/bot-host.mjs`, `scripts/lib/free-lanes.mjs`, `scripts/lib/work-session.mjs`, or `scripts/tui-gateway.mjs` are not this line. An open PR on this file blocks this file only.
+5. **META-1 RETIRED 2026-10-11.** Packet `specs/done/meta-miniapp.SUPERSEDED.md` — P1–P4 delivered (shell live on `app.health-tracker.co.uk`, bots web-only per #751, `tui.` redirects to `app.`); P5 teardown moot (ttyd units back the web Terminal tab). Do not re-execute.
 
 6. **Progress surfaces (2 PRs, independent of the phases above — a hub-file
    concern, not a product phase).** One turn fans out at `fanoutProgressEvent`
@@ -53,9 +53,9 @@ R-14.1 through R-16 are closed. Do not restart them. Do not give two agents the 
    is decided (2026-10-09):** leave `progress.progressMode` as `'gist'`. Do not
    set `'phase'`. Full write-up: `specs/active/progress-surfaces-1.md`.
 
-**Still open.** F-13.2 stays blocked on a live T2 `per_100g` capture. D-10 stays off the execute list until an explicit delete go. V-17b is the remaining site move (DuckDNS log soak, then remove the DuckDNS blocks). Website shipped rows stay shipped.
+**Still open.** V-17b is the remaining site move (code-done: Caddy duckdns blocks removed, zero live-code refs, `assert-domain-canonical` 70/0 — left: DuckDNS dashboard DNS deletion + human console checks). D-10 DONE 2026-10-12 (13 orphans deleted, tier2 already-gone, missing keys moot, retention verified-empty, 81 residuals in 30-day grace). Website shipped rows stay shipped. F-13.2 was removed 2026-10-11 per owner directive — do not reopen the lock-merge basis.
 
-**Cleared 2026-10-09. Do not execute.** D-3, the D-4 VPS re-run, D-5, D-6, D-7, D-8, L-5, R-13.4, R-13.5, V-18, CB-7, CB-8. Decision: **keep D1**. English and Indonesian stay the only locales. CB-6 stays superseded. V-17 stays superseded by V-17b.
+**Cleared 2026-10-09. Do not execute.** D-3, the D-4 VPS re-run, D-5, D-6, D-7, D-8, R-13.4, R-13.5, V-18, CB-7, CB-8. Decision: **keep D1**. L-5 reopened 2026-10-12 per owner (fr + zh fill this change); en/id/fr/zh are the product. CB-6 stays superseded. V-17 stays superseded by V-17b.
 
 **Frozen. Do not bring these back** because the chat can now point at another worker:
 
@@ -70,7 +70,7 @@ BOT-14, BOT-19, BOT-21, and BOT-23 stay DONE.
 
 **Ticket flow (the agreed shape — roles, not bots):** packer (`bug_ticket`, Solar-free, card only) → QA reproduces (`qa_meal --ticket`, V-30.3) → orchestrator specifies (strong model, locked spec) → you lock (`go`) → script dispatches one healthy backend → verifier (didn't author it) closes on `named_test` green. Packer never writes specs, never dispatches, never edits `src/`. Full role contract: `plan/BUG_TICKET_PIPELINE.md` §4.4. Worked transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` turn plumbing) in §6.2. The dev is a transient process, not a bot — no registry row, no token, no memory.
 
-**D-2 is CLOSED.** All ledger rows DONE; verified clean-tree on 2026-09-24: `tsc` 0, 60/60 packet vitest, `journey-guard D-2` PASS (retired from `specs/active/`). Residual: `golden_cases` has no D1 table (skipped by design). **D-1 is DONE** (2026-09-25). **Decision 2026-10-09: keep D1.** D-3 and D-5…D-8 are cleared. Still open on this plane: **D-10** only, and only after an explicit go. **F-13.2** stays blocked on a live T2 `per_100g` lock capture. **V-27 is DONE** (phone check passed 2026-09-24).
+**D-2 is CLOSED.** All ledger rows DONE; verified clean-tree on 2026-09-24: `tsc` 0, 60/60 packet vitest, `journey-guard D-2` PASS (retired from `specs/active/`). Residual: `golden_cases` has no D1 table (skipped by design). **D-1 is DONE** (2026-09-25). **Decision 2026-10-09: keep D1.** D-3 and D-5…D-8 are cleared. **D-10 DONE 2026-10-12** (sweep + retention executed; residuals in grace). **V-27 is DONE** (phone check passed 2026-09-24).
 
 **Bot code** follows the rail above (BOT-20 using the existing `scripts/lib/bug-pack.mjs`). **Track V Phase 10 pickup:** V-30.1 DONE, **V-30.2 CLOSED 2026-09-24** (P9 token, one live E2E reply, `enabled: true` + `@Bug_ticket_bot`, traceable fixture + packer-only boundary), **V-30.3 DONE 2026-09-24** (human go received; skill/runner/`repro --check`/gate `assert-bug-repro` 57/0 + live verdict on card #2 → `failed`/`not_reproducible`, `svc-repro` done), **V-30.4 DONE 2026-09-24** (human go received; `--ticket=#n` packet dispatch + guard + plan/attempt/block + verifier separation; gate `assert-bug-dispatch` 49/0; live VPS proof: card #3 → `done` via PR #101 + named_test verify, card #4 → `blocked_reason`, hardening #98/#102/#103), **V-30.5 DONE 2026-09-25** (human go received; generated `bug-backlog.mjs` + preserved legacy, `/resume`, capability proof transitions with ticket-scoped strict, CI gates, `BUG_PIPELINE.md`/`telegram_work.md`, retro-audit 6/6 from disk, review-failures fixture signature sensorized + zero recurrence since #130). The complete dependency order, exact runbook, and file/gate handoff are in `plan/BUG_TICKET_PIPELINE.md` §6.2.
 
@@ -165,7 +165,7 @@ The three lists together are exactly the one list the old picker showed, so the 
 
 The surfaces still do not share one host-aware route projection. Bot-host `/freemodel` starts from host discovery and annotates a per-bot ledger, while `/allowance` renders that ledger; the router separately probes provider catalogs and reads its router ledger. A route can appear in one surface but not the other, and a tap can resolve a display label rather than a stable execution route. The shared `free-lanes.mjs` vendor copy has ledger/quota/rendering helpers but no exported host-aware usable-choice projection.
 
-**Cleared 2026-10-09.** The four packets below are not work. The landed allowance list stays. Do not normalize a new Cloudflare lane. The Cloudflare lane stays off.
+**Cleared 2026-10-09.** The four packets below are not work. The landed allowance list stays. Do not normalize a new Cloudflare lane. The Cloudflare lane stays off. **Superseded 2026-10-11:** the router-consumes-canonical-projection rewrite (draft packet `router-projection-1`, PR #741 closed unmerged) is not work either — BOT-26 already unified pools + failover on both surfaces with QS-8/QS-12 green; the router's internal helper fork stays while both sides are green.
 
 **Left from the BOT-24 review, kept as history:** normalize OpenCode-hosted `tokenharbor/*`, `cloudflare/*`, and `google/*` refs to their actual execution owner before quota/allowance matching; make bot-host callbacks use stable route identities; make bot-host failover and quota stamping use the selected actual route and the per-bot ledger; keep router Freebuff terminal-only by default; pass vendor reset hints through the active ping; and make ping target eligibility and ledger writes explicitly per bot. Do not treat pending/unauthenticated/ended lanes as selectable. The current bot-host freemodels tests still contain three known stale failures from the pre-location-scoped/Gemini behavior.
 
@@ -196,7 +196,7 @@ The surfaces still do not share one host-aware route projection. Bot-host `/free
 5. **Q-13 DONE** — `specs/done/q-13-biomarker-dictionary-split.md`. `BiomarkerDictionaryModal.tsx` 6,230 lines / 345 KB → **3,725 lines / 183,970 B**, under the AI Studio 200 KB ceiling. Nodes: `02d84dc` packet → `145d8e2` consolidation panel (49.7 KB) → `450f7c4` data-accuracy panel (41.7 KB) → `ad84598` agent panel (37.6 KB) → `fafc060` `DictionaryItem` + `autoCalibrateBiomarkerCalibrate`/`autoCalibrateBiomarkerDef` + `ensureCustomRanges` (44.6 KB, no props). CATALOG ratcheted 6640 → 3726. The planned batch-paste panel (49.2 KB / 74 props) was dropped as poor value — the file already cleared the ceiling without it. **Do not touch `LogChat.tsx`** — another agent is editing it in this working tree, and it is now the largest remaining file (340 KB / 6,474 lines, under the 6,500 ceiling).
 6. **R-13.1 LIVE on OVH VPS-2 (Track V V-0...V-16 COMPLETE, Phase 6 V-19...V-26 COMPLETE)** — host is **OVH VPS-2** (`https://health-tracking.duckdns.org`), Caddy + systemd `health-tracker.service` (node dist/server.cjs), GitHub Webhook auto-deploy active. Render in 24-48h soak mode prior to V-17 deletion. **Next mobile ID: V-27 DONE 2026-09-24** (Mosh + tmux `health`, public key-only SSH, phone check passed). Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md) Phase 7. Do not redo V-19…V-26. **Auto-deploy wipes uncommitted work — always push.**
 7. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-13 files.
-8. **Track D — D-1 and D-2 are DONE. Decision 2026-10-09: keep D1.** D-3 and D-5…D-8 are cleared. D-9 is DONE. D-10 stays off the execute list until an explicit go. Plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 superseded.** Audit: [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md).
+8. **Track D — D-1, D-2, D-9, and D-10 are DONE (D-10 executed 2026-10-12). Decision 2026-10-09: keep D1.** D-3 and D-5…D-8 are cleared. Plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 superseded.** Audit: [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md).
 
 **BUG-1 — Food pagination count fallback (recurring regression, COMPLETE 2026-09-24).**  
 Fixed across 5 layers: (1) `src/utils/syncUtils.ts` awaits `authStateReady()` and falls back to `localStorage.getItem('auth_token')` so mobile/custom sessions attach Bearer token and stop getting 401; (2) `server_db_d1.ts:d1PullSync` retries count query on transient failure and does not fall back to `rawFoods.length` on pagination/incremental queries; (3) `server_routes_sync.ts` stops falling back to `activeFoods.length` for `totalFoodsCount`; (4) `src/hooks/useAppSync.ts` uses `Math.max` ratchet so total count never regresses downward and caches/restores `totalFoodsCount` in storage bundle; (5) Deterministic sensor planted at `src/utils/__tests__/foodPaginationCount.test.ts` (7/7 pass). Learning: `specs/learnings/food-pagination-count-fallback-20260924.md`.  
@@ -204,7 +204,7 @@ Fixed across 5 layers: (1) `src/utils/syncUtils.ts` awaits `authStateReady()` an
 **BUG-2 — Gemini 503 on food analysis (peak demand mitigation, COMPLETE 2026-09-24).**  
 Enhanced `server_food_scout_source.ts` with emergency safety net: (1) increased backoff delay for 503/UNAVAILABLE to 2500ms; (2) `runScoutRetryLoop` now hops to `gemini-2.5-flash` if both `gemini-3.5-flash-lite` and `gemini-3.1-flash-lite` return 503/UNAVAILABLE during peak demand on the flash-lite infrastructure. Verified via `sync-regression` + `food-calc`, `tsc` 0.
 
-**Still open:** **F-13.2** (a live T2 `per_100g` lock capture), **D-10** (explicit go before any R2 delete), **V-17b** (DuckDNS soak, then remove the DuckDNS blocks). **Cleared 2026-10-09:** D-3, D-5…D-8, L-5, R-13.4, R-13.5, V-18, CB-7, CB-8, the cross-device half of R-16, BOT-24's unstarted packets, BOT-26 L18. **D-1 is DONE 2026-09-25.** **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), Cloud Run, **VPS SQLite**, dual-write D1+SQLite, **R2 bulk-delete from `R2_DELETE_CANDIDATES.json`**. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
+**Still open:** **V-17b** (code-done; DuckDNS dashboard DNS deletion + human console checks). **D-10 DONE 2026-10-12.** F-13.2 removed 2026-10-11 per owner — do not reopen. **Cleared 2026-10-09:** D-3, D-5…D-8, R-13.4, R-13.5, V-18, CB-7, CB-8, the cross-device half of R-16, BOT-24's unstarted packets, BOT-26 L18. **L-5 DONE 2026-10-12** (fr + zh filled per owner). **D-1 is DONE 2026-09-25.** **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), Cloud Run, **VPS SQLite**, dual-write D1+SQLite, **R2 bulk-delete residuals** (D-10 done 2026-10-12; 81 orphans in grace — re-sweep, do not invent a second list). **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
 
 **Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 744/0/0 at `5615f1e`, `golden/scorecard/result_summary/LATEST.md`).
 
@@ -245,7 +245,7 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Biomarkers | **B0** Apply smoke, then B2 leftover hygiene, then real G-B2. Chat UX = fill-template (one agent + TS batch), not 10 personas. |
 | Site is slow | **R-8** measure (Q-1 is already green). Then R-9 defer. Not FoodCard/App splits first |
 | Make the site live / leave Render | **Track V is LIVE** on OVH VPS-2 at `https://health-tracker.co.uk`. V-17b is the leftover: DuckDNS log soak, then remove the DuckDNS blocks. Phase 6 (V-19…V-26), V-27, V-28, and V-29 are COMPLETE. |
-| Localisation leftover | **Closed.** L-1…L-4 landed. L-5 cleared 2026-10-09. English and Indonesian stay the product. |
+| Localisation leftover | L-1…L-5 landed. fr + zh filled 2026-10-12 per owner (reviewed, placeholder-verified); en/id/fr/zh are the product. |
 | Location, `/project`, `/role`, or the rating council | [R14_1_AGENT_PLAN.md](./R14_1_AGENT_PLAN.md). Not a new bot. Not Antigravity. Not the council draft's offline cloud fallback. |
 | Telegram Mini App TUI (`/tui`) | [TUI_IMPLEMENTATION.md](./TUI_IMPLEMENTATION.md). Proposal: [TG_Tui_Proposal1.md](../TG_Tui_Proposal1.md). Not `Tui_proposal2b.md`'s order. Not the website master scorecard. |
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
@@ -305,7 +305,7 @@ Contact model is **A**: OpenCode master **self-serves** meal-audit via shared sk
 
 **Do not** dual-poll one Telegram token (VPS + phone, or Hermes + bot-host). **Do not** restart `hermes-gateway` from this track unless a named V-28/V-29 task says so. **Do not** run `bot-host@android` on the VPS. Restart phone bot: `setsid nohup ~/start-mobile-opencode-bot.sh </dev/null >/dev/null 2>&1 &` (android: `~/start-android-opencode-bot.sh`, legacy).
 
-Do **not** start: putting curator back on Analyze, reopening FDC, a Worker rewrite, a god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, a **Q-9** rewrite binge, inventing a catalog primitive, Cloud Run, **production SQLite on the VPS**, dual-write D1+SQLite, dropping Firebase Auth, paying to unpause Supabase, or running `R2_DELETE_CANDIDATES.json` (that is D-10, and it waits for an explicit go). **R-5** is superseded. **R-13.1 / Track V** is LIVE on VPS-2. **D-1 is DONE 2026-09-25.** **Decision 2026-10-09: keep D1.** D-3, D-5…D-8, R-13.4, R-13.5, V-18, L-5, CB-7, and CB-8 are cleared. R-14.1, TUI steps 1–4, and R-15 are complete. The R-16 cross-device pass and BOT-24's unstarted packets are cleared. Do not reopen BOT-1–BOT-23, V-30, or CB-6. Do not install Antigravity. Do not push a coder commit to `origin/main`.  
+Do **not** start: putting curator back on Analyze, reopening FDC, a Worker rewrite, a god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, a **Q-9** rewrite binge, inventing a catalog primitive, Cloud Run, **production SQLite on the VPS**, dual-write D1+SQLite, dropping Firebase Auth, paying to unpause Supabase, or re-running `R2_DELETE_CANDIDATES.json` from scratch (D-10 done 2026-10-12; residuals re-sweep only). **R-5** is superseded. **R-13.1 / Track V** is LIVE on VPS-2. **D-1 is DONE 2026-09-25.** **Decision 2026-10-09: keep D1.** D-3, D-5…D-8, R-13.4, R-13.5, V-18, CB-7, and CB-8 are cleared (L-5 done 2026-10-12). R-14.1, TUI steps 1–4, and R-15 are complete. The R-16 cross-device pass and BOT-24's unstarted packets are cleared. Do not reopen BOT-1–BOT-23, V-30, or CB-6. Do not install Antigravity. Do not push a coder commit to `origin/main`.  
 F-10 lives here + [FOOD.md](./FOOD.md) Process. Track V lives here + [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Track D lives here + [DATA_PLANE.md](./DATA_PLANE.md).
 
 ---
@@ -572,7 +572,7 @@ M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` 
 | ID | Item | Done when | Do not |
 |---|---|---|---|
 | **F-13.1** | **Shipped 2026-09-17.** `src/utils/foodFollowUpEdit.ts` — text-only follow-up on a blank draft + recent meal ⇒ `submissionMode = 'edit'`, so the existing `activeMeal` fallback (`LogChat.tsx:2498`) supplies the prior meal. 24/24 vitest. | Text-only follow-up reports `mode === 'edit'` with the prior meal's dishes carried | Adopt the newest meal unconditionally — T1 sends a photo and must stay a new scan |
-| **F-13.2** | Lock-merge basis consistency in `server_dish_finalize.ts` residual fill. **Not started: no hard evidence** — the golden path succeeded with oats *estimated* (turn-2 capture has zero `per_100g`), so the recorded numbers are prose only. Do not guess math in the sole kcal writer. | A live T2 capture that actually exercises a `per_100g` brand lock at a non-100 g weight | Change `finalizeDishLedger` basis on prose alone |
+| **F-13.2** | **REMOVED 2026-10-11 per owner directive.** Residual fill stays as-is; do not guess math in the sole kcal writer. | — | Reopen the lock-merge basis |
 | **F-13.3** | **DONE 2026-09-23 — live T2 GREEN.** Blank drafts adopt the newest NON-EMPTY succeeded session meal (`newestSucceededFoodJob` + `pendingMealOfJob` incl. persisted messages; `LogChat.tsx` only). Root causes killed: (1) completions only flip JobStore status, meal lives in messages; (2) stale demo seeds with empty breakdowns outranked T1. Live gate 2/2 incl. T2 (oats 40g, Big Mac 508 lock, no coconut, ledger math, persisted). Live spec now uses fresh-signup identity (fixed demo account accumulates seeds across runs). Temp diag breadcrumb removed. | Same-thread edit works on a pristine account; unit 32/32, tsc 0, guard PASS | Widen packet scope or touch `App.tsx`/`JobStore` for this |
 
 ---
@@ -660,7 +660,7 @@ Canonical plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Live host: `https://
 | **V-15** | Public hostname, Firebase + R2 CORS, deploy loop | `/api/status` 200 off Tailscale | **COMPLETE** (`https://health-tracking.duckdns.org` + Webhook) |
 | **V-16** | DNS cutover; Render still up | Cellular load, no Render splash, meal works | **COMPLETE & LIVE** |
 | **V-17** | Delete Render; scrub `onrender.com` | Old origin dead | **SUPERSEDED by the co.uk migration** — Render deletion folded into full-domain move; last live-code `onrender.com` default retired on `agent/domain-couk-full`. Plan: [COUK_MIGRATION.md](../docs/infra/COUK_MIGRATION.md) |
-| **V-17b** | Full migration to `health-tracker.co.uk` (web app + TUI + TG bot buttons + `web`/`omb`/`tgtg` hosts); retire duckdns | co.uk serves everything; duckdns blocks removed | **NEARLY DONE** (Domain-01; all code defaults + DNS + Caddy + bot envs live and verified; audit sweep `agent/domain-couk-audit` moved the last defaults, scorecard live origin, and plan canonicals; left: duckdns log soak + human console checks, then remove duckdns blocks) |
+| **V-17b** | Full migration to `health-tracker.co.uk` (web app + TUI + TG bot buttons + `web`/`omb`/`tgtg` hosts); retire duckdns | co.uk serves everything; duckdns blocks removed | **CODE-DONE 2026-10-12** (verified: zero live-code duckdns refs, `assert-domain-canonical` 70/0, Caddy duckdns blocks gone, `tui.` redirects to `app.`; left, all human: DuckDNS dashboard DNS deletion — apex/tui/omb/tgtg A records still resolve — + console checks per COUK_MIGRATION.md step 7) |
 | **V-18** | Confirm Containers/Cloud Run stay off | Runbook matches prod | **CLEARED 2026-10-09.** Containers and Cloud Run stay off. Workers Paid is not a roadmap item. |
 
 ### Track V Phase 6 — Autonomous Journey QA Fleet & Orchestrator Self-Healing Loop
@@ -769,7 +769,7 @@ Canonical plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 is superseded.** D1 is t
 | **D-7** | SQLite WAL + Litestream → R2; freeze D1 | **CLEARED 2026-10-09** with D-6 | A second SQL writer |
 | **D-8** | Keep D1; delete any SQLite adapter | **CLEARED 2026-10-09.** Satisfied by the keep-D1 decision | A half-wired SQLite adapter |
 | **D-9** | Stop R2 photo **regrowth** (hash reuse; no `_0` twin). Muse audit. No deletes. | **DONE** (`cf19075`) | New uploads do not mint duplicate keys |
-| **D-10** | After D-1: apply [R2_DELETE_CANDIDATES.json](./R2_DELETE_CANDIDATES.json), sweeper, debug/logs retention | gate satisfied — **D-1 DONE 2026-09-25**; still `blocked_human` until an explicit human go | Audit re-run; no keys still referenced |
+| **D-10** | After D-1: apply [R2_DELETE_CANDIDATES.json](./R2_DELETE_CANDIDATES.json), sweeper, debug/logs retention | **DONE 2026-10-12** — audit re-run + dump in R2, 13 past-grace orphans deleted, tier2 already-gone, missing keys moot, retention >90d verified-empty, 81 residuals in grace | Audit re-run; no keys still referenced |
 
 **D-6 decision (2026-10-09): keep D1.** D-5…D-8 are cleared. Do not dual-write. Do not install SQLite. Meal analyze (~8 s Gemini) is not a reason to reopen the branch.
 
@@ -840,7 +840,7 @@ Q-4 AgentResultTable thin    ← shipped
 Q-10 dependency audit        ← shipped
 Q-11 App shell decoupling     ← DONE — 11.7/11.10/11.11/11.12 landed (App 350, Header 690)
 R-13.1 / Track V             ← LIVE on OVH VPS-2 since 2026-09-20 ([VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md)); Worker health-tracker-2 is a no-build edge proxy; Render soak-pending-delete
-Track D (one SQL)            ← keep D1 (decision 2026-10-09). D-1 and D-2 done. D-10 waits for an explicit go. D-3 and D-5…D-8 cleared.
+Track D (one SQL)            ← keep D1 (decision 2026-10-09). D-1, D-2, D-9, D-10 done (D-10 executed 2026-10-12). D-3 and D-5…D-8 cleared.
 Cloud Run Option A           ← SUPERSEDED (plan/GCP_FREE_TIER_MIGRATION.md)
 ```
 
@@ -882,17 +882,17 @@ packet. Q-9/Q-8.2 are green.
 
 | | **Any agent** (Studio / Antigravity / OpenCode / Cline) | **Grok** (quota-scarce) |
 |---|---|---|
-| Prefer | Current work at the top of this file. Q-11 and Q-13 are complete. Still open: F-13.2, D-10 (explicit go), and V-17b. The 2026-10-09 cleared list is not work. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
+| Prefer | Current work at the top of this file. Q-11 and Q-13 are complete. Still open: V-17b (console checks). D-10 DONE 2026-10-12. F-13.2 removed 2026-10-11. The 2026-10-09 cleared list is not work. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
 | Do not | `npm test`; critic LLM; USDA; invent a primitive; live Gemini as inner loop; wait for Grok | Sit in a live wait loop; rewrite binge; re-lock packets other agents are executing |
 
 ---
 
 ## Track L — Localisation (active)
 
-**L-1…L-4 landed.** L-5 cleared 2026-10-09. English and Indonesian stay the product. Do not invent `fr` or `zh` copy.
+**L-1…L-5 landed (L-5 filled 2026-10-12 per owner: fr + zh reviewed, placeholder-verified, sensor-pinned).** en/id/fr/zh are the product.
 
 **Architecture:** `src/utils/translations.ts` (`en` source of truth, `id` key-parity) · `src/utils/i18n.ts` (`t()`, English fallback, `withAgentLanguage` / `withScoutLanguage`) · named gates `src/utils/i18n.test.ts` and `agents/dietitianInstructions.i18n.test.ts`.
-**Scope:** English + Indonesian only. `fr` / `zh` stay incomplete and fall back to English. More languages later.
+**Scope:** en/id/fr/zh, all with key parity. `fr` / `zh` filled 2026-10-12 (L-5) and sensor-pinned. More languages later.
 
 ### Landed — do not redo
 
@@ -904,7 +904,7 @@ EN/ID UI chrome for login, home, chat, food history, insights, trends/health, pr
 - **L-2 Seeded / demo content.** Pack restore from `85ce58b` landed 2026-09-15 (seed*/outlier*/clinicalActionDesc/dailyBenefitsDesc). Covered by automated preciseCause language test (`81a9651`); no live eyeball needed.
 - **L-3 Catalog display names.** `displayBiomarkerName` / `displayConditionName` already wired (MedicalHistoryTab, dictionary, audit). Keep keys English; vitest gates in `i18n.test.ts`.
 - **L-4 Admin / leftover widgets.** Pack restore from `85ce58b` landed 2026-09-15 (table*/backup*/audit*/dict*/sanitize*/batch*/img*/del*). Scorecard `i18n_required_chrome` ALL GREEN, sealed 2026-09-15 (705/0/0).
-- **L-5 More languages.** **CLEARED 2026-10-09.** No next language was named. English and Indonesian stay the product. Do not fill in `fr` or `zh`.
+- **L-5 More languages.** **DONE 2026-10-12 per owner call.** fr + zh packs filled (1,993 keys each), independent reviewer pass per language with all findings applied, placeholder/terminology machine-verified, digests pinned. en/id/fr/zh are the product.
 
 **Out of Track L:** dish/brand names, JSON keys / nutrient codes / biomarker keys, native Choose File, old saved meal-analysis sentences (re-log to refresh).
 

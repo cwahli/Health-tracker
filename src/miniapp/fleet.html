@@ -112,6 +112,9 @@
   .clickable-row { cursor: pointer; }
   .clickable-row:hover td { background: #233554 !important; }
   .empty-cell { color: #64748b; }
+  /* META-1 shell: the burger lives here, first inside this masthead
+     (in-flow with the title, never floating over it). Framed in the shell
+     it opens the shell drawer; top-level it returns to the shell. */
 </style>
 </head>
 <body>
@@ -123,6 +126,7 @@
 
     <div class="masthead">
       <div class="title-group">
+        <button id="shell-burger" aria-label="Menu" title="Mini apps menu" style="background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:6px;width:28px;height:28px;font-size:15px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;">&#x2630;</button>
         <span class="live-dot" id="live-indicator" title="Connected"></span>
         <h1>Fleet</h1>
         <button id="btn-refresh" class="btn-refresh" title="Refresh state" aria-label="Refresh state">🔄</button>
@@ -213,6 +217,8 @@
     try {
       window.Telegram.WebApp.ready();
       window.Telegram.WebApp.expand();
+      // A vertical drag must scroll the table, not collapse the Mini App.
+      if (window.Telegram.WebApp.disableVerticalSwipes) window.Telegram.WebApp.disableVerticalSwipes();
     } catch (e) {}
   }
 
@@ -416,10 +422,17 @@
   // Initial fetch
   fetchState();
 
-  // SSE setup
-  if (typeof EventSource !== 'undefined') {
+  // SSE setup. The socket lives only while the page is visible: a hidden
+  // WebView holds no screen to update, and a dead socket that never closes
+  // is how terminals leak. Reconnect on return, then refresh once.
+  var sse = null;
+  function connectSse() {
+    try { if (sse) sse.close(); } catch (e) {}
+    sse = null;
+    if (document.visibilityState !== 'visible') return;
+    if (typeof EventSource === 'undefined') return;
     try {
-      var sse = new EventSource('/fleet/api/events' + location.search);
+      sse = new EventSource('/fleet/api/events' + location.search);
       sse.addEventListener('state', function (e) {
         try { applyState(JSON.parse(e.data)); } catch (err) {}
       });
@@ -459,8 +472,13 @@
         var ind = document.getElementById('live-indicator');
         if (ind) ind.style.background = '#10b981';
       };
-    } catch (e) {}
+    } catch (e) { sse = null; }
   }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') { connectSse(); fetchState(); }
+    else { try { if (sse) sse.close(); } catch (e) {} sse = null; }
+  });
+  connectSse();
 
   // Backup poll every 15s (only when page is visible)
   setInterval(function () {
@@ -468,5 +486,15 @@
   }, 15000);
 })();
 </script>
+<script>(function(){
+var b=document.getElementById("shell-burger");if(!b)return;
+function q(k){try{return new URLSearchParams(window.location.search||"").get(k)||""}catch(e){return""}}
+b.addEventListener("click",function(){
+try{if(window.self!==window.top){window.parent.postMessage({type:"shell:menu"},"*");return}}catch(e){}
+var init="";try{init=(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initData)||""}catch(e){}
+if(init){var bot=q("bot")||"vm";window.location.href="/app/?bot="+encodeURIComponent(bot)+"&initData="+encodeURIComponent(init);return}
+var t=q("token");window.location.href=t?("/app/app?token="+encodeURIComponent(t)+"&tab=fleet"):("/app/login?tab=fleet");
+});
+})();</script>
 </body>
 </html>

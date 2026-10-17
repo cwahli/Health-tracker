@@ -222,8 +222,8 @@ const PROVIDERS = {
     label: "Cline",
     freeModels: [
       "cline-free/muse-spark-1.3-contributor",
-      "cline-free/deepseek-v4.1-flash",
-      "cline-free/glm-5.3-flash",
+  "cline-free/mimo-v2.6-flash",
+      "cline-free/mimo-v2.6-flash",
     ],
   },
   tokenharbor: {
@@ -233,7 +233,6 @@ const PROVIDERS = {
       "deepseek-v4-flash:free",
       "mimo-v2.5:free",
       "mimo-v2.6-flash:free",
-      "qwen3.8-flash:free",
     ],
   },
   freebuff: {
@@ -311,7 +310,6 @@ function freeFamilyKey(modelId) {
 const FREE_FAMILIES = {
   "deepseek-v4.1-flash": [
     { provider: "opencode", model: "tokenharbor/deepseek-v4.1-flash:free" },
-    { provider: "cline", model: "cline-free/deepseek-v4.1-flash" },
     { provider: "tokenharbor", model: "deepseek-v4.1-flash:free" },
   ],
   "deepseek-v4-flash": [
@@ -331,24 +329,18 @@ const FREE_FAMILIES = {
   "mimo-v2.6-flash": [
     { provider: "opencode", model: "opencode/mimo-v2.6-flash-free" },
     { provider: "opencode", model: "tokenharbor/mimo-v2.6-flash:free" },
+    { provider: "cline", model: "cline-free/mimo-v2.6-flash" },
     { provider: "tokenharbor", model: "mimo-v2.6-flash:free" },
   ],
   "mimo-v2.5": [
     { provider: "opencode", model: "tokenharbor/mimo-v2.5:free" },
     { provider: "tokenharbor", model: "mimo-v2.5:free" },
   ],
-  "qwen3.8-flash": [
-    { provider: "opencode", model: "tokenharbor/qwen3.8-flash:free" },
-    { provider: "tokenharbor", model: "qwen3.8-flash:free" },
-  ],
   "qwen3.8-27b": [
     { provider: "opencode", model: "cloudflare/@cf/qwen/qwen3.8-27b" },
   ],
   "glm-4.7-flash": [
     { provider: "opencode", model: "cloudflare/@cf/zai-org/glm-4.7-flash" },
-  ],
-  "glm-5.3-flash": [
-    { provider: "cline", model: "cline-free/glm-5.3-flash" },
   ],
 };
 
@@ -799,7 +791,6 @@ const FREE_ALLOWANCE_BUCKETS = [
       "deepseek-v4-flash:free",
       "mimo-v2.5:free",
       "mimo-v2.6-flash:free",
-      "qwen3.8-flash:free",
     ],
     match: (p, m) => p === "tokenharbor" || /^tokenharbor\//i.test(m) || /:free$/i.test(m),
   },
@@ -2861,10 +2852,8 @@ function clineAuthOk() {
  */
 const CLINE_BOOTSTRAP_LANES = [
   "cline-free/muse-spark-1.3-contributor",
-  "cline-free/deepseek-v4.1-flash",
   // Used successfully on this box as free lane; kept only if the ledger does
   // not say unavailable/ended.
-  "cline-free/glm-5.3-flash",
 ];
 function availableClineKnownLanes(table = loadFreeLaneTable()) {
   const rows = Array.isArray(table?.lanes) ? table.lanes : [];

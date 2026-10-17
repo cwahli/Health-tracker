@@ -176,52 +176,54 @@ function scaleNutrientObj(obj?: Record<string, any>, factor: number = 1.0): Reco
   return res;
 }
 
+export function scaleOneSubcomponent(c: any, factor: number): any {
+  if (!c || typeof c !== 'object') return c;
+  const cWeight = c.weightGrams || c.estimatedWeightGrams;
+  const cEstWeight = c.estimatedWeightGrams || c.weightGrams;
+  const scaledItemNutrients = scaleNutrientObj(c.nutrients || c.nutritionFacts, factor);
+  const scaledTruthNutrients = scaleNutrientObj(c.truthNutrients, factor);
+
+  const scaledP = scaledItemNutrients?.protein ?? (c.protein ? Math.round(c.protein * factor * 10) / 10 : (c.proteinGrams ? Math.round(c.proteinGrams * factor * 10) / 10 : 0));
+  const scaledCarbs = scaledItemNutrients?.carbohydrates ?? (c.carbohydrates ? Math.round(c.carbohydrates * factor * 10) / 10 : (c.carbs ? Math.round(c.carbs * factor * 10) / 10 : (c.carbsGrams ? Math.round(c.carbsGrams * factor * 10) / 10 : 0)));
+  const scaledSatFat = c.saturatedFat ? Math.round(c.saturatedFat * factor * 10) / 10 : (scaledItemNutrients?.saturatedFat || 0);
+  const rawTotalFat = scaledItemNutrients?.totalFat ?? (c.totalFat ? Math.round(c.totalFat * factor * 10) / 10 : (c.fat ? Math.round(c.fat * factor * 10) / 10 : (c.fatGrams ? Math.round(c.fatGrams * factor * 10) / 10 : 0)));
+  const scaledTotalFat = Math.max(rawTotalFat, scaledSatFat);
+  const scaledCal = c.calories ? Math.round(c.calories * factor) : (scaledItemNutrients?.calories || c.calories);
+  const scaledSodium = c.sodium ? Math.round(c.sodium * factor) : (scaledItemNutrients?.sodium || c.sodium);
+
+  if (scaledItemNutrients) {
+    scaledItemNutrients.protein = scaledP;
+    scaledItemNutrients.carbohydrates = scaledCarbs;
+    scaledItemNutrients.totalFat = scaledTotalFat;
+    scaledItemNutrients.saturatedFat = scaledSatFat;
+    scaledItemNutrients.calories = scaledCal;
+    scaledItemNutrients.sodium = scaledSodium;
+  }
+
+  return {
+    ...c,
+    weightGrams: cWeight ? Math.round(cWeight * factor) : cWeight,
+    estimatedWeightGrams: cEstWeight ? Math.round(cEstWeight * factor) : cEstWeight,
+    calories: scaledCal,
+    protein: scaledP,
+    proteinGrams: scaledP,
+    carbohydrates: scaledCarbs,
+    carbs: scaledCarbs,
+    carbsGrams: scaledCarbs,
+    totalFat: scaledTotalFat,
+    fat: scaledTotalFat,
+    fatGrams: scaledTotalFat,
+    saturatedFat: scaledSatFat,
+    sodium: scaledSodium,
+    nutrients: scaledItemNutrients || c.nutrients,
+    truthNutrients: scaledTruthNutrients || c.truthNutrients,
+    nutritionFacts: scaledItemNutrients || c.nutritionFacts,
+  };
+}
+
 function scaleSubcomponents(subComps: any[] | undefined, factor: number): any[] | undefined {
   if (!Array.isArray(subComps)) return subComps;
-  return subComps.map((c: any) => {
-    if (!c || typeof c !== 'object') return c;
-    const cWeight = c.weightGrams || c.estimatedWeightGrams;
-    const cEstWeight = c.estimatedWeightGrams || c.weightGrams;
-    const scaledItemNutrients = scaleNutrientObj(c.nutrients || c.nutritionFacts, factor);
-    const scaledTruthNutrients = scaleNutrientObj(c.truthNutrients, factor);
-
-    const scaledP = scaledItemNutrients?.protein ?? (c.protein ? Math.round(c.protein * factor * 10) / 10 : (c.proteinGrams ? Math.round(c.proteinGrams * factor * 10) / 10 : 0));
-    const scaledCarbs = scaledItemNutrients?.carbohydrates ?? (c.carbohydrates ? Math.round(c.carbohydrates * factor * 10) / 10 : (c.carbs ? Math.round(c.carbs * factor * 10) / 10 : (c.carbsGrams ? Math.round(c.carbsGrams * factor * 10) / 10 : 0)));
-    const scaledSatFat = c.saturatedFat ? Math.round(c.saturatedFat * factor * 10) / 10 : (scaledItemNutrients?.saturatedFat || 0);
-    const rawTotalFat = scaledItemNutrients?.totalFat ?? (c.totalFat ? Math.round(c.totalFat * factor * 10) / 10 : (c.fat ? Math.round(c.fat * factor * 10) / 10 : (c.fatGrams ? Math.round(c.fatGrams * factor * 10) / 10 : 0)));
-    const scaledTotalFat = Math.max(rawTotalFat, scaledSatFat);
-    const scaledCal = c.calories ? Math.round(c.calories * factor) : (scaledItemNutrients?.calories || c.calories);
-    const scaledSodium = c.sodium ? Math.round(c.sodium * factor) : (scaledItemNutrients?.sodium || c.sodium);
-
-    if (scaledItemNutrients) {
-      scaledItemNutrients.protein = scaledP;
-      scaledItemNutrients.carbohydrates = scaledCarbs;
-      scaledItemNutrients.totalFat = scaledTotalFat;
-      scaledItemNutrients.saturatedFat = scaledSatFat;
-      scaledItemNutrients.calories = scaledCal;
-      scaledItemNutrients.sodium = scaledSodium;
-    }
-
-    return {
-      ...c,
-      weightGrams: cWeight ? Math.round(cWeight * factor) : cWeight,
-      estimatedWeightGrams: cEstWeight ? Math.round(cEstWeight * factor) : cEstWeight,
-      calories: scaledCal,
-      protein: scaledP,
-      proteinGrams: scaledP,
-      carbohydrates: scaledCarbs,
-      carbs: scaledCarbs,
-      carbsGrams: scaledCarbs,
-      totalFat: scaledTotalFat,
-      fat: scaledTotalFat,
-      fatGrams: scaledTotalFat,
-      saturatedFat: scaledSatFat,
-      sodium: scaledSodium,
-      nutrients: scaledItemNutrients || c.nutrients,
-      truthNutrients: scaledTruthNutrients || c.truthNutrients,
-      nutritionFacts: scaledItemNutrients || c.nutritionFacts,
-    };
-  });
+  return subComps.map((c: any) => scaleOneSubcomponent(c, factor));
 }
 
 export function scaleMealPortion<T extends FoodLogLike>(currentLog: T, ratio: number): T {
@@ -404,6 +406,10 @@ export function scaleSingleDishPortion<T extends FoodLogLike>(currentLog: T, dis
   };
   items[dishIdx] = updatedDish;
 
+  return recomputeMealTotals(currentLog, items);
+}
+
+function recomputeMealTotals<T extends FoodLogLike>(currentLog: T, items: any[]): T {
   const newTotalWeight = items.reduce((acc, it) => acc + (Number(it.weightGrams || it.estimatedWeightGrams) || 0), 0);
   const newTotalCalories = items.reduce((acc, it) => acc + (Number(it.calories) || 0), 0);
   const newTotalSatFat = Math.round(items.reduce((acc, it) => acc + (Number(it.saturatedFat) || 0), 0) * 10) / 10;
@@ -497,6 +503,127 @@ export function scaleSingleDishPortion<T extends FoodLogLike>(currentLog: T, dis
   }
 
   return resLog;
+}
+
+/**
+ * Applies staged per-component portion weights to one dish in a single pass.
+ * Each staged component is rescaled to its chosen grams (same single-scaler
+ * math as every other path: R = chosen / current); untouched components keep
+ * their current numbers. The dish total is the sum of its parts, and the meal
+ * totals recompute from the updated rows — one recalculation for the whole
+ * selection set, never one per dropdown.
+ *
+ * `stagedByCompIdx` maps component position (0-based, same order the UI tabs
+ * list) to chosen grams. Components without an entry are left unchanged.
+ * Dishes with no component list fall back to a uniform dish scale toward the
+ * staged combined total.
+ */
+export function applyStagedComponentWeights<T extends FoodLogLike>(
+  currentLog: T,
+  dishIdx: number,
+  stagedByCompIdx: Record<number, number>
+): T {
+  const items = [...(currentLog.itemsBreakdown || [])];
+  const dish = items[dishIdx];
+  if (!dish) return currentLog;
+
+  const compListKey =
+    (Array.isArray(dish.compositeSiblings) && dish.compositeSiblings.length > 0)
+      ? 'compositeSiblings'
+      : (Array.isArray(dish.componentsDetailList) && dish.componentsDetailList.length > 0)
+        ? 'componentsDetailList'
+        : (Array.isArray(dish.components) && dish.components.length > 0 ? 'components' : null);
+
+  const stagedEntries = Object.entries(stagedByCompIdx || {})
+    .map(([k, v]) => [Number(k), Math.round(Number(v))] as [number, number])
+    .filter(([k, v]) => Number.isInteger(k) && k >= 0 && Number.isFinite(v) && v > 0);
+  if (stagedEntries.length === 0) return currentLog;
+
+  if (!compListKey) {
+    const currentDishW = Number(dish.weightGrams || dish.estimatedWeightGrams) || 0;
+    const stagedTotal = stagedEntries.reduce((acc, [, v]) => acc + v, 0);
+    if (!(currentDishW > 0) || !(stagedTotal > 0)) return currentLog;
+    return scaleSingleDishPortion(currentLog, dishIdx, stagedTotal / currentDishW);
+  }
+
+  const currentDishW = Number(dish.weightGrams || dish.estimatedWeightGrams) || 0;
+  const comps = [...(dish[compListKey] as any[])];
+  let anyStaged = false;
+  const newComps = comps.map((c: any, i: number) => {
+    const hit = stagedEntries.find(([k]) => k === i);
+    if (!hit) return c;
+    const curW = Number(c?.weightGrams || c?.estimatedWeightGrams) || 0;
+    if (!(curW > 0)) return c;
+    anyStaged = true;
+    const scaled = scaleOneSubcomponent(c, hit[1] / curW);
+    scaled.weightGrams = hit[1];
+    scaled.estimatedWeightGrams = hit[1];
+    return scaled;
+  });
+  if (!anyStaged) return currentLog;
+
+  const compW = (c: any) => Number(c?.weightGrams || c?.estimatedWeightGrams) || 0;
+  const newDishW = newComps.reduce((acc, c) => acc + compW(c), 0);
+  const sumKey = (get: (c: any) => number, round: (n: number) => number) =>
+    round(newComps.reduce((acc, c) => acc + get(c), 0));
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  const dishNutrients: Record<string, any> = { ...(dish.nutrients || {}) };
+  dishNutrients.calories = sumKey((c) => Number(c.calories ?? c.nutrients?.calories) || 0, Math.round);
+  const sumSatFat = sumKey((c) => Number(c.saturatedFat ?? c.nutrients?.saturatedFat) || 0, r1);
+  const sumSodium = sumKey((c) => Number(c.sodium ?? c.nutrients?.sodium) || 0, Math.round);
+  dishNutrients.saturatedFat = sumSatFat;
+  dishNutrients.sodium = sumSodium;
+  const compNutKeys = new Set<string>();
+  newComps.forEach((c) => {
+    if (c?.nutrients && typeof c.nutrients === 'object') {
+      Object.keys(c.nutrients).forEach((k) => compNutKeys.add(k));
+    }
+  });
+  compNutKeys.forEach((k) => {
+    dishNutrients[k] = r1(newComps.reduce((acc, c) => {
+      const val = c?.nutrients?.[k];
+      return acc + (typeof val === 'number' ? val : 0);
+    }, 0));
+  });
+  if (dishNutrients.totalFat != null && dishNutrients.saturatedFat != null) {
+    if (dishNutrients.totalFat < dishNutrients.saturatedFat) {
+      dishNutrients.totalFat = dishNutrients.saturatedFat;
+    }
+  }
+
+  const dishBaseW = currentDishW > 0
+    ? currentDishW / (Number(dish.portionRatio) || 1.0)
+    : newDishW;
+  const dishRatio = dishBaseW > 0 ? Math.round((newDishW / dishBaseW) * 1000) / 1000 : 1.0;
+  const dishFactor = currentDishW > 0 ? newDishW / currentDishW : 1.0;
+
+  const updatedDish = {
+    ...dish,
+    [compListKey]: newComps,
+    // Alternate component views stay proportionally consistent.
+    compositeSiblings: compListKey === 'compositeSiblings' ? newComps : scaleSubcomponents(dish.compositeSiblings, dishFactor),
+    componentsDetailList: compListKey === 'componentsDetailList' ? newComps : scaleSubcomponents(dish.componentsDetailList, dishFactor),
+    components: compListKey === 'components' ? newComps : scaleSubcomponents(dish.components, dishFactor),
+    weightGrams: newDishW,
+    estimatedWeightGrams: newDishW,
+    calories: dishNutrients.calories,
+    protein: dishNutrients.protein ?? dish.protein,
+    proteinGrams: dishNutrients.proteinGrams ?? dishNutrients.protein ?? dish.proteinGrams,
+    carbohydrates: dishNutrients.carbohydrates ?? dish.carbohydrates,
+    carbs: dishNutrients.carbs ?? dishNutrients.carbohydrates ?? dish.carbs,
+    carbsGrams: dishNutrients.carbsGrams ?? dishNutrients.carbohydrates ?? dish.carbsGrams,
+    totalFat: dishNutrients.totalFat ?? dish.totalFat,
+    fat: dishNutrients.fat ?? dishNutrients.totalFat ?? dish.fat,
+    fatGrams: dishNutrients.fatGrams ?? dishNutrients.totalFat ?? dish.fatGrams,
+    saturatedFat: sumSatFat,
+    sodium: sumSodium,
+    nutrients: dishNutrients,
+    portionRatio: dishRatio,
+    portionDescription: newDishW ? `${newDishW}g` : `${dishRatio}x`,
+  };
+  items[dishIdx] = updatedDish;
+
+  return recomputeMealTotals(currentLog, items);
 }
 
 export interface PortionChoicesResult<T> {

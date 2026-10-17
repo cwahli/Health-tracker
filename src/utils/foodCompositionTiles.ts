@@ -142,3 +142,46 @@ export function mapDisplayedScoutItems(
     };
   });
 }
+
+/**
+ * Compare-mode crop dedupe (class: identical scout crops rendered N times).
+ * Groups tiles that resolve to the exact same pixels — same photo index plus
+ * same rounded bounding box (a missing box crops as the full photo) — into one
+ * tile carrying every member. The row renders one tile per unique crop instead
+ * of repeating the same photo per item. Pure; order-stable (first-seen wins).
+ */
+export interface CropTile {
+  key: string;
+  sourceImageIndex: number;
+  boundingBox2D: any;
+  /** Indices into the input array (preview navigates by these). */
+  memberIndices: number[];
+  representativeIndex: number;
+}
+
+export function uniqueCropTiles(items: any[] | null | undefined): CropTile[] {
+  const list = Array.isArray(items) ? items : [];
+  const tiles: CropTile[] = [];
+  const byKey = new Map<string, CropTile>();
+  list.forEach((item: any, i: number) => {
+    const rawIdx = item && typeof item.sourceImageIndex === 'number' ? item.sourceImageIndex : 0;
+    const bb = item ? item.boundingBox2D : null;
+    // A missing box renders as the full photo, same pixels as an explicit
+    // full-image box — one key so they dedupe together.
+    let boxKey = 'full';
+    if (Array.isArray(bb) && bb.length === 4) {
+      const r = bb.map((n: any) => Math.round(Number(n)));
+      const isFull = r[0] <= 10 && r[1] <= 10 && r[2] >= 990 && r[3] >= 990;
+      boxKey = isFull ? 'full' : r.join(',');
+    }
+    const key = `${rawIdx}|${boxKey}`;
+    let tile = byKey.get(key);
+    if (!tile) {
+      tile = { key, sourceImageIndex: rawIdx, boundingBox2D: bb ?? null, memberIndices: [], representativeIndex: i };
+      byKey.set(key, tile);
+      tiles.push(tile);
+    }
+    tile.memberIndices.push(i);
+  });
+  return tiles;
+}

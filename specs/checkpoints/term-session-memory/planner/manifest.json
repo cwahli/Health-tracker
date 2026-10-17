@@ -1,0 +1,16 @@
+{
+  "slug": "term-session-memory",
+  "node": "planner",
+  "at": "2026-10-13T17:58:26.268Z",
+  "git": {
+    "head": "745cfd1b51fd1b42657e00bfdbebcf79bd3c7ad4",
+    "stashCommit": null
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/term-session-memory.md"
+  ]
+}

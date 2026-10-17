@@ -4,8 +4,11 @@
 // Run: node scripts/assert-tui-gateway.test.mjs
 import crypto from 'node:crypto';
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal, isWebStatic, verifyWithRefererFallback } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, SHELL_ESCAPE_JS, landingLocationFor, authorizeForgeAtGateway, isWebUiHost, webUiHost, webUiUpstream, webUiAuthHeader, webAuthShimJs, injectWebAuthShim, webUpstreamQuery, WEB_AUTH_STORAGE_KEY, refererToken, describeWebRefusal, isWebStatic, verifyWithRefererFallback, tgtgUpstream, tgtgHost, isTgtgHost, agendaUpstream, agendaHost, isAgendaHost } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -276,7 +279,7 @@ console.log('assert-tui-gateway:');
   check('the upstream body survives the injection', html.includes('console.log("hello")'));
   check('the fullscreen button ships with the page', html.includes('tui-fsbtn'));
   check('exactly our widget scripts are added, nothing else',
-    (html.match(/<script/gi) || []).length === (upstream.match(/<script/gi) || []).length + 5
+    (html.match(/<script/gi) || []).length === (upstream.match(/<script/gi) || []).length + 6
     && html.includes('requestFullscreen'));
   check('the page is not gzip bytes labelled as html', !html.startsWith('\u001f\u008b'));
   check('no credential is embedded in the page', !/tui_session=/.test(html) && !/var TOKEN =/.test(html));
@@ -345,6 +348,82 @@ console.log('assert-tui-gateway:');
     );
     check('without Telegram the button hides itself', btn2.style.display === 'none');
   }
+  // One burger per surface: the framed shell header owns nav, so the
+  // standalone page carries a top-level-only escape (hidden when framed) —
+  // a bare domain or pasted /tty*/ link is never a dead end without nav
+  // (live 2026-10-11). The old floating in-frame burger with its per-surface
+  // double meaning stays gone; expand, fullscreen and the swipe lock stay.
+  check('no floating shell-burger is injected anymore',
+    !FULLSCREEN_WIDGET_JS.includes('shell-burger'));
+  check('the standalone escape hides itself when framed',
+    SHELL_ESCAPE_JS.includes('window.top!==window.self'));
+  check('the standalone escape returns to the shell terminal tab',
+    SHELL_ESCAPE_JS.includes('/app/app?token=')
+    && SHELL_ESCAPE_JS.includes('&tab=tui')
+    && SHELL_ESCAPE_JS.includes('/app/login?tab=tui'));
+  check('expand + fullscreen + swipe lock survive the removal',
+    FULLSCREEN_WIDGET_JS.includes('disableVerticalSwipes')
+    && FULLSCREEN_WIDGET_JS.includes('requestFullscreen')
+    && FULLSCREEN_WIDGET_JS.includes('tg.expand'));
+  // The served terminal page itself: exactly one burger per surface — the
+  // shell header owns nav when framed, so the page carries only the
+  // top-level escape (hidden inside the shell's iframe).
+  {
+    const ttyd = http.createServer((rq, rs) => {
+      rs.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      rs.end('<html><head></head><body><div class="xterm"></div></body></html>');
+    });
+    await new Promise((r) => ttyd.listen(0, '127.0.0.1', r));
+    const env = { TUI_GATEWAY_SECRET: SECRET, TUI_BOT_TOKEN_VM: TOKEN,
+      TUI_TTYD_URL: `http://127.0.0.1:${ttyd.address().port}`,
+      TUI_TTYD_CREDENTIAL: Buffer.from('tui:x').toString('base64') };
+    const token = issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+    const page = await new Promise((resolve, reject) => {
+      let code = 0; let body = '';
+      const res = { writeHead: (c) => { code = c; }, write: (c) => { body += c; },
+        end: (b) => { body += String(b || ''); resolve({ code, body }); } };
+      createGateway({ env, log: () => {} })(
+        { method: 'GET', url: '/tty/', headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` },
+          [Symbol.asyncIterator]: async function* () {} }, res).catch(reject);
+      setTimeout(() => resolve({ code: -2, body: '' }), 5000).unref?.();
+    });
+    ttyd.close();
+    check('the served terminal page has no floating burger',
+      page.code === 200 && !page.body.includes('shell-burger'));
+    check('the served terminal page carries the top-level shell escape',
+      page.body.includes('tui-shellbtn') && page.body.includes('data-bot="vm"'));
+    check('the escape hides when framed (shell header owns nav there)',
+      page.body.includes('window.top!==window.self'));
+    check('the served page keeps the fullscreen button + scroll bridge',
+      page.body.includes('tui-fsbtn') && page.body.includes('emitFine'));
+    {
+      const runEscape = (framed) => {
+        const self = {};
+        const escBtn = { style: {}, getAttribute: () => 'vm',
+          addEventListener: (ev, fn) => { escBtn[ev] = fn; } };
+        const loc = { search: `?token=${encodeURIComponent(token)}`, href: '' };
+        let threw = '';
+        try {
+          // eslint-disable-next-line no-new-func
+          new Function('window', 'document', 'location', SHELL_ESCAPE_JS)(
+            framed ? { top: {}, self } : { top: self, self },
+            { getElementById: () => escBtn }, loc,
+          );
+        } catch (e) { threw = String((e && e.message) || e); }
+        if (typeof escBtn.click === 'function') {
+          try { escBtn.click(); } catch (e) { threw = threw || String((e && e.message) || e); }
+        }
+        return { threw, shown: escBtn.style.display, target: loc.href };
+      };
+      const top = runEscape(false);
+      check(`the escape runs without throwing${top.threw ? ` — ${top.threw}` : ''}`, top.threw === '');
+      check('the escape shows itself top-level', top.shown === 'block');
+      check('the escape returns to the shell terminal tab with the token',
+        top.target.startsWith('/app/app?token=') && top.target.includes('&bot=vm') && top.target.includes('&tab=tui'));
+      const framed = runEscape(true);
+      check('the escape stays hidden when framed', framed.threw === '' && framed.shown !== 'block' && framed.target === '');
+    }
+  }
 
   // 12a4. The LAYOUT pass must not depend on Telegram, and it must fill
   //       whatever the viewport actually is — no device is special-cased.
@@ -406,10 +485,14 @@ console.log('assert-tui-gateway:');
   //                   half page = ctrl+meta+u / ctrl+meta+d
   //                   (TRANSCRIPT_KEYBINDS in
   //                   sdk/apps/cli/src/tui/hooks/transcript-keybinds.ts)
-  //       So the bridge sends BARE PageUp / PageDown: the one binding both
-  //       lanes share. A ctrl+alt bridge scrolls opencode and is dead on a
-  //       cline lane (cline wants meta, not alt) — the "scrolls on VM2, dead
-  //       on VM" shape. Both directions are paced: a page key jumps a full
+  //       So the touch bridge sends BARE PageUp / PageDown: the one binding
+  //       both lanes share through this xterm. A fine-key bridge is dead on a
+  //       cline lane — not because cline wants meta (it does, per TRANSCRIPT
+  //       KEYBINDS) but because ttyd 1.7.7's xterm emits ZERO PTY bytes for
+  //       Ctrl+Meta+letter, trusted or synthetic (lab keyecho-clean 2026-10-11:
+  //       C-M-u/d/b/f silent, C-A + bare page keys bytes). That stranded VM4
+  //       live: keys dispatched, zero movement, while key-counting probes
+  //       stayed green. Both directions are paced: a page key jumps a full
   //       page, so an unpaced burst would skip screens per touchmove.
   {
     const handlers = {}; const keys = [];
@@ -467,35 +550,26 @@ console.log('assert-tui-gateway:');
     check('a small nudge does not scroll', keys.length === t0);
     check('a nudge is not taken off the page', prevented === 0);
 
-    // Fine granularity: a LINE of travel emits the line keys, not a page key.
-    // A page key is a WHOLE screen, so keying on pagePx made any drag feel
-    // like a few full-screen jumps however far the finger travelled. linePx is
-    // 18px, so a 300px drag crosses ~16 lines (capped at MAX_LINE_KEYS per
-    // touchmove, paced to LINE_COOLDOWN_MS).
+    // Page granularity: a drag emits BARE page keys, never modified keys.
+    // The old fine-key drain sent ctrl+alt (opencode) + ctrl+meta (cline) per
+    // line of travel — but Ctrl+Meta+letter never becomes PTY bytes in this
+    // xterm (see the header note), so every cline drag silently died (VM4).
+    // linePx stays only as the ACTIVATION threshold (a tap still types);
+    // keys fire per pagePx of travel through the 300ms emit cooldown.
     reset();
     let b = keys.length;
     drag(600, 300, 6);
-    const fineDown = keys.slice(b).filter((k) => k.type === 'keydown');
-    // Per gesture step the bridge sends BOTH lanes' finest keys, because the
-    // two binding sets are disjoint (opencode ctrl+alt, cline ctrl+meta) and
-    // the bridge cannot know which lane is behind the terminal.
-    const lineKeys = fineDown.filter((k) => k.key === 'e');
-    const halfKeys = fineDown.filter((k) => k.key === 'd');
-    check('an upward drag sends the opencode LINE key (ctrl+alt+e)',
-      lineKeys.length >= 1 && lineKeys.every((k) => k.ctrlKey === true && k.altKey === true));
-    check('...and the cline half-page key (ctrl+meta+d), since the bridge',
-      halfKeys.length >= 1 && halfKeys.every((k) => k.ctrlKey === true && k.metaKey === true));
-    check('the two lanes never both fire on one binding (disjoint modifiers)',
-      lineKeys.every((k) => k.metaKey === false) && halfKeys.every((k) => k.altKey === false));
-    check('a drag emits more steps than the old one-page-per-drag bridge',
-      lineKeys.length >= 3, `only ${lineKeys.length} line keys`);
-    check('one touchmove never floods (MAX_LINE_KEYS per move)',
-      lineKeys.length <= 6 * 6);
+    const dragDown = keys.slice(b).filter((k) => k.type === 'keydown');
+    const downs = dragDown.filter((k) => k.keyCode === 34);
+    check('an upward drag sends bare PageDown (both lanes bind it)',
+      downs.length >= 1 && downs.every((k) => k.ctrlKey === false && k.altKey === false && k.metaKey === false));
+    check('touch never sends modified line keys (dead on the cline xterm)',
+      dragDown.every((k) => k.key !== 'e' && k.key !== 'd' && k.key !== 'y' && k.key !== 'u'));
+    check('page keys are paced by the cooldown, not flooded per move',
+      downs.length <= 6);
     check('a key is released as well as pressed',
-      keys.slice(b).some((k) => k.type === 'keyup' && k.key === 'e'));
+      keys.slice(b).some((k) => k.type === 'keyup' && k.keyCode === 34));
     check('the drag is taken off the page once scrolling', prevented >= 1);
-    check('NO bare page key is sent while the fine path works',
-      fineDown.every((k) => k.key !== 'PageDown' && k.key !== 'PageUp'));
 
     // A tap smaller than one line must not scroll: a tap still types.
     // reset() first: drag() never sends touchend, so without it this gesture
@@ -506,15 +580,13 @@ console.log('assert-tui-gateway:');
     handlers.touchmove({ touches: [{ clientY: 594 }], preventDefault() { prevented += 1; } });
     check('a sub-line nudge does not scroll', keys.length === t1);
 
-    // Up: the opposite direction sends y / u, not e / d.
+    // Up: the opposite direction sends bare PageUp (keyCode 33).
     reset();
     b = keys.length;
     drag(300, 600, 6);
-    const fineUp = keys.slice(b).filter((k) => k.type === 'keydown');
-    check('a downward drag sends the opencode line key (ctrl+alt+y)',
-      fineUp.some((k) => k.key === 'y' && k.ctrlKey === true && k.altKey === true));
-    check('...and the cline half-page key (ctrl+meta+u)',
-      fineUp.some((k) => k.key === 'u' && k.ctrlKey === true && k.metaKey === true));
+    const dragUp = keys.slice(b).filter((k) => k.type === 'keydown');
+    check('a downward drag sends bare PageUp',
+      dragUp.some((k) => k.keyCode === 33 && k.ctrlKey === false && k.altKey === false && k.metaKey === false));
 
     // Multi-touch is left alone so pinch-zoom survives.
     reset();
@@ -584,7 +656,129 @@ console.log('assert-tui-gateway:');
   check('the readout flag keeps the session token first',
     landingLocationFor('vm2', 'TOK', { TUI_PAGE_DEBUG: '1' }) === '/tty2/?token=TOK&tui_measure=1');
 
-  // 12b. The bootstrap we do serve is ours, so it is executed with stubs.
+  // 12a8. Operator-only terminal kill (shell memory saver): a non-operator
+//       token is refused, an unknown terminal is a 400, and a known bot with
+//       no live tmux session reports killed:false honestly instead of failing
+//       (off-box backends such as the grok TG router have no local session).
+{
+  const kill = async (botId, target, method = 'POST') => {
+    const env = { TUI_GATEWAY_SECRET: SECRET, TUI_ROUTE_TESTKILL_PATH: '/ttykill/' };
+    const token = issueToken({ botId, chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+    const handle = createGateway({ env, log: () => {} });
+    return new Promise((resolve, reject) => {
+      let code = 0; let body = '';
+      const res = { writeHead: (c) => { code = c; }, end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+      const req = { method, url: '/api/ttys/kill',
+        headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}`, 'content-type': 'application/json' },
+        on: (ev, fn) => { if (ev === 'data') fn(JSON.stringify({ bot: target })); if (ev === 'end') fn(); } };
+      handle(req, res).catch(reject);
+    });
+  };
+  const list = async (botId) => {
+    const env = { TUI_GATEWAY_SECRET: SECRET, TUI_ROUTE_TESTKILL_PATH: '/ttykill/' };
+    const token = issueToken({ botId, chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+    const handle = createGateway({ env, log: () => {} });
+    return new Promise((resolve, reject) => {
+      let code = 0; let body = '';
+      const res = { writeHead: (c) => { code = c; }, end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+      handle({ method: 'GET', url: '/api/ttys',
+        headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` } }, res).catch(reject);
+    });
+  };
+  const listed = await list('webop');
+  check('the picker list admits a registered bot',
+    listed.code === 200 && JSON.parse(listed.body).ttys.some((r) => r.bot === 'testkill'));
+  const refused = await kill('vm', 'testkill');
+  check('a non-operator token cannot kill', refused.code === 403);
+  const unknown = await kill('webop', 'nosuchbot');
+  check('an unknown terminal is a 400, not a tmux name', unknown.code === 400);
+  const idle = await kill('webop', 'testkill');
+  const idleBody = JSON.parse(idle.body || '{}');
+  check('a known bot with no live session reports killed:false, not failure',
+    idle.code === 200 && idleBody.ok === true && idleBody.killed === false && idleBody.tmux === 'VM-tui-testkill');
+  const get = await kill('webop', 'testkill', 'GET');
+  check('the kill route is POST only', get.code === 405);
+
+  // 12a9. Per-bot liveness for the shell rows: dormant by default, live
+  //       while a real tmux session exists, dormant again after the kill.
+  const status = async (botId) => {
+    const env = { TUI_GATEWAY_SECRET: SECRET, TUI_ROUTE_TESTKILL_PATH: '/ttykill/' };
+    const token = issueToken({ botId, chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+    const handle = createGateway({ env, log: () => {} });
+    return new Promise((resolve, reject) => {
+      let code = 0; let body = '';
+      const res = { writeHead: (c) => { code = c; }, end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+      handle({ method: 'GET', url: '/api/ttys/status',
+        headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` } }, res).catch(reject);
+    });
+  };
+  const row = (code, body, bot) => {
+    if (code !== 200) return 'http' + code;
+    const j = JSON.parse(body || '{}');
+    const r = (j.status || []).find((s) => s.bot === bot);
+    return r ? (r.live ? 'live' : 'dormant') : 'missing';
+  };
+  check('a dormant bot reports dormant', row(...await (async () => { const r = await status('webop'); return [r.code, r.body]; })(), 'testkill') === 'dormant');
+  const { execFileSync } = await import('node:child_process');
+  execFileSync('tmux', ['new-session', '-d', '-s', 'VM-tui-testkill', 'sleep 300']);
+  const sLive = await status('webop');
+  check('a bot with a live tmux session reports live', row(sLive.code, sLive.body, 'testkill') === 'live');
+  await kill('webop', 'testkill');
+  const sDead = await status('webop');
+  check('the kill flips it back to dormant', row(sDead.code, sDead.body, 'testkill') === 'dormant');
+  try { execFileSync('tmux', ['kill-session', '-t', 'VM-tui-testkill']); } catch {}
+  // The status door matches the list door (any valid token): liveness is
+  // deployment shape, not session data. Killing stays operator-only above.
+  const sVm = await status('vm');
+  check('any valid token reads the status (same door as the list)',
+    sVm.code === 200 && JSON.parse(sVm.body || '{}').status.some((s) => s.bot === 'testkill'));
+  const bare = await new Promise((resolve, reject) => {
+    const env = { TUI_GATEWAY_SECRET: SECRET, TUI_ROUTE_TESTKILL_PATH: '/ttykill/' };
+    const handle = createGateway({ env, log: () => {} });
+    let code = 0;
+    const res = { writeHead: (c) => { code = c; }, end: () => resolve(code) };
+    handle({ method: 'GET', url: '/api/ttys/status', headers: {} }, res).catch(reject);
+  });
+  check('no token gets no status', bare === 401);
+}
+
+// 12b. Agenda sections on the app host (/agenda/*): same upstream as the
+//      agenda host, prefix stripped, gateway token never proxied upstream.
+{
+  const seen = [];
+  const agenda = http.createServer((rq, rs) => {
+    seen.push(rq.url);
+    rs.writeHead(200, { 'content-type': 'application/json' });
+    rs.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise((r) => agenda.listen(0, '127.0.0.1', r));
+  const env = { TUI_GATEWAY_SECRET: SECRET, AGENDA_UPSTREAM: `http://127.0.0.1:${agenda.address().port}` };
+  const token = issueToken({ botId: 'web', chatId: 'firebase:1', secret: SECRET, ttlSec: 900 });
+  const call = (url, headers = {}) => new Promise((resolve, reject) => {
+    let code = 0; let body = '';
+    const res = { writeHead: (c) => { code = c; }, write: () => true,
+      end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+    createGateway({ env, log: () => {} })(
+      { method: 'GET', url, headers, [Symbol.asyncIterator]: async function* () {} }, res).catch(reject);
+    setTimeout(() => resolve({ code: -2, body: '' }), 5000).unref?.();
+  });
+  const q = `token=${encodeURIComponent(token)}`;
+  const api = await call(`/agenda/api/tax-status?${q}`, { host: 'app.example' });
+  check('a tokened agenda path proxies', api.code === 200);
+  check('the prefix is stripped upstream', seen.some((u) => u === '/api/tax-status'));
+  check('the gateway token never reaches upstream', seen.every((u) => !u.includes('token=')));
+  const root = await call(`/agenda/?${q}&tab=tax`, { host: 'app.example' });
+  check('the section query survives the strip', seen.some((u) => u === '/?tab=tax'));
+  void root;
+  check('no token gets no agenda path', (await call('/agenda/api/tax-status', { host: 'app.example' })).code === 401);
+  check('a page referer admits the framed subresource call',
+    (await call('/agenda/api/agenda', { host: 'app.example', referer: `https://app.example/agenda/?${q}` })).code === 200);
+  check('a lookalike path is not an agenda route',
+    (await call(`/agendax?${q}`, { host: 'app.example' })).code !== 200);
+  agenda.close();
+}
+
+// 12b. The bootstrap we do serve is ours, so it is executed with stubs.
   const boot = await bootstrapThroughGateway();
   const scripts = [...boot.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]);
   check('the bootstrap has a script', scripts.length > 0);
@@ -785,11 +979,30 @@ console.log('assert-tui-gateway:');
       const r = await call('/tty/token', { host: 't.example', referer: `https://t.example/?token=${encodeURIComponent(old)}` });
       return r.code === 200 && String(r.h['set-cookie'] || '').includes(COOKIE_NAME);
     })());
-  check('a tokened TUI root deep-links to the terminal path, never the bootstrap',
+  // A tokened TUI root lands on the shell for a top-level visit (typed
+  // domain, bookmark: the raw ttyd page has no burger and no way back —
+  // live 2026-10-11), while the shell's own terminal iframe keeps the fast
+  // tty path (shell Referer and/or dest=iframe). No tab is forced: the
+  // shell opens its last-visited tab (live 2026-10-11: bare domain kept
+  // rebooting into the terminal instead of the previous page).
+  check('a top-level tokened TUI root lands on the shell with no forced tab, never the bootstrap',
     await (async () => {
       const r = await call(`/?token=${encodeURIComponent(token)}`, { host: 't.example' });
-      return r.code === 302 && String(r.h.location || '').startsWith('/tty/')
+      const loc = String(r.h.location || '');
+      return r.code === 302 && loc.startsWith('/app/app?token=') && loc.includes('&bot=vm') && !loc.includes('tab=')
         && String(r.h['set-cookie'] || '').includes(COOKIE_NAME);
+    })());
+  check('the shell terminal iframe keeps the fast tty path (shell referer)',
+    await (async () => {
+      const r = await call(`/?bot=vm&token=${encodeURIComponent(token)}`,
+        { host: 't.example', referer: `https://t.example/app/app?token=${encodeURIComponent(token)}&bot=vm&tab=tui` });
+      return r.code === 302 && String(r.h.location || '').startsWith('/tty/');
+    })());
+  check('the shell terminal iframe keeps the fast tty path (dest iframe)',
+    await (async () => {
+      const r = await call(`/?bot=vm&token=${encodeURIComponent(token)}`,
+        { host: 't.example', 'sec-fetch-dest': 'iframe' });
+      return r.code === 302 && String(r.h.location || '').startsWith('/tty/');
     })());
   check('a bare TUI root still gets the cold bootstrap',
     await (async () => {
@@ -801,6 +1014,23 @@ console.log('assert-tui-gateway:');
         setTimeout(() => resolve(-2), 5000).unref?.();
       });
       return code === 200;
+    })());
+  // Cold-browser forward: no initData and no token means an expired (or
+  // first) session — the login entry must NOT force tab=tui, or every
+  // re-login reboots into the terminal instead of the previous page (the
+  // shell opens its last-visited tab, terminal for a first visit).
+  check('the cold bootstrap forwards browsers to login with no forced tab',
+    await (async () => {
+      const chunks = [];
+      await new Promise((resolve, reject) => {
+        const res = { writeHead: () => {}, write: (c) => { chunks.push(Buffer.from(String(c))); return true; }, end: (b) => { if (b) chunks.push(Buffer.from(String(b))); resolve(null); } };
+        createGateway({ env, log: () => {} })(
+          { method: 'GET', url: '/', headers: { host: 't.example' }, [Symbol.asyncIterator]: async function* () {} }, res).catch(reject);
+        setTimeout(() => resolve(null), 5000).unref?.();
+      });
+      const body = chunks.join('');
+      return body.includes('location.replace("/app/login")')
+        && !body.includes('/app/login?tab=');
     })());
   check('the fallback prefers direct tokens and otherwise needs the referer',
     verifyWithRefererFallback({ headers: { host: 't.example', cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` } }, new URL('http://x/'), SECRET).ok === true
@@ -949,9 +1179,14 @@ console.log('assert-tui-gateway:');
     exch.code === 302 && String(exch.h.location || '').startsWith('/?token='));
 
   const tuiRoot = await call('/', { host: 'tui.health-tracker.co.uk', cookie: `${COOKIE_NAME}=${encodeURIComponent(wtoken)}` });
-  check('a tokened TUI root deep-links to its own terminal path (bot isolation kept)',
-    tuiRoot.code === 302 && String(tuiRoot.h.location || '').startsWith('/tty/')
+  check('a top-level tokened TUI root lands on the shell with no forced tab, never a raw tty (bot isolation kept)',
+    tuiRoot.code === 302 && String(tuiRoot.h.location || '').startsWith('/app/app?token=')
+    && !String(tuiRoot.h.location || '').includes('tab=')
     && !tuiRoot.body.includes('serve index'));
+  const tuiFramed = await call('/?bot=vm&token=' + encodeURIComponent(wtoken),
+    { host: 'tui.health-tracker.co.uk', referer: `https://tui.health-tracker.co.uk/app/app?token=${encodeURIComponent(wtoken)}&bot=vm&tab=tui` });
+  check('the framed TUI root still deep-links to its own terminal path',
+    tuiFramed.code === 302 && String(tuiFramed.h.location || '').startsWith('/tty/'));
 
   // Cookie planting: subresource requests carry no token of their own, so a
   // token-authed proxy plants the presented token as the cookie — otherwise
@@ -1023,6 +1258,18 @@ console.log('assert-tui-gateway:');
   check('web/token refuses a garbage token',
     await (async () => {
       const r = await call('/web/token?token=garbage', { host: 'web.test' });
+      return r.code === 401;
+    })());
+  check('app/token renews a live token with a fresh cookie',
+    await (async () => {
+      const r = await call(`/app/token?token=${encodeURIComponent(wtoken)}`, { host: 'tui.health-tracker.co.uk' });
+      const body = JSON.parse(r.body);
+      return r.code === 200 && body.ok === true && typeof body.token === 'string'
+        && body.token !== wtoken && String(r.h['set-cookie'] || '').includes(COOKIE_NAME);
+    })());
+  check('app/token refuses a garbage token',
+    await (async () => {
+      const r = await call('/app/token?token=garbage', { host: 'tui.health-tracker.co.uk' });
       return r.code === 401;
     })());
   check('the shim renews proactively on a timer',
@@ -1118,6 +1365,493 @@ console.log('assert-tui-gateway:');
   check('proxied html clears site caches so no stale shell survives',
     planted.h['clear-site-data'] === '"cache"');
   serve.close();
+}
+
+// 15. The bag-audit host (META-1 P3.4): the whole host proxies to the
+//     standalone :8892 app behind the shared door — never a sub-path,
+//     because the app's /api/* paths are absolute and a sub-path mount
+//     would break every call. Upstream auth (?k=/cookie/tgauth) untouched.
+{
+  const hostOf = (h) => ({ host: h });
+  check('the tgtg host matches, case-insensitively, port stripped',
+    isTgtgHost({ headers: hostOf('TGTG.Test:443') }, { TGTG_HOST: 'tgtg.test' }) === true);
+  check('the tui host is not the tgtg host',
+    isTgtgHost({ headers: hostOf('tui.health-tracker.co.uk') }, { TGTG_HOST: 'tgtg.test' }) === false);
+  check('no host header is not the tgtg host',
+    isTgtgHost({ headers: {} }, {}) === false);
+  check('the default tgtg host is the served one',
+    tgtgHost({}) === 'tgtg.health-tracker.co.uk');
+  check('the default upstream is the same-box bag service',
+    tgtgUpstream({}) === 'http://127.0.0.1:8892');
+
+  // Through the handler against a stub bag app: the stub records the exact
+  // URL it received, so passthrough (not rewriting) is proven.
+  const seen = [];
+  const bags = http.createServer((rq, rs) => {
+    let body = '';
+    rq.on('data', (c) => { body += c; });
+    rq.on('end', () => {
+      seen.push({ url: rq.url, cookie: rq.headers.cookie || '' });
+      rs.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      rs.end('{"ok":true,"bags":[]}');
+    });
+  });
+  await new Promise((r) => bags.listen(0, '127.0.0.1', r));
+  const bport = bags.address().port;
+  const benv = {
+    TUI_GATEWAY_SECRET: SECRET,
+    TUI_BOT_TOKEN_VM: TOKEN,
+    TGTG_HOST: 'tgtg.test',
+    TGTG_UPSTREAM: `http://127.0.0.1:${bport}`,
+  };
+  const bhandle = createGateway({ env: benv, log: () => {} });
+  const call = (url, headers) => new Promise((resolve) => {
+    const req = {
+      method: 'GET', url, headers: headers || {},
+      [Symbol.asyncIterator]: async function* () {},
+    };
+    const res = {};
+    let code = 0; let hh = {}; const chunks = [];
+    res.writeHead = (c, h) => { code = c; hh = h || {}; };
+    res.write = (c) => { chunks.push(Buffer.from(c)); return true; };
+    res.end = (body) => { if (body) chunks.push(Buffer.from(body)); resolve({ code, h: hh, body: Buffer.concat(chunks).toString('utf8') }); };
+    bhandle(req, res).catch(() => resolve({ code: -1 }));
+    setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+  });
+  const btoken = issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+
+  const refused = await call('/api/bags', { host: 'tgtg.test' });
+  check('the tgtg host without a token is refused, never proxied',
+    refused.code === 401 && seen.length === 0);
+
+  const page = await call('/?k=abc123', { host: 'tgtg.test', cookie: `${COOKIE_NAME}=${encodeURIComponent(btoken)}` });
+  check('a cookied token on the tgtg host reaches the bag app',
+    page.code === 200 && page.body.includes('"bags"'));
+  check('the viewer key passes through untouched (upstream auth owns it)',
+    seen.some((s) => s.url === '/?k=abc123'));
+
+  const api = await call(`/api/bags?token=${encodeURIComponent(btoken)}`, { host: 'tgtg.test' });
+  check('absolute api paths survive the proxy with a query token',
+    api.code === 200 && seen.some((s) => s.url === `/api/bags?token=${encodeURIComponent(btoken)}`));
+
+  const n = seen.length;
+  await call('/api/bags', { host: 'tui.health-tracker.co.uk', cookie: `${COOKIE_NAME}=${encodeURIComponent(btoken)}` });
+  check('the same path on the tui host never reaches the bag app',
+    seen.length === n);
+  bags.close();
+}
+
+// 16. The agenda host (META-1 P3.5: calendar/agenda/stays): same whole-host
+//     pattern. The app has no auth of its own, so the door is the only gate.
+{
+  const hostOf = (h) => ({ host: h });
+  check('the agenda host matches, case-insensitively, port stripped',
+    isAgendaHost({ headers: hostOf('Agenda.Test:443') }, { AGENDA_HOST: 'agenda.test' }) === true);
+  check('the tui host is not the agenda host',
+    isAgendaHost({ headers: hostOf('tui.health-tracker.co.uk') }, { AGENDA_HOST: 'agenda.test' }) === false);
+  check('the tgtg host is not the agenda host',
+    isAgendaHost({ headers: hostOf('tgtg.health-tracker.co.uk') }, { AGENDA_HOST: 'agenda.test', TGTG_HOST: 'tgtg.health-tracker.co.uk' }) === false);
+  check('no host header is not the agenda host',
+    isAgendaHost({ headers: {} }, {}) === false);
+  check('the default agenda host is the served one',
+    agendaHost({}) === 'agenda.health-tracker.co.uk');
+  check('the default upstream is the same-box agenda service',
+    agendaUpstream({}) === 'http://127.0.0.1:8895');
+
+  const aseen = [];
+  const agenda = http.createServer((rq, rs) => {
+    let body = '';
+    rq.on('data', (c) => { body += c; });
+    rq.on('end', () => {
+      aseen.push({ url: rq.url });
+      rs.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      rs.end('{"ok":true,"events":[]}');
+    });
+  });
+  await new Promise((r) => agenda.listen(0, '127.0.0.1', r));
+  const aport = agenda.address().port;
+  const aenv = {
+    TUI_GATEWAY_SECRET: SECRET,
+    TUI_BOT_TOKEN_VM: TOKEN,
+    AGENDA_HOST: 'agenda.test',
+    AGENDA_UPSTREAM: `http://127.0.0.1:${aport}`,
+  };
+  const ahandle = createGateway({ env: aenv, log: () => {} });
+  const acall = (url, headers) => new Promise((resolve) => {
+    const req = {
+      method: 'GET', url, headers: headers || {},
+      [Symbol.asyncIterator]: async function* () {},
+    };
+    const res = {};
+    let code = 0; let hh = {}; const chunks = [];
+    res.writeHead = (c, h) => { code = c; hh = h || {}; };
+    res.write = (c) => { chunks.push(Buffer.from(c)); return true; };
+    res.end = (body) => { if (body) chunks.push(Buffer.from(body)); resolve({ code, h: hh, body: Buffer.concat(chunks).toString('utf8') }); };
+    ahandle(req, res).catch(() => resolve({ code: -1 }));
+    setTimeout(() => resolve({ code: -2 }), 5000).unref?.();
+  });
+  const atoken = issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+
+  const arefused = await acall('/api/agenda', { host: 'agenda.test' });
+  check('the agenda host without a token is refused, never proxied',
+    arefused.code === 401 && aseen.length === 0);
+
+  const agendaPage = await acall('/api/agenda', { host: 'agenda.test', cookie: `${COOKIE_NAME}=${encodeURIComponent(atoken)}` });
+  check('a cookied token on the agenda host reaches the agenda app',
+    agendaPage.code === 200 && agendaPage.body.includes('"events"') && aseen.some((s) => s.url === '/api/agenda'));
+
+  const an = aseen.length;
+  await acall('/api/agenda', { host: 'tgtg.test', cookie: `${COOKIE_NAME}=${encodeURIComponent(atoken)}` });
+  check('the agenda api on the tgtg host stays on its own branch',
+    aseen.length === an);
+  agenda.close();
+}
+
+// 17. The TUI session browser (META-1 P3.6): read-only list plus the one
+//     snapshot write, both bot-bound. Fixture state root — no tmux, no VPS.
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tui-sessions-'));
+  const now = Date.now();
+  const vm = path.join(tmp, 'vm');
+  fs.mkdirSync(vm, { recursive: true });
+  fs.writeFileSync(path.join(vm, 'sessions.json'), JSON.stringify({
+    '111': 'ses_AAA',
+    '222': 'WS\u0000ses_BBB',
+  }));
+  fs.writeFileSync(path.join(vm, 'cline-sessions.json'), JSON.stringify({ '333': '1700000000_ab12' }));
+  fs.writeFileSync(path.join(vm, 'prefs.json'), JSON.stringify({
+    '111': { model: 'opencode/m1' },
+    '333': { model: 'cline:cline-free/m2' },
+  }));
+  fs.writeFileSync(path.join(vm, 'leases.json'), JSON.stringify({ '111': { startedAt: now } }));
+  fs.writeFileSync(path.join(vm, 'tui-open.json'), JSON.stringify({
+    chatId: '222', surface: 'opencode', model: 'opencode/m1',
+    sessionId: 'ses_BBB', workspace: 'WS', at: new Date(now).toISOString(),
+  }));
+  fs.writeFileSync(path.join(vm, 'tui-lease.json'), JSON.stringify({
+    session: 'ses_AAA', heartbeat: now, pane: 'VM-tui', bot: 'vm', clients: 1, since: 0,
+  }));
+
+  const senv = { TUI_GATEWAY_SECRET: SECRET, TUI_BOT_TOKEN_VM: TOKEN, TUI_STATE_ROOT: tmp };
+  const shandle = createGateway({ env: senv, log: () => {} });
+  const server = http.createServer(shandle);
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const sbase = `http://127.0.0.1:${server.address().port}`;
+  const stoken = issueToken({ botId: 'vm', chatId: '111', secret: SECRET, ttlSec: 900 });
+  const scookie = `${COOKIE_NAME}=${encodeURIComponent(stoken)}`;
+  try {
+    const list = await (await fetch(`${sbase}/tui/api/sessions?bot=vm`, { headers: { cookie: scookie } })).json();
+    check('the list admits a same-bot token and shows every lane',
+      list.ok === true && Array.isArray(list.chats) && list.chats.length === 3);
+    const byId = Object.fromEntries((list.chats || []).map((c) => [c.chatId, c]));
+    check('an opencode row carries its session and a held lease',
+      byId['111']?.surface === 'opencode' && byId['111']?.sessionId === 'ses_AAA' && byId['111']?.leaseHeld === true);
+    check('a workspace-scoped row splits workspace from session',
+      byId['222']?.sessionId === 'ses_BBB' && byId['222']?.workspace === 'WS');
+    check('a cline row follows the live lane, not the snapshot',
+      byId['333']?.surface === 'cline' && byId['333']?.sessionId === '1700000000_ab12');
+    check('a fresh heartbeat reads as open now',
+      list.openNow?.pane === 'VM-tui');
+
+    const open = await (await fetch(`${sbase}/tui/api/open?bot=vm`, {
+      method: 'POST', headers: { cookie: scookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ chat: '111' }),
+    })).json();
+    check('open snapshots the chat the map resolves',
+      open.ok === true && open.chatId === '111' && open.sessionId === 'ses_AAA');
+    const written = JSON.parse(fs.readFileSync(path.join(vm, 'tui-open.json'), 'utf8'));
+    check('the snapshot lands on disk in the /tui shape',
+      written.chatId === '111' && written.surface === 'opencode' && typeof written.at === 'string');
+
+    const miss = await fetch(`${sbase}/tui/api/open?bot=vm`, {
+      method: 'POST', headers: { cookie: scookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ chat: '999' }),
+    });
+    check('a sessionless opencode chat refuses instead of a blank row',
+      miss.status === 409);
+
+    const cross = await fetch(`${sbase}/tui/api/sessions?bot=vm2`, { headers: { cookie: scookie } });
+    check('a token bound to another bot cannot read this map',
+      cross.status === 401);
+    const anon = await fetch(`${sbase}/tui/api/sessions?bot=vm`);
+    check('the list refuses without a token',
+      anon.status === 401);
+    const nobot = await fetch(`${sbase}/tui/api/sessions`, { headers: { cookie: scookie } });
+    check('the list requires the bot',
+      nobot.status === 400);
+
+    const page = await fetch(`${sbase}/tui/sessions`, { headers: { cookie: scookie } });
+    check('the browser page serves behind the door',
+      page.status === 200 && (await page.text()).includes('Terminal sessions'));
+    const pageAnon = await fetch(`${sbase}/tui/sessions`);
+    check('the browser page refuses without a token',
+      pageAnon.status === 401);
+  } finally {
+    server.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// 18. The meta shell landing (META-1 P4): bot-agnostic exchange into
+//     /app/app, served from the app upstream build. No bot default —
+//     without ?bot= the bootstrap says so instead of guessing.
+{
+  const botToken = '123456789:ABCdefGHIjklMNOpqrSTUvwxYZ';
+  const secret = 'gateway-test-secret-12345';
+  const env = { TUI_GATEWAY_SECRET: secret, TUI_BOT_TOKEN_VM: botToken };
+  const handle = createGateway({ env });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const bare = await fetch(`${base}/app/`, { redirect: 'manual' });
+    assert.equal(bare.status, 200);
+    assert.ok((await bare.text()).includes('opening the mini app'));
+
+    const botKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+    const validInitData = makeInitData(fresh(), { secretKey: botKey });
+    const good = await fetch(`${base}/app/?bot=vm&initData=${encodeURIComponent(validInitData)}`, { redirect: 'manual' });
+    assert.equal(good.status, 302);
+    assert.ok((good.headers.get('location') || '').startsWith('/app/app?token='));
+    assert.ok((good.headers.get('location') || '').includes('bot=vm'), 'bot survives the exchange (else the shell shows No bot)');
+    const goodTab = await fetch(`${base}/app/?bot=vm&tab=fleet&initData=${encodeURIComponent(validInitData)}`, { redirect: 'manual' });
+    assert.equal(goodTab.status, 302);
+    assert.ok((goodTab.headers.get('location') || '').includes('tab=fleet'), 'tab survives the exchange');
+
+    const badInitData = validInitData.replace(/hash=[a-f0-9]{10}/, 'hash=deadbeef00');
+    const bad = await fetch(`${base}/app/?bot=vm&initData=${encodeURIComponent(badInitData)}`, { redirect: 'manual' });
+    assert.equal(bad.status, 401);
+
+    const noapp = await fetch(`${base}/app/app`);
+    assert.equal(noapp.status, 401);
+  } finally {
+    server.close();
+  }
+}
+
+// 19. Browser Firebase exchange (META-1): missing body is 400, a bogus
+//     token is 401 without reaching Google (fails local decode). The live
+//     verify path is exercised on VPS throwaway with a real session.
+{
+  const secret = 'gateway-test-secret-12345';
+  const env = { TUI_GATEWAY_SECRET: secret, TUI_BOT_TOKEN_VM: '123456789:ABCdefGHIjklMNOpqrSTUvwxYZ' };
+  const handle = createGateway({ env });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const empty = await fetch(`${base}/app/auth/firebase`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    });
+    assert.equal(empty.status, 400);
+
+    const bogus = await fetch(`${base}/app/auth/firebase`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ idToken: 'garbage' }),
+    });
+    assert.equal(bogus.status, 401);
+    assert.equal((await bogus.json()).ok, false);
+  } finally {
+    server.close();
+  }
+}
+
+// 20. Review verdicts honor the renewal grace (live 2026-10-11: a heart
+//     tap on a page open past the 15min token TTL 401'd `bad token`, and
+//     the toast gave no recovery). Empty-key bodies fail at `missing key`
+//     (400) without touching Google, so 400 proves auth passed, 401 that
+//     it did not. Both mutating endpoints share the fixed verify call.
+{
+  const secret = 'gateway-test-secret-review-grace';
+  const env = { TUI_GATEWAY_SECRET: secret, TUI_TOKEN_RENEW_GRACE_SEC: '3600' };
+  const handle = createGateway({ env });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = (p, token) => fetch(`${base}${p}?token=${encodeURIComponent(token)}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  });
+  try {
+    const live = issueToken({ botId: 'vm', chatId: '6218257274', secret, ttlSec: 900 });
+    assert.equal((await post('/review/api/approve', live)).status, 400);
+    assert.equal((await post('/review/api/comment', live)).status, 400);
+    assert.equal((await post('/review/api/answer', live)).status, 400);
+
+    // Expired 2min ago, inside the 3600s grace: admitted like a live token.
+    const stale = issueToken({ botId: 'vm', chatId: '6218257274', secret, ttlSec: 900, now: Date.now() - 1020000 });
+    assert.equal((await post('/review/api/approve', stale)).status, 400);
+    assert.equal((await post('/review/api/answer', stale)).status, 400);
+
+    // Expired past the grace, and garbage: still refused.
+    const dead = issueToken({ botId: 'vm', chatId: '6218257274', secret, ttlSec: 900, now: Date.now() - 4600000 });
+    assert.equal((await post('/review/api/approve', dead)).status, 401);
+    assert.equal((await post('/review/api/approve', 'garbage')).status, 401);
+  } finally {
+    server.close();
+  }
+}
+
+// 20b. The question endpoint admits the same token classes as the other
+// verdict endpoints: live and within-grace pass auth (empty body proves
+// it with `missing key` 400), past-grace and garbage are refused.
+{
+  const secret = 'gateway-test-secret-review-question';
+  const env = { TUI_GATEWAY_SECRET: secret, TUI_TOKEN_RENEW_GRACE_SEC: '3600' };
+  const handle = createGateway({ env });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = (token) => fetch(`${base}/review/api/question?token=${encodeURIComponent(token)}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  });
+  try {
+    const live = issueToken({ botId: 'vm', chatId: '6218257274', secret, ttlSec: 900 });
+    assert.equal((await post(live)).status, 400);
+    const stale = issueToken({ botId: 'vm', chatId: '6218257274', secret, ttlSec: 900, now: Date.now() - 1020000 });
+    assert.equal((await post(stale)).status, 400);
+    const dead = issueToken({ botId: 'vm', chatId: '6218257274', secret, ttlSec: 900, now: Date.now() - 4600000 });
+    assert.equal((await post(dead)).status, 401);
+    assert.equal((await post('garbage')).status, 401);
+  } finally {
+    server.close();
+  }
+}
+
+// 12a10. The picker lists bare VM opencode sessions next to the ttyd
+//        routes (all three in one place: collab/VM-bot ttyd rows plus the
+//        box's own agent sessions, which have no ttyd route). Session rows
+//        carry `opencode:<sessionId>` ids so several `vm` rows never share a
+//        key, and the kill door still 400s them (no tmux name to kill).
+{
+  const { DatabaseSync } = await import('node:sqlite');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ttys-picker-'));
+  const dbPath = path.join(dir, 'opencode.db');
+  const db = new DatabaseSync(dbPath);
+  db.exec(`create table session_v2(id text primary key, model text, directory text, title text, time_updated integer, time_archived integer);
+    create table session_message(session_id text, type text, data text, time_created integer);`);
+  const now = Date.now();
+  const insSession = db.prepare('insert into session_v2(id, model, directory, title, time_updated, time_archived) values (?, ?, ?, ?, ?, ?)');
+  const insMsg = db.prepare('insert into session_message(session_id, type, data, time_created) values (?, ?, ?, ?)');
+  const model = (id) => JSON.stringify({ id, providerID: 'opencode' });
+  insSession.run('ses_work1', model('probe-model'), '/home/ubuntu', 'Probe working session', now - 60000, null);
+  insMsg.run('ses_work1', 'assistant', JSON.stringify({ time: { created: 1 } }), now - 60000);
+  insSession.run('ses_idle1', model('probe-idle'), '/home/ubuntu', 'Probe idle session', now - 120000, null);
+  insMsg.run('ses_idle1', 'assistant', JSON.stringify({ time: { created: 1, completed: 2 } }), now - 120000);
+  insSession.run('ses_stale1', model('probe-old'), '/home/ubuntu', 'Probe stale session', now - 20 * 60000, null);
+  insSession.run('ses_noname', '', '/home/ubuntu', '', now - 60000, null);
+  insSession.run('ses_archived1', model('probe-arch'), '/home/ubuntu', 'Probe archived session', now - 60000, now - 1000);
+  db.close();
+  const call = async (env, method, urlPath, jsonBody = null) => {
+    const token = issueToken({ botId: 'webop', chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+    const handle = createGateway({ env, log: () => {} });
+    return new Promise((resolve, reject) => {
+      let code = 0; let body = '';
+      const res = { writeHead: (c) => { code = c; }, end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+      const payload = jsonBody === null ? null : JSON.stringify(jsonBody);
+      const req = { method, url: urlPath,
+        headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}`, ...(payload ? { 'content-type': 'application/json' } : {}) },
+        on: (ev, fn) => { if (payload && ev === 'data') fn(payload); if (ev === 'end') fn(); } };
+      handle(req, res).catch(reject);
+    });
+  };
+  const env = { TUI_GATEWAY_SECRET: SECRET, TUI_ROUTE_TTYTEST_PATH: '/ttytest/', VM_OPENCODE_DB_PATH: dbPath };
+  const listed = await call(env, 'GET', '/api/ttys');
+  const ttys = JSON.parse(listed.body || '{}').ttys || [];
+  const byId = Object.fromEntries(ttys.map((r) => [r.id, r]));
+  check('ttyd rows keep their order and gain tty ids',
+    listed.code === 200 && ttys[0] && ttys[0].bot === 'ttytest' && ttys[0].id === 'tty:ttytest' && ttys[0].kind === 'tty' && ttys[0].path === '/ttytest/');
+  check('a working bare session is listed with its title and model',
+    byId['opencode:ses_work1'] && byId['opencode:ses_work1'].kind === 'opencode'
+    && byId['opencode:ses_work1'].title === 'Probe working session'
+    && byId['opencode:ses_work1'].agent === 'opencode/probe-model'
+    && byId['opencode:ses_work1'].status === 'working');
+  check('an idle bare session is listed too',
+    byId['opencode:ses_idle1'] && byId['opencode:ses_idle1'].status === 'idle');
+  check('session rows point at the public web UI, not a ttyd path',
+    String(byId['opencode:ses_work1']?.url || '').startsWith('https://')
+    && !('path' in (byId['opencode:ses_work1'] || {})));
+  check('stale, archived and model-less sessions stay out of the picker',
+    !byId['opencode:ses_stale1'] && !byId['opencode:ses_archived1'] && !byId['opencode:ses_noname']);
+  const killSession = await call(env, 'POST', '/api/ttys/kill', { bot: 'opencode:ses_work1' });
+  check('a session id is not a tmux name: kill 400s instead of killing',
+    killSession.code === 400);
+  const statusRes = await call(env, 'GET', '/api/ttys/status');
+  const status = JSON.parse(statusRes.body || '{}').status || [];
+  const sById = Object.fromEntries(status.filter((s) => s && s.id).map((s) => [s.id, s]));
+  check('bare sessions report live under their picker id',
+    statusRes.code === 200 && sById['opencode:ses_work1'] && sById['opencode:ses_work1'].live === true);
+  check('session status rows are keyed by picker id, apart from the bot row',
+    status.filter((s) => s && s.bot === 'vm' && !s.id).length <= 1
+    && sById['opencode:ses_work1'].bot === 'vm');
+  const missing = await call({ ...env, VM_OPENCODE_DB_PATH: path.join(dir, 'nope.db') }, 'GET', '/api/ttys');
+  const missingTtys = JSON.parse(missing.body || '{}').ttys || [];
+  check('a missing opencode.db degrades to ttyd rows only, never a 500',
+    missing.code === 200 && missingTtys.length >= 1 && !missingTtys.some((r) => r && r.kind === 'opencode'));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// 12a11. The shared session viewer: POST /api/ttys/view points it at one
+//        bare VM session so the row opens as a real attached TUI, not the
+//        web UI (which already owns the Web tab). Unknown/stale sessions
+//        404, bare strings 400, and without the viewer route it honestly
+//        503s so the client can fall back.
+{
+  const { DatabaseSync } = await import('node:sqlite');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ttys-view-'));
+  const dbPath = path.join(dir, 'opencode.db');
+  const targetFile = path.join(dir, 'vmsession', 'target.json');
+  const db = new DatabaseSync(dbPath);
+  db.exec(`create table session_v2(id text primary key, model text, directory text, title text, time_updated integer, time_archived integer);
+    create table session_message(session_id text, type text, data text, time_created integer);`);
+  const now = Date.now();
+  const model = (id) => JSON.stringify({ id, providerID: 'opencode' });
+  db.prepare('insert into session_v2(id, model, directory, title, time_updated, time_archived) values (?, ?, ?, ?, ?, ?)')
+    .run('ses_view1', model('probe-view'), '/tmp', 'Probe viewed session', now - 60000, null);
+  db.prepare('insert into session_message(session_id, type, data, time_created) values (?, ?, ?, ?)')
+    .run('ses_view1', 'assistant', JSON.stringify({ time: { created: 1 } }), now - 60000);
+  db.close();
+  const view = async (env, jsonBody, { method = 'POST', token = true } = {}) => {
+    const tok = token ? issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900 }) : '';
+    const handle = createGateway({ env, log: () => {} });
+    return new Promise((resolve, reject) => {
+      let code = 0; let body = '';
+      const res = { writeHead: (c) => { code = c; }, end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+      const payload = jsonBody === null ? null : JSON.stringify(jsonBody);
+      const req = { method, url: '/api/ttys/view',
+        headers: { ...(tok ? { cookie: `${COOKIE_NAME}=${encodeURIComponent(tok)}` } : {}), ...(payload ? { 'content-type': 'application/json' } : {}) },
+        on: (ev, fn) => { if (payload && ev === 'data') fn(payload); if (ev === 'end') fn(); } };
+      handle(req, res).catch(reject);
+    });
+  };
+  const env = {
+    TUI_GATEWAY_SECRET: SECRET,
+    TUI_ROUTE_VMSESSION_PATH: '/ttyvm/',
+    VM_OPENCODE_DB_PATH: dbPath,
+    VMSESSION_TARGET_FILE: targetFile,
+  };
+  const ok = await view(env, { id: 'opencode:ses_view1' });
+  const okBody = JSON.parse(ok.body || '{}');
+  check('pointing the viewer at a live session records its target',
+    ok.code === 200 && okBody.ok === true && okBody.bot === 'vmsession' && okBody.path === '/ttyvm/'
+    && okBody.id === 'tty:vmsession');
+  const target = JSON.parse(fs.readFileSync(targetFile, 'utf8'));
+  check('the recorded target carries session id and workspace, server-side only',
+    target.sessionId === 'ses_view1' && target.directory === '/tmp');
+  const stale = await view(env, { id: 'opencode:ses_nosuch' });
+  check('an unknown session is a 404, never an attach to nothing',
+    stale.code === 404);
+  const bare = await view(env, { id: 'vm' });
+  check('a bare bot name is not a viewable session id',
+    bare.code === 400);
+  const anon = await view(env, { id: 'opencode:ses_view1' }, { token: false });
+  check('no token gets no view', anon.code === 401);
+  const get = await view(env, null, { method: 'GET' });
+  check('the view route is POST only', get.code === 405);
+  const { TUI_ROUTE_VMSESSION_PATH: _dropped, ...noViewerEnv } = env;
+  const unconfigured = await view(noViewerEnv, { id: 'opencode:ses_view1' });
+  check('without the viewer route it 503s so the client falls back',
+    unconfigured.code === 503);
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 console.log(`\n${passed} pass, ${failed} fail`);

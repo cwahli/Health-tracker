@@ -40,6 +40,9 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [selectedDemoType, setSelectedDemoType] = useState<'empty' | 'average' | 'complex'>('average');
+  const [waAvailable, setWaAvailable] = useState(false);
+  const [waSession, setWaSession] = useState<{ sessionId: string; code: string; waLink: string; expiresAt: number } | null>(null);
+  const [waExpired, setWaExpired] = useState(false);
 
   const t = translations[language] || translations.en;
 
@@ -129,6 +132,85 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
       if (sbUnsub) sbUnsub();
     };
   }, [nickname]);
+
+  // WhatsApp surface availability (business number configured server-side).
+  useEffect(() => {
+    fetch('/api/auth/whatsapp/config')
+      .then((r) => r.json())
+      .then((c) => setWaAvailable(!!(c && c.enabled)))
+      .catch(() => setWaAvailable(false));
+  }, []);
+
+  // Poll a pending WhatsApp session until verified, expired, or cancelled.
+  useEffect(() => {
+    if (!waSession) return;
+    if (Date.now() >= waSession.expiresAt) {
+      setWaSession(null);
+      setWaExpired(true);
+      setStatus('idle');
+      return;
+    }
+    const timer = setInterval(async () => {
+      if (Date.now() >= waSession.expiresAt) {
+        clearInterval(timer);
+        setWaSession(null);
+        setWaExpired(true);
+        setStatus('idle');
+        return;
+      }
+      try {
+        const resp = await fetch('/api/auth/whatsapp/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: waSession.sessionId }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.success) {
+          clearInterval(timer);
+          if (data.token) localStorage.setItem('auth_token', data.token);
+          if (data.userProfile?.email) localStorage.setItem('last_active_email', data.userProfile.email);
+          setWaSession(null);
+          setStatus('idle');
+          handleSuccessfulLogin({
+            uid: data.userProfile?.uid,
+            email: data.userProfile?.email || '',
+            displayName: data.userProfile?.nickname || 'WhatsApp User',
+            photoURL: '',
+            emailVerified: true,
+          } as any);
+        }
+      } catch (e) {
+        console.warn('[Auth] WhatsApp poll error:', e);
+      }
+    }, 2000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waSession]);
+
+  const handleWhatsAppLogin = async () => {
+    setErrorMsg('');
+    setWaExpired(false);
+    setStatus('sending');
+    try {
+      const resp = await fetch('/api/auth/whatsapp/request-code', { method: 'POST' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success) {
+        setErrorMsg(data.error || t.waUnavailable);
+        setStatus('idle');
+        return;
+      }
+      setWaSession({
+        sessionId: data.sessionId,
+        code: data.code,
+        waLink: data.waLink,
+        expiresAt: Date.now() + (data.expiresInMs || 300000),
+      });
+      setStatus('idle');
+    } catch (e: any) {
+      setErrorMsg(e?.message || t.waUnavailable);
+      setStatus('idle');
+    }
+  };
 
   // Complete the Firebase popup-blocked redirect flow. `signInWithRedirect`
   // navigates to Google and back; this reads the result on return. Without it
@@ -647,82 +729,54 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
     userType: 'Standard',
   });
 
-  const handleThirdPartyLogin = async (provider: 'Google' | 'X' | 'Facebook') => {
+  const handleThirdPartyLogin = async () => {
     setErrorMsg('');
     setStatus('sending');
 
-    if (provider === 'Google') {
-      const providerObj = new GoogleAuthProvider();
-      providerObj.setCustomParameters({ prompt: 'select_account' });
-      try {
-        const result = await signInWithPopup(auth, providerObj);
-        if (result?.user) {
-          onLogin(profileFromFirebaseUser(result.user));
-          setStatus('idle');
-          return;
-        }
-        // A popup that resolves without a user is not a successful login.
-        setErrorMsg('Google sign-in did not return an account. Please try again.');
-        setStatus('idle');
-        return;
-      } catch (fbErr: any) {
-        const code = String(fbErr?.code || '');
-        console.warn('Firebase Google popup auth error:', fbErr);
-
-        // User closed the popup on purpose — no error, no login.
-        if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-          setStatus('idle');
-          return;
-        }
-
-        // Popup blocked (common on mobile / strict browsers): use the real
-        // redirect flow instead of fabricating a user.
-        if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
-          try {
-            await signInWithRedirect(auth, providerObj);
-            return; // page navigates away to Google
-          } catch (redirectErr: any) {
-            console.warn('Firebase Google redirect auth error:', redirectErr);
-            setErrorMsg(redirectErr?.message || 'Google sign-in failed. Please try again.');
-            setStatus('idle');
-            return;
-          }
-        }
-
-        // Every other failure is a REAL error (unauthorized-domain,
-        // operation-not-allowed, internal-error, network…). Surface it — never
-        // silently sign the user in as a fabricated account.
-        setErrorMsg(fbErr?.message || `Google sign-in failed${code ? ` (${code})` : ''}.`);
+    const providerObj = new GoogleAuthProvider();
+    providerObj.setCustomParameters({ prompt: 'select_account' });
+    try {
+      const result = await signInWithPopup(auth, providerObj);
+      if (result?.user) {
+        onLogin(profileFromFirebaseUser(result.user));
         setStatus('idle');
         return;
       }
-    }
+      // A popup that resolves without a user is not a successful login.
+      setErrorMsg('Google sign-in did not return an account. Please try again.');
+      setStatus('idle');
+      return;
+    } catch (fbErr: any) {
+      const code = String(fbErr?.code || '');
+      console.warn('Firebase Google popup auth error:', fbErr);
 
-    // Non-Google providers: Supabase OAuth when configured.
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const providerMap: Record<string, string> = { Google: 'google', X: 'twitter', Facebook: 'facebook' };
-        const sbProvider = providerMap[provider] || provider.toLowerCase();
-        const { data, error } = await supabase.auth.signInWithOAuth({
-          provider: sbProvider as any,
-          options: {
-            redirectTo: window.location.origin
-          }
-        });
-        
-        if (error) throw error;
-        return;
-      } catch (sEx: any) {
-        console.warn(`Supabase ${provider} OAuth error:`, sEx);
-        setErrorMsg(sEx.message || `Failed to sign in with ${provider}`);
+      // User closed the popup on purpose — no error, no login.
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
         setStatus('idle');
         return;
       }
-    }
 
-    // No provider available for X/Facebook — surface it. Never fabricate a user.
-    setErrorMsg(`${provider} sign-in is unavailable right now. Please use Google or email.`);
-    setStatus('idle');
+      // Popup blocked (common on mobile / strict browsers): use the real
+      // redirect flow instead of fabricating a user.
+      if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+        try {
+          await signInWithRedirect(auth, providerObj);
+          return; // page navigates away to Google
+        } catch (redirectErr: any) {
+          console.warn('Firebase Google redirect auth error:', redirectErr);
+          setErrorMsg(redirectErr?.message || 'Google sign-in failed. Please try again.');
+          setStatus('idle');
+          return;
+        }
+      }
+
+      // Every other failure is a REAL error (unauthorized-domain,
+      // operation-not-allowed, internal-error, network…). Surface it — never
+      // silently sign the user in as a fabricated account.
+      setErrorMsg(fbErr?.message || `Google sign-in failed${code ? ` (${code})` : ''}.`);
+      setStatus('idle');
+      return;
+    }
   };
 
   return (
@@ -1003,32 +1057,55 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
             </div>
 
             {/* Social Oauth Triggers */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <button
-                id="google-login-btn"
-                type="button"
-                onClick={() => handleThirdPartyLogin('Google')}
-                className="py-2.5 px-3 border border-theme-border/60 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl text-xs font-semibold text-theme-text-secondary flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
-              >
-                <span className="w-2.5 h-2.5 bg-red-500 rounded-full" /> Google
-              </button>
-              <button
-                id="x-login-btn"
-                type="button"
-                onClick={() => handleThirdPartyLogin('X')}
-                className="py-2.5 px-3 border border-theme-border/60 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl text-xs font-semibold text-theme-text-secondary flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
-              >
-                <span className="w-2.5 h-2.5 bg-slate-800 dark:bg-slate-300 rounded-full" /> X
-              </button>
-              <button
-                id="facebook-login-btn"
-                type="button"
-                onClick={() => handleThirdPartyLogin('Facebook')}
-                className="py-2.5 px-3 border border-theme-border/60 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl text-xs font-semibold text-theme-text-secondary flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
-              >
-                <span className="w-2.5 h-2.5 bg-indigo-600 rounded-full" /> Facebook
-              </button>
-            </div>
+            {waSession ? (
+              <div className="border border-theme-border/60 rounded-xl p-4 text-center space-y-3">
+                <p className="text-xs text-theme-text-secondary font-medium leading-relaxed">{t.waVerifyDesc}</p>
+                <p className="font-mono text-sm font-bold text-slate-800 dark:text-slate-200 break-all">{waSession.code}</p>
+                {waSession.waLink && (
+                  <a
+                    id="whatsapp-open-btn"
+                    href={waSession.waLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition-all active:scale-[0.98]"
+                  >
+                    {t.waOpenWhatsApp}
+                  </a>
+                )}
+                <p className="text-[11px] text-slate-400">{t.waWaiting}</p>
+                <button
+                  type="button"
+                  onClick={() => setWaSession(null)}
+                  className="text-[11px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                >
+                  {t.waCancel}
+                </button>
+              </div>
+            ) : (
+              <div className={`grid grid-cols-1 ${waAvailable ? 'sm:grid-cols-2' : ''} gap-3`}>
+                <button
+                  id="google-login-btn"
+                  type="button"
+                  onClick={() => handleThirdPartyLogin()}
+                  className="py-2.5 px-3 border border-theme-border/60 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl text-xs font-semibold text-theme-text-secondary flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
+                >
+                  <span className="w-2.5 h-2.5 bg-red-500 rounded-full" /> Google
+                </button>
+                {waAvailable && (
+                  <button
+                    id="whatsapp-login-btn"
+                    type="button"
+                    onClick={handleWhatsAppLogin}
+                    className="py-2.5 px-3 border border-theme-border/60 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl text-xs font-semibold text-theme-text-secondary flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
+                  >
+                    <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full" /> WhatsApp
+                  </button>
+                )}
+              </div>
+            )}
+            {waExpired && !waSession && (
+              <p className="text-center text-xs text-rose-600 dark:text-rose-400 font-medium mt-2">{t.waExpired}</p>
+            )}
           </form>
           </div>
         )}

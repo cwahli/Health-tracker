@@ -76,8 +76,10 @@ import {
 } from './lib/agent-opencode.mjs';
 import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from './lib/opencode-tui.mjs';
 import { issueToken } from './tui-gateway.mjs';
+import { listModelCatalog } from './lib/opencode-api.mjs';
 import { KNOWN_HOSTS, workerStatus, isLocalHost, machineLabel } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
+import { validateAttachTarget, attachNeedsConfirm, formatBytes, unorphan, recordOrphan } from './lib/session-orphans.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
 import { enqueueJob, awaitJob, requeueJob, getJob, DEFAULT_LEASE_MS } from './lib/worker-jobs.mjs';
 import { preflightWorkerTurn, classifyWorkerFailure, retryDelayMs, preflightSummary, relayUrl } from './lib/swap-guards.mjs';
@@ -730,13 +732,36 @@ async function getModels(config, caches) {
   return caches.models;
 }
 
-async function getVariants(config, caches, modelId) {
+/**
+ * The model catalog for this host, cached for the life of the process.
+ *
+ * `opencode models --verbose` was removed from the CLI — it now exits with
+ * "Unrecognized flag", so this used to throw on every `/thinking`, `/model` and
+ * `/status` that needed a context limit. `opencode api model.list` is the
+ * supported surface. A host that cannot answer yields an empty list rather than
+ * an exception: the commands then say what they cannot determine instead of
+ * dying silently.
+ */
+async function modelCatalog(config, caches) {
   if (!caches.verbose) {
-    caches.verbose = parseModelsVerbose(
-      await listModelsVerbose({ opencodeBin: config.agent.opencodeBin, env: opencodeEnv(config) }),
-    );
+    const rows = await listModelCatalog({
+      opencodeBin: config.agent.opencodeBin,
+      env: opencodeEnv(config),
+      workspace: config.agent.workspace,
+    });
+    caches.verbose = rows || [];
+    if (!rows) caches.catalogUnavailable = true;
   }
-  const entry = caches.verbose.find((m) => m.id === modelId);
+  return caches.verbose;
+}
+
+async function getVariants(config, caches, modelId) {
+  const catalog = await modelCatalog(config, caches);
+  // A stored model may name a provider the catalog spells differently, so fall
+  // back to the bare model id before concluding there are no levels.
+  const bare = String(modelId || '').split('/').slice(1).join('/');
+  const entry = catalog.find((m) => m.id === modelId)
+    || catalog.find((m) => m.id.split('/').slice(1).join('/') === bare);
   return entry?.variants || [];
 }
 
@@ -1608,10 +1633,6 @@ function missingCount(rows) {
 
 export const MAX_FOLLOWUPS = 5;
 const followupQueues = new Map();
-// The tunnel URL this process last handed out. A quick tunnel's hostname changes
-// on every reconnect, so this is how /tui knows an older button is now dead.
-let lastMiniappUrl = '';
-let lastBugsUrl = '';
 
 export function queuedFollowups(chatId) {
   return followupQueues.get(String(chatId)) || [];
@@ -1879,6 +1900,7 @@ export class ProgressRenderer {
         ctxLimit: this.ctxLimit || ctxLimitFor(this.modelLabel),
       });
       lines.push(`${this.settledLabel}${modelBit ? ` · ${modelBit}` : ''} · ${Math.max(0, Math.round(elapsedSec))}s${suffix}`);
+
     } else {
       lines.push(
         formatWorkingHeadline({
@@ -3099,6 +3121,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
 
     case 'new':
+      // The dropped binding's server session outlives the chat: register it
+      // as an orphan instead of losing it silently (the reaper is dry-run
+      // first, archive only — /new itself changes nothing else).
+      {
+        const prev = unscopeSessionId(sessions.get(String(chatId)));
+        if (prev && prev.sessionId) recordOrphan({ sessionId: prev.sessionId, workspace: prev.workspace, reason: '/new' });
+      }
       sessions.delete(chatId);
       saveSessions(config.id, sessions);
       clearFollowups(chatId);
@@ -3361,26 +3390,56 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.');
         return;
       }
-      const variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+      let variants = [];
+      try {
+        variants = ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+      } catch (err) {
+        // A read failure must not read as "this model has no levels". Say which
+        // it was, so the answer is actionable.
+        await api.sendMessage(chatId, `Could not read this host's model catalog, so I cannot list the thinking levels for ${eff.model}.\n(${err.message})`);
+        return;
+      }
+      const levels = [...new Set(variants.filter(Boolean))];
       if (!cmd.args) {
-        if (!variants.length) {
-          await api.sendMessage(chatId, `No thinking levels exposed for ${eff.model}.`);
+        if (!levels.length) {
+          // Distinguish "the catalog is unreachable" from "this model is
+          // single-shot". They used to look identical, which is how a dead
+          // catalog read as a working answer.
+          await api.sendMessage(
+            chatId,
+            caches.catalogUnavailable
+              ? `This host cannot read its model catalog, so the levels for ${eff.model} are unknown.`
+              : `${eff.model} exposes no thinking levels — it runs at its default.`,
+          );
           return;
         }
-        await api.sendMessage(chatId, `Thinking level for ${eff.model} (current: ${eff.variant || 'default'}):`, {
-          reply_markup: variantKeyboard(variants),
+        // Name the level in force so the reply answers "what am I on" without
+        // a second command, and mark it on the keyboard.
+        const current = eff.variant && levels.includes(eff.variant) ? eff.variant : null;
+        await api.sendMessage(chatId, `Thinking levels for ${eff.model} — current: ${current || 'default'}:`, {
+          reply_markup: variantKeyboard(levels, { selected: current }),
         });
         return;
       }
-      const target = cmd.args;
-      if (variants.length && !variants.includes(target)) {
-        await api.sendMessage(chatId, `Unknown level: ${target}\nUse /thinking to pick from the list.`);
+      const target = cmd.args.trim().toLowerCase();
+      if (levels.length && !levels.includes(target)) {
+        await api.sendMessage(chatId, `Unknown level: ${cmd.args}\n${eff.model} offers: ${levels.join(', ')}.`);
         return;
       }
       setPref(prefs, chatId, { variant: target });
       savePrefs(config.id, prefs);
-      await api.sendMessage(chatId, `Thinking level set to ${target}.`);
+      await api.sendMessage(chatId, `Thinking level set to ${target} for this chat.`);
+      return;
+    }
+
+    case 'skills': {
+      const typed = listTypedSkills(config);
+      if (!typed.length) {
+        await api.sendMessage(chatId, 'No /do-* skills found on this host. The canonical copy is ~/.agents/skills.');
+        return;
+      }
+      const lines = typed.map(([cmd, blurb]) => (blurb ? `${cmd} — ${blurb}` : cmd));
+      await api.sendMessage(chatId, `Skills you can type here (typed, not buttons — just send the line):\n${lines.join('\n')}`);
       return;
     }
 
@@ -3526,273 +3585,67 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         }
         return;
       }
-      // The actual TUI: ttyd serves a real PTY and mounts it under the same
-      // tunnel and the same login, so this is a terminal you type into from
-      // inside Telegram. It attaches to THIS chat's session in THIS checkout
-      // (resolved per attach by tui-attach.sh).
-      //
-      // WHICH tool it launches follows the chat's effective lane, not the bot's
-      // registry default. It used to be OpenCode unconditionally, so a chat on
-      // Cline opened an OpenCode TUI on a stale opencode session id — a
-      // different agent on a different thread from the one answering here.
-      //
-      // There is deliberately no /web any more. `opencode web` is a chat client,
-      // not a terminal, and every attempt to make it useful from a phone hit a
-      // wall that was the app's own doing: HTTP Basic auth a WebView cannot
-      // answer, a project list kept in browser storage so a fresh WebView opens
-      // empty, and no deep link that survives a tunnel hostname change. The TUI
-      // covers the same ground and is strictly better on a phone; browsing older
-      // sessions is a /sessions picker away inside the TUI itself.
-      // A gateway URL wins over the phone's quick-tunnel file: it is this host's
-      // own terminal, on its own hostname, and it is the one that is not a
-      // dead hostname waiting to happen.
-      const tuiUrl = readTuiUrl();
-      if (!tuiUrl) {
-        // Say what is actually true. This used to blame a phone tunnel, which
-        // is only the story on the phone: the URL file's default path is a
-        // Termux path on EVERY host, so the path cannot be the tell — the
-        // platform can (the same markers freemodels.mjs uses for the mobile
-        // lane). Measured 2026-09-30: vm3, a VM bot with no gateway URL, was
-        // told its "phone tunnel" was down — a tunnel it has no relationship
-        // with.
-        const onPhone = Boolean(process.env.TERMUX_VERSION || process.env.ANDROID_ROOT);
-        await api.sendMessage(chatId, onPhone
-          ? '⌨️ TUI is offline — the phone tunnel is down. It restarts itself; try /tui again in a minute.'
-          : [
-            '⌨️ TUI is not served from this machine yet.',
-            'The phone publishes its terminal through a quick tunnel whose hostname changes on every reconnect, and this bot has no URL for it. The VM-side terminal is a separate gateway on its own hostname (`plan/TUI_IMPLEMENTATION.md` step 2), gated on Telegram `initData` so a public PTY is never anonymous.',
-            'Until that gateway answers there is no terminal to open here. `/tx on` still gives you the live tool feed in this chat.',
-          ].join('\n'));
-        return;
-      }
-      // A quick tunnel's hostname changes on every reconnect, so a button sent
-      // in an older message opens a tunnel that no longer exists and the WebView
-      // fails with nothing to explain it. Say so rather than let the tap look
-      // broken.
-      const moved = lastMiniappUrl && lastMiniappUrl !== tuiUrl;
-      lastMiniappUrl = tuiUrl;
-      // tuiSurface / tuiCanOpen are resolved at the top of this case, with the
-      // session they depend on (status, off and refresh all need it).
-      if (!tuiSurface.terminal) {
-        // An API-only lane has no screen to attach to. Handing it a PTY anyway
-        // would be a scraped badge, not a terminal.
-        await api.sendMessage(chatId, [
-          `⌨️ No terminal for this chat — it is on \`${tuiSurface.tool}\`, which answers in one shot and has no session to attach to.`,
-          '`/tx on` still gives you the live tool feed here, and `/model_free` moves the chat to a lane with a real terminal if you want one.',
-        ].join('\n'));
-        return;
-      }
-      // No session to share means no terminal worth opening: tui-attach.sh
-      // refuses a sessionless opencode open (live 2026-10-04), so the button
-      // below would promise a conversation and deliver that refusal on the
-      // user's screen. Say it here, where the answer belongs. Asked BEFORE the
-      // tui-open.json write so a null session is never recorded as a fact about
-      // the chat — that snapshot with `sessionId: null` is what an auditor reads
-      // afterwards and cannot tell from a broken record.
-      //
-      // Live 2026-10-05: `/new` cleared the chat's session row at 10:54:23,
-      // `/tui` ran at 10:54:43, wrote the null snapshot and sent the button,
-      // and the tap 20s later printed "No chat session recorded yet — nothing
-      // shared to attach to" on a phone. tuiSessionId was already resolved at the
-      // top of this case; nothing read it on the open path.
-      if (!tuiCanOpen) {
-        await api.sendMessage(chatId, [
-          '⌨️ There is nothing for the terminal to attach to yet — this chat has no session.',
-          tuiNoSessionAdvice,
-          '(`/new` puts you here on purpose: a fresh chat has no session until your next message.)',
-        ].join('\n'));
-        return;
-      }
-      // No session to share means no terminal worth opening: tui-attach.sh
-      // refuses a sessionless opencode open (live 2026-10-04), so the button
-      // below would promise a conversation and deliver that refusal on the
-      // user's screen. Say it here, where the answer belongs. Asked BEFORE the
-      // tui-open.json write so a null session is never recorded as a fact about
-      // the chat — that snapshot with `sessionId: null` is what an auditor reads
-      // afterwards and cannot tell from a broken record.
-      //
-      // Live 2026-10-05: `/new` cleared the chat's session row at 10:54:23,
-      // `/tui` ran at 10:54:43, wrote the null snapshot and sent the button,
-      // and the tap 20s later printed "No chat session recorded yet — nothing
-      // shared to attach to" on a phone. tuiSessionId was already resolved at the
-      // top of this case; nothing read it on the open path.
-      if (!tuiCanOpen) {
-        await api.sendMessage(chatId, [
-          '⌨️ There is nothing for the terminal to attach to yet — this chat has no session.',
-          tuiNoSessionAdvice,
-          '(`/new` puts you here on purpose: a fresh chat has no session until your next message.)',
-        ].join('\n'));
-        return;
-      }
-      // Record which chat opened the TUI, which lane it is on, and the session
-      // that lane produced. ttyd runs one static command per bot, so it cannot
-      // be told the chat any other way — and tui-attach.sh reading only ids[0]
-      // attached every chat to whichever conversation happened to be first in
-      // the map. `surface` is what stops the attach from launching OpenCode for
-      // a Cline chat; `model` is the lane's own model so the screen names the
-      // model actually answering here. Best-effort and never fatal: a missing
-      // write just leaves the legacy behaviour in place.
-      try {
-        writeJson(path.join(stateDir(config.id), 'tui-open.json'), {
-          chatId: String(chatId),
-          surface: tuiSurface.surface,
-          model: effective(config, prefs, chatId).model,
-          sessionId: tuiSurface.surface === 'cline'
-            ? loadClineSessions(config.id).get(chatId) || null
-            : tuiSessionId,
-          // The workspace, so tui-attach.sh opens THIS project and not the static
-          // TUI_WORKTREE in its service file. See the script for why that guess
-          // was showing one project's conversation under another's button.
-          workspace: tuiWorkspace,
-          at: new Date().toISOString(),
-        });
-      } catch {
-        // fall through to the button below
-      }
-      // Split solution (plan/WEBUI_MIGRATION.md): opencode chats get the DOM web
-      // UI first (native scroll, real text, same sessions via serve) with the
-      // terminal as fallback; every other lane keeps the TUI button only —
-      // cline/grok/freebuff have no web UI to point at.
+      // The terminal moved to the web (owner call 2026-10-11): no Mini App
+      // button here any more. Bare /tui answers the pane status plus the web
+      // UI link when this lane has one; the full terminal lives behind the
+      // pointer below. status/off/refresh above are unchanged.
       const webUiUrl = tuiSurface.sharedSession ? readWebUiUrl() : '';
       const freshWebLink = webUiUrl
         ? personalWebUiLink({ webUrl: webUiUrl, botId: config.id, chatId, secret: gatewaySecretFromHostEnv() })
         : '';
-      const openButtons = [
-        ...(freshWebLink
-          ? [{ text: '🌐 Open web UI', url: freshWebLink }]
-          : webUiUrl
-            ? [{ text: '🌐 Open web UI', web_app: { url: `${webUiUrl}/?bot=${config.id}` } }]
-            : []),
-        { text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } },
-      ];
       await api.sendMessage(chatId, [
-        moved ? '⚠️ *The tunnel was reconnected*, so any earlier /tui button is dead — use this one.' : null,
-        tuiSurface.sharedSession
-          ? `⌨️ *${tuiSurface.label}* — a real terminal, driven by touch, attached to *this* conversation in \`${tuiWorkspace}\`.`
-          : [
-            `⌨️ *${tuiSurface.label}* — a real ${tuiSurface.tool} terminal in \`${tuiWorkspace}\`, resumed onto the last ${tuiSurface.tool} thread for this chat.`,
-            `This chat is on ${tuiSurface.tool} (\`${shortProviderModel(effective(config, prefs, chatId).model)}\`), so that is the screen you get — not opencode.`,
-            `_Cline cannot resume a thread headlessly, so this is the last ${tuiSurface.tool} thread and not the one I answer each new message in. Work you type here is yours; it does not come back to this chat._`,
-          ].join('\n'),
-        tuiSurface.sharedSession
-          ? 'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.'
-          : 'It runs under tmux, so closing the Mini App keeps your place, and you can reopen the same thread whenever you want.',
-        'We both keep working with it open. The terminal waits for a turn I am running, and I wait for a turn you started — one at a time, never two writers at once. Opening it proves you are the Telegram user this chat belongs to, so there is no password to remember.',
-        ...(webUiUrl ? [`🌐 Prefer reading over typing? The *web UI* shows this same conversation as a normal page — scrolls natively, no terminal frames.${freshWebLink ? ' The button above is minted fresh for this tap and lasts 15 minutes.' : ''}`] : []),
-      ].filter(Boolean).join('\n'), {
-        reply_markup: { inline_keyboard: [openButtons] },
+        `⌨️ ${tuiStatusLine(config.id, tuiSessionId)}`,
+        'The terminal moved to the web — open https://app.health-tracker.co.uk/app/ in a browser and sign in, then pick the Terminal tab.',
+        ...(webUiUrl ? [`🌐 Prefer reading over typing? The *web UI* shows this same conversation as a normal page.${freshWebLink ? ' The button below is minted fresh for this tap and lasts 15 minutes.' : ''}`] : []),
+      ].join('\n'), {
+        ...(freshWebLink
+          ? { reply_markup: { inline_keyboard: [[{ text: '🌐 Open web UI', url: freshWebLink }]] } }
+          : webUiUrl
+            ? { reply_markup: { inline_keyboard: [[{ text: '🌐 Open web UI', web_app: { url: `${webUiUrl}/?bot=${config.id}` } }]] } }
+            : {}),
       });
       return;
     }
 
     case 'bugs': {
-      // Shared bug board mini app (packet bug-board-miniapp, Node 5). Same
-      // web_app button pattern as /tui, served by the same gateway host under
-      // /bugs/ behind the initData door. Scoped to the bug ticket bot: it owns
-      // the canonical card list.
-      // Served from bot-host bots that hold a gateway token. vm is the
-      // master bot and validates today; bug_ticket stays listed so the scope
-      // is correct if it ever gains a bot-host surface (it is a hermes bot
-      // and has no bot-host command path).
-      const BOARD_BOTS = ['vm', 'bug_ticket'];
-      if (!BOARD_BOTS.includes(config.id)) {
-        await api.sendMessage(chatId, '🐛 The bug board lives on the VM bot — ask it for /bugs and it will hand you the button.');
-        return;
-      }
-      const bugsGatewayUrl = readTuiUrl();
-      if (!bugsGatewayUrl) {
-        const onPhone = Boolean(process.env.TERMUX_VERSION || process.env.ANDROID_ROOT);
-        await api.sendMessage(chatId, onPhone
-          ? '🐛 Bug board is offline — the phone tunnel is down. It restarts itself; try /bugs again in a minute.'
-          : '🐛 Bug board is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /bugs again.');
-        return;
-      }
-      const boardUrl = `${bugsGatewayUrl}/bugs/?bot=${config.id}`;
-      const moved = lastBugsUrl && lastBugsUrl !== boardUrl;
-      lastBugsUrl = boardUrl;
-      // The card list below is read live from the store by this handler, not
-      // composed by the model — so its count is the same number the board
-      // shows, even for a stale session that would otherwise answer from chat
-      // history.
+      // The board moved to the web (owner call 2026-10-11): no Mini App
+      // button. The card list below is still read live from the store by this
+      // handler, not composed by the model — so its count is the same number
+      // the board shows, even for a stale session that would otherwise answer
+      // from chat history.
       const liveList = await bugsListText();
       await api.sendMessage(chatId, [
-        moved ? '⚠️ *The tunnel was reconnected*, so any earlier /bugs button is dead — use this one.' : null,
         liveList,
-        'What changes here lands in the same list the site shows.',
-      ].filter(Boolean).join('\n'), {
-        reply_markup: { inline_keyboard: [[{ text: '🐛 Open bug board', web_app: { url: boardUrl } }]] },
-      });
+        'Open the board on the web: https://app.health-tracker.co.uk/app/ — pick the Bugs tab.',
+      ].join('\n'));
       return;
     }
 
     case 'forge': {
-      // One-click bot forge (Mini App). Same web_app button + initData door as
-      // /tui and /bugs: the page calls the gateway's /forge/api/* and the whole
-      // creation is the single `runForge` pipeline. Scoped to the master bot —
-      // it is the one that holds a gateway token and owns the fleet.
-      const FORGE_BOTS = ['vm'];
-      if (!FORGE_BOTS.includes(config.id)) {
-        await api.sendMessage(chatId, '🛠 The bot forge lives on the master bot — ask it for /forge and it will hand you the button.');
-        return;
-      }
-      const forgeGatewayUrl = readTuiUrl();
-      if (!forgeGatewayUrl) {
-        await api.sendMessage(chatId, '🛠 Bot forge is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /forge again.');
-        return;
-      }
-      const forgeUrl = `${forgeGatewayUrl}/forge?bot=${config.id}`;
-      await api.sendMessage(chatId, [
-        '🛠 *Bot forge* — type a name, get a working bot.',
-        'One run gets the token, writes the registry row, syncs the env files, wires supervision, proves the token with `getMe`, and enables it — you never edit a `.env` file.',
-        'With a userbot session it asks @BotFather itself; otherwise paste the token @BotFather gave you into the page.',
-      ].join('\n'), {
-        reply_markup: { inline_keyboard: [[{ text: '🛠 Open bot forge', web_app: { url: forgeUrl } }]] },
-      });
+      // Web-only (owner call 2026-10-11): the forge page lives behind the
+      // shell now; the bot answers the pointer, no button.
+      await api.sendMessage(chatId, '🛠 The bot forge moved to the web: https://app.health-tracker.co.uk/app/ — open in a browser, sign in, and pick the Forge tab.');
       return;
     }
 
     case 'fleet': {
-      // Dynamic fleet dashboard (Mini App). Same web_app button + initData door
-      // as /tui, /bugs, and /forge: served by the gateway under /fleet/.
-      // Served by every bot-host bot: the button carries ?bot=<this bot> and
-      // the gateway validates the opener's initData against that bot's token
-      // (auto-matching any token it holds), so no per-bot allowlist lives here.
-      const fleetGatewayUrl = readTuiUrl();
-      if (!fleetGatewayUrl) {
-        await api.sendMessage(chatId, '📋 Fleet dashboard is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /fleet again.');
-        return;
-      }
-      const fleetUrl = `${fleetGatewayUrl}/fleet/?bot=${config.id}`;
-      await api.sendMessage(chatId, [
-        '📋 *Fleet Dashboard*',
-        'Live tickets from PM sheet, terminal panes across all locations (Mac, VM, Mobile, Collab), and fleet bot activity.',
-      ].join('\n'), {
-        reply_markup: { inline_keyboard: [[{ text: '📋 Open Fleet Dashboard', web_app: { url: fleetUrl } }]] },
-      });
+      // Web-only (owner call 2026-10-11): the fleet dashboard lives behind
+      // the shell now; the bot answers the pointer, no button.
+      await api.sendMessage(chatId, '📋 The Fleet Dashboard moved to the web: https://app.health-tracker.co.uk/app/ — open in a browser, sign in, and pick the Fleet tab.');
+      return;
+    }
+
+    case 'app': {
+      // Web-only (owner call 2026-10-11): the shell is a browser page now;
+      // the bot answers the pointer, no button.
+      await api.sendMessage(chatId, '▦ Mini Apps moved to the web: https://app.health-tracker.co.uk/app/ — open in a browser and sign in; the burger menu switches tabs.');
       return;
     }
 
     case 'review': {
-      // Human review queue (Mini App). Same web_app button + initData door
-      // as /fleet, served by the gateway under /review/. Unlike the fleet
-      // board it is NOT scoped to the VM bot: every bot serves its own
-      // button, and the gateway accepts initData from any configured bot.
-      // Agents set a row's Status to `review` when work is ready for human
-      // eyes; the app shows proof screenshots over the original request, and
-      // 👍 archives the row while comments append back to the sheet.
-      const reviewGatewayUrl = readTuiUrl();
-      if (!reviewGatewayUrl) {
-        await api.sendMessage(chatId, '⭐ Review queue is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /review again.');
-        return;
-      }
-      const reviewUrl = `${reviewGatewayUrl}/review/?bot=${config.id}`;
-      await api.sendMessage(chatId, [
-        '⭐ *Review Queue*',
-        'Work marked ready for review: proof screenshots over the original request.',
-        '👍 archives a finished item; 💬 sends feedback back to the sheet.',
-      ].join('\n'), {
-        reply_markup: { inline_keyboard: [[{ text: '⭐ Open Review Queue', web_app: { url: reviewUrl } }]] },
-      });
+      // Web-only (owner call 2026-10-11): the review queue lives behind the
+      // shell now; the bot answers the pointer, no button.
+      await api.sendMessage(chatId, '⭐ The Review Queue moved to the web: https://app.health-tracker.co.uk/app/ — open in a browser, sign in, and pick the Review tab. 👍 archives a finished item; 💬 sends feedback back to the sheet.');
       return;
     }
 
@@ -3833,6 +3686,49 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'tx': {
       await handleTxCommand({ api, config, chatId, arg: cmd.args, lane: parseModelRef(eff.model).surface });
+      return;
+    }
+
+    case 'attach': {
+      // On-demand landing on a session from the operator's own opencode
+      // session list — deliberately no always-attach mode (a shared
+      // mega-thread taxes every turn with its full history and serializes
+      // turns; measured 2026-10-14). Rebind only: no turn starts, nothing
+      // is spent, no lane changes.
+      const parts = String(cmd.args || '').trim().split(/\s+/).filter(Boolean);
+      const want = parts[0] || '';
+      const force = parts.slice(1).some((a) => /^(force|yes)$/i.test(a));
+      if (!want) {
+        await api.sendMessage(chatId, 'Usage: /attach <session-id> [force] — land this chat on a session from your opencode session list (same workspace only, opencode lanes only). Nothing runs and nothing is spent.');
+        return;
+      }
+      const attachProject = getChatProject(chatId);
+      const attachWorkspace = attachProject.type === 'external' ? attachProject.workspace : config.agent.workspace;
+      if (sessionForWorkspace(sessions, chatId, attachWorkspace) === want) {
+        await api.sendMessage(chatId, 'Already on that session — nothing changed.');
+        return;
+      }
+      const chk = validateAttachTarget({ sessionId: want, workspace: attachWorkspace });
+      if (!chk.ok) {
+        await api.sendMessage(chatId, `Cannot attach: ${chk.reason}`, { parse_mode: 'Markdown' });
+        return;
+      }
+      if (!force && attachNeedsConfirm(chk)) {
+        await api.sendMessage(
+          chatId,
+          `⚠️ \`${chk.title || chk.sessionId}\` is heavy (${chk.msgs} messages, ${formatBytes(chk.bytes)}) — every turn here will carry that history, slower and pricier. Send \`/attach ${chk.sessionId} force\` to attach anyway, or pick a smaller session.`,
+          { parse_mode: 'Markdown' },
+        );
+        return;
+      }
+      bindSessionForWorkspace(sessions, chatId, attachWorkspace, chk.sessionId);
+      saveSessions(config.id, sessions);
+      unorphan({ sessionId: chk.sessionId });
+      await api.sendMessage(
+        chatId,
+        `Attached this chat to \`${chk.title || chk.sessionId}\` (${chk.msgs} messages) in this workspace. The next turn continues that conversation — watch it live in your terminal on the same session. Nothing ran and nothing was spent.`,
+        { parse_mode: 'Markdown' },
+      );
       return;
     }
 
@@ -3881,7 +3777,12 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         // Drop the old project's session row. Without this the chat kept a
         // session id from the workspace it just left, and the TUI — which
         // resolves its session from this same file — went on attaching the
-        // previous project's conversation after a switch.
+        // previous project's conversation after a switch. The dropped id is
+        // registered as an orphan (dry-run-first reaper, archive only).
+        {
+          const prev = unscopeSessionId(sessions.get(String(chatId)));
+          if (prev && prev.sessionId) recordOrphan({ sessionId: prev.sessionId, workspace: prev.workspace, reason: `/project ${proj.name}` });
+        }
         sessions.delete(String(chatId));
         saveSessions(config.id, sessions);
         const roleInfo =
@@ -4839,8 +4740,18 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
         await api.editMessageText(chatId, messageId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.').catch(() => {});
         return;
       }
-      let variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+      let variants = [];
+      try {
+        variants = ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+      } catch (err) {
+        // Never leave a tap unanswered: the keyboard would sit there looking
+        // live. Say what happened and clear it.
+        await api.answerCallbackQuery(query.id, { text: 'Catalog unavailable' });
+        await api.editMessageText(chatId, messageId, `Could not read this host's model catalog, so ${eff.model}'s thinking levels are unknown.\n(${err.message})`, {
+          reply_markup: CLEAR_KEYBOARD,
+        }).catch(() => {});
+        return;
+      }
       // New buttons carry the name (`v:high`); old keyboards carry an index
       // (`v:0`). Support both so already-shown keyboards keep working.
       let variant = variants.includes(value) ? value : variants[Number(value)];
@@ -6567,9 +6478,31 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     } else {
       await api.sendMessage(
         chatId,
-        `⏸ Held: you asked for \`${heldLocation.requested}\` and it is still unreachable (${status.reason}). Nothing was run and no allowance was spent. Send \`/location vps\` to run here, or retry when the worker connects.`
+        `⏸ Held: you asked for \`${heldLocation.requested}\` and it is still unreachable (${status.reason}). Nothing was run and no allowance was spent — lane \`${eff.model}\` never started there. Send \`/location vps\` to run here, or retry when the worker connects.`
       );
       return;
+    }
+  }
+
+  // A saved remote /location that went silent must hold BEFORE the headline
+  // paints. Announcing "starting…" and then "nothing ran" is a contradiction:
+  // the lane (eff.model) and the host (desiredLocation) are different axes,
+  // and the reachability check used to run only deep inside runRemoteTurn,
+  // after the headline paints. This pre-check holds fast with no headline,
+  // no claim, and no ledger touch. runRemoteTurn keeps its own check as the
+  // race safety for a worker that dies mid-turn.
+  {
+    const earlyLocation = desiredLocation(prefs, chatId) || workLocation();
+    if (!isLocalHost(earlyLocation)) {
+      const earlyStatus = workerStatus(earlyLocation);
+      if (!earlyStatus.reachable) {
+        setBlockedLocation(chatId, earlyLocation, earlyStatus.reason);
+        await api.sendMessage(
+          chatId,
+          `⏸ Held: \`${earlyLocation}\` is unreachable (${earlyStatus.reason}). Nothing was run and no allowance was spent — lane \`${eff.model}\` never started there. Send \`/location vps\` to run here, or retry when the worker connects.`
+        );
+        return;
+      }
     }
   }
 
@@ -6803,10 +6736,6 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
         ? workSession.opencodeSessionId
         : undefined);
-    // Connectivity pings run throwaway: force a fresh session so their
-    // scaffolding never lands in the chat's transcript or the TUI.
-    if (isPingTurn) turnSessionId = null;
-
 
     // A TUI is open on this same conversation, so the user can watch this turn
     // happen in the terminal as well. It shares the session, so what runs here
@@ -6828,6 +6757,13 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         : `⌨️ A ${openSurface.tool} terminal is open, but ${openSurface.tool} cannot resume a thread headlessly — this turn will not appear there. The terminal stays on the last ${openSurface.tool} thread.`
       ).catch(() => {});
     }
+    // FINAL 2026-10-14 (bot-visibility-hub node 6): pings run IN the chat
+    // session, not throwaway. Throwaway kept Telegram and the web UI
+    // permanently incoherent (the answer exists nowhere the UI reads, so the
+    // UI can never update) and minted one orphan server session per
+    // greeting. With PONG humanized at delivery, the transcript cost is one
+    // bracketed user line in the TUI — worth coherent surfaces and zero
+    // orphans. turnSessionId stays as resolved: no override here.
 
     // A TUI is open on this same conversation, so the user can watch this turn
     // happen in the terminal as well. It shares the session, so what runs here
@@ -6855,6 +6791,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // switched project passes nothing here rather than the previous project's
     // conversation — which the tool would happily resume, in the wrong tree.
     if (workSession.viewMode !== 'tui' && turnSessionId) extraArgs.push('--session', turnSessionId);
+
     try { observer = createObserver(workSession); } catch {}
     observerContext = { model: eff.model, attempt: 1, surface: ref.surface, provider: ref.surface };
     // Local fanout: headline + observer log always. The feed is
@@ -7312,9 +7249,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // turn stored nothing at all (runCline always resolved null), so the TUI
     // kept attaching to whatever stale opencode id was left in the map.
     const resultSurface = parseModelRef(lastAttemptModel).surface;
-    // Ping turns never bind back: the throwaway session belongs to the
-    // check, not the chat. Everything else (usage, ledger, sticky lane)
-    // behaves exactly like a normal turn.
+    // Ping turns never bind back: they run in the chat's own session, so
+    // writing back the same id is a no-op map write. Everything else
+    // (usage, ledger, sticky lane) behaves exactly like a normal turn.
     if (result.sessionID && !isPingTurn) {
       if (resultSurface === 'cline') {
         const clineSessions = loadClineSessions(config.id);

@@ -32,10 +32,15 @@
  *   TUI_SESSION_TTL_SEC   default 900
  */
 import crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
+import { tmuxNameFor } from './tui-bot-plumbing.mjs';
+import { collectTmuxSessions, listTmuxNames, collectUnattributedMem, collectBareSessionMem } from './lib/tmux-session-mem.mjs';
+import { collectActivity, readActivityInputs } from './lib/activity-hub.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..');
@@ -380,6 +385,27 @@ export function webUiHost(env = process.env) {
   return String(env.OPENCODE_WEB_HOST || 'web.health-tracker.co.uk').trim().toLowerCase();
 }
 
+/** Public origin of the opencode web UI for browsers (same default as the
+ * mini-app registry's `web` entry). The picker opens this for bare VM
+ * sessions; the per-request gateway token is appended by the client. */
+export function webPublicUrl(env = process.env) {
+  const raw = String(env.OPENCODE_WEB_URL || '').trim().replace(/\/+$/, '');
+  if (raw) return raw;
+  return `https://${webUiHost(env)}`;
+}
+
+/** Bot id of the shared VM session viewer (one TUI pane re-pointed per View). */
+export const VMSESSION_BOT = 'vmsession';
+
+/** Where POST /api/ttys/view records the viewer's attach target.
+ * VMSESSION_TARGET_FILE is a test seam only; prod uses the bot-host state dir. */
+export function viewerTargetFile(env = process.env) {
+  const override = String(env.VMSESSION_TARGET_FILE || '').trim();
+  if (override) return override;
+  const home = String(env.HOME || os.homedir() || '/home/ubuntu');
+  return path.join(home, '.local', 'state', 'bot-host', 'vmsession', 'target.json');
+}
+
 export function isWebUiHost(req, env = process.env) {
   const raw = req?.headers?.host || req?.headers?.[':authority'] || '';
   const host = String(raw).split(':')[0].trim().toLowerCase();
@@ -391,6 +417,48 @@ export function webUiAuthHeader(env = process.env) {
   const pw = String(env.OPENCODE_WEB_PASSWORD || '').trim();
   if (!pw) return '';
   return `Basic ${Buffer.from(`opencode:${pw}`).toString('base64')}`;
+}
+
+/**
+ * Upstream bag-audit app (standalone `:8892` on the same box). The app keeps
+ * its own `?k=` / cookie / `/api/tgauth` posture untouched — this gateway
+ * only decides who reaches it, behind the shared Telegram door.
+ */
+export function tgtgUpstream(env = process.env) {
+  return String(env.TGTG_UPSTREAM || 'http://127.0.0.1:8892').replace(/\/+$/, '');
+}
+
+/** Host header the bag app is served on; requests there take the tgtg branch. */
+export function tgtgHost(env = process.env) {
+  return String(env.TGTG_HOST || 'tgtg.health-tracker.co.uk').trim().toLowerCase();
+}
+
+export function isTgtgHost(req, env = process.env) {
+  const raw = req?.headers?.host || req?.headers?.[':authority'] || '';
+  const host = String(raw).split(':')[0].trim().toLowerCase();
+  return host !== '' && host === tgtgHost(env);
+}
+
+/**
+ * Upstream agenda webapp (standalone `:8895` on the same box: tax calendar,
+ * agenda, hostel scout). Same whole-host pattern as the bag app — its
+ * `/api/*` paths are absolute. The app has no auth of its own (loopback
+ * only), so the shared door is its only public gate: nothing on this host
+ * serves anonymously.
+ */
+export function agendaUpstream(env = process.env) {
+  return String(env.AGENDA_UPSTREAM || 'http://127.0.0.1:8895').replace(/\/+$/, '');
+}
+
+/** Host header the agenda app is served on; requests there take its branch. */
+export function agendaHost(env = process.env) {
+  return String(env.AGENDA_HOST || 'agenda.health-tracker.co.uk').trim().toLowerCase();
+}
+
+export function isAgendaHost(req, env = process.env) {
+  const raw = req?.headers?.host || req?.headers?.[':authority'] || '';
+  const host = String(raw).split(':')[0].trim().toLowerCase();
+  return host !== '' && host === agendaHost(env);
 }
 
 /**
@@ -441,7 +509,75 @@ const BOOTSTRAP_BUGS = [
   '      setTimeout(tryProceed, 100);',
   '      return;',
   '    }',
+    // A real browser has no Telegram initData and never will: forward it to
+    // the ungated login entry instead of stranding it on a Telegram-only
+    // refusal. No ?bot= is forwarded on purpose: the shell defaults Firebase
+    // sessions to bot 'web', and a stale bot=vm would poison that (terminal
+    // door + bag injection both key on the token's own bot).
+    '    if (typeof location !== "undefined" && location.replace) {',
+    '      location.replace("/app/login?tab=" + encodeURIComponent("bugs"));',
+    '      return;',
+    '    }',
   '    if (m) m.textContent = "no initData \u2014 open this from the /bugs button in Telegram";',
+  '  }',
+  '  tryProceed();',
+  '})();',
+  '</script></body></html>',
+].join("\n");
+
+/**
+ * Cold-start page for the meta shell (META-1 P4). Same exchange shape as
+ * BOOTSTRAP_BUGS, but bot-agnostic: the button URL carries ?bot= (every bot
+ * serves the shell), and without one the page says so instead of guessing.
+ */
+const BOOTSTRAP_APP = [
+  '<!doctype html>',
+  '<html lang="en"><head><meta charset="utf-8">',
+  '<meta name="viewport" content="width=device-width,initial-scale=1">',
+  '<title>Mini App</title>',
+  '<script src="https://telegram.org/js/telegram-web-app.js"></script>',
+  '<style>html,body{margin:0;height:100%;background:#0b1220;color:#f8fafc;',
+  'font:14px system-ui;display:flex;align-items:center;justify-content:center;',
+  'text-align:center;padding:24px}</style>',
+  '</head><body><div id="m">opening the mini app\u2026</div>',
+  '<script>',
+  '(function () {',
+  '  var m = document.getElementById("m");',
+  '  var attempts = 0;',
+  '  function tryProceed() {',
+  '    attempts++;',
+  '    var bot = (typeof location !== "undefined" && location.search && new URLSearchParams(location.search).get("bot")) || "";',
+  '    var initData = "";',
+  '    if (typeof Telegram !== "undefined" && Telegram && Telegram.WebApp) {',
+  '      if (Telegram.WebApp.ready) Telegram.WebApp.ready();',
+  '      if (Telegram.WebApp.expand) Telegram.WebApp.expand();',
+  '      if (Telegram.WebApp.initData) initData = Telegram.WebApp.initData;',
+  '    }',
+  '    if (initData) {',
+  '      if (!bot) {',
+  '        if (m) m.textContent = "no bot \u2014 open this from a bot button in Telegram";',
+  '        return;',
+  '      }',
+  '      if (typeof location !== "undefined" && location.replace) {',
+  '        location.replace("/app/?bot=" + encodeURIComponent(bot) + "&initData=" + encodeURIComponent(initData));',
+  '      }',
+  '      return;',
+  '    }',
+  '    if (attempts < 20 && typeof setTimeout !== "undefined") {',
+  '      setTimeout(tryProceed, 100);',
+  '      return;',
+  '    }',
+    // A real browser has no Telegram initData and never will: forward it to
+    // the ungated login entry instead of stranding it on a Telegram-only
+    // refusal. No ?bot= is forwarded on purpose: the shell defaults Firebase
+    // sessions to bot 'web', and a stale bot=vm would poison that (terminal
+    // door + bag injection both key on the token's own bot).
+    '    if (typeof location !== "undefined" && location.replace) {',
+    '      var ftab=""; try { ftab=new URLSearchParams(location.search||"").get("tab")||""; } catch (e) {}',
+    '      location.replace("/app/login" + (ftab ? "?tab=" + encodeURIComponent(ftab) : ""));',
+    '      return;',
+    '    }',
+  '    if (m) m.textContent = "no initData \u2014 open this from a bot button in Telegram";',
   '  }',
   '  tryProceed();',
   '})();',
@@ -606,6 +742,54 @@ async function proxyWebUi(req, res, url, env, { ttlSec = 900 } = {}) {
 }
 
 /**
+ * Transparent proxy to a same-box upstream app. Unlike proxyWebUi there is no
+ * credential to substitute and no shim to inject: each app authenticates
+ * itself (or, like the agenda app, has none and relies on this door). The
+ * gateway door above already admitted the caller; this only moves bytes. The
+ * full search string passes through untouched; the query is never logged.
+ */
+async function proxyHostUpstream(req, res, url, upstream, downError, { stripPrefix = '', stripToken = false } = {}) {
+  let proximate = url.pathname;
+  if (stripPrefix && (proximate === stripPrefix || proximate.startsWith(`${stripPrefix}/`))) {
+    proximate = proximate.slice(stripPrefix.length) || '/';
+  }
+  const query = stripToken ? webUpstreamQuery(url?.search) : (url?.search || '');
+  const target = `${String(upstream).replace(/\/+$/, '')}${proximate}${query}`;
+  try {
+    const headers = {};
+    for (const [k, v] of Object.entries(req.headers || {})) {
+      if (['host', 'connection', 'content-length'].includes(String(k).toLowerCase())) continue;
+      headers[k] = v;
+    }
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const body = Buffer.concat(chunks);
+    const up = await fetch(target, {
+      method: req.method,
+      headers,
+      body: ['GET', 'HEAD'].includes(String(req.method)) || body.length === 0 ? undefined : body,
+      duplex: 'half',
+    });
+    const outHeaders = { 'cache-control': 'no-store' };
+    const ct = up.headers.get('content-type');
+    if (ct) outHeaders['content-type'] = ct;
+    const sc = typeof up.headers.getSetCookie === 'function' ? up.headers.getSetCookie() : [];
+    if (sc && sc.length) outHeaders['set-cookie'] = sc;
+    res.writeHead(up.status, outHeaders);
+    if (up.body) {
+      for await (const c of up.body) {
+        if (!res.write(c)) await new Promise((r) => res.once('drain', r));
+      }
+    }
+    res.end();
+  } catch (err) {
+    logGatewayError(err);
+    if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: downError || 'upstream unreachable' }));
+  }
+}
+
+/**
  * The 302 target after a successful Telegram exchange. TEMP-DEBUG: with
  * TUI_PAGE_DEBUG=1 it also asks the page for its on-screen geometry readout,
  * so one phone screenshot carries the numbers. Remove both when the phone
@@ -667,6 +851,18 @@ const BOOTSTRAP = [
   '      setTimeout(tryProceed, 100);',
   '      return;',
   '    }',
+    // A real browser has no Telegram initData and never will: forward it to
+    // the ungated login entry instead of stranding it on a Telegram-only
+    // refusal. No ?bot= is forwarded on purpose: the shell defaults Firebase
+    // sessions to bot 'web', and a stale bot=vm would poison that (terminal
+    // door + bag injection both key on the token's own bot). No ?tab= either:
+    // the shell opens its last-visited tab (or the terminal for a first
+    // visit) — a forced tab=tui here rebooted expired sessions into the
+    // terminal instead of the previous page (live 2026-10-11).
+    '    if (typeof location !== "undefined" && location.replace) {',
+    '      location.replace("/app/login");',
+    '      return;',
+    '    }',
   '    if (m) m.textContent = "no initData \u2014 open this from the /tui button in Telegram";',
   '  }',
   '  tryProceed();',
@@ -716,6 +912,15 @@ export const BOOTSTRAP_FLEET = [
   '      setTimeout(tryProceed, 100);',
   '      return;',
   '    }',
+    // A real browser has no Telegram initData and never will: forward it to
+    // the ungated login entry instead of stranding it on a Telegram-only
+    // refusal. No ?bot= is forwarded on purpose: the shell defaults Firebase
+    // sessions to bot 'web', and a stale bot=vm would poison that (terminal
+    // door + bag injection both key on the token's own bot).
+    '    if (typeof location !== "undefined" && location.replace) {',
+    '      location.replace("/app/login?tab=" + encodeURIComponent("fleet"));',
+    '      return;',
+    '    }',
   '    if (m) m.textContent = "no initData \u2014 open this from the /fleet button in Telegram";',
   '  }',
   '  tryProceed();',
@@ -729,6 +934,9 @@ import {
   getFleetNodes as getFleetNodesStatus,
   getFleetBots as getFleetBotsStatus,
   resetFleetState as resetFleetStateStatus,
+  readVmPickerEntries as readVmPickerEntriesStatus,
+  readVmOpencodeSessions as readVmOpencodeSessionsStatus,
+  findVmSessionTarget as findVmSessionTargetStatus,
   FLEET_CACHE_TTL_MS,
 } from './lib/fleet-status.mjs';
 
@@ -739,9 +947,11 @@ import {
   approveReviewItem as approveReviewItemStatus,
   commentReviewItem as commentReviewItemStatus,
   answerReviewItem as answerReviewItemStatus,
+  answerQuestion as answerQuestionStatus,
   verifyProofFile as verifyProofFileStatus,
   resetReviewState as resetReviewStateStatus,
 } from './lib/review-status.mjs';
+import { notifyTodoEvent } from './lib/todo-notify.mjs';
 
 export { FLEET_CACHE_TTL_MS };
 
@@ -787,6 +997,15 @@ export const BOOTSTRAP_REVIEW = [
   '      setTimeout(tryProceed, 100);',
   '      return;',
   '    }',
+    // A real browser has no Telegram initData and never will: forward it to
+    // the ungated login entry instead of stranding it on a Telegram-only
+    // refusal. No ?bot= is forwarded on purpose: the shell defaults Firebase
+    // sessions to bot 'web', and a stale bot=vm would poison that (terminal
+    // door + bag injection both key on the token's own bot).
+    '    if (typeof location !== "undefined" && location.replace) {',
+    '      location.replace("/app/login?tab=" + encodeURIComponent("review"));',
+    '      return;',
+    '    }',
   '    if (m) m.textContent = "no initData \u2014 open this from the /review button in Telegram";',
   '  }',
   '  tryProceed();',
@@ -797,6 +1016,139 @@ export const BOOTSTRAP_REVIEW = [
 /** Test-auth door for the review routes: same harness flag as the fleet. */
 export function isReviewTestAuth(env = process.env) {
   return String(env.REVIEW_TEST_AUTH || env.FLEET_TEST_AUTH || '').trim() === '1';
+}
+
+/**
+ * TUI session browser (META-1 P3.6, read side). The gateway never owned the
+ * bot state maps; it reads them here, read-only, using bot-host's own
+ * layout (`$HOME/.local/state/bot-host/<bot>/`). Writes stay in exactly one
+ * place (`snapshotTuiOpen` below mirrors bot-host's `/tui` write shape, so
+ * `tui-attach.sh` resolution cannot tell who recorded the row).
+ */
+export function tuiStateRoot(env = process.env) {
+  const override = String(env.TUI_STATE_ROOT || '').trim();
+  if (override) return override;
+  return path.join(process.env.HOME || '/root', '.local', 'state', 'bot-host');
+}
+
+function readTuiJson(root, bot, name) {
+  try {
+    const raw = fs.readFileSync(path.join(root, bot, name), 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+const TUI_SCOPE_SEP = '\u0000';
+
+function unscopeSessionId(value) {
+  const s = String(value ?? '');
+  const cut = s.indexOf(TUI_SCOPE_SEP);
+  return cut === -1
+    ? { workspace: '', sessionId: s.trim() }
+    : { workspace: s.slice(0, cut), sessionId: s.slice(cut + 1).trim() };
+}
+
+function surfaceForModelRef(model) {
+  const raw = String(model || '').trim().toLowerCase();
+  if (raw.startsWith('cline:')) return 'cline';
+  if (raw.startsWith('gemini:')) return 'gemini';
+  return 'opencode';
+}
+
+function leaseHeldFor(chatLeases, chatId, maxAgeSec = 1800, now = Date.now()) {
+  const entry = chatLeases?.[String(chatId)];
+  if (!entry || typeof entry !== 'object') return false;
+  const ts = Number(entry.startedAt ?? entry.heartbeat ?? NaN);
+  // A corrupt timestamp fails safe to HELD (same rule as tui-attach.sh):
+  // delay, never corrupt a live turn.
+  if (!Number.isFinite(ts) || ts <= 0) return true;
+  return now - ts <= maxAgeSec * 1000;
+}
+
+/**
+ * One row per chat with a session on any lane. Pure read — safe to call
+ * from the endpoint and from the sensor with a fixture root.
+ */
+export function listTuiSessions({ env = process.env, root = null, bot = '', now = Date.now() } = {}) {
+  const dir = root || tuiStateRoot(env);
+  const sessions = readTuiJson(dir, bot, 'sessions.json');
+  const clineSessions = readTuiJson(dir, bot, 'cline-sessions.json');
+  const prefs = readTuiJson(dir, bot, 'prefs.json');
+  const leases = readTuiJson(dir, bot, 'leases.json');
+  const tuiOpen = readTuiJson(dir, bot, 'tui-open.json');
+  const tuiLease = readTuiJson(dir, bot, 'tui-lease.json');
+  const chatIds = new Set([
+    ...Object.keys(sessions),
+    ...Object.keys(clineSessions),
+    ...Object.keys(prefs).filter((k) => k !== '__meta'),
+  ]);
+  const rows = [];
+  for (const chatId of chatIds) {
+    const prefModel = String(prefs[chatId]?.model || '');
+    const snapshot = tuiOpen.chatId === chatId ? tuiOpen : null;
+    const model = prefModel || String(snapshot?.model || '');
+    const surface = snapshot?.surface || surfaceForModelRef(model);
+    const map = surface === 'cline' ? clineSessions : sessions;
+    const { workspace, sessionId } = unscopeSessionId(map[chatId]);
+    if (!sessionId && !snapshot?.sessionId) continue;
+    rows.push({
+      chatId: String(chatId),
+      surface,
+      model,
+      sessionId: sessionId || String(snapshot?.sessionId || ''),
+      workspace: workspace || String(snapshot?.workspace || ''),
+      leaseHeld: leaseHeldFor(leases, chatId, 1800, now),
+      lastOpenAt: snapshot?.at || '',
+    });
+  }
+  const hb = Number(tuiLease.heartbeat || 0);
+  const openNow = hb > 0 && now - hb <= 60000 ? tuiLease : null;
+  return { chats: rows, openNow };
+}
+
+/**
+ * Record which chat opened the terminal (the `/tui` write shape, mirrored).
+ * Resolves the session exactly like the open path: live map row first,
+ * snapshot fallback never. Returns the row or null when there is nothing
+ * shared to attach to (the attach script refuses those the same way).
+ */
+export function snapshotTuiOpen({ env = process.env, root = null, bot = '', chatId = '', now = Date.now() } = {}) {
+  const dir = root || tuiStateRoot(env);
+  const cleanChat = String(chatId || '').trim();
+  if (!cleanChat) return null;
+  const sessions = readTuiJson(dir, bot, 'sessions.json');
+  const clineSessions = readTuiJson(dir, bot, 'cline-sessions.json');
+  const prefs = readTuiJson(dir, bot, 'prefs.json');
+  const prev = readTuiJson(dir, bot, 'tui-open.json');
+  const prefModel = String(prefs[cleanChat]?.model || '');
+  const model = prefModel || (prev.chatId === cleanChat ? String(prev.model || '') : '');
+  const surface = (prev.chatId === cleanChat && prev.surface) || surfaceForModelRef(model);
+  const map = surface === 'cline' ? clineSessions : sessions;
+  const { workspace, sessionId } = unscopeSessionId(map[cleanChat]);
+  const sid = sessionId || (prev.chatId === cleanChat ? String(prev.sessionId || '') : '');
+  const ws = workspace || (prev.chatId === cleanChat ? String(prev.workspace || '') : '');
+  // Shared-session lanes with no session are a refusal, not a blank row
+  // (live 2026-10-04: a null snapshot reads as a broken record afterwards).
+  if (surface === 'opencode' && !sid) return null;
+  if (surface === 'gemini') return null;
+  const row = {
+    chatId: cleanChat,
+    surface,
+    model,
+    sessionId: sid,
+    workspace: ws,
+    at: new Date(now).toISOString(),
+  };
+  try {
+    fs.mkdirSync(path.join(dir, bot), { recursive: true });
+    fs.writeFileSync(path.join(dir, bot, 'tui-open.json'), JSON.stringify(row));
+  } catch {
+    return null;
+  }
+  return row;
 }
 
 export async function getReviewItems(opts = {}) {
@@ -868,6 +1220,19 @@ const buf = Buffer.isBuffer(got.bytes) ? got.bytes : Buffer.from(got.bytes || ''
 }
 
 export const fleetSseClients = new Set();
+
+export const reviewSseClients = new Set();
+
+export function broadcastReviewEvent(event, data) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of reviewSseClients) {
+    try {
+      res.write(payload);
+    } catch {
+      reviewSseClients.delete(res);
+    }
+  }
+}
 
 export function recordFleetHeartbeat(payload, opts = {}) {
   const res = recordFleetHeartbeatStatus(payload, opts);
@@ -1078,6 +1443,86 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // Never log the query: it carries the raw initData.
     log(`${req.method} ${url.pathname}`);
 
+    // Bag audit host: the whole host proxies to the standalone app behind
+    // the shared door — placed before every path route (including `/`),
+    // because on this host even `/` belongs to the bag app, not the TUI.
+    // A sub-path mount would break the app's absolute `/api/*` calls
+    // without HTML rewriting, which this gateway never does. Upstream auth
+    // (`?k=` / cookie / `/api/tgauth`) untouched; never log the query.
+    if (isTgtgHost(req, env)) {
+      let tgtgVerdict = verifyAnyToken(req, url, secret);
+      if (!tgtgVerdict.ok) {
+        const rt = refererToken(req);
+        if (rt) tgtgVerdict = verifyToken(rt, secret);
+      }
+      const bagViewKey = String(env.TGTG_VIEW_KEY || '').trim();
+      if (!tgtgVerdict.ok && bagViewKey) {
+        // The bag keeps its own credential, and the page loads direct from
+        // Caddy today — refusing here would break the live TG button. A
+        // valid viewer cookie, or the Telegram auth exchange itself (the
+        // bag's initData allowlist stays intact inside), admits without a
+        // gateway token. Constant-time compare; an unset key never matches.
+        const presentedCookie = String(cookieValue(req, 'tgtg_view') || '');
+        if (presentedCookie &&
+            presentedCookie.length === bagViewKey.length &&
+            crypto.timingSafeEqual(Buffer.from(presentedCookie), Buffer.from(bagViewKey))) {
+          tgtgVerdict = { ok: true, botId: '', chatId: '', via: 'bag-cookie' };
+        } else if (url.pathname === '/api/tgauth' && req.method === 'POST') {
+          tgtgVerdict = { ok: true, botId: '', chatId: '', via: 'bag-tgauth' };
+        }
+      }
+      if (!tgtgVerdict.ok) {
+        log(`tgtg refused (${tgtgVerdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: tgtgVerdict.reason }));
+      }
+      // Browser (Firebase) sessions carry no Telegram initData for the bag
+      // app's own /api/tgauth, so the gateway presents the viewer credential
+      // upstream itself — per request, never to the browser, never logged
+      // (env TGTG_VIEW_KEY, same value as the bag service's own VIEW_KEY).
+      // Telegram sessions keep the native tgauth path, so the bag's
+      // per-user allowlist still applies to every Telegram session.
+      if ((tgtgVerdict.botId === 'web' || tgtgVerdict.botId === 'webop') && bagViewKey) {
+        const prevCookie = String(req.headers.cookie || '').trim();
+        req.headers.cookie = prevCookie ? `${prevCookie}; tgtg_view=${bagViewKey}` : `tgtg_view=${bagViewKey}`;
+      }
+      return proxyHostUpstream(req, res, url, tgtgUpstream(env), 'bag upstream unreachable');
+    }
+
+    // Agenda host: tax calendar, agenda, hostel scout behind the same door.
+    // Same whole-host pattern (absolute `/api/*` paths). Unlike the bag app
+    // there is no upstream auth to preserve — the app is loopback-only, so
+    // this door is its only public gate and nothing serves anonymously.
+    if (isAgendaHost(req, env)) {
+      let agendaVerdict = verifyAnyToken(req, url, secret);
+      if (!agendaVerdict.ok) {
+        const rt = refererToken(req);
+        if (rt) agendaVerdict = verifyToken(rt, secret);
+      }
+      if (!agendaVerdict.ok) {
+        log(`agenda refused (${agendaVerdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: agendaVerdict.reason }));
+      }
+      return proxyHostUpstream(req, res, url, agendaUpstream(env), 'agenda upstream unreachable');
+    }
+
+    // Agenda sections on the app host (/agenda/*): the tax calendar, agenda
+    // and hostel scout are sections (?tab=) of one upstream app whose
+    // absolute asset/API paths demand whole-app proxying — which a path
+    // prefix cannot do unless the prefix is stripped here (it is) and the
+    // app addresses relatively (it does after the companion change).
+    if (url.pathname === '/agenda' || url.pathname.startsWith('/agenda/')) {
+      const agendaVerdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace, maxAgeSec: sessionMax });
+      if (!agendaVerdict.ok) {
+        log(`agenda path refused (${agendaVerdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: agendaVerdict.reason }));
+      }
+      return proxyHostUpstream(req, res, url, agendaUpstream(env), 'agenda upstream unreachable',
+        { stripPrefix: '/agenda', stripToken: true });
+    }
+
     // The Mini App's landing URL. It carries initData, which is exchanged for
     // a session token that goes into an HttpOnly cookie — so the token never
     // appears in a URL, in browser history, or in a Referer.
@@ -1099,6 +1544,27 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
           const deep = verifyAnyToken(req, url, secret);
           if (deep.ok) {
             const raw = presentedTokens(req, url).find((t) => verifyToken(t, secret).ok) || '';
+            // A top-level visit (typed domain, bookmark, pasted link) must
+            // land on the shell, never on a raw ttyd page: the raw page has
+            // no burger and no way back (live 2026-10-11: bare
+            // app.health-tracker.co.uk stranded on the tty with no nav).
+            // No tab is forced: the shell opens its last-visited tab (or the
+            // terminal for a first visit), so a refresh returns to the page
+            // already on. The shell's own terminal iframe keeps the fast tty
+            // path — it arrives with the shell as Referer and/or dest=iframe.
+            const ref = String(req.headers?.referer || req.headers?.referrer || '');
+            const dest = String(req.headers?.['sec-fetch-dest'] || '').toLowerCase();
+            const framed = dest === 'iframe' || ref.includes('/app/app');
+            if (!framed) {
+              log(`admitted bot=${deep.botId} chat=${deep.chatId} (deep link -> shell)`);
+              const shellQuery = `?token=${encodeURIComponent(raw)}&bot=${encodeURIComponent(deep.botId)}`;
+              res.writeHead(302, {
+                'location': `/app/app${shellQuery}`,
+                'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(raw)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+                'cache-control': 'no-store',
+              });
+              return res.end();
+            }
             log(`admitted bot=${deep.botId} chat=${deep.chatId} (deep link)`);
             res.writeHead(302, {
               'location': landingLocationFor(deep.botId, raw, env),
@@ -1278,7 +1744,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       // auth_request instead, which is why /authz is left strict. The referer
       // channel joins here too (same grace): parser-fired and worker clients
       // that never see a cookie still repair through it.
-      const verdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace, botId: tokenBot, maxAgeSec: sessionMax });
+      const verdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace, maxAgeSec: sessionMax });
       if (!verdict.ok) {
         log(`token refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
@@ -1295,7 +1761,10 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         headers['set-cookie'] = `${COOKIE_NAME}=${encodeURIComponent(fresh)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`;
         log(`token renewed bot=${verdict.botId} chat=${verdict.chatId} (expired ${Math.round((Date.now() - verdict.exp) / 1000)}s ago, grace ${renewGrace}s, session age ${Math.round(verdict.iat ? (Date.now() - verdict.iat) / 1000 : 0)}s)`);
       }
-      if (verdict.botId !== tokenBot && !(tokenBot === 'vm' && verdict.botId !== 'vm2')) {
+      if (verdict.botId === 'webop' && verdict.botId !== tokenBot) {
+        log(`operator cross-view token route bot=${tokenBot}`);
+      }
+      if (verdict.botId !== tokenBot && !(tokenBot === 'vm' && verdict.botId !== 'vm2') && verdict.botId !== 'webop') {
         log(`token refused (token is for bot=${verdict.botId}, path is for bot=${tokenBot})`);
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: 'token is for another bot' }));
@@ -1314,13 +1783,16 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     // the vm2 terminal and land in another bot's conversation map.
     const route = ttydRoutes(env)[url.pathname];
     if (route) {
-      const verdict = verifyWithRefererFallback(req, url, secret, { botId: route.bot, maxAgeSec: sessionMax });
+      const verdict = verifyWithRefererFallback(req, url, secret, { maxAgeSec: sessionMax });
       if (!verdict.ok) {
         log(`page refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
       }
-      if (verdict.botId !== route.bot && !(route.bot === 'vm' && verdict.botId !== 'vm2')) {
+      if (verdict.botId === 'webop' && verdict.botId !== route.bot) {
+        log(`operator cross-view page route bot=${route.bot}`);
+      }
+      if (verdict.botId !== route.bot && !(route.bot === 'vm' && verdict.botId !== 'vm2') && verdict.botId !== 'webop') {
         log(`page refused (token is for bot=${verdict.botId}, path is for bot=${route.bot})`);
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: 'token is for another bot' }));
@@ -1329,7 +1801,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         res.writeHead(503, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: 'gateway has no TUI_TTYD_CREDENTIAL' }));
       }
-      return serveTtydPage(req, res, ttydFor(route.bot, env), route.base, ttydCredential);
+      return serveTtydPage(req, res, ttydFor(route.bot, env), route.base, ttydCredential, route.bot);
     }
 
     // Bug board mini app (packet bug-board-miniapp, Node 5). Same initData
@@ -1376,6 +1848,449 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         'cache-control': 'no-store',
       });
       return res.end();
+    }
+
+    // Meta shell (META-1 P4). Same door as /bugs/: exchange here, then the
+    // token admits /app/app, which proxies the built shell (dist/app.html)
+    // from the app upstream. No bot default — the button carries ?bot=.
+    // Token renewal for the shell (META-1): the 900s page token dies
+    // while the tab stays open, and initData is single-use. Same shape as
+    // /web/token — grace-bound renewal with the absolute session cliff.
+    if (url.pathname === '/app/token') {
+      const verdict = verifyWithRefererFallback(req, url, secret, { renewGraceSec: renewGrace, maxAgeSec: sessionMax });
+      if (!verdict.ok) {
+        log(`app/token refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const fresh = issueToken({ botId: verdict.botId, chatId: verdict.chatId, secret, ttlSec: ttl, issuedAt: verdict.iat });
+      res.writeHead(200, {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+        'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(fresh)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+      });
+      return res.end(JSON.stringify({ ok: true, token: fresh }));
+    }
+
+    // Terminal session list for the shell picker. Same ttydRoutes table the
+    // page routes serve (trailing-slash entries only, first wins per bot),
+    // so the picker can never name a path the gateway does not serve — plus
+    // one row per live VM opencode CLI session (bare sessions with no ttyd
+    // route), so collab, VM-bot and VM sessions are all visible in one place.
+    // Rows are keyed by id (`tty:<bot>` vs `opencode:<sessionId>`), never by
+    // bot alone, because several session rows share bot `vm`. The list itself
+    // is deployment shape + liveness, not session data; any valid token reads
+    // it. Opening another bot's terminal additionally needs an
+    // operator ('webop') token at the page/token routes below.
+    if (url.pathname === '/api/ttys') {
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`ttys refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const seen = new Set();
+      const ttys = [];
+      for (const [routePath, route] of Object.entries(ttydRoutes(env))) {
+        if (!routePath.endsWith('/') || seen.has(route.bot)) continue;
+        seen.add(route.bot);
+        ttys.push({ bot: route.bot, path: routePath, id: `tty:${route.bot}`, kind: 'tty' });
+      }
+      ttys.sort((a, b) => String(a.bot).localeCompare(String(b.bot)));
+      // VM_OPENCODE_DB_PATH is a test seam only: unset in prod, where the
+      // default opencode.db under HOME is read (best-effort, never throws).
+      // Every entry is listed (the picker is also the session viewer); the
+      // client hides entries the status call reports no backend memory for.
+      // memMiB annotates the rare exclusive-backend entry in place.
+      const listBare = readVmPickerEntriesStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) });
+      const listMem = await collectBareSessionMem({
+        sessions: listBare.map((e) => e && e.sessionId).filter(Boolean),
+      });
+      for (const e of listBare) {
+        const m = e && e.sessionId ? listMem[e.sessionId] : null;
+        ttys.push({
+          ...e,
+          ...(m && !m.shared && Number.isInteger(m.mib) && m.mib > 0 ? { memMiB: m.mib } : {}),
+        });
+      }
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ok: true, ttys }));
+    }
+
+    // Operator-only terminal kill for the shell's terminal tab (memory
+    // saver). A TUI agent holds ~150-1000MB while its tmux session lives;
+    // killing the session frees it, and the next terminal open re-attaches
+    // (tui-attach.sh uses `tmux new-session -d -A`) resuming the same agent
+    // session id — so this frees RAM without losing the conversation.
+    // Operator-only like the cross-view page routes: any viewer listing
+    // sessions must not be able to kill them. The target must be a bot the
+    // route table serves, so the tmux name is allowlisted, never free-form.
+    // Off-box bots (e.g. the grok TG router backend) have no local tmux
+    // session: the kill reports killed:false honestly instead of failing.
+    if (url.pathname === '/api/ttys/kill') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'POST only' }));
+      }
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`ttys kill refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      if (verdict.botId !== 'webop') {
+        log(`ttys kill refused (not operator: ${verdict.botId})`);
+        res.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'operator only' }));
+      }
+      const parsed = await readJsonBody(req);
+      const tmName = parsed.ok ? String((parsed.json && parsed.json.tmux) || '').trim() : '';
+      if (tmName !== '') {
+        // Raw tmux target for the picker's tracking rows: operator-only like
+        // the bot path, and the name must exactly match a live session in
+        // the same tick — never free-form. A session that vanished between
+        // listing and killing reports killed:false honestly.
+        const liveNow = await listTmuxNames({});
+        if (!liveNow.includes(tmName)) {
+          res.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+          return res.end(JSON.stringify({ ok: false, error: 'unknown terminal' }));
+        }
+        let killed = false;
+        try {
+          await new Promise((resolve, reject) => {
+            execFile('tmux', ['kill-session', '-t', tmName], { timeout: 10000 }, (err) => (err ? reject(err) : resolve()));
+          });
+          killed = true;
+        } catch {
+          killed = false;
+        }
+        log(`ttys kill tmux=${tmName} killed=${killed}`);
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: true, tmux: tmName, killed }));
+      }
+      const target = parsed.ok ? String((parsed.json && parsed.json.bot) || '').trim() : '';
+      const known = target !== '' && Object.values(ttydRoutes(env)).some((r) => r && r.bot === target);
+      if (!known) {
+        res.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'unknown terminal' }));
+      }
+      const name = tmuxNameFor(target);
+      let killed = false;
+      try {
+        await new Promise((resolve, reject) => {
+          execFile('tmux', ['kill-session', '-t', name], { timeout: 10000 }, (err) => (err ? reject(err) : resolve()));
+        });
+        killed = true;
+      } catch {
+        killed = false;
+      }
+      log(`ttys kill bot=${target} tmux=${name} killed=${killed}`);
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ok: true, bot: target, tmux: name, killed }));
+    }
+
+    // Live/dormant flags for the shell's per-bot session rows. Same door as
+    // the list (deployment shape + liveness, no session data); killing stays
+    // operator-only. One `tmux has-session` per served bot, allowlisted names
+    // only; off-box backends (no local tmux session) report live:false. Bare
+    // VM opencode sessions ride along as always-live rows keyed by their
+    // picker id (they are listed only while fresh, so listing is liveness).
+    if (url.pathname === '/api/ttys/status') {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'GET only' }));
+      }
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`ttys status refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const seen = new Set();
+      const bots = [];
+      for (const route of Object.values(ttydRoutes(env))) {
+        if (!route || seen.has(route.bot)) continue;
+        seen.add(route.bot);
+        bots.push(route.bot);
+      }
+      bots.sort();
+      const status = [];
+      for (const b of bots) {
+        let live = false;
+        try {
+          await new Promise((resolve, reject) => {
+            execFile('tmux', ['has-session', '-t', tmuxNameFor(b)], { timeout: 5000 }, (err) => (err ? reject(err) : resolve()));
+          });
+          live = true;
+        } catch {
+          live = false;
+        }
+        status.push({ bot: b, live });
+      }
+      // Memory, idle age and backend label per live tmux session from one
+      // inventory scan: unknown carries no field rather than a zero.
+      // Bare rows are always reported (the picker doubles as the session
+      // viewer — frozen gate); the client hides entries with no backend
+      // memory once status truth arrives. memMiB annotates the rare
+      // exclusive-backend entry in place, with its DB agent string.
+      const inventory = await collectTmuxSessions({});
+      const byName = new Map(inventory.map((e) => [e.name, e]));
+      for (const row of status) {
+        if (!row.live) continue;
+        const hit = byName.get(tmuxNameFor(row.bot));
+        if (!hit) continue;
+        if (Number.isInteger(hit.memMiB) && hit.memMiB > 0) row.memMiB = hit.memMiB;
+        if (Number.isInteger(hit.idleMs) && hit.idleMs >= 0) row.idleMs = hit.idleMs;
+        if (hit.agent) row.agent = hit.agent;
+      }
+      const bareEntries = readVmPickerEntriesStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) });
+      const bareMem = await collectBareSessionMem({
+        sessions: bareEntries.map((e) => e && e.sessionId).filter(Boolean),
+      });
+      for (const e of bareEntries) {
+        const m = e && e.sessionId ? bareMem[e.sessionId] : null;
+        status.push({
+          id: e.id,
+          bot: e.bot,
+          live: true,
+          ...(m && !m.shared && Number.isInteger(m.mib) && m.mib > 0 ? { memMiB: m.mib } : {}),
+          ...(e && e.agent ? { agent: e.agent } : {}),
+        });
+      }
+      // Full tmux inventory for the picker's tracking rows: EVERY live
+      // session, not just the served bots'. `route` names the served bot
+      // when the session is that bot's attach target, else null — the client
+      // renders routeless sessions as view-less rows keyed `tmux:<name>`.
+      const served = new Map(bots.map((b) => [tmuxNameFor(b), b]));
+      const tmux = inventory.map((e) => ({
+        name: e.name,
+        ...(Number.isInteger(e.memMiB) ? { memMiB: e.memMiB } : {}),
+        ...(Number.isInteger(e.idleMs) ? { idleMs: e.idleMs } : {}),
+        ...(e.agent ? { agent: e.agent } : {}),
+        route: served.get(e.name) || null,
+      }));
+      // The reconciling remainder: PSS outside every tmux tree. Panel
+      // sessions + box ≈ all-process PSS; the rest to `free` is kernel slab
+      // plus swapped-out pages, which live in no process. Omitted on failure.
+      const unatt = await collectUnattributedMem({});
+      const box = Number.isInteger(unatt.mib) && unatt.mib > 0
+        ? { otherMiB: unatt.mib, otherProcs: unatt.procs }
+        : null;
+      // Live bot-turn activity for the picker's working badges: every bot
+      // turn already writes observer logs + leases, this only joins them.
+      // Best-effort and additive — a failed read yields `activity: []`, never
+      // a failed status.
+      let activity = [];
+      try {
+        activity = collectActivity(readActivityInputs({}));
+      } catch {
+        activity = [];
+      }
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ok: true, status, tmux, ...(box ? { box } : {}), activity }));
+    }
+
+    // Point the shared VM session viewer at one bare opencode session, so a
+    // picker row opens as a real attached TUI instead of the web UI (which
+    // already owns the Web tab — pointing there too just duplicated the view).
+    // Same door as the list: viewing is no more sensitive than listing.
+    // The viewer route itself (TUI_ROUTE_VMSESSION_PATH) is deployment config;
+    // without it this honestly 503s and the client falls back to the web UI.
+    if (url.pathname === '/api/ttys/view') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'POST only' }));
+      }
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`ttys view refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const parsed = await readJsonBody(req);
+      const id = parsed.ok ? String((parsed.json && parsed.json.id) || '').trim() : '';
+      const hit = /^opencode:(ses_[A-Za-z0-9]+)$/.exec(id);
+      if (!hit) {
+        res.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'unknown terminal' }));
+      }
+      const target = findVmSessionTargetStatus(
+        readVmOpencodeSessionsStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null }),
+        hit[1],
+      );
+      if (!target) {
+        res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'session not found or stale' }));
+      }
+      let viewerPath = '';
+      for (const [routePath, route] of Object.entries(ttydRoutes(env))) {
+        if (routePath.endsWith('/') && route && route.bot === VMSESSION_BOT) { viewerPath = routePath; break; }
+      }
+      if (!viewerPath) {
+        res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'session viewer not configured' }));
+      }
+      try {
+        const file = viewerTargetFile(env);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, JSON.stringify({ ...target, updatedAt: new Date().toISOString() }), 'utf8');
+      } catch (err) {
+        log(`ttys view target unwritable: ${err && err.message ? err.message : err}`);
+        res.writeHead(500, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(JSON.stringify({ ok: false, error: 'viewer unavailable' }));
+      }
+      // Reap the viewer pane so the next open attaches to the new target
+      // instead of showing the previous session (tmux -A keeps stale panes).
+      try {
+        await new Promise((resolve, reject) => {
+          execFile('tmux', ['kill-session', '-t', tmuxNameFor(VMSESSION_BOT)], { timeout: 5000 }, (err) => (err ? reject(err) : resolve()));
+        });
+      } catch {}
+      log(`ttys view session=${target.sessionId}`);
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ok: true, bot: VMSESSION_BOT, path: viewerPath, id: `tty:${VMSESSION_BOT}` }));
+    }
+
+    if (url.pathname === '/app/' || url.pathname === '/app' || url.pathname === '/app/index.html') {
+      const initData = url.searchParams.get('initData') || '';
+      if (!initData) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(BOOTSTRAP_APP);
+      }
+      let botId = url.searchParams.get('bot') || '';
+      let verdict = botId ? validateInitData(initData, tokenFor(botId, env)) : { ok: false, reason: 'no bot in URL — open this from a bot button in Telegram' };
+      if (!verdict.ok && (verdict.reason === 'hash mismatch' || verdict.reason === 'missing initData or bot token')) {
+        for (const [k, raw] of Object.entries(env)) {
+          if (!k.startsWith('TUI_BOT_TOKEN_')) continue;
+          const val = String(raw || '').trim();
+          if (!val) continue;
+          const candidateBot = k.slice('TUI_BOT_TOKEN_'.length).toLowerCase();
+          if (candidateBot === botId) continue;
+          const v = validateInitData(initData, val);
+          if (v.ok) {
+            log(`app landing bot=${botId} was ${verdict.reason}, auto-matched bot=${candidateBot}`);
+            botId = candidateBot;
+            verdict = v;
+            break;
+          }
+        }
+      }
+      if (!verdict.ok) {
+        log(`app landing refused (${verdict.reason}) for bot=${botId} (tokens for: ${configuredTokenBots(env).join(',') || 'none'}); got ${describeInitData(initData)}`);
+        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
+        return res.end(`<!doctype html><meta charset=utf-8><body style="font:14px system-ui;background:#0b1220;color:#f8fafc;padding:24px">
+          <h1>refused</h1><p>${escapeHtml(verdict.reason)}</p></body>`);
+      }
+      const token = issueToken({ botId, chatId: verdict.chatId, secret, ttlSec: ttl });
+      log(`app admitted bot=${botId} ${verdict.boundBy}=${verdict.chatId}`);
+      // The shell reads bot+tab from the query: a bare ?token= would land it
+      // on the "No bot" screen (live 2026-10-09: grok menu tap lost both).
+      const tab = url.searchParams.get('tab') || '';
+      const landingQuery = `?token=${encodeURIComponent(token)}&bot=${encodeURIComponent(botId)}` +
+        (tab ? `&tab=${encodeURIComponent(tab)}` : '');
+      res.writeHead(302, {
+        'location': `/app/app${landingQuery}`,
+        'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+        'cache-control': 'no-store',
+      });
+      return res.end();
+    }
+
+    // Ungated login entry for real browsers (no initData exists there).
+    // Serves the same built shell bytes; the HTML alone exposes no session
+    // data (every state/API route keeps its door). The shell shows the
+    // Firebase Google branch when no Telegram session is present, then the
+    // /app/auth/firebase exchange mints the cookie /app/token reads.
+    if (url.pathname === '/app/login') {
+      try {
+        const up = await fetch(boardUpstream(env) + '/app.html', { headers: { 'accept-encoding': 'identity' } });
+        if (up.status === 404) {
+          res.writeHead(503, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'shell not built on app upstream (vite build has no app.html input yet)' }));
+        }
+        const body = Buffer.from(await up.arrayBuffer());
+        res.writeHead(up.status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(body);
+      } catch (err) {
+        logGatewayError(err);
+        res.writeHead(502, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'shell upstream unreachable' }));
+      }
+    }
+
+    if (url.pathname === '/app/app') {
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`shell refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      try {
+        const up = await fetch(boardUpstream(env) + '/app.html', { headers: { 'accept-encoding': 'identity' } });
+        if (up.status === 404) {
+          res.writeHead(503, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'shell not built on app upstream (vite build has no app.html input yet)' }));
+        }
+        const body = Buffer.from(await up.arrayBuffer());
+        res.writeHead(up.status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(body);
+      } catch (err) {
+        logGatewayError(err);
+        res.writeHead(502, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'shell upstream unreachable' }));
+      }
+    }
+
+    // Browser login for the shell (META-1): a real browser has no Telegram
+    // initData, but Firebase Google sign-in works there (same project as the
+    // website, so the same account). The client posts the Firebase ID token
+    // from signInWithPopup; verified here with firebase-admin (projectId
+    // only — verification fetches Google's certs, no key file), then
+    // exchanged for the gateway cookie. Never log the token.
+    if (url.pathname === '/app/auth/firebase' && req.method === 'POST') {
+      const parsed = await readJsonBody(req);
+      if (!parsed.ok) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: parsed.error }));
+      }
+      const idToken = String(parsed.json?.idToken || '').trim();
+      if (!idToken) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'idToken required' }));
+      }
+      let decoded = null;
+      try {
+        const adminApp = await import('firebase-admin/app');
+        const adminAuth = await import('firebase-admin/auth');
+        const projectId = String(env.FIREBASE_PROJECT_ID || 'health-tracker-b04dd').trim();
+        try {
+          adminApp.getApp();
+        } catch {
+          adminApp.initializeApp({ projectId });
+        }
+        decoded = await adminAuth.getAuth().verifyIdToken(idToken);
+      } catch (err) {
+        log(`firebase exchange refused (${err?.code || err?.message || 'verify failed'})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'invalid Firebase token' }));
+      }
+      // Operator gate for terminal cross-viewing: any Google account may
+      // use the shell (bot 'web', as today), but only the operator's own
+      // Google address mints bot 'webop', the one token the ttyd page/token
+      // routes admit across bots. Without this, any Gmail could type into
+      // the bots' live sessions. Env FIREBASE_OPERATOR_EMAILS, comma list.
+      const allowed = String(env.FIREBASE_OPERATOR_EMAILS || '').split(',')
+        .map((s) => s.trim().toLowerCase()).filter(Boolean);
+      const who = String(decoded.email || '').trim().toLowerCase();
+      const operator = who !== '' && allowed.includes(who);
+      const token = issueToken({ botId: operator ? 'webop' : 'web', chatId: `firebase:${decoded.uid}`, secret, ttlSec: ttl });
+      log(`firebase exchange admitted uid=${decoded.uid}${operator ? ' (operator)' : ''}`);
+      res.writeHead(200, {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+        'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+      });
+      return res.end(JSON.stringify({ ok: true }));
     }
 
     if (url.pathname === '/bugs/app') {
@@ -1732,6 +2647,32 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       return res.end(JSON.stringify({ ...state, generatedAt: new Date().toISOString() }));
     }
 
+    if (url.pathname === '/review/api/events') {
+      const authHeader = req.headers['x-telegram-init-data'] || '';
+      let verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
+      if (!verdict.ok && authHeader) {
+        const authVer = authorizeForgeAtGateway({ initData: String(authHeader), env });
+        if (authVer.ok) verdict = { ok: true };
+      }
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        'connection': 'keep-alive',
+        'x-accel-buffering': 'no',
+      });
+      res.flushHeaders?.();
+      reviewSseClients.add(res);
+      req.on('close', () => { reviewSseClients.delete(res); });
+      getReviewItems({ env, root: REPO_ROOT }).then((state) => {
+        res.write(`event: state\ndata: ${JSON.stringify(state)}\n\n`);
+      }).catch(() => {});
+      return;
+    }
+
     if (url.pathname === '/review/api/proof') {
       const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
       if (!verdict.ok) {
@@ -1777,7 +2718,11 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     }
 
     if (url.pathname === '/review/api/answer' && req.method === 'POST') {
-      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
+      // Same renewal grace as every other authed path: the review page
+      // stays open longer than one token TTL (live 2026-10-11: heart tap
+      // 401'd `bad token` on a page open >15min), and a correctly-signed
+      // token inside grace is still the chat-bound bearer, not a new door.
+      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret, { renewGraceSec: renewGrace });
       if (!verdict.ok) {
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
@@ -1790,12 +2735,24 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         return res.end(JSON.stringify({ ok: false, error: parsed.error }));
       }
       const out = await answerReviewItemStatus(parsed.json?.key, parsed.json || {}, { env });
+      if (out.ok) {
+        // Review screens stay live without polling: push the fresh queue to
+        // every open SSE client. Fire-and-forget — never delays the answer.
+        getReviewItems({ env, root: REPO_ROOT }).then(
+          (state) => broadcastReviewEvent('state', state),
+          () => {},
+        );
+        // Event-driven todo wake-up: the human's tap triages read-only.
+        // No-op unless TODO_AGENT_NOTIFY=1 (never in tests).
+        try { notifyTodoEvent('answer', parsed.json?.key, env); } catch { /* notify must never fail the answer */ }
+      }
       res.writeHead(out.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify(out));
     }
 
     if ((url.pathname === '/review/api/approve' || url.pathname === '/review/api/comment') && req.method === 'POST') {
-      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret);
+      // Renewal grace, same reason as /review/api/answer above.
+      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret, { renewGraceSec: renewGrace });
       if (!verdict.ok) {
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
@@ -1809,8 +2766,104 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       const out = url.pathname === '/review/api/approve'
         ? await approveReviewItemStatus(data.key, { env })
         : await commentReviewItemStatus(data.key, data.text, data.target, { env });
+      if (out.ok) {
+        // Same live push as /answer above: the queue changed, tell the screens.
+        getReviewItems({ env, root: REPO_ROOT }).then(
+          (state) => broadcastReviewEvent('state', state),
+          () => {},
+        );
+        // Event-driven todo wake-up (see /answer above).
+        try { notifyTodoEvent(url.pathname === '/review/api/approve' ? 'approve' : 'comment', data.key, env); } catch { /* notify must never fail the verdict */ }
+      }
       res.writeHead(out.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify(out));
+    }
+
+    if (url.pathname === '/review/api/question' && req.method === 'POST') {
+      // ❓ The owner answers the agent's Additional question. Same renewal
+      // grace as the other verdict endpoints; the answer lands in the
+      // question cell and the answer wake-up re-runs triage on the row.
+      const verdict = isReviewTestAuth(env) ? { ok: true } : verifyAnyToken(req, url, secret, { renewGraceSec: renewGrace });
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      const parsed = await readJsonBody(req);
+      if (!parsed.ok) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: parsed.error }));
+      }
+      const data = parsed.json || {};
+      const out = await answerQuestionStatus(data.key, data.text, { env });
+      if (out.ok) {
+        getReviewItemsStatus({ env, root: REPO_ROOT }).then(
+          (state) => broadcastReviewEvent('state', state),
+          () => {},
+        );
+        try { notifyTodoEvent('answer', data.key, env); } catch { /* notify must never fail the verdict */ }
+      }
+      res.writeHead(out.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify(out));
+    }
+
+    // TUI session browser (META-1 P3.6). Read-only list plus the one
+    // snapshot write bot-host's /tui already performs — tui-attach.sh
+    // cannot tell who recorded the row. The token must be bound to the
+    // same bot it reads/writes (cross-bot map access refused: same class
+    // as the token/path isolation on the terminal routes).
+    if (url.pathname === '/tui/api/sessions') {
+      const bot = String(url.searchParams.get('bot') || '').trim();
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok || !bot) {
+        res.writeHead(!bot ? 400 : 401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: !bot ? 'bot required' : verdict.reason }));
+      }
+      if (verdict.botId !== bot) {
+        log(`tui sessions refused (token is for bot=${verdict.botId}, asked bot=${bot})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'token is for another bot' }));
+      }
+      const list = listTuiSessions({ env, bot });
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ok: true, bot, ...list }));
+    }
+
+    if (url.pathname === '/tui/api/open' && req.method === 'POST') {
+      const bot = String(url.searchParams.get('bot') || '').trim();
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok || !bot) {
+        res.writeHead(!bot ? 400 : 401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: !bot ? 'bot required' : verdict.reason }));
+      }
+      if (verdict.botId !== bot) {
+        log(`tui open refused (token is for bot=${verdict.botId}, asked bot=${bot})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'token is for another bot' }));
+      }
+      const parsed = await readJsonBody(req);
+      if (!parsed.ok) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: parsed.error }));
+      }
+      const row = snapshotTuiOpen({ env, bot, chatId: parsed.json?.chat });
+      if (!row) {
+        res.writeHead(409, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'nothing shared to attach to — send the bot a message first' }));
+      }
+      log(`tui browser open bot=${bot} chat=${row.chatId} surface=${row.surface}`);
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ ok: true, ...row }));
+    }
+
+    // TUI session browser page (META-1 P3.6): the list + open buttons.
+    if (url.pathname === '/tui/sessions') {
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(TUI_BROWSER_HTML);
     }
 
     // One-click bot forge. The gateway owns the hostname and the initData
@@ -1827,6 +2880,131 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     return res.end(JSON.stringify({ ok: false, error: 'not found' }));
   };
 }
+
+/**
+ * TUI session browser page (META-1 P3.6). Served bytes, same pattern as the
+ * BOOTSTRAP pages above: inline so the page needs no build step and no new
+ * route file. Vanilla JS, query passthrough, no server-only imports.
+ */
+const TUI_BROWSER_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TUI sessions</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 0 0 24px 0; background: #0f172a; color: #e2e8f0;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%; line-height: 1.5; }
+  .masthead { position: sticky; top: 0; z-index: 30; display: flex; align-items: center;
+    justify-content: space-between; gap: 10px; background: #0f172a;
+    padding: 8px 14px; border-bottom: 1px solid #334155; }
+  h1 { color: #f8fafc; font-size: 17px; margin: 0; }
+  .btn { background: #1e293b; border: 1px solid #334155; color: #93c5fd;
+    border-radius: 6px; padding: 4px 10px; font-size: 13px; cursor: pointer; }
+  .row { border: 1px solid #334155; border-radius: 8px; background: #1e293b;
+    margin: 10px 14px; padding: 10px 12px; }
+  .row .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .chat { font-family: "SF Mono", Consolas, monospace; color: #7dd3fc; font-size: 13px; }
+  .meta { font-size: 12px; color: #94a3b8; margin-top: 4px; overflow-wrap: anywhere; }
+  .badge { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 9999px;
+    font-size: 11px; font-weight: 600; }
+  .b-open { background: #065f46; color: #a7f3d0; border: 1px solid #059669; }
+  .b-busy { background: #854d0e; color: #fef08a; border: 1px solid #ca8a04; }
+  .b-idle { background: #334155; color: #cbd5e1; border: 1px solid #475569; }
+  .empty { text-align: center; color: #94a3b8; padding: 32px 14px; }
+</style>
+</head>
+<body>
+<div class="masthead">
+  <h1>Terminal sessions</h1>
+  <button class="btn" id="btn-refresh" type="button">Refresh</button>
+</div>
+<div id="list"><div class="empty">Loading…</div></div>
+<script>
+(function () {
+  try {
+    var tg = window.Telegram && window.Telegram.WebApp;
+    if (tg) {
+      if (tg.ready) tg.ready();
+      if (tg.expand) tg.expand();
+      if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
+    }
+  } catch (e) {}
+  var query = location.search || '';
+  var bot = '';
+  try { bot = new URLSearchParams(query).get('bot') || ''; } catch (e) {}
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function render(data) {
+    var box = document.getElementById('list');
+    if (!data || !data.ok || !data.chats || !data.chats.length) {
+      box.innerHTML = '<div class="empty">No chat sessions recorded yet.<br>Send the bot a message first, then reopen this.</div>';
+      return;
+    }
+    box.innerHTML = data.chats.map(function (c, i) {
+      var badge = c.leaseHeld
+        ? '<span class="badge b-busy">turn running</span>'
+        : (data.openNow ? '<span class="badge b-open">open now</span>' : '<span class="badge b-idle">idle</span>');
+      return '<div class="row"><div class="top"><span class="chat">' + esc(c.chatId) + '</span>' + badge + '</div>' +
+        '<div class="meta">' + esc(c.surface) + ' · ' + esc(c.model || '—') + '</div>' +
+        (c.workspace ? '<div class="meta">' + esc(c.workspace) + '</div>' : '') +
+        '<div style="margin-top:8px"><button class="btn" type="button" data-i="' + i + '">Open terminal</button></div></div>';
+    }).join('');
+    box.querySelectorAll('button[data-i]').forEach(function (b) {
+      b.addEventListener('click', function () { openChat(data.chats[Number(b.getAttribute('data-i'))]); });
+    });
+  }
+
+  function openChat(c) {
+    if (!c) return;
+    fetch('/tui/api/open' + query, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat: c.chatId }),
+    }).then(function (res) { return res.json().then(function (j) { return { status: res.status, body: j }; }); })
+      .then(function (r) {
+        if (r.status === 200 && r.body && r.body.ok) {
+          // Back to the terminal landing with the same query (bot + token):
+          // the cookie or ?token= admits, and the attach resolves the chat
+          // this snapshot just recorded.
+          location.href = '/' + query;
+        } else {
+          alert((r.body && r.body.error) || ('open failed (' + r.status + ')'));
+        }
+      })
+      .catch(function () { alert('open failed: network'); });
+  }
+
+  function fetchState() {
+    fetch('/tui/api/sessions' + query, { headers: { Accept: 'application/json' } })
+      .then(function (res) { return res.json(); })
+      .then(render)
+      .catch(function () {
+        document.getElementById('list').innerHTML = '<div class="empty">Could not load sessions.</div>';
+      });
+  }
+
+  document.getElementById('btn-refresh').addEventListener('click', function () { fetchState(); });
+  if (!bot) {
+    document.getElementById('list').innerHTML = '<div class="empty">No bot — open this from a bot button in Telegram.</div>';
+    return;
+  }
+  fetchState();
+  setInterval(function () {
+    if (document.visibilityState === 'visible') fetchState();
+  }, 30000);
+})();
+</script>
+</body>
+</html>
+`;
 
 /**
  * Build the forge route the gateway mounts, or null when this host cannot forge
@@ -1879,17 +3057,21 @@ async function loadForgeRoute({ env, log }) {
  *   browser default 8px shows as a frame around the terminal.
  * - touch-action on the xterm viewport: lets one-finger vertical pans scroll
  *   the scrollback instead of fighting the canvas.
+ * - overscroll-behavior:none on the document AND the viewport: a drag that
+ *   scrolls a transcript is the same direction as pull-to-refresh, and
+ *   `contain` does not disable the refresh — `none` does, while still
+ *   allowing the inner scroll itself.
  */
 export const VIEWPORT_HEAD_TAGS = [
   '<meta name="viewport" content="width=device-width, initial-scale=1">',
   '<style>html,body{margin:0!important;padding:0!important;height:100%!important;'
-    + 'width:100%!important;overflow:hidden!important;background:#000!important}'
+    + 'width:100%!important;overflow:hidden!important;overscroll-behavior:none!important;background:#000!important}'
     + '#terminal-container{width:100%!important;max-width:100%!important;margin:0!important;'
     + 'padding:0!important;height:100%!important}'
     + '#terminal-container .terminal,.terminal{padding:0!important;height:100%!important;'
     + 'width:100%!important;box-sizing:border-box!important}'
     + '.xterm{height:100%!important;width:100%!important}'
-    + '.xterm .xterm-viewport{touch-action:pan-y!important;overscroll-behavior:contain!important}</style>',
+    + '.xterm .xterm-viewport{touch-action:pan-y!important;overscroll-behavior:none!important}</style>',
 ].join('');
 
 export function withPhoneViewport(html) {
@@ -2027,16 +3209,27 @@ export const LAYOUT_JS = [
  *
  * opencode binds a LINE key (messages_line_up/down = ctrl+alt+y / ctrl+alt+e,
  * confirmed against the keybind table in the binary and measured moving a live
- * pane). Sending those instead of page keys maps finger travel one-to-one onto
- * lines, which is what "feels like scrolling" actually means. cline has no
- * line key (TRANSCRIPT_KEYBINDS has page and half-page only), so it keeps the
- * half-page keys — finer than a full page, still coarse, and honest about it.
+ * pane), so the WHEEL keeps those for 1:1 feel on the opencode lane. Touch
+ * does NOT use them: it keys on bare PageUp/PageDown at page granularity.
  *
- * Line keys are emitted one per LINE_PX of travel and paced to LINE_COOLDOWN_MS
- * (far tighter than the page cooldown: a line is a small move, so a 300ms
- * cadence would feel like a stall rather than motion). MAX_LINE_KEYS per
- * touchmove bounds a fast flick without throttling it outright, and the fling
- * decays the same way at line granularity.
+ * Why the split (VM4, live 2026-10-11). A touch bridge that sent fine keys for
+ * both lanes — ctrl+alt for opencode, ctrl+meta half-page for cline (TRANSCRIPT
+ * KEYBINDS) — stranded every cline lane: forty dispatched keys, zero movement.
+ * Lab byte-clean room verdict: this ttyd/xterm emits ZERO PTY bytes for
+ * Ctrl+Meta+letter, trusted or synthetic (C-M-u/d/b/f all silent), while
+ * Ctrl+Alt+letter and bare PageUp/PageDown all produce bytes. xterm swallows
+ * the meta combo before it ever becomes bytes, so no app can bind it — the
+ * failure is at the xterm layer, not the app layer, and no key-counting probe
+ * can see it (dispatched keys are counted; produced bytes were not). Touch
+ * therefore sends the one binding both lanes honour through this xterm —
+ * bare page keys — and the wheel keeps opencode line keys (cline wheels ride
+ * app mouse-reporting, which a trusted wheel reaches regardless).
+ *
+ * Wheel twin (desktop browsers): a wheel over an alt-screen TUI moves nothing
+ * natively — same measurement as above, viewport scrollHeight == clientHeight
+ * — so wheel deltas become the same fine steps the drag emits. Where xterm
+ * HAS scrollback (plain shells) native scrolling wins and the handler stands
+ * aside; ctrl/meta+wheel (zoom) is never touched.
  */
 export const TOUCH_SCROLL_JS = [
   '(function(){',
@@ -2049,22 +3242,21 @@ export const TOUCH_SCROLL_JS = [
   '// would jump full pages per line-px of drag.',
   'var PGUP=33,PGDN=34,MAX_KEYS=3,COOLDOWN_MS=300,',
   'FLING_PX_PER_STEP=160,MAX_FLING_STEPS=6;',
-  // Line granularity, and the per-lane split. opencode binds a LINE key',
-  '// (messages_line_up/down = ctrl+alt+y / ctrl+alt+e); cline has none, and',
-  '// binds half-page to ctrl+meta+u / ctrl+meta+d instead. Those two sets are',
-  '// DISJOINT — opencode binds ctrl+alt, cline binds ctrl+meta — so one',
-  '// gesture step can send both and each lane takes only the step it has a',
-  '// binding for. That is what makes this lane-agnostic: the bridge cannot',
-  '// know which lane is behind the terminal (it is per-chat and can change),',
-  '// so it sends the finest step EVERY lane binds rather than guessing.',
-  '//',
-  '// Verified moving a live opencode pane (ctrl+alt+y/e/u/d all moved it).',
-  '// The cline half-page pair is inherited from the TRANSCRIPT_KEYBINDS note',
-  '// above and has NOT been re-measured on this box — cline is not installed',
-  '// here. Treat cline-side granularity as unproven until someone tries it.',
-  'var LINE_UP="y",LINE_DOWN="e",HALF_UP="u",HALF_DOWN="d",',
+  // Line granularity is WHEEL-ONLY, and opencode-only. opencode binds a LINE key',
+  '// (messages_line_up/down = ctrl+alt+y / ctrl+alt+e), lab byte-proven through',
+  '// this exact ttyd/xterm (C-A-* produce PTY bytes). The cline TRANSCRIPT',
+  '// half-page pair (ctrl+meta+u/d) is NOT sent anymore: lab byte-proven DEAD.',
+  '// ttyd 1.7.7\u2019s xterm emits ZERO PTY bytes for Ctrl+Meta+letter — trusted',
+  '// or synthetic, keyecho-clean (2026-10-11: C-M-u/d/b/f all silent, C-A-y/e/b/f',
+  '// and bare PageUp/PageDown all bytes). xterm swallows the combo before it',
+  '// ever becomes bytes, so no app behind the terminal can bind it — the old',
+  '// "disjoint lane-agnostic" story was wrong at the xterm layer, not the app',
+  '// layer, and it stranded every cline lane (VM4, live 2026-10-11: forty',
+  '// dispatched keys, zero movement). The cline lane scrolls on the BARE page',
+  '// keys both lanes bind, which is why the touch path below keys on pagePx.',
+  'var LINE_UP="y",LINE_DOWN="e",',
   'MAX_LINE_KEYS=6;',
-  'var t=null,y0=0,acc=0,v=0,v0=0,last=0,active=0,lastDir=0,lastKeyAt=0;',
+  'var t=null,y0=0,x0=0,acc=0,cumY=0,cumX=0,v=0,v0=0,last=0,active=0,lastDir=0,lastKeyAt=0;',
   'function screen(){return document.querySelector(".xterm-screen")||document.querySelector(".xterm");}',
   'function keys(){return document.querySelector(".xterm-helper-textarea")||screen();}',
   'function now(){try{return performance.now();}catch(e){return Date.now();}}',
@@ -2090,12 +3282,11 @@ export const TOUCH_SCROLL_JS = [
   'el.dispatchEvent(new KeyboardEvent("keyup",o));',
   '}catch(e){}',
   '}',
-  '// One LINE of travel on opencode, one HALF PAGE on cline, in the same',
-  '// gesture step. Both are sent because the bindings are disjoint — see the',
-  '// note above. ctrl+alt+e/y and ctrl+meta+d/u are distinct key combinations,',
-  '// so no lane sees a doubled step, and no modifier here is one xterm or the',
-  '// browser eats: alt+letter is the risky pair on some platforms, so a',
-  '// failure degrades to the coarse page key below rather than to nothing.',
+  '// One LINE step for the wheel on opencode (ctrl+alt+y/e). No meta half:',
+  '// see the note above — Ctrl+Meta+letter never becomes PTY bytes here, so',
+  '// sending it only doubles dispatched events for nothing. Touch never calls',
+  '// this; it keys on bare page keys (drain, below). A platform that eats',
+  '// ctrl+alt still degrades to the coarse page key below rather than nothing.',
   'function pressFine(dir){',
   'var el=keys();if(!el)return 0;',
   'var sent=0;',
@@ -2115,8 +3306,6 @@ export const TOUCH_SCROLL_JS = [
   '};',
   '// opencode messages_line_up/down -> ctrl+alt+y / ctrl+alt+e  (one line)',
   'fire(up?LINE_UP:LINE_DOWN,{ctrl:true,alt:true});',
-  '// cline half-page -> ctrl+meta+u / ctrl+meta+d  (TRANSCRIPT_KEYBINDS)',
-  'fire(up?HALF_UP:HALF_DOWN,{ctrl:true,meta:true});',
   '}catch(e){}',
   'return sent;',
   '}',
@@ -2127,44 +3316,48 @@ export const TOUCH_SCROLL_JS = [
   'if(t-lastKeyAt<COOLDOWN_MS)return;',
   'press(dir>0?PGDN:PGUP);lastDir=dir>0?1:-1;lastKeyAt=t;',
   '}',
-  '// LinePx is the whole point of this change: a page key is a WHOLE screen,',
-  '// so one page key per 1/24th of travel makes any drag feel like a handful',
-  '// of full-screen jumps. One LINE of finger travel per line key maps the',
-  '// gesture onto the content 1:1, which is what "scrolling" means to a thumb.',
+  '// linePx is the touch ACTIVATION threshold only (a tap still types): the',
+  '// gesture must be unambiguous before anything scrolls. Keys themselves are',
+  '// page-paced (drain, below) — line keys would be 1:1 on opencode but are',
+  '// dead silence on a cline lane (see the note above), and a scroll that',
+  '// moves on both lanes beats a smooth one that strands one of them.',
   'function linePx(){',
   'try{return 18;}catch(e){return 18;}',
   '}',
-  '// emitFine sends the finest step each lane binds (see pressFine), and has',
-  '// NO time-based cooldown. That is deliberate: the accumulator already',
-  '// admits exactly one key per LINE_PX of finger travel, so a key cannot',
-  '// escape without the finger having moved that far. Adding a timer on top',
-  '// decoupled keys from movement — the scroll would run on a clock instead of',
-  '// the thumb, which is the same "not real" feeling at a smaller scale. The',
-  '// page-key path below keeps its 300ms cooldown because a page key is a',
-  '// WHOLE screen and an unpaced burst would jump screens per touchmove.',
-  '//',
-  '// Falls back to the coarse page key if the fine dispatch sent nothing, so a',
-  '// platform that eats ctrl+alt / ctrl+meta degrades to the old behaviour',
-  '// rather than to a dead scroll.',
+  '// emitFine is the WHEEL path: opencode line keys (see pressFine), with NO',
+  '// time-based cooldown — the wheel accumulator already admits a bounded run',
+  '// per event (MAX_LINE_KEYS), so a key cannot escape without wheel travel.',
+  '// Falls back to the coarse page key if the fine dispatch sent nothing, so',
+  '// a platform that eats ctrl+alt degrades instead of dying silently.',
   'function emitFine(dir){',
   'if(pressFine(dir)>0){lastDir=dir>0?1:-1;return;}',
   'var t=now();',
   'if(t-lastKeyAt<COOLDOWN_MS)return;',
   'press(dir>0?PGDN:PGUP);lastDir=dir>0?1:-1;lastKeyAt=t;',
   '}',
+  '// drain is the TOUCH path: bare page keys at page granularity, paced by the',
+  '// 300ms cooldown in emit (a page key is a WHOLE screen — an unpaced burst',
+  '// would skip screens per touchmove). Page keys are the one binding BOTH',
+  '// lanes honour through this xterm (lab byte-proven), so a drag moves on',
+  '// opencode AND cline; the old fine-key drain stranded cline (VM4 live).',
   'function drain(){',
-  'var s=linePx(),n=0;',
-  'while(acc>=s&&n<MAX_LINE_KEYS){acc-=s;emitFine(1);n++;}',
-  'while(acc<=-s&&n<MAX_LINE_KEYS){acc+=s;emitFine(-1);n++;}',
+  'var s=pagePx(),n=0;',
+  'while(acc>=s&&n<MAX_LINE_KEYS){acc-=s;emit(1);n++;}',
+  'while(acc<=-s&&n<MAX_LINE_KEYS){acc+=s;emit(-1);n++;}',
   '}',
   'function down(e){',
   'if(active||!e.touches||e.touches.length!==1)return;',
-  't=e.touches[0];y0=t.clientY;v=0;v0=0;acc=0;last=now();',
+  't=e.touches[0];y0=t.clientY;x0=(t.clientX||0);v=0;v0=0;acc=0;cumY=0;cumX=0;last=now();',
   '}',
   'function move(e){',
   'if(!t||!e.touches||e.touches.length!==1)return;',
   'var y=e.touches[0].clientY,dy=y0-y,n=now();',
   'y0=y;',
+  '// Contain the gesture before the scroll threshold: a vertical-dominant',
+  '// drag is ours from 10px, so pull-to-refresh never sees its head. Below',
+  '// that a tap still types and a nudge still belongs to the page.',
+  'cumY+=dy;cumX+=((e.touches[0].clientX||0)-x0);x0=(e.touches[0].clientX||0);',
+  'if(!active&&Math.abs(cumY)>=10&&Math.abs(cumY)>=Math.abs(cumX)){try{e.preventDefault();}catch(err){}}',
   // A drag becomes a scroll at ONE LINE of travel, not one page-key worth: the',
   '// gesture has to be unambiguous (a tap still types) without demanding a',
   '// whole eighth-screen before anything moves.',
@@ -2179,13 +3372,12 @@ export const TOUCH_SCROLL_JS = [
   'if(!t)return;',
   't=null;',
   // Momentum: a flick keeps scrolling for a few steps, one per frame, so it',
-  '// glides instead of stopping dead. Capped, and it ends on its own. The',
-  '// step count is measured in LINES now (linePx, not pagePx), so the fling',
-  '// covers a distance proportional to the flick rather than a fixed number',
-  '// of screen-jumps.',
+  '// glides instead of stopping dead. Steps are page keys (see drain) and run',
+  '// through emit\u2019s 300ms cooldown, so a fling adds at most a page or two \u2014',
+  '// capped, and it ends on its own.',
   'var steps=0;',
   'try{',
-  'steps=Math.min(MAX_FLING_STEPS,Math.round(Math.abs(v)*FLING_PX_PER_STEP/linePx()));',
+  'steps=Math.min(MAX_FLING_STEPS,Math.round(Math.abs(v)*FLING_PX_PER_STEP/pagePx()));',
   '}catch(e){}',
   'var dir=v>0?1:-1;',
   'acc=0;active=0;v=0;',
@@ -2193,11 +3385,35 @@ export const TOUCH_SCROLL_JS = [
   'var n=0;',
   'var tick=function(){',
   'if(n++>=steps)return;',
-  'emitFine(dir);',
+  'emit(dir);',
   'try{requestAnimationFrame(tick);}catch(e){}',
   '};',
   'try{requestAnimationFrame(tick);}catch(e){}',
   '}',
+  '}',
+  '// Wheel: the desktop-browser twin of the drag above. Alt-screen TUIs have',
+  '// no scrollback for the browser to move, so wheel deltas become fine steps;',
+  '// plain shells keep their native scroll (stand aside, no preventDefault).',
+  'var wacc=0;',
+  'function nativeScrollable(){',
+  'try{',
+  'var vp=document.querySelector(".xterm-viewport");',
+  'return !!(vp&&(vp.scrollHeight-vp.clientHeight>4));',
+  '}catch(e){return true;}',
+  '}',
+  'function wheel(e){',
+  'try{',
+  'if(!e||e.ctrlKey||e.metaKey)return;',
+  'var d=typeof e.deltaY==="number"?e.deltaY:0;',
+  'if(e.deltaMode===1)d*=16;',
+  'if(!d)return;',
+  'if(nativeScrollable())return;',
+  'wacc+=d;',
+  'var s=40,n=0;',
+  'while(wacc>=s&&n<MAX_LINE_KEYS){wacc-=s;emitFine(1);n++;}',
+  'while(wacc<=-s&&n<MAX_LINE_KEYS){wacc+=s;emitFine(-1);n++;}',
+  'try{e.preventDefault();}catch(err){}',
+  '}catch(err){}',
   '}',
   'var h={touchstart:down,touchmove:move,touchend:up,touchcancel:up};',
   'var bound=null,tries=0;',
@@ -2209,11 +3425,13 @@ export const TOUCH_SCROLL_JS = [
   'if(bound){',
   '["touchstart","touchmove","touchend","touchcancel"].forEach(function(t){',
   'try{bound.removeEventListener(t,h[t]);}catch(e){}});',
+  'try{bound.removeEventListener("wheel",wheel);}catch(e){}',
   '}',
   'el.addEventListener("touchstart",h.touchstart,{passive:true});',
   'el.addEventListener("touchmove",h.touchmove,{passive:false});',
   'el.addEventListener("touchend",h.touchend,{passive:true});',
   'el.addEventListener("touchcancel",h.touchcancel,{passive:true});',
+  'el.addEventListener("wheel",wheel,{passive:false});',
   'bound=el;',
   'return true;',
   '}catch(e){return false;}',
@@ -2256,6 +3474,11 @@ export const FULLSCREEN_WIDGET_JS = [
   'setTimeout(function(){try{if(tg.requestFullscreen&&!tg.isFullscreen)tg.requestFullscreen();}catch(e){}refit();},1800);',
   "b.addEventListener('click',go);",
   "try{tg.onEvent('viewportChanged',refit);}catch(e){}",
+  // No floating burger here by design: every terminal surface carries its
+  // own left burger in the shell header (browser picker bar and Telegram
+  // slim bar alike), which opens the Mini Apps drawer directly. A second
+  // floating button meant a different thing per surface — removed 2026-10-11.
+  // Fullscreen/expand/swipe handling above is untouched.
   '}catch(e){}',
   '})();',
 ].join('\n');
@@ -2292,21 +3515,69 @@ export const MEASURE_JS = [
   '})();',
 ].join('\n');
 
+/**
+ * Escape hatch back to the shell for a STANDALONE terminal page (typed
+ * domain, bookmark, pasted tty link). The shell's terminal tab owns nav
+ * through its own header burger, so when framed this stays hidden — exactly
+ * one burger is ever visible per surface. Top-level it shows a ☰ that
+ * returns to the shell's terminal tab, forwarding the page's own ?token=
+ * (cookie-only sessions fall back to the ungated login entry, which heals
+ * through the cookie or shows the sign-in honestly).
+ */
+export const SHELL_ESCAPE_JS = [
+  '(function(){',
+  'try{',
+  'try{if(window.top!==window.self)return;}catch(e){return;}',
+  'var b=document.getElementById("tui-shellbtn");',
+  'if(!b)return;',
+  'b.style.display="block";',
+  'b.addEventListener("click",function(){',
+  'try{',
+  'var q=new URLSearchParams(location.search||"");',
+  'var t=q.get("token")||"";',
+  'var bot=(b.getAttribute("data-bot")||"").trim();',
+  'if(t){location.href="/app/app?token="+encodeURIComponent(t)',
+  '+(bot?"&bot="+encodeURIComponent(bot):"")+"&tab=tui";}',
+  'else{location.href="/app/login?tab=tui";}',
+  '}catch(e){try{location.href="/app/login?tab=tui";}catch(e2){}}',
+  '});',
+  '}catch(e){}',
+  '})();',
+].join('\n');
+
 export const FULLSCREEN_WIDGET = [
   '<script src="https://telegram.org/js/telegram-web-app.js"></script>',
   '<button id="tui-fsbtn" title="fullscreen" style="position:fixed;top:8px;right:8px;'
     + 'z-index:9999;width:40px;height:40px;border-radius:20px;border:1px solid #555;'
     + 'background:rgba(20,20,20,.7);color:#eee;font-size:20px;line-height:1;cursor:pointer;">&#x26F6;</button>',
+  '<button id="tui-shellbtn" data-bot="" title="Mini Apps" aria-label="Menu" style="display:none;position:fixed;top:8px;left:8px;'
+    + 'z-index:9999;width:40px;height:40px;border-radius:20px;border:1px solid #555;'
+    + 'background:rgba(20,20,20,.7);color:#eee;font-size:20px;line-height:1;cursor:pointer;">&#x2630;</button>',
   `<script>${LAYOUT_JS}</script>`,
   `<script>${TOUCH_SCROLL_JS}</script>`,
   `<script>${FULLSCREEN_WIDGET_JS}</script>`,
+  `<script>${SHELL_ESCAPE_JS}</script>`,
 ].join('');
 
-export function withFullscreenButton(html) {
+// SHELL_BURGER_BUTTON / withShellBurger retired 2026-10-11: the floating
+// in-frame burger duplicated the shell header burger with different meaning
+// per surface. Every framed terminal surface (browser picker bar, Telegram
+// slim bar) carries the drawer burger in its own header now; the standalone
+// page keeps only the top-level escape above (hidden when framed), so a bare
+// domain or pasted /tty*/ link is never a dead end without nav.
+
+function escapeAttr(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+export function withFullscreenButton(html, shellBot = '') {
   const body = String(html || '');
   if (body.includes('tui-fsbtn')) return body;
-  if (/<\/body\s*>/i.test(body)) return body.replace(/<\/body\s*>/i, (m) => `${FULLSCREEN_WIDGET}${m}`);
-  return `${body}${FULLSCREEN_WIDGET}`;
+  const widget = shellBot
+    ? FULLSCREEN_WIDGET.replace('data-bot=""', `data-bot="${escapeAttr(shellBot)}"`)
+    : FULLSCREEN_WIDGET;
+  if (/<\/body\s*>/i.test(body)) return body.replace(/<\/body\s*>/i, (m) => `${widget}${m}`);
+  return `${body}${widget}`;
 }
 
 export function withGeometryProbe(html) {
@@ -2314,7 +3585,7 @@ export function withGeometryProbe(html) {
   if (body.includes('tui-measure')) return body;
   return body.replace(/<\/body\s*>/i, (m) => `<script>${MEASURE_JS}</script>${m}`);
 }
-function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredential = '') {
+function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredential = '', shellBot = '') {
   const target = new URL(upstreamPath, ttydBase);
   const upstream = http.request(
     {
@@ -2337,7 +3608,7 @@ function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredentia
         // bodies pass through untouched.
         if ((up.statusCode || 200) === 200) {
           let page = withPhoneViewport(out.toString('utf8'));
-          page = withFullscreenButton(page);
+          page = withFullscreenButton(page, shellBot);
           page = withGeometryProbe(page);
           out = Buffer.from(page, 'utf8');
         }

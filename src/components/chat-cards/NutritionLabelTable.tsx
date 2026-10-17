@@ -5,6 +5,7 @@ import { translations } from '../../utils/translations';
 import { PositionedTooltip } from '../ui/PositionedTooltip';
 import { PortionDropdown } from './PortionDropdown';
 import { PackPortionRow } from './PackPortionRow';
+import { dishKeyFor, stagedPortionKey, combineStagedDishWeight, staticBaseWeight } from '../../utils/portionStaging';
 
 function parseLabelCalories(raw: any): number | null {
   if (raw == null) return null;
@@ -437,24 +438,35 @@ function resolveComponentWeightGrams(comp: any, dishWeight: number = 0, compCoun
   return 0;
 }
 
-export function NutritionLabelTable({ 
-  activeScoutItems, 
-  onConfirmItem, 
-  defaultOpen = true, 
-  hideOwnToggle = false, 
-  language = "en", 
+export function NutritionLabelTable({
+  activeScoutItems,
+  onConfirmItem,
+  defaultOpen = true,
+  hideOwnToggle = false,
+  language = "en",
   isSaved = false,
   onScalePortion,
-  currentPortionRatio
-}: { 
-  activeScoutItems: any[], 
-  onConfirmItem?: (idx: any) => void, 
-  defaultOpen?: boolean, 
-  hideOwnToggle?: boolean, 
-  language?: string, 
+  currentPortionRatio,
+  scopeKey,
+  onApplyComponentWeights
+}: {
+  activeScoutItems: any[],
+  onConfirmItem?: (idx: any) => void,
+  defaultOpen?: boolean,
+  hideOwnToggle?: boolean,
+  language?: string,
   isSaved?: boolean,
   onScalePortion?: (ratio: number) => void,
-  currentPortionRatio?: number
+  currentPortionRatio?: number,
+  /** Parent dish position — namespaces staged selections so two dishes can never share keys. */
+  scopeKey?: string | number,
+  /**
+   * Staged multi-dropdown commit. When provided, per-component dropdown
+   * changes are staged locally and the parent recalculates exactly once via
+   * this callback (component position -> chosen grams) when the user applies.
+   * Without it, the legacy immediate onScalePortion path is kept.
+   */
+  onApplyComponentWeights?: (stagedByCompIdx: Record<number, number>) => void
 }) {
   const t = translations[language || "en"] || translations.en;
   const [showEstimatedMap, setShowEstimatedMap] = React.useState<Record<number, boolean>>({});
@@ -572,12 +584,43 @@ export function NutritionLabelTable({
             const hasTabs = subComps.length > 1;
             const activeTab = activeTabMap[i] || 0;
             const itemKeyPrefix = rootItem.id || rootItem.keyword || String(i);
+            // PORTION_MIXUP: one canonical staged key per dish+tab. The scope
+            // (parent dish position) keeps two dishes from ever sharing keys,
+            // and the stable dish identity survives tab switches.
+            const dishKey = `${scopeKey ?? i}::${dishKeyFor(rootItem, i)}`;
+            const stagedKeyFor = (tab: number) => stagedPortionKey(dishKey, tab);
             const staticDishTotalWeight = getResolvedItemWeightGrams(rootItem) || 0;
-            const dishTotalWeight = hasTabs
-              ? subComps.reduce((sum: number, comp: any, cIdx: number) => {
-                  const compW = customPortionMap[`${itemKeyPrefix}-${cIdx + 1}`] ?? customPortionMap[`${i}-${cIdx + 1}`] ?? resolveComponentWeightGrams(comp, staticDishTotalWeight, subComps.length);
-                  return sum + compW;
-                }, 0)
+            // Whole-dish ratios divide by the stable 1.0 base, never by the
+            // live weight (which already includes earlier scalings).
+            const wholeDishBaseWeight = staticBaseWeight(staticDishTotalWeight, (rootItem as any)?.portionRatio);
+            // Staged multi-dropdown commit. While provided, component dropdowns
+            // only stage locally; the parent recalculates once on apply.
+            const useStaging = typeof onApplyComponentWeights === 'function';
+            const clearDishStaged = () => {
+              setCustomPortionMap((prev) => {
+                const next: Record<string, number> = {};
+                Object.entries(prev).forEach(([k, v]) => {
+                  if (!k.startsWith(`${dishKey}::`)) next[k] = v;
+                });
+                return next;
+              });
+            };
+            const stageComponentWeight = (tab: number, grams: number) => {
+              if (!(grams > 0)) return;
+              setCustomPortionMap((prev) => ({ ...prev, [stagedKeyFor(tab)]: Math.round(grams) }));
+            };
+            const stagedInfo = hasTabs
+              ? combineStagedDishWeight(
+                  subComps,
+                  customPortionMap,
+                  dishKey,
+                  staticDishTotalWeight,
+                  getResolvedItemWeightGrams(rootItem) || 0,
+                  (comp, total, count) => resolveComponentWeightGrams(comp, total, count)
+                )
+              : null;
+            const dishTotalWeight = hasTabs && stagedInfo
+              ? stagedInfo.totalGrams
               : staticDishTotalWeight;
 
             let item = rootItem;
@@ -593,7 +636,7 @@ export function NutritionLabelTable({
 
             if (activeTab > 0 && subComps[activeTab - 1]) {
               const comp = subComps[activeTab - 1];
-              const compWeight = customPortionMap[`${itemKeyPrefix}-${activeTab}`] ?? customPortionMap[`${i}-${activeTab}`] ?? resolveComponentWeightGrams(comp, dishTotalWeight, subComps.length);
+              const compWeight = customPortionMap[stagedKeyFor(activeTab)] ?? resolveComponentWeightGrams(comp, dishTotalWeight, subComps.length);
               const compName = String(comp.primaryBaseMatchName || comp.name || comp.searchQuery || comp.keyword || (typeof comp === 'string' ? comp : 'Ingredient'))
                 .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
                 .replace(/^[📖\s]+/, '')
@@ -819,14 +862,14 @@ export function NutritionLabelTable({
                     >
                       <span className="capitalize">{rootItem.dishName || 'Dish'}</span>
                       <span className={`text-[10px] font-normal leading-tight mt-0.5 ${activeTab === 0 ? 'text-indigo-100' : 'text-slate-400'}`}>
-                        {dishTotalWeight}g
+                        {dishTotalWeight}g{useStaging && stagedInfo && stagedInfo.dirty ? ` ${t.stagedBadge || '· staged'}` : ''}
                       </span>
                     </button>
 
                     {/* Tabs 1..N: Sub-components */}
                     {subComps.map((comp: any, cIdx: number) => {
                       const isActive = activeTab === cIdx + 1;
-                      const compW = customPortionMap[`${itemKeyPrefix}-${cIdx + 1}`] ?? customPortionMap[`${i}-${cIdx + 1}`] ?? resolveComponentWeightGrams(comp, staticDishTotalWeight, subComps.length);
+                      const compW = customPortionMap[stagedKeyFor(cIdx + 1)] ?? resolveComponentWeightGrams(comp, staticDishTotalWeight, subComps.length);
                       const cName = String(comp.primaryBaseMatchName || comp.name || comp.searchQuery || comp.keyword || (typeof comp === 'string' ? comp : 'Ingredient'))
                         .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
                         .replace(/^[📖\s]+/, '')
@@ -854,6 +897,32 @@ export function NutritionLabelTable({
                   </div>
                 )}
 
+                {/* Staged multi-dropdown commit: recalculate once, when the set is complete. */}
+                {useStaging && hasTabs && stagedInfo && stagedInfo.dirty && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-2 mb-2.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-xs font-sans">
+                    <span className="text-slate-600 dark:text-slate-300 font-medium">
+                      {(t.portionsSelected || '{selected}/{total} portions').replace('{selected}', String(stagedInfo.selectedCount)).replace('{total}', String(stagedInfo.requiredCount))}
+                      {` · ${stagedInfo.totalGrams}g ${t.stagedBadge || '· staged'}`}
+                      {!stagedInfo.allSelected && ` — ${t.selectAllPortionsHint || 'select every portion, then apply'}`}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={!stagedInfo.allSelected}
+                      onClick={() => {
+                        const stagedByCompIdx: Record<number, number> = {};
+                        subComps.forEach((_c: any, cIdx: number) => {
+                          const v = customPortionMap[stagedKeyFor(cIdx + 1)];
+                          if (typeof v === 'number' && v > 0) stagedByCompIdx[cIdx] = v;
+                        });
+                        if (onApplyComponentWeights) onApplyComponentWeights(stagedByCompIdx);
+                      }}
+                      className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white shadow-sm transition-all cursor-pointer"
+                    >
+                      {t.applyPortions || 'Apply portions'}
+                    </button>
+                  </div>
+                )}
+
                 {/* Pack Portion Selection with 5s Accept Feedback */}
                 {activePackGrams && activePackGrams > 0 && (
                   <PackPortionRow
@@ -871,24 +940,27 @@ export function NutritionLabelTable({
                     }}
                     onScaleWeight={(newWeight) => {
                       if (activeTab > 0) {
-                        setCustomPortionMap(prev => {
-                          const updatedMap = {
-                            ...prev,
-                            [`${itemKeyPrefix}-${activeTab}`]: newWeight,
-                            [`${i}-${activeTab}`]: newWeight
-                          };
-                          // Compute new dish weight with updated subcomponent weight
-                          const newDishWeight = subComps.reduce((sum: number, c: any, cIdx: number) => {
-                            const cW = updatedMap[`${itemKeyPrefix}-${cIdx + 1}`] ?? updatedMap[`${i}-${cIdx + 1}`] ?? resolveComponentWeightGrams(c, staticDishTotalWeight, subComps.length);
-                            return sum + cW;
-                          }, 0);
-                          if (onScalePortion && staticDishTotalWeight > 0 && newDishWeight > 0) {
-                            onScalePortion(newDishWeight / staticDishTotalWeight);
-                          }
-                          return updatedMap;
-                        });
-                      } else if (onScalePortion && dishTotalWeight > 0) {
-                        onScalePortion(newWeight / dishTotalWeight);
+                        if (useStaging) {
+                          // Stage only — the parent recalculates once on apply.
+                          stageComponentWeight(activeTab, newWeight);
+                          return;
+                        }
+                        const key = stagedKeyFor(activeTab);
+                        const merged = { ...customPortionMap, [key]: Math.round(newWeight) };
+                        setCustomPortionMap(merged);
+                        // Compute new dish weight with updated subcomponent weight
+                        const newDishWeight = subComps.reduce((sum: number, c: any, cIdx: number) => {
+                          const cW = merged[stagedKeyFor(cIdx + 1)] ?? resolveComponentWeightGrams(c, staticDishTotalWeight, subComps.length);
+                          return sum + cW;
+                        }, 0);
+                        if (onScalePortion && staticDishTotalWeight > 0 && newDishWeight > 0) {
+                          onScalePortion(newDishWeight / staticDishTotalWeight);
+                        }
+                      } else if (onScalePortion && wholeDishBaseWeight > 0) {
+                        // Whole-dish pick is a complete selection: apply at once
+                        // against the stable base, and drop superseded staged picks.
+                        clearDishStaged();
+                        onScalePortion(newWeight / wholeDishBaseWeight);
                       }
                     }}
                   />
@@ -901,31 +973,35 @@ export function NutritionLabelTable({
                       <span className="font-semibold text-slate-800 dark:text-slate-100">{activeTitle}</span>
                       <span className="text-slate-500 dark:text-slate-400 font-normal">{t.weightLabel}:</span>
                       <PortionDropdown
-                        baseWeight={activeTab > 0 ? (resolveComponentWeightGrams(subComps[activeTab - 1], staticDishTotalWeight, subComps.length) || 100) : (staticDishTotalWeight || 100)}
+                        baseWeight={activeTab > 0 ? (resolveComponentWeightGrams(subComps[activeTab - 1], staticDishTotalWeight, subComps.length) || 100) : wholeDishBaseWeight}
                         currentWeight={resolvedWeight || 100}
                         language={language}
                         onScale={(ratio) => {
-                          const baseW = activeTab > 0 ? (resolveComponentWeightGrams(subComps[activeTab - 1], staticDishTotalWeight, subComps.length) || 100) : (staticDishTotalWeight || 100);
+                          const baseW = activeTab > 0 ? (resolveComponentWeightGrams(subComps[activeTab - 1], staticDishTotalWeight, subComps.length) || 100) : wholeDishBaseWeight;
                           const newWeight = Math.round(baseW * ratio);
                           if (activeTab > 0) {
-                            setCustomPortionMap(prev => {
-                              const updatedMap = {
-                                ...prev,
-                                [`${itemKeyPrefix}-${activeTab}`]: newWeight,
-                                [`${i}-${activeTab}`]: newWeight
-                              };
-                              // Compute new dish weight with updated subcomponent weight
-                              const newDishWeight = subComps.reduce((sum: number, c: any, cIdx: number) => {
-                                const cW = updatedMap[`${itemKeyPrefix}-${cIdx + 1}`] ?? updatedMap[`${i}-${cIdx + 1}`] ?? resolveComponentWeightGrams(c, staticDishTotalWeight, subComps.length);
-                                return sum + cW;
-                              }, 0);
-                              if (onScalePortion && staticDishTotalWeight > 0 && newDishWeight > 0) {
-                                onScalePortion(newDishWeight / staticDishTotalWeight);
-                              }
-                              return updatedMap;
-                            });
-                          } else if (onScalePortion && dishTotalWeight > 0) {
-                            onScalePortion(newWeight / dishTotalWeight);
+                            if (useStaging) {
+                              // Stage only — the parent recalculates once on apply.
+                              stageComponentWeight(activeTab, newWeight);
+                              return;
+                            }
+                            const key = stagedKeyFor(activeTab);
+                            const merged = { ...customPortionMap, [key]: newWeight };
+                            setCustomPortionMap(merged);
+                            // Compute new dish weight with updated subcomponent weight
+                            const newDishWeight = subComps.reduce((sum: number, c: any, cIdx: number) => {
+                              const cW = merged[stagedKeyFor(cIdx + 1)] ?? resolveComponentWeightGrams(c, staticDishTotalWeight, subComps.length);
+                              return sum + cW;
+                            }, 0);
+                            if (onScalePortion && staticDishTotalWeight > 0 && newDishWeight > 0) {
+                              onScalePortion(newDishWeight / staticDishTotalWeight);
+                            }
+                          } else if (onScalePortion && wholeDishBaseWeight > 0) {
+                            // Whole-dish pick is a complete selection: apply at
+                            // once against the stable base, and drop superseded
+                            // staged picks.
+                            clearDishStaged();
+                            onScalePortion(newWeight / wholeDishBaseWeight);
                           }
                         }}
                       />

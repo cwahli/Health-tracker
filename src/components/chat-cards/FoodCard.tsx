@@ -21,9 +21,10 @@ import { toPendingFoodLog } from '../../mealBuild/adapters';
 import { namesReferToSameFood } from '../../../server_scout_reconcile';
 import { extractMostRecentImageDate, getCurrentDateInTimezone } from '../../utils/dateUtils';
 import { normalizeMealImageUrl, uniqueMealImageUrls, isUsableImageUrl, collectSavedMealImageUrls } from '../../utils/foodImageSources';
-import { scaleMealPortion, scaleSingleDishPortion } from '../../utils/portionUtils';
+import { scaleMealPortion, scaleSingleDishPortion, applyStagedComponentWeights } from '../../utils/portionUtils';
+import { dishKeyFor, resolveBreakdownIndex, getStagedDishEdits, buildStagedPortionSummary } from '../../utils/portionStaging';
 import { threadHasUnansweredPortionClarify } from '../../utils/chatMessageDedupe';
-import { mapDisplayedScoutItems, resolveTileImageIndex } from '../../utils/foodCompositionTiles';
+import { mapDisplayedScoutItems, resolveTileImageIndex, uniqueCropTiles } from '../../utils/foodCompositionTiles';
 import PreviousMealThumbnail from '../PreviousMealThumbnail';
 import ImageSlider from '../ImageSlider';
 import { NutrientPieChart } from '../NutrientPieChart';
@@ -605,24 +606,23 @@ export const FoodCard: React.FC<AgentCardProps & {
     const effectiveRatio = targetWeight / initialWeight;
     const diffRatio = Math.abs(targetWeight - initialWeight) / initialWeight;
     const diffPercent = Math.round(diffRatio * 100);
-    const isOverThreshold = diffRatio > 0.30;
 
     setPortionScale(effectiveRatio);
-    setPortionAccepted(true);
     setPortionLogVersion((v) => v + 1);
 
     const updatedLog = scaleMealPortion(currentLog, effectiveRatio);
     updatedLog.initialWeightGrams = initialWeight;
     updatedLog.weightGrams = targetWeight;
+    // STAGED-PORTION: dropdown changes preview locally only. No agent call
+    // here — the user may still be mid-selection across dishes. The Review
+    // button sends one combined edit when the set is complete.
     updatedLog.portionAdjustment = {
-      type: isOverThreshold ? 'agent_edit' : 'local_math',
+      type: 'staged_local',
       diffPercent,
       fromWeight: initialWeight,
       toWeight: targetWeight,
-      agentCalled: isOverThreshold,
-      reason: isOverThreshold
-        ? `Portion change of ${diffPercent}% (> 30%) triggered an agent review edit.`
-        : `Portion change of ${diffPercent}% (<= 30%) recalculated locally without extra agent call.`,
+      agentCalled: false,
+      reason: `Staged portion change of ${diffPercent}% — awaiting Review with new portion.`,
     };
 
     const logId = currentLog.id || (msg as any).loggedFoodId;
@@ -647,44 +647,41 @@ export const FoodCard: React.FC<AgentCardProps & {
       onLogFood(updatedLog as any);
     }
 
-    // Over 30% threshold: triggers agent review call (similar to an edit)
-    if (isOverThreshold && handleSend) {
-      const diffSign = targetWeight > initialWeight ? `+${diffPercent}%` : `-${diffPercent}%`;
-      handleSend({
-        text: `Adjust total meal portion from ${initialWeight}g to ${targetWeight}g (${diffSign}). Please review the nutrition breakdown, macros, and dietary advice for this updated portion.`,
-        overrideMode: 'edit',
-        sourceMsgId: msg.id,
-      });
-    }
+    // STAGED-PORTION: no automatic agent call. Review sends one combined edit.
   };
 
-  const handleScaleSingleDish = (dishIdx: number, ratio: number) => {
-    const currentLog = msg.data?.pendingFoodLog || msg.pendingFoodLog;
-    if (!currentLog) return;
-    const initialWeight = currentLog.initialWeightGrams || currentLog.weightGrams || 100;
-    if (!currentLog.initialWeightGrams && currentLog.weightGrams) {
-      currentLog.initialWeightGrams = currentLog.weightGrams;
-    }
+  // PORTION_MIXUP: the displayed dish list filters out flattened component
+  // rows, so a displayed position is NOT an itemsBreakdown index. Resolve by
+  // stable identity (scoutIndex) so a dropdown always scales its own dish.
+  const resolveDishBreakdownIndex = (displayedIdx: number): number => {
+    const currentLog = msg.data?.pendingFoodLog || (msg as any).pendingFoodLog;
+    const rows = currentLog?.itemsBreakdown;
+    if (!Array.isArray(rows)) return displayedIdx;
+    const displayed = displayedScoutItems[displayedIdx];
+    if (!displayed) return displayedIdx;
+    return resolveBreakdownIndex(rows, dishKeyFor(displayed, displayedIdx), displayedIdx);
+  };
 
-    const updatedLog = scaleSingleDishPortion(currentLog, dishIdx, ratio);
+  const commitScaledLog = (currentLog: any, updatedLog: any, breakdownIdx: number, dishLabel: string) => {
+    void breakdownIdx;
+    void dishLabel;
+    const initialWeight = currentLog.initialWeightGrams || currentLog.weightGrams || 100;
     updatedLog.initialWeightGrams = initialWeight;
     const newTotalWeight = updatedLog.weightGrams || initialWeight;
-    const diffRatio = Math.abs(newTotalWeight - initialWeight) / initialWeight;
+    const diffRatio = initialWeight > 0 ? Math.abs(newTotalWeight - initialWeight) / initialWeight : 0;
     const diffPercent = Math.round(diffRatio * 100);
-    const isOverThreshold = diffRatio > 0.30;
 
+    // STAGED-PORTION: preview locally only — never fire the agent per
+    // dropdown. The Review button sends one combined edit on demand.
     updatedLog.portionAdjustment = {
-      type: isOverThreshold ? 'agent_edit' : 'local_math',
+      type: 'staged_local',
       diffPercent,
       fromWeight: initialWeight,
       toWeight: newTotalWeight,
-      agentCalled: isOverThreshold,
-      reason: isOverThreshold
-        ? `Dish portion scaled total meal weight by ${diffPercent}% (> 30%). Triggered agent review edit.`
-        : `Dish portion scaled total meal weight by ${diffPercent}% (<= 30%). Recalculated locally without extra agent call.`,
+      agentCalled: false,
+      reason: `Staged dish portion change of ${diffPercent}% — awaiting Review with new portion.`,
     };
 
-    setPortionAccepted(true);
     setPortionLogVersion((v) => v + 1);
     const logId = currentLog.id || (msg as any).loggedFoodId;
     if (logId) {
@@ -710,17 +707,94 @@ export const FoodCard: React.FC<AgentCardProps & {
     if ((isAlreadyLogged || (loggedMessageIds && loggedMessageIds.includes(msg.id))) && onLogFood) {
       onLogFood(updatedLog as any);
     }
+    // STAGED-PORTION: no automatic agent call. Review sends one combined edit.
+  };
 
-    // Over 30% threshold: triggers agent review call
-    if (isOverThreshold && handleSend) {
-      const dishName = updatedLog.itemsBreakdown?.[dishIdx]?.name || `dish #${dishIdx + 1}`;
-      const diffSign = newTotalWeight > initialWeight ? `+${diffPercent}%` : `-${diffPercent}%`;
-      handleSend({
-        text: `Adjust portion of ${dishName} (total meal now ${newTotalWeight}g vs initial ${initialWeight}g, ${diffSign}). Please review the nutrition breakdown and dietary advice.`,
-        overrideMode: 'edit',
-        sourceMsgId: msg.id,
-      });
+  // STAGED-PORTION snapshot: original dish weights for this card, captured
+  // once before any dropdown edit so the Review button can name exact
+  // from→to changes (ham 50g → 100g, scrambled egg 120g → 200g, …).
+  const stagedSnapshotRef = React.useRef<{ msgId: string; rows: any[] } | null>(null);
+  {
+    const snapLog = (msg as any).data?.pendingFoodLog || (msg as any).pendingFoodLog;
+    const rows = snapLog?.itemsBreakdown;
+    if (Array.isArray(rows) && rows.length > 0) {
+      if (!stagedSnapshotRef.current || stagedSnapshotRef.current.msgId !== msg.id) {
+        stagedSnapshotRef.current = {
+          msgId: msg.id,
+          rows: rows.map((it: any) => ({
+            originalName: it.originalName,
+            keyword: it.keyword,
+            name: it.name,
+            canonicalDbName: it.canonicalDbName,
+            weightGrams: it.weightGrams,
+            estimatedWeightGrams: it.estimatedWeightGrams,
+          })),
+        };
+      }
     }
+  }
+
+  const stagedDishEdits = React.useMemo(() => {
+    const snap = stagedSnapshotRef.current;
+    const curLog = (msg as any).data?.pendingFoodLog || (msg as any).pendingFoodLog;
+    if (!snap || snap.msgId !== msg.id || !curLog?.itemsBreakdown) return [];
+    return getStagedDishEdits(snap.rows, curLog.itemsBreakdown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [msg.id, msg.data?.pendingFoodLog, (msg as any).pendingFoodLog, portionLogVersion]);
+
+  const stagedPortionSummary = React.useMemo(
+    () => buildStagedPortionSummary(stagedDishEdits),
+    [stagedDishEdits]
+  );
+
+  const handleReviewStagedPortions = () => {
+    const curLog = (msg as any).data?.pendingFoodLog || (msg as any).pendingFoodLog;
+    if (!curLog || stagedDishEdits.length === 0 || !handleSend) return;
+    const choices: Record<string, number> = {};
+    stagedDishEdits.forEach((e) => {
+      const row = curLog.itemsBreakdown?.[e.breakdownIdx];
+      const key = row?.scoutIndex !== undefined && row?.scoutIndex !== null
+        ? String(row.scoutIndex)
+        : String(e.breakdownIdx);
+      choices[key] = e.toGrams;
+    });
+    handleSend({
+      text: `Please update my meal portions: ${stagedPortionSummary}. Please review the nutritional calculation, macro distribution, and provide an updated clinical evaluation and verdict.`,
+      overrideMode: 'edit',
+      sourceMsgId: msg.id,
+      activeMeal: curLog,
+      portionChoices: choices,
+      skipScout: true,
+      scoutItems: curLog.scoutItems || [],
+      activeScoutItems: curLog.scoutItems || [],
+    });
+  };
+
+  const handleScaleSingleDish = (displayedIdx: number, ratio: number) => {
+    const currentLog = msg.data?.pendingFoodLog || (msg as any).pendingFoodLog;
+    if (!currentLog) return;
+    if (!currentLog.initialWeightGrams && currentLog.weightGrams) {
+      currentLog.initialWeightGrams = currentLog.weightGrams;
+    }
+    const breakdownIdx = resolveDishBreakdownIndex(displayedIdx);
+    if (breakdownIdx < 0 || !currentLog.itemsBreakdown?.[breakdownIdx]) return;
+
+    const updatedLog = scaleSingleDishPortion(currentLog, breakdownIdx, ratio);
+    commitScaledLog(currentLog, updatedLog, breakdownIdx, `dish #${breakdownIdx + 1}`);
+  };
+
+  // Staged multi-dropdown commit: one recalculation for the whole selection set.
+  const handleApplyStagedWeights = (displayedIdx: number, stagedByCompIdx: Record<number, number>) => {
+    const currentLog = msg.data?.pendingFoodLog || (msg as any).pendingFoodLog;
+    if (!currentLog) return;
+    if (!currentLog.initialWeightGrams && currentLog.weightGrams) {
+      currentLog.initialWeightGrams = currentLog.weightGrams;
+    }
+    const breakdownIdx = resolveDishBreakdownIndex(displayedIdx);
+    if (breakdownIdx < 0 || !currentLog.itemsBreakdown?.[breakdownIdx]) return;
+
+    const updatedLog = applyStagedComponentWeights(currentLog, breakdownIdx, stagedByCompIdx);
+    commitScaledLog(currentLog, updatedLog, breakdownIdx, `dish #${breakdownIdx + 1}`);
   };
 
   // Card-wide parent image search state hooks
@@ -1337,7 +1411,20 @@ export const FoodCard: React.FC<AgentCardProps & {
                         </h4>
                       </div>
 
-                      {/* Shared Scout Items Row for Comparison Mode */}
+                      {/* Clinician recommendation: the model's top pick (never rendered before) */}
+                      {!!comparisonData?.recommendedOption && (
+                        <div data-testid="compare-recommended" className="bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/50 rounded-xl p-3 text-left font-sans flex items-start gap-2">
+                          <span className="text-sm shrink-0">⭐</span>
+                          <div className="flex-1 min-w-0">
+                            <span className="font-bold text-emerald-900 dark:text-emerald-200 text-xs block mb-0.5">{t.recommendedOption || 'Recommended option'}</span>
+                            <span className="text-[13px] text-emerald-900 dark:text-emerald-100 font-medium leading-snug break-words">{comparisonData.recommendedOption}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Shared Scout Items Row for Comparison Mode — one tile per unique
+                          crop (items sharing identical photo + box pixels merge into a
+                          single tile with a +n badge instead of repeating the photo). */}
                       {activeScoutItems.length > 0 && (
                         <div className="bg-slate-50/50 dark:bg-slate-900/30 rounded-xl p-3 border border-theme-border/60 mb-2">
                            <div className="flex items-center justify-between mb-2">
@@ -1346,21 +1433,27 @@ export const FoodCard: React.FC<AgentCardProps & {
                                {t.identifiedIngredients || "Identified Ingredients"}
                              </div>
                            </div>
+                           {(() => {
+                             const cropTiles = uniqueCropTiles(activeScoutItems);
+                             return (
                            <div className={
-                             activeScoutItems.length > 4 
+                             cropTiles.length > 4 
                                ? "flex overflow-x-auto gap-3 pt-2 pb-2 w-full font-sans scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800" 
                                : "flex flex-wrap items-start justify-start gap-3 pt-2 pb-2 w-full font-sans"
                            }>
-                             {activeScoutItems.map((item: any, i: number) => {
+                             {cropTiles.map((tile: any) => {
+                               const item: any = activeScoutItems[tile.representativeIndex];
+                               const i = tile.representativeIndex;
+                               const extraCount = tile.memberIndices.length - 1;
                                const imgIdx = resolveTileImageIndex(item, messageImages.length);
                                const resolvedImgSrc = resolveHistoricalImgSrc(item, messageImages, foodLogs || [], imgIdx);
-                               const itemWidthClass = activeScoutItems.length > 4
+                               const itemWidthClass = cropTiles.length > 4
                                  ? 'w-[90px] sm:w-[105px] shrink-0'
-                                 : activeScoutItems.length === 1 
+                                 : cropTiles.length === 1 
                                    ? 'w-[130px] sm:w-[150px] shrink-0' 
                                    : 'w-full max-w-[160px]';
                                return (
-                                 <div key={i} className={`flex flex-col items-center gap-1 shrink-0 relative group ${itemWidthClass}`}>
+                                 <div key={tile.key} className={`flex flex-col items-center gap-1 shrink-0 relative group ${itemWidthClass}`}>
                                    <div className="relative w-full">
                                      <div 
                                        className={`w-full aspect-square rounded-xl overflow-hidden cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-sm ${
@@ -1402,8 +1495,11 @@ export const FoodCard: React.FC<AgentCardProps & {
                                        </div>
                                      )}
                                    </div>
-                                   <span className="text-[10px] text-center font-medium leading-tight break-words line-clamp-2 w-full font-sans text-slate-700 dark:text-slate-300">
+                                   <span className="text-[10px] text-center font-medium leading-tight break-words line-clamp-2 w-full font-sans text-slate-700 dark:text-slate-300" title={tile.memberIndices.map((m: number) => (activeScoutItems[m]?.keyword || activeScoutItems[m]?.originalName || activeScoutItems[m]?.name)).filter(Boolean).join(', ')}>
                                      {showTranslations.scout ? (item.keyword || item.originalName) : (item.originalName || item.keyword)}
+                                     {extraCount > 0 && (
+                                       <span className="ml-1 inline-flex items-center px-1 rounded-full bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold">+{extraCount}</span>
+                                     )}
                                    </span>
                                    {item.anomalyFlags && item.anomalyFlags.length > 0 && (
                                      <span className="text-[8px] text-center leading-tight text-amber-600 dark:text-amber-500 w-full font-sans line-clamp-2">
@@ -1414,8 +1510,10 @@ export const FoodCard: React.FC<AgentCardProps & {
                                );
                              })}
                            </div>
+                             );
+                           })()}
 
-                           {/* Uncertain Items Helper Button */}
+                            {/* Uncertain Items Helper Button */}
                            {reviewsOpen && activeScoutItems.some(isItemUnclearOrLowConfidence) && (
                              <div className="mt-2 flex flex-col gap-1.5 bg-amber-50/50 dark:bg-amber-900/10 border border-amber-200/50 dark:border-amber-800/50 rounded-lg p-2 font-sans relative">
                                <button 
@@ -1638,9 +1736,25 @@ export const FoodCard: React.FC<AgentCardProps & {
                                         </span>
                                       )}
                                     </p>
-                                    {group.averageNutrientsPer100g && (
-                                      <p data-testid="compare-per-100g-note" className="text-[11px] text-slate-500 italic pt-1.5">
-                                        * Nutritional values are estimates per 100g
+                                    {((group.servingWeightGrams && Number(group.servingWeightGrams) > 0) || group.averageNutrientsPer100g) && (
+                                      <p data-testid="compare-per-100g-note" className="text-[11px] text-slate-500 pt-1.5 leading-relaxed">
+                                        {group.servingWeightGrams && Number(group.servingWeightGrams) > 0
+                                          ? `* Values above per serving (≈${Math.round(Number(group.servingWeightGrams))}g)`
+                                          : `* Values above per serving`}
+                                        {(() => {
+                                          const p = group.averageNutrientsPer100g || {};
+                                          const num = (v: any) => (v === null || v === undefined || isNaN(Number(v)) ? null : Number(v));
+                                          const parts: string[] = [];
+                                          const kcal = num(p.calories); if (kcal !== null) parts.push(`${kcal} kcal/100g`);
+                                          const prot = num(p.protein); if (prot !== null) parts.push(`P ${prot}g`);
+                                          const fat = num(p.totalFat); if (fat !== null) parts.push(`F ${fat}g`);
+                                          const sat = num(p.saturatedFat); if (sat !== null) parts.push(`sat ${sat}g`);
+                                          const carbs = num(p.carbohydrates); if (carbs !== null) parts.push(`C ${carbs}g`);
+                                          const sugar = num(p.sugar); if (sugar !== null) parts.push(`sugar ${sugar}g`);
+                                          const sod = num(p.sodium); if (sod !== null) parts.push(`Na ${sod}mg`);
+                                          if (parts.length === 0) return null;
+                                          return ` · Per 100g: ${parts.join(' · ')}`;
+                                        })()}
                                       </p>
                                     )}
                                   </div>
@@ -2343,6 +2457,8 @@ export const FoodCard: React.FC<AgentCardProps & {
                                     onScalePortion={(ratio) => handleScaleSingleDish(openLabelIdx, ratio)}
                                     currentPortionRatio={displayedScoutItems[openLabelIdx]?.portionRatio || 1.0}
                                     language={language}
+                                    scopeKey={openLabelIdx}
+                                    onApplyComponentWeights={(staged) => handleApplyStagedWeights(openLabelIdx, staged)}
                                   />
                                 </div>
                              )}
@@ -2575,7 +2691,7 @@ export const FoodCard: React.FC<AgentCardProps & {
                                               ? 'bg-indigo-600 text-white border-indigo-600'
                                               : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
                                           }`}
-                                          title={`${presetW}g (${preset.tag}) — ${isPresetOver ? '>30% triggers agent review' : '<=30% instant math'}`}
+                                          title={`${presetW}g (${preset.tag}) — 'staged, sent on Review'`}
                                         >
                                           {preset.label} ({presetW}g)
                                         </button>
@@ -2589,14 +2705,14 @@ export const FoodCard: React.FC<AgentCardProps & {
                                       <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 p-2 rounded-lg border border-amber-200 dark:border-amber-900/40">
                                         <span>🤖</span>
                                         <span>
-                                          <strong>{livePct}% portion difference (&gt;30%):</strong> Will trigger AI agent review to re-evaluate macros, micronutrients, and dietary advice.
+                                          <strong>{livePct}% portion difference (&gt;30%):</strong> Staged below — tap Review meal with new portion for full re-analysis.
                                         </span>
                                       </div>
                                     ) : (
                                       <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 p-2 rounded-lg border border-emerald-200 dark:border-emerald-900/40">
                                         <span>⚡</span>
                                         <span>
-                                          <strong>{livePct}% portion difference (≤30%):</strong> Instant nutrient recalculation across all 33 nutrients without calling the agent.
+                                          <strong>{livePct}% portion difference (≤30%):</strong> Nutrients preview instantly below — tap Review meal with new portion for full re-analysis.
                                         </span>
                                       </div>
                                     )}
@@ -2875,6 +2991,35 @@ export const FoodCard: React.FC<AgentCardProps & {
                           msg.data?.pendingFoodLog?.savable !== false &&
                           (msg as any).savable !== false
                         );
+                        // STAGED-PORTION: pending dropdown edits turn the action
+                        // into Review — one tap sends the whole set for full
+                        // re-analysis instead of firing per dropdown. This
+                        // comes before the saved/unsavable branches so a
+                        // staged change on a saved meal still has a path to
+                        // agent re-analysis (otherwise it would be local-only).
+                        if (stagedDishEdits.length > 0) {
+                          const shortLabel = (t.reviewMealWithPortionShort as string) || 'Review meal with new portion';
+                          return (
+                            <div className="w-full flex flex-col gap-1.5 animation-fade-in">
+                              <ul className="w-full px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-[11px] font-sans text-amber-900 dark:text-amber-200 text-left list-none space-y-0.5">
+                                {stagedDishEdits.map((e) => (
+                                  <li key={e.breakdownIdx} className="flex items-start gap-1.5">
+                                    <span aria-hidden="true">•</span>
+                                    <span>{e.name}: {e.fromGrams}g → {e.toGrams}g</span>
+                                  </li>
+                                ))}
+                              </ul>
+                              <button
+                                type="button"
+                                onClick={handleReviewStagedPortions}
+                                className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer font-sans"
+                              >
+                                <Sparkles className="w-4 h-4" />
+                                {shortLabel}
+                              </button>
+                            </div>
+                          );
+                        }
                         if (isAlreadyLogged) {
                           return (
                             <div className="w-full py-2 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/50 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 animation-fade-in font-sans">
@@ -3055,6 +3200,8 @@ export const FoodCard: React.FC<AgentCardProps & {
                       onScalePortion={(ratio) => handleScaleSingleDish(openLabelIdx, ratio)}
                       currentPortionRatio={displayedScoutItems[openLabelIdx]?.portionRatio || 1.0}
                                     language={language}
+                                    scopeKey={openLabelIdx}
+                                    onApplyComponentWeights={(staged) => handleApplyStagedWeights(openLabelIdx, staged)}
                                   />
                   </div>
                 )}

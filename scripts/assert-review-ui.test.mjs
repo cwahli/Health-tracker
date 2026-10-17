@@ -10,6 +10,8 @@
  * was correct and only the *transition* was wrong. These checks drive the page
  * and assert on live DOM state:
  *
+ *   0. landing: the Request tab opens first with the request text and
+ *      the result screenshot below it (the point of truth)
  *   1. the proof `<img>` node is the SAME node across a tab round-trip (no
  *      rebuild, so no reload blink)
  *   2. the image owns the majority of the screen (stage taller than the info card)
@@ -57,6 +59,7 @@ const QUEUE = [
     proof: 'p',
     gate: 'sensor green + screenshot',
     lastActivity: '12:00 - 2 oct (UK)',
+    question: 'Which screenshot shows the bug?',
     proofs: [
       { id: 'file-0', name: 'shot-one.png', mimeType: 'image/png' },
       { id: 'file-1', name: 'shot-two.png', mimeType: 'image/png' },
@@ -114,6 +117,15 @@ async function withPage(fn) {
     status: 200, contentType: 'application/json',
     body: JSON.stringify({ ok: true, google: true, items: QUEUE }),
   }));
+  // The page also opens the live-push SSE stream, and the test gateway
+  // admits it and immediately pushes the REAL queue. Unstubbed, that event
+  // rebuilds the page mid-test with live items (intermittent fixture
+  // failures showing real keys). Hold the stream quiet: sensors test user
+  // gestures, not the push channel.
+  await page.route('**/review/api/events**', (r) => r.fulfill({
+    status: 200, contentType: 'text/event-stream',
+    body: ': test-quiet\nretry: 60000\n\n',
+  }));
   await page.route('**/review/api/proof*', (r) => {
     const id = new URL(r.request().url()).searchParams.get('file') || '';
     proofFetches.push(id);
@@ -129,6 +141,15 @@ async function withPage(fn) {
   await page.route('**/review/api/approve*', (route) => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }),
   }));
+  const qposts = [];
+  await page.route('**/review/api/question*', (route) => {
+    const sent = JSON.parse(route.request().postData() || '{}');
+    qposts.push(sent);
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, key: sent.key, stamped: '[human 11 Oct] ' + sent.text }),
+    });
+  });
   await page.route('**/review/api/answer*', (route) => {
     const sent = JSON.parse(route.request().postData() || '{}');
     answers.push(sent);
@@ -144,13 +165,30 @@ async function withPage(fn) {
 
   try {
     await page.goto(`${base}/review/app?token=x`);
-    await page.waitForSelector('.stage img');
-    return await fn({ page, base, posts, answers, proofFetches });
+    // Landing contract: Request opens first — request text with the result
+    // screenshot directly below it.
+    await page.waitForSelector('.view[data-view="request"].on');
+    return await fn({ page, base, posts, answers, proofFetches, qposts });
   } finally {
     await browser.close();
     server.close();
   }
 }
+
+test('landing opens Request with the request text and the result below it', async (t) => {
+  const ran = await withPage(async ({ page, proofFetches }) => {
+    const on = await page.$$eval('#tabs button', (bs) => bs.filter((b) => b.classList.contains('on')).map((b) => b.getAttribute('data-tab')));
+    assert.deepEqual(on, ['request'], 'Request reads on at landing, nothing else');
+    const req = await page.textContent('.view[data-view="request"]');
+    assert.match(req, /Original request/, 'the request column is on screen');
+    assert.match(req, /Build the thing/, 'with the request words');
+    const src = await page.$eval('.view[data-view="request"] .result img', (img) => img.getAttribute('src') || '');
+    assert.match(src, /\/review\/api\/proof/, 'the result screenshot rides below the request');
+    assert.match(src, /file=file-0/, 'it is the first proof shot');
+    assert.ok(proofFetches.includes('file-0'), 'and it is fetched through the guarded proof route');
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
 
 test('tab taps do not rebuild the image node (the blink)', async (t) => {
   const ran = await withPage(async ({ page }) => {
@@ -174,7 +212,7 @@ test('the image owns the majority of the screen on every tab', async (t) => {
       await page.waitForTimeout(80);
       const h = await page.evaluate(() => {
         const info = document.querySelector('.view[data-view="info"]');
-        const stage = document.querySelector('.stage');
+        const stage = document.querySelector('[data-view="proof"] .stage');
         return {
           info: info ? info.getBoundingClientRect().height : 0,
           stage: stage ? stage.getBoundingClientRect().height : 0,
@@ -356,7 +394,7 @@ test('multiple shots per item: one fetch each, and the counter follows the swipe
   const ran = await withPage(async ({ page, proofFetches }) => {
     const count = await page.textContent('#imgcount');
     assert.equal(count, '1/3');
-    assert.equal(await page.$$eval('.stage img', (i) => i.length), 3, 'all three shots are in the DOM');
+    assert.equal(await page.$$eval('[data-view="proof"] .stage img', (i) => i.length), 3, 'all three stage shots are in the DOM');
     assert.ok(proofFetches.includes('file-0'), 'shot 1 fetched');
     assert.ok(proofFetches.includes('file-2'), 'shot 3 fetched');
 
@@ -381,14 +419,50 @@ test('the heart confirms once, then archives', async (t) => {
       approves += 1;
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
     });
-    // On the landing (image) view the heart is the one-tap done action.
+    // The heart lives on the proof stage: from the Request landing, one
+    // Info tap opens the stage, and the heart there is the one-tap done.
     assert.equal(await page.textContent('#pos'), '1/2', 'two items to start');
+    await page.click('#tabs button[data-tab="info"]');
+    await page.waitForSelector('[data-view="proof"] .stage:not([hidden])');
     await page.click('#heart');
     await page.waitForTimeout(250);
     assert.equal(approves, 1, 'one tap on the image view archives');
     assert.equal(await page.textContent('#pos'), '1/1', 'the archived item left the queue');
     const shown = await page.textContent('.kv .key');
     assert.match(shown, /req:test-b/, 'the next item is now showing');
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
+
+test('the result screenshot carries its own heart that archives', async (t) => {
+  const ran = await withPage(async ({ page }) => {
+    let approves = 0;
+    await page.route('**/review/api/approve*', (route) => {
+      approves += 1;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    });
+    // On the Request landing: the heart pinned to the result archives
+    // without ever opening the swipe stage.
+    assert.equal(await page.textContent('#pos'), '1/2', 'two items to start');
+    await page.click('.view[data-view="request"] .result .heart');
+    await page.waitForTimeout(250);
+    assert.equal(approves, 1, 'the result heart archives from the landing');
+    assert.equal(await page.textContent('#pos'), '1/1', 'the archived item left the queue');
+  });
+  if (ran === null) t.skip('playwright not installed');
+});
+test('the agent question shows on landing and the answer posts to the question route', async (t) => {
+  const ran = await withPage(async ({ page, qposts }) => {
+    const thread = await page.textContent('#qa-thread');
+    assert.match(thread, /Which screenshot shows the bug/);
+    await page.fill('#qa-answer', 'the second one');
+    await page.click('#qa-send');
+    await page.waitForTimeout(200);
+    assert.equal(qposts.length, 1);
+    assert.equal(qposts[0].key, 'req:test-a');
+    assert.equal(qposts[0].text, 'the second one');
+    assert.match(await page.textContent('#qa-thread'), /\[human 11 Oct\] the second one/);
+    assert.match(await page.textContent('.toast') || '', /agent continues/);
   });
   if (ran === null) t.skip('playwright not installed');
 });

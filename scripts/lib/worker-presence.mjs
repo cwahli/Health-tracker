@@ -126,6 +126,23 @@ export function clearWorker(host, home = os.homedir()) {
   }
 }
 
+/** Human age for a silent worker: 45s, 12m, 3h 5m, 3d 10h. */
+export function formatSilentAge(ageMs) {
+  const s = Math.max(0, Math.round(Number(ageMs) / 1000));
+  if (!Number.isFinite(s)) return 'unknown time';
+  if (s < 90) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 90) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 48) {
+    const rm = m % 60;
+    return rm > 0 ? `${h}h ${rm}m` : `${h}h`;
+  }
+  const d = Math.floor(h / 24);
+  const rh = h % 24;
+  return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
+}
+
 /**
  * @returns {{host: string, reachable: boolean, reason: string, lastSeen: string|null, ageMs: number|null, machine: object|null, standin: boolean}}
  */
@@ -146,7 +163,7 @@ export function workerStatus(host, { home = os.homedir(), now = Date.now(), ttlM
     return { host: h, reachable: false, reason: 'worker record has no usable timestamp', lastSeen: row.lastSeen, ageMs: null, machine, standin };
   }
   if (ageMs > ttlMs) {
-    return { host: h, reachable: false, reason: `worker silent for ${Math.round(ageMs / 1000)}s`, lastSeen: row.lastSeen, ageMs, machine, standin };
+    return { host: h, reachable: false, reason: `worker silent for ${formatSilentAge(ageMs)}`, lastSeen: row.lastSeen, ageMs, machine, standin };
   }
   if (row.pid && !alive(row.pid)) {
     // Pids live in per-machine namespaces: only a worker on THIS machine can

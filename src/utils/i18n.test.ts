@@ -20,6 +20,7 @@ import {
   displayTimeTag,
   interpolate,
   normalizeLocale,
+  pickPlural,
   t,
   withAgentLanguage,
 } from './i18n';
@@ -34,7 +35,7 @@ describe('i18n locales', () => {
     expect([...SUPPORTED_LOCALES].sort()).toEqual(['en', 'fr', 'id', 'zh']);
   });
 
-  it('requires English and Indonesian raw packs to have the same keys as en (not English-filled)', () => {
+  it('requires every complete-locale raw pack to have the same keys as en (not English-filled)', () => {
     const sourceKeys = Object.keys(localePacks.en).sort();
     for (const locale of REQUIRED_COMPLETE_LOCALES) {
       const keys = Object.keys(localePacks[locale]).sort();
@@ -43,9 +44,41 @@ describe('i18n locales', () => {
     }
   });
 
-  it('falls back to English for a missing French/Chinese key', () => {
-    expect(t('fr', 'sendToAdmin')).toBeTruthy();
-    expect(t('zh', 'sendToAdmin')).toBeTruthy();
+  it('serves translated French/Chinese copy, falling back to English only for unknown keys', () => {
+    expect(t('fr', 'sendToAdmin')).toBe(localePacks.fr.sendToAdmin);
+    expect(t('zh', 'sendToAdmin')).toBe(localePacks.zh.sendToAdmin);
+    expect(t('fr', 'sendToAdmin')).not.toBe(localePacks.en.sendToAdmin);
+    expect(t('zh', 'sendToAdmin')).not.toBe(localePacks.en.sendToAdmin);
+    expect(t('fr', '__notAKey__')).toBe('__notAKey__');
+    expect(t('zh', '__notAKey__')).toBe('__notAKey__');
+  });
+});
+
+describe('pickPlural (ICU pilot)', () => {
+  const dict = { one: 'ONE', other: 'OTHER' } as Record<string, string>;
+  it('routes 1 to one in English and French, always other in Chinese', () => {
+    expect(pickPlural(dict, 'en', 1, 'one', 'other')).toBe('ONE');
+    expect(pickPlural(dict, 'en', 2, 'one', 'other')).toBe('OTHER');
+    expect(pickPlural(dict, 'fr', 0, 'one', 'other')).toBe('ONE');
+    expect(pickPlural(dict, 'fr', 1, 'one', 'other')).toBe('ONE');
+    expect(pickPlural(dict, 'fr', 2, 'one', 'other')).toBe('OTHER');
+    expect(pickPlural(dict, 'zh', 1, 'one', 'other')).toBe('OTHER');
+    expect(pickPlural(dict, 'id', 1, 'one', 'other')).toBe('OTHER');
+  });
+  it('picks the singular biomarker frame in French for one extraction', () => {
+    const fr = translations.fr as Record<string, string>;
+    expect(
+      interpolate(pickPlural(fr, 'fr', 1, 'biomarkersExtractedStatusOne', 'biomarkersExtractedStatus'), {
+        count: 1,
+        recWord: fr.recWordApplied,
+      }),
+    ).toContain('biomarqueur extrait');
+    expect(
+      interpolate(pickPlural(fr, 'fr', 3, 'biomarkersExtractedStatusOne', 'biomarkersExtractedStatus'), {
+        count: 3,
+        recWord: fr.recWordApplied,
+      }),
+    ).toContain('biomarqueurs extraits');
   });
 });
 

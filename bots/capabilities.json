@@ -211,6 +211,7 @@
         "forge": false,
         "fleet": false,
         "review": false,
+        "app": false,
         "skills": false,
         "routerOnly": ["switch", "unlock"],
         "aliases": ["think", "freemodel", "model"]

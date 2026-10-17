@@ -8,6 +8,10 @@ import {
   reaggregateDishWeightFromComponents,
   collapsePackagePreparedScoutItems,
   findPackagePreparedPair,
+  sanitizeWeightEditCommands,
+  parseMessageMealTotal,
+  isPortionAdjustTurn,
+  editAnchoredPriorIndices,
 } from './server_edit_patch_ledger.js';
 
 describe('edit patch ledger', () => {
@@ -745,3 +749,92 @@ describe('F-13.1 live T2 (foods[]-only add/delete, no dish action)', () => {
   });
 });
 
+
+describe('PORTION-SMEAR containment (live job_1791997001237, 2026-10-14)', () => {
+  // Initial meal totaled 1030g: porridge 150, smoothie 250, eggs 120, salad 150.
+  const porridgePrior = () => ([
+    { scoutIndex: 0, name: 'Porridge', keyword: 'Porridge', weightGrams: 150 },
+    { scoutIndex: 4, name: 'Berry Smoothie', keyword: 'Berry Smoothie', weightGrams: 250 },
+    { scoutIndex: 5, name: 'Scrambled Eggs', keyword: 'Scrambled Eggs', weightGrams: 120 },
+    { scoutIndex: 7, name: 'Mixed Green Salad', keyword: 'Mixed Green Salad', weightGrams: 150 },
+  ]);
+  const smoothieMsg1407 =
+    'Adjust portion of Berry Smoothie (total meal now 1407g vs initial 1030g, +37%). Please review the nutrition breakdown and dietary advice.';
+
+  it('parses the message meal total and detects portion-adjust turns', () => {
+    expect(parseMessageMealTotal(smoothieMsg1407)).toBe(1407);
+    expect(parseMessageMealTotal('please review')).toBeNull();
+    expect(isPortionAdjustTurn(smoothieMsg1407)).toBe(true);
+    expect(isPortionAdjustTurn('please review the meal')).toBe(false);
+    expect(isPortionAdjustTurn('please review', { 4: 627 })).toBe(true);
+  });
+
+  it('anchors only the user-targeted dish, never by the total', () => {
+    const anchored = editAnchoredPriorIndices(porridgePrior(), smoothieMsg1407);
+    expect(anchored.has(1)).toBe(true);
+    expect(anchored.has(0)).toBe(false);
+    expect(anchored.has(2)).toBe(false);
+    expect(anchored.has(3)).toBe(false);
+  });
+
+  it('drops total-valued and unanchored weight writes on a portion adjust', () => {
+    const { commands, notes } = sanitizeWeightEditCommands({
+      commands: [
+        { action: 'set_weight', itemName: 'Berry Smoothie', newWeightGrams: 1407, scoutIndex: 4 },
+        { action: 'update_component_weight', itemName: 'Porridge', componentName: 'Oatmeal Porridge', newWeightGrams: 900, scoutIndex: 0 },
+      ],
+      priorItems: porridgePrior(),
+      userMessage: smoothieMsg1407,
+    });
+    expect(commands).toEqual([]);
+    expect(notes.some((n) => n.includes('meal total'))).toBe(true);
+    expect(notes.some((n) => n.includes('not targeted'))).toBe(true);
+  });
+
+  it('keeps the anchored dish edit when it is not the total', () => {
+    const { commands } = sanitizeWeightEditCommands({
+      commands: [{ action: 'set_weight', itemName: 'Berry Smoothie', newWeightGrams: 627, scoutIndex: 4 }],
+      priorItems: porridgePrior(),
+      userMessage: 'Adjust portion of Berry Smoothie: 250g ➔ 627g. Please review.',
+    });
+    expect(commands).toHaveLength(1);
+    expect(commands[0].newWeightGrams).toBe(627);
+  });
+
+  it('lets a single-dish meal equal its total (no false positive)', () => {
+    const { commands } = sanitizeWeightEditCommands({
+      commands: [{ action: 'set_weight', itemName: 'Porridge', newWeightGrams: 500, scoutIndex: 0 }],
+      priorItems: [{ scoutIndex: 0, name: 'Porridge', weightGrams: 300 }],
+      userMessage: 'Adjust portion of Porridge (total meal now 500g vs initial 300g, +67%).',
+    });
+    expect(commands).toHaveLength(1);
+  });
+
+  it('never mints a weight lock for the message total', () => {
+    const locks = mergeLocksFromCommands({
+      priorLocks: [],
+      commands: [{ action: 'set_weight', itemName: 'Berry Smoothie', newWeightGrams: 1407, scoutIndex: 4 }],
+      itemsAfter: [
+        { scoutIndex: 0, name: 'Porridge', weightGrams: 150 },
+        { scoutIndex: 4, name: 'Berry Smoothie', weightGrams: 1407 },
+      ],
+      turn: 2,
+      userMessage: smoothieMsg1407,
+    });
+    expect(locks.some((l) => l.field === 'weightGrams')).toBe(false);
+  });
+
+  it('the total clause cannot unlock a weight lock as "user set"', () => {
+    const locked = applyUserLockedSlots({
+      scoutItems: [
+        { scoutIndex: 0, name: 'Porridge', estimatedWeightGrams: 150 },
+        { scoutIndex: 4, name: 'Berry Smoothie', estimatedWeightGrams: 2536 },
+      ],
+      locks: [{ scoutIndex: 4, field: 'weightGrams', value: 1407, lockedAtTurn: 2 }],
+      userMessage: 'Adjust portion of Berry Smoothie (total meal now 2536g vs initial 1030g, +146%). Please review.',
+    });
+    expect(locked.items[1].weightGrams).toBe(1407);
+    expect(locked.notes.some((n) => n.includes('user set'))).toBe(false);
+    expect(locked.notes.some((n) => n.includes('lock weight slot 4'))).toBe(true);
+  });
+});

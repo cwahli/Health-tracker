@@ -28,3 +28,38 @@ counts, and the screenshot must show the result as the user sees it.
 Terminal-only evidence (vitest, assert scripts, `tsc`) proves the code;
 only the 6-step live meal run proves the fix. A `done`/`Done` without
 the PNGs is invalid and must be reopened and redone.
+
+## Proof presentation rules (standing — repeated human verdicts, 2026-10-10)
+
+A meal ticket is not reviewable until all three hold:
+
+1. **job_id cited visibly.** The proof names the job it replays
+   (`job_id cited visibly` on the panels or captions, e.g.
+   `job_1786701466257_np41t5gpa`), so a reviewer can trace every shot
+   back to the filed job without opening the card. Where no live job
+   exists (prebuilt benchmark fixture), cite the replay target instead:
+   bundle identity + comparison identity + exact command — and the bare
+   sentence "no job" without the target fails the check on purpose.
+2. **input (entry picture+text) through output (analysis view).** The
+   shot set covers the full flow: the meal ENTRY as entered (initial
+   picture plus the text, when there is any) and the OUTPUT (analysis
+   view with the fixed nutrient info as the user sees it). Input-only
+   or output-only proof goes back for the missing half. Reconstructed
+   entry states are allowed only when labeled as reconstructed.
+3. **Curated folder.** Before submitting for review, the ticket's
+   folder holds only this ticket's shots: irrelevant files are moved
+   out (another ticket's shots to that ticket's folder), superseded
+   revisions move to a `superseded/` subfolder (the review app lists
+   top-level images only, so they stay out of review without being
+   deleted). Nothing is deleted.
+4. **Captured loaded, not loading.** Every shot is taken after its
+   content renders: all `<img>` complete with nonzero dimensions, no
+   spinners, skeletons, or placeholders. The capture script asserts
+   loaded state (network idle + per-image complete) before shooting;
+   a loading-state capture is not proof and goes back for re-capture.
+5. **Download-back before review.** After any batch Drive upload,
+   download every file back and confirm the bytes render before the
+   row goes to review — a clean folder listing is metadata only and
+   can mask a phantom (unreplicated blob reads as notFound) for
+   several minutes. The caption file carries name + bytes + md5 so a
+   ghost is a two-minute diagnosis, not a re-capture.

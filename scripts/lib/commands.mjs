@@ -12,7 +12,7 @@ export const BOT_COMMANDS = [
   { command: 'start', description: 'Start the bot and show help' },
   { command: 'help', description: 'Show available commands' },
   { command: 'status', description: 'Show session, model, agent, usage' },
-  { command: 'status_all', description: 'Show fleet-wide status across agents in this chat' },
+  { command: 'status_all', fleetRead: true, description: 'Show fleet-wide status across agents in this chat' },
   { command: 'new', description: 'Start a fresh session' },
   { command: 'compact', description: "Compact this chat's session in place (stays on it)" },
   { command: 'model_light_free', description: 'Pick a free model from the light pool (a quota hit moves inside light only)' },
@@ -24,11 +24,7 @@ export const BOT_COMMANDS = [
   { command: 'plan', description: 'Switch to the plan agent' },
   { command: 'thinking', description: 'Pick the thinking level (variant)' },
   { command: 'skills', description: 'List /do-* skills you can type here' },
-  { command: 'tui', description: 'Open the opencode TUI for this conversation (Mini App)' },
-  { command: 'bugs', description: 'Open the shared bug board (Mini App)' },
-  { command: 'fleet', description: 'Open the live fleet dashboard (Mini App)' },
-  { command: 'review', description: 'Review finished work: proof screenshots, approve or comment (Mini App)' },
-  { command: 'forge', description: 'Create a new bot, one click (Mini App)' },
+  { command: 'tui', description: 'Terminal pane status for this conversation (terminal itself moved to web)' },
   { command: 'debug', description: 'Show the active work-session debug view' },
   { command: 'handoff', description: 'Checkpoint this work session for continuation' },
   { command: 'resume', description: 'Print the current bug-ticket packet' },
@@ -66,6 +62,17 @@ export const HIDDEN_COMMANDS = {
   models: 'moved: the model list became the three pool pickers — answers the same pointer',
   store: 'ops: store queue status/flush is a background concern, typed on demand',
   setup: 'ops: provider readiness gaps, surfaced via /allowance and typed to fix',
+  // The bot mini-apps went web-only (2026-10-11 owner call): no buttons, no
+  // menu entries. The cases stay handled so a typed name answers the web
+  // pointer instead of falling through to the tool as a prompt.
+  bugs: 'moved: the bug board is web-only now — answers as a pointer to the Bugs tab',
+  fleet: 'moved: the fleet dashboard is web-only now — answers as a pointer to the Fleet tab',
+  review: 'moved: the review queue is web-only now — answers as a pointer to the Review tab',
+  forge: 'moved: the bot forge is web-only now — answers as a pointer to the Forge tab',
+  app: 'moved: the mini-app shell is a browser page now — answers as a pointer to the web shell',
+  // Operator power tool (2026-10-14): landing a chat on a session from the
+  // operator's own opencode list is typed on demand, not a menu entry.
+  attach: 'ops: land this chat on one of your opencode sessions (/attach <session-id> [force]) — same workspace only, starts no turn',
 };
 
 /**
@@ -104,17 +111,17 @@ export const HELP_USAGE = {
   thinking: { args: '[level]', text: 'pick the thinking level (variant)' },
   skills: { args: '', text: 'list /do-* skills you can type here (typed, not buttons)' },
   tui: {
-    args: '', text: 'open this conversation in a real terminal (Mini App button)',
+    args: '', text: 'terminal pane status for this chat (terminal itself is on the web)',
     extra: [
       '/tui status      name the open pane, who is attached, how long it has been up',
       '/tui off         close that pane (add force to close it mid-turn)',
     ],
   },
-  bugs: { args: '', text: 'open the shared bug board (Mini App button)' },
-  fleet: { args: '', text: 'open the live fleet dashboard across all machines (Mini App button)' },
-  review: { args: '', text: 'review finished work: proof screenshots, approve with 👍 or comment back (Mini App button)' },
-  forge: { args: '', text: 'create a new bot in one click (Mini App forge)' },
   debug: { args: '', text: 'show the active work-session debug view' },
+  attach: {
+    args: '<session-id> [force]',
+    text: 'land this chat on one of your opencode sessions (same workspace only; starts no turn, spends nothing)',
+  },
   handoff: { args: '', text: 'checkpoint this work session for continuation' },
   resume: { args: '[n]', text: 'print the current bug-ticket packet (n = card #)' },
   tx: { args: '[on|off|status|debug]', text: 'shared work view for this chat' },
@@ -279,7 +286,26 @@ export function greetingReply(text) {
   return null;
 }
 
-  export function parseCommand(text) {
+
+  /**
+ * `fleetRead: true` marks a command whose answer is ABOUT THE ROOM rather than
+ * about the bot that ran it — one table for every agent present in this chat.
+ *
+ * Such a command must produce exactly one reply in a group. A bare one is
+ * addressed to nobody (see resolveGroupAddressing), so on a group with no master
+ * seat every bot dropped it and the room saw nothing. The gate now elects one
+ * renderer from the agents that are actually present, keyed off this flag — so
+ * marking a command here is all it takes to make it work in any group, and no
+ * command name is hardcoded anywhere else.
+ */
+export function isFleetReadCommand(name) {
+  const key = String(name ?? '').trim().toLowerCase();
+  if (!key) return false;
+  return BOT_COMMANDS.some((c) => c.command === key && c.fleetRead === true);
+}
+
+/** Every agent that has observed this chat, in registry order. */
+export function parseCommand(text) {
     const raw = String(text ?? '').trim();
     if (!raw.startsWith('/')) return null;
     let normalized = raw;
@@ -857,14 +883,26 @@ export function agentKeyboard(agents) {
   };
 }
 
-export function variantKeyboard(variants) {
+export function variantKeyboard(variants, { selected = null, columns = 2 } = {}) {
   // Embed the variant name (short, e.g. "low"/"high") instead of a bare
   // index so taps stay valid even if the cached model list was refetched
   // or reordered between showing the keyboard and tapping it.
   // Old `v:<index>` buttons still decode via the index fallback.
-  return {
-    inline_keyboard: variants.map((variant) => [{ text: variant, callback_data: `v:${variant}` }]),
-  };
+  const list = [...new Set((Array.isArray(variants) ? variants : []).map((v) => String(v ?? '').trim()).filter(Boolean))];
+  // The level in force is marked in the label, so the keyboard answers "what am
+  // I on" by itself. It stays tappable — a tap on the current level is a no-op
+  // re-set, not an error — and callback_data is untouched, so an old tap still
+  // decodes to the same level.
+  const buttons = list.map((variant) => ({
+    text: variant === selected ? `✅ ${variant}` : variant,
+    callback_data: `v:${variant}`,
+  }));
+  // Two per row: five levels in five rows is a column of text on a phone, and
+  // every model that offers levels offers several.
+  const perRow = Math.max(1, Math.min(columns, buttons.length || 1));
+  const rows = [];
+  for (let i = 0; i < buttons.length; i += perRow) rows.push(buttons.slice(i, i + perRow));
+  return { inline_keyboard: rows };
 }
 
 export function decodeCallback(data) {

@@ -30,6 +30,9 @@
      * `web.health-tracking.duckdns.org` (OpenCode web UI `:8897`)
      * `omb.health-tracking.duckdns.org` (OpenMausBot `:8799`)
      * `tgtg.health-tracking.duckdns.org` (TooGoodToGo `:8892`)
+     * **`mc.health-tracking.duckdns.org`** (MC Radar Mini App `:8080`) — no co.uk twin yet
+     * **`agenda.health-tracking.duckdns.org`** (Agenda/Tax WebApp `:8895`) — no co.uk twin yet
+     * *These last two have no `health-tracker.co.uk` twin and block duckdns retirement — plan: [MC_DOMAIN_CUTOVER.md](./MC_DOMAIN_CUTOVER.md), ledger rows 11–12 in [COUK_MIGRATION.md](./COUK_MIGRATION.md).*
   2. Fallback routing and internal agent scripts that default to DuckDNS.
 * **Access Logs:** `/var/log/caddy/duckdns-access.log` (monitors remaining traffic for retirement signal).
 

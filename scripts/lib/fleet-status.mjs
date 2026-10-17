@@ -81,7 +81,9 @@ function sqliteDriver() {
 /**
  * One row per live opencode session on the VM host — never an aggregate:
  * the user asked for one agent per row, so each session carries its own
- * model, working marker and title.
+ * model, working marker and title. Model-less `opencode run` children
+ * (triage/worker) show as `worker` rows when titled `sheet-todo …`,
+ * so a spawned session is visible with its ticket key.
  * Each row may carry lastType/lastCompleted from its newest session_message:
  * a streaming assistant message (no completed stamp) means working.
  */
@@ -94,15 +96,20 @@ export function vmSessionRows(rows, { now = Date.now() } = {}) {
     } catch {
       modelId = String(r.model || '').trim();
     }
-    if (!modelId) return null;
+    // Headless `opencode run` workers (triage/worker children) never get a
+    // model recorded on the session row, so the model gate below would hide
+    // them forever. A titled sheet-todo child shows as a worker row with
+    // the ticket key in the task; untitled model-less rows stay dropped.
     const dir = String(r.directory || '').trim();
     const title = String(r.title || '').trim();
+    const isTodoChild = !modelId && title.toLowerCase().startsWith('sheet-todo ');
+    if (!modelId && !isTodoChild) return null;
     const label = title && title.toLowerCase() !== 'none' ? title : (dir.split('/').pop() || dir);
     const streaming = String(r.lastType || '') === 'assistant' && (r.lastCompleted === null || r.lastCompleted === undefined);
     const working = streaming || String(r.lastType || '') === 'user';
     return {
       location: 'VM',
-      agent: `opencode/${modelId}`,
+      agent: modelId ? `opencode/${modelId}` : 'worker',
       status: working ? 'working' : 'idle',
       lastPhase: working ? 'working' : 'idle',
       task: label,
@@ -112,6 +119,64 @@ export function vmSessionRows(rows, { now = Date.now() } = {}) {
       updatedAt: r.lastSeenMs ? new Date(Number(r.lastSeenMs)).toISOString() : (r.timeUpdated ? new Date(Number(r.timeUpdated)).toISOString() : new Date(now).toISOString()),
     };
   }).filter(Boolean);
+}
+
+/**
+ * Terminal-picker rows for live VM opencode CLI sessions: bare sessions with
+ * no ttyd route (this box's own agent runs). The picker's ttyd rows are keyed
+ * per bot, so these carry their own `opencode:<sessionId>` ids — one row per
+ * session, never merged into the VM bot row. `url` is the public web UI root
+ * the picker opens for the session (same gateway door, token appended by the
+ * client); the row itself is what makes the session visible in one place with
+ * the collab and VM-bot terminals.
+ */
+export function vmPickerEntries(rawRows, { now = Date.now(), webUrl = '' } = {}) {
+  const out = [];
+  for (const r of (Array.isArray(rawRows) ? rawRows : [])) {
+    const mapped = vmSessionRows([r], { now })[0];
+    if (!mapped) continue;
+    const sid = String(r?.id || '').trim();
+    if (!sid) continue;
+    out.push({
+      id: `opencode:${sid}`,
+      kind: 'opencode',
+      bot: 'vm',
+      sessionId: sid,
+      agent: mapped.agent,
+      title: mapped.task,
+      status: mapped.status,
+      updatedAt: mapped.updatedAt,
+      url: String(webUrl || ''),
+    });
+  }
+  return out;
+}
+
+/** Read + map in one call for the terminal picker (best-effort, never throws). */
+export function readVmPickerEntries({ home = os.homedir(), now = Date.now(), windowMs = VM_OPENCODE_WINDOW_MS, dbPath = null, webUrl = '' } = {}) {
+  return vmPickerEntries(
+    readVmOpencodeSessions({ home, now, windowMs, dbPath }),
+    { now, webUrl },
+  );
+}
+
+/**
+ * Attach target for one bare VM session: the session id plus the workspace
+ * directory the viewer terminal must start in. Only sessions the picker
+ * itself would list (fresh, model-bearing) resolve — anything else is a 404
+ * upstream, never a `null` the viewer would turn into a fresh session.
+ * The directory stays server-side (target file + attach argv); picker rows
+ * never carry it.
+ */
+export function findVmSessionTarget(rawRows, sessionId, { now = Date.now() } = {}) {
+  const sid = String(sessionId || '').trim();
+  if (!/^ses_[A-Za-z0-9]+$/.test(sid)) return null;
+  const row = (Array.isArray(rawRows) ? rawRows : []).find((r) => String(r?.id || '') === sid);
+  if (!row) return null;
+  if (!vmSessionRows([row], { now })[0]) return null;
+  const directory = String(row.directory || '').trim();
+  if (!directory) return null;
+  return { sessionId: sid, directory, title: String(row.title || '').trim() };
 }
 
 /** Recent unarchived opencode sessions from the local opencode.db (best-effort).
@@ -127,7 +192,7 @@ export function readVmOpencodeSessions({ home = os.homedir(), now = Date.now(), 
     const conn = new DatabaseSync(db, { readOnly: true });
     try {
       const rows = conn.prepare(
-        `select s.model, s.directory, s.title, s.time_updated as timeUpdated,
+        `select s.id as id, s.model, s.directory, s.title, s.time_updated as timeUpdated,
           (select m.type from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastType,
           (select m.data from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastData,
           (select max(m.time_created) from session_message m where m.session_id = s.id) as lastMsgMs
@@ -670,7 +735,85 @@ function splitScopedSession(raw) {
  * `workspace` scopes the session row the same way /status does (an exact
  * workspace match, or the row belongs to another project).
  */
-export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home = os.homedir(), seats = null, roleOf = null, masterId = null } = {}) {
+/**
+ * Group presence, learned from the group's own traffic.
+ *
+ * "Which agents are in THIS group" has no registry answer: seats join chats at
+ * runtime and nothing on disk said so. What IS true is that a bot only receives
+ * an update for a chat it belongs to, so every message in a group is proof of
+ * presence for the bots that saw it. Recording that turns membership into a fact
+ * instead of a guess, which is what lets a fleet-wide read work in any group —
+ * including one created a minute ago — with no per-group config.
+ *
+ * Kept out of totals.json on purpose: presence churns on every message and must
+ * not rewrite the usage ledger to record "I was here".
+ */
+const PRESENCE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const PRESENCE_MIN_GAP_MS = 60 * 1000;
+
+function presencePath(seatId, home) {
+  return path.join(home, '.local', 'state', 'bot-host', seatId, 'presence.json');
+}
+
+/**
+ * Record that this seat has seen this chat. Cheap: an entry written inside the
+ * gap window writes nothing, so a busy group does not become a write per
+ * message. Returns true when the file was written.
+ */
+export function noteChatPresence(seatId, chatId, { home = os.homedir(), now = Date.now() } = {}) {
+  const key = String(chatId ?? '');
+  if (!key || !seatId) return false;
+  try {
+    const file = presencePath(seatId, home);
+    const prev = readJsonObject(file) || {};
+    const at = Number(prev[key]) || 0;
+    const age = now - at;
+    if (at && age >= 0 && age < PRESENCE_MIN_GAP_MS) return false;
+    const next = {};
+    for (const [k, v] of Object.entries(prev)) {
+      const t = Number(v) || 0;
+      // Bounded, or this file grows with every group the fleet ever sat in.
+      if (t && now - t >= 0 && now - t < PRESENCE_TTL_MS) next[k] = t;
+    }
+    next[key] = now;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `${JSON.stringify(next)}\n`, 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The agents present in one chat, in registry order.
+ *
+ * Presence first (they are in the room), then per-chat work records (they have
+ * been in the room), then null for "nothing known here yet" — so a caller can
+ * fall back to the full council instead of claiming the room is empty.
+ */
+export function chatRoster({ fleetBots, chatId, home = os.homedir(), now = Date.now() } = {}) {
+  const key = String(chatId ?? '');
+  if (!key) return null;
+  const here = [];
+  const worked = [];
+  for (const b of fleetBots || []) {
+    if (!b || b.enabled === false) continue;
+    if (!FLEET_CHAT_RUNTIMES.has(b.runtime || 'bot-host')) continue;
+    const at = Number((readJsonObject(presencePath(b.id, home)) || {})[key]) || 0;
+    // age >= 0 matters: a file written by a host whose clock ran ahead reads as a
+    // negative age, which is < TTL, so the seat would sit in the roster forever.
+    const age = now - at;
+    if (at && age >= 0 && age < PRESENCE_TTL_MS) { here.push(b.id); continue; }
+    const dir = path.join(home, '.local', 'state', 'bot-host', b.id);
+    const totals = readJsonObject(path.join(dir, 'totals.json'));
+    if (Object.prototype.hasOwnProperty.call(totals || {}, key)) worked.push(b.id);
+  }
+  if (here.length) return here;
+  if (worked.length) return worked;
+  return null;
+}
+
+export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home = os.homedir(), seats = null, roleOf = null, masterId = null, onlySeats = null } = {}) {
   const key = String(chatId ?? '');
   if (!key) return [];
   let bots = [];
@@ -684,7 +827,11 @@ export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home
     return [];
   }
   const ws = String(workspace || '');
+  // When the caller scoped this chat (see chatRoster), the room's own seats
+  // win over the council: a group is not every seat that exists.
+  const scopedIds = Array.isArray(onlySeats) && onlySeats.length ? new Set(onlySeats) : null;
   const inCouncil = (b) => {
+    if (scopedIds) return scopedIds.has(b.id);
     if (!Array.isArray(seats) || typeof roleOf !== 'function') return true;
     if (master && b.id === master) return true;
     return seats.includes(roleOf(b));
@@ -707,6 +854,12 @@ export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home
       const tokens = Number(totalsRow.tokens) || 0;
       const cost = Number(totalsRow.cost) || 0;
       const last = totalsRow.last && typeof totalsRow.last === 'object' ? totalsRow.last : null;
+      // What this seat RAN on beats what it is CONFIGURED to run on. noteUsage
+      // records the answering lane (seat-model's `answeredBy`), which differs
+      // from the registry default the moment a lane fails over. Reading only
+      // the config made the table claim a lane the answer did not come from —
+      // the opposite of the point of the column.
+      const usedModel = typeof last?.model === 'string' ? last.model.trim() : '';
       const lastTokens = Number(last?.tokens?.total ?? last?.tokens) || 0;
       const lastLimit = Number(last?.contextLimit) || 0;
       const enabled = b.enabled !== false;
@@ -716,7 +869,7 @@ export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home
         name: b.name || b.id,
         enabled,
         role: master && b.id === master ? 'coordinator' : seat || null,
-        model: pref.model || b.agent?.model || null,
+        model: usedModel || pref.model || b.agent?.model || null,
         agent: pref.agent || b.agent?.defaultAgent || null,
         sessionId,
         foreignSession,
@@ -799,7 +952,11 @@ export function formatFleetStatusTable(rows, { chatId, via } = {}) {
     }
     out.push('```');
   } else {
-    const W = { bot: 8, role: 14, model: 18, agent: 5, sess: 9, task: 7, runs: 14 };
+    // Wide enough for a full model id ("opencode/nemotron-3.5-lightning-free" is
+    // 38). A truncated lane name defeats the column — it cannot tell you which
+    // lane ran. Only reached when the seats disagree, so the narrow uniform
+    // table above is unaffected.
+    const W = { bot: 8, role: 13, model: 38, agent: 5, sess: 9, task: 7, runs: 10 };
     out.push('```');
     out.push(
       `${padEnd('Bot', W.bot)} ${padEnd('Role', W.role)} ${padEnd('Model', W.model)} ${padEnd('Ag', W.agent)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Usage', W.runs)}`.trimEnd(),

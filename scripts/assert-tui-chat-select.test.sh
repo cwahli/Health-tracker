@@ -4,8 +4,9 @@
 #
 # tui-attach.sh historically printed ids[0] — the first session in the map —
 # so every chat attached to whichever conversation happened to be first. The
-# resolution order is now: TUI_CHAT_ID env, then tui-open.json (written by
-# bot-host on every /tui), then the legacy first-session fallback. TUI_DRY_RUN
+# resolution order is now: TUI_CHAT_ID env, then tui-open.json (stale files on
+# disk from past opens; the bot no longer writes it — web-only 2026-10-11),
+# then the legacy first-session fallback. TUI_DRY_RUN
 # prints the decision without touching tmux, leases, or the model.
 set -u
 PASS=0
@@ -60,13 +61,18 @@ rm "$STATE/sessions.json"
 out=$(TUI_STATE_ROOT="$ROOT/state/bot-host" TUI_BOT_ID=vm TUI_CHAT_ID=111 TUI_DRY_RUN=1 bash "$ATTACH")
 check "missing map resolves empty" "$(first "$out")" "SURFACE=opencode SID= SOURCE=legacy-first"
 
-# 6. The bot-host /tui handler records the opening chat (static check on the
-#    live contract: tui-open.json written on the gateway path, never fatal).
-SRC="$(grep -c "tui-open.json" "$HERE/bot-host.mjs")"
-check "bot-host mentions tui-open on /tui ($SRC site(s))" "$([ "$SRC" -ge 1 ] && echo yes || echo no)" "yes"
-grep -q "writeJson(path.join(stateDir(config.id), 'tui-open.json')" "$HERE/bot-host.mjs" \
-  && { echo "  PASS  the write targets this bot's state dir"; PASS=$((PASS + 1)); } \
-  || { echo "  FAIL  the write targets this bot's state dir"; FAIL=$((FAIL + 1)); }
+# 6. Web-only (owner call 2026-10-11): the bot no longer records the opening
+#    chat — bare /tui answers status plus a web pointer and never writes
+#    tui-open.json. The attach still honors stale snapshots on disk (sections
+#    2, 3 and 15 execute that path); only the Telegram write path is gone.
+if grep -q "tui-open.json" "$HERE/bot-host.mjs"; then
+  echo "  FAIL  bot-host still writes tui-open.json on /tui (web-only: pointer only)"; FAIL=$((FAIL + 1))
+else
+  echo "  PASS  bot-host writes no tui-open.json (the attach honors stale files)"; PASS=$((PASS + 1))
+fi
+grep -q "https://app.health-tracker.co.uk/app/" "$HERE/bot-host.mjs" \
+  && { echo "  PASS  bare /tui points at the web shell"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  bare /tui names no web shell"; FAIL=$((FAIL + 1)); }
 
 # 7. Session continuity survives a restart: the Map key type must match the
 #    disk round-trip. Turns used to write the raw Telegram id (a number) while
@@ -229,14 +235,14 @@ VM3_NAME=$(grep -o 'TUI_TMUX_NAME=.*' "$HERE/tui-ttyd-vm3.service" | cut -d= -f2
   && { echo "  PASS  the three bots keep separate sessions ($VM_NAME / $VM2_NAME / $VM3_NAME)"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  bots share one session ($VM_NAME / $VM2_NAME / $VM3_NAME)"; FAIL=$((FAIL + 1)); }
 
-# The phone-vs-VM tell must be the platform, not the URL file's path: that path
-# defaults to a Termux location on every host, so a VM bot with no gateway URL
-# was told its "phone tunnel" was down (vm3, live 2026-09-30). The markers are
-# the ones freemodels.mjs already uses for the mobile lane.
-TELL=$(grep -c 'const onPhone = Boolean(process.env.TERMUX_VERSION || process.env.ANDROID_ROOT);' "$HERE/bot-host.mjs" || true)
-[ "$TELL" = "2" ] \
-  && { echo "  PASS  the phone-vs-VM tell is the platform, not the URL path"; PASS=$((PASS + 1)); } \
-  || { echo "  FAIL  the phone-vs-VM tell is the platform, not the URL path (found $TELL of 2)"; FAIL=$((FAIL + 1)); }
+# The phone-vs-VM tell left with the offline lectures (web-only 2026-10-11):
+# no branch of /tui blames a tunnel any more, so there is no host to
+# misattribute — pin the lecture's absence rather than the tell's shape.
+if grep -q "phone tunnel is down" "$HERE/bot-host.mjs"; then
+  echo "  FAIL  a phone-tunnel lecture survives the web-only strip"; FAIL=$((FAIL + 1))
+else
+  echo "  PASS  no phone-tunnel lecture remains to misattribute"; PASS=$((PASS + 1))
+fi
 
 # 13. The terminal launches the tool the CHAT is on, not the bot's default.
 #     This is the class that shipped: the attach hardcoded $OPENCODE_BIN, so a
