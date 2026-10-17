@@ -121,6 +121,37 @@ export function mergeProfiles(a?: UserProfile | null, b?: UserProfile | null): U
   return { ...a, ...b };
 }
 
+// F2 (email-signup nickname lost on reload): durable identity for the
+// background sync. `checkForDbChanges` runs from `loadUserData` in the same
+// tick as `setProfile`, so the render closure it reads still has
+// `profile === null` (React hasn't re-rendered) and Firebase has no session
+// for D1 email/password users — every live source is empty. Without the
+// fallback below, `activeEmail` resolves to `undefined`, the sync reads the
+// `guest` bundle instead of the user's per-email bundle, the server pull goes
+// out with no email, and the merge path overwrites the just-restored profile
+// (nickname + email) with a null/blank one — header falls back to 'User'.
+// `last_active_email` is written on every successful login (all providers)
+// and removed only by explicit sign-out, so it is exactly the identity the
+// reload-restore sequence needs. Live sources keep precedence; the fallback
+// only fires when all of them are empty.
+export function resolveActiveSyncEmail(
+  activeUser?: { email?: string | null } | null,
+  profile?: { email?: string | null } | null,
+  firebaseEmail?: string | null,
+): string | undefined {
+  const live = (activeUser?.email || (profile as any)?.email || firebaseEmail || '').toLowerCase().trim();
+  if (live) return live;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const last = (localStorage.getItem('last_active_email') || '').toLowerCase().trim();
+      if (last) return last;
+    }
+  } catch {
+    // Storage unavailable (SSR/sandboxed) — fall through to undefined.
+  }
+  return undefined;
+}
+
 export function mergeBiomarkerHistory(
   a: BiomarkerLog[] = [],
   b: BiomarkerLog[] = [],

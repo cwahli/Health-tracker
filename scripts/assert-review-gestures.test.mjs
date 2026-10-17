@@ -134,6 +134,7 @@ async function withPage(fn) {
   const browser = await chromium.launch();
   const context = await browser.newContext({
     viewport: { width: 420, height: 900 },
+    colorScheme: 'dark', // app's dark: variants follow prefers-color-scheme; QA defaults to dark theme
     hasTouch: true,
     isMobile: true,
   });

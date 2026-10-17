@@ -7,7 +7,7 @@
 
 import { getFallbackCategoryProfile } from '../../../server_food_catalog.js';
 import { isPackagedBindItem, inferChainNameFromPackageLabel } from '../../../server_brand_match.js';
-import { userSafeScoutFailureMessage, parseAndHealVisionScout } from '../../../server_vision_scout.js';
+import { parseAndHealVisionScout } from '../../../server_vision_scout.js';
 import { isGeminiQuotaError, isGeminiUnavailableError, nextGeminiFallbackEngine } from '../../../server_gemini_retry.js';
 import { t, withScoutLanguage } from '../../utils/i18n.js';
 import { extractFoodSearchQueriesFromText, detectChainKeyFromText } from './server_food_analyze_helpers.js';
@@ -575,22 +575,28 @@ export function mapTextQueriesToScoutItems(extractedQueries: string[]): any[] {
 
 /** Classifies a dead scout run into the user-facing error (quota/503/corrupt/generic). */
 export function buildScoutFailureError(lastScoutErr: any, language?: unknown): Error {
-  const raw = userSafeScoutFailureMessage(lastScoutErr);
   const msg = String(lastScoutErr?.message || '');
   const isQuota = /429|RESOURCE_EXHAUSTED|quota exceeded/i.test(msg);
   const isUnavailable = /503|UNAVAILABLE|overloaded|fetch failed|stalled/i.test(msg);
   if (/Vision Scout Corrupted/i.test(msg)) {
     throw new Error(t(language, 'analysisFailed'));
   }
+  // F1: user-facing text stays short — no raw API JSON, no Details suffix, no
+  // key-validity detail. The full error is already in debug logs via the
+  // "[Vision Scout Failed Permanently]" addDebugLog at the call site.
+  // Quota/unavailable keep their routing tokens (no raw bodies) so
+  // humanizeJobFailure still maps them to actionable guidance. The generic
+  // branch is modality-neutral (no "image") so text meals never get told to
+  // re-upload a photo.
   if (isQuota) {
     throw new Error(
-      `Vision Scout Failed: Gemini quota (429) on this model — wait the retry-after window or switch model. Not a bad photo. (Details: ${raw})`
+      `Vision Scout Failed: Gemini quota (429) on this model — wait the retry-after window or switch model. Not a bad photo.`
     );
   }
   if (isUnavailable) {
-    throw new Error(`Vision Scout Failed: Gemini unavailable (503). Retry shortly. (Details: ${raw})`);
+    throw new Error(`Vision Scout Failed: Gemini unavailable (503). Retry shortly.`);
   }
-  throw new Error(`Vision Scout Failed: Couldn't reliably read this image, please try again or re-upload. (Details: ${raw})`);
+  throw new Error(`Vision Scout Failed: Couldn't analyze this meal. Please try again.`);
 }
 
 /**

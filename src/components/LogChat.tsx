@@ -2519,13 +2519,18 @@ ${logsText}`);
         };
         const fetchSubmitWithRetry = async (url: string, payload: any, maxRetries = 4, delayMs = 600, timeoutMs = 45000) => {
           let lastErr: any = null;
+          // F3: /api/jobs/submit requires the verified session credential
+          // (htk auth_token for email users, Firebase ID token otherwise).
+          // pullAuthHeaders attaches whichever exists; without it the server
+          // answers 401 and the meal never queues.
+          const submitHeaders = await pullAuthHeaders();
           for (let attempt = 1; attempt <= maxRetries; attempt++) {
             const ctrl = new AbortController();
             const timer = setTimeout(() => ctrl.abort(), timeoutMs);
             try {
               const res = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: submitHeaders,
                 body: safeJSONStringify(payload),
                 signal: ctrl.signal
               });
@@ -2632,8 +2637,13 @@ ${logsText}`);
           }
           const submitPayload = {
             jobId: currentJobId,
-            idempotencyKey: `idemp_${auth.currentUser?.uid || 'anon'}_${currentJobId}_${currentReqId}`,
-            userId: auth.currentUser?.uid || 'anonymous',
+            // F3: real server uid (email users have no Firebase session, so
+            // auth.currentUser is null for them — profile.uid is the server
+            // identity). The server derives ownership from the verified
+            // session token and ignores this field; sending the true id keeps
+            // idempotency keys and logs attributable.
+            idempotencyKey: `idemp_${auth.currentUser?.uid || profile?.uid || 'anon'}_${currentJobId}_${currentReqId}`,
+            userId: auth.currentUser?.uid || profile?.uid || 'anonymous',
             kind: family === 'D' ? 'food_compare' : 'food_log',
             mode: submissionMode,
             text: ((userContent || textToSend || '').replace(/^[+\s,.-]+/, '').trim()),
@@ -3837,11 +3847,19 @@ ${logsText}`);
             }
             
             const looksLikeTimeout = response.status === 504 || response.status === 502 || response.status === 503 || rawText.trim().toLowerCase().startsWith('<!doctype') || rawText.trim().toLowerCase().startsWith('<html');
-            const cleanRaw = is503 ? 'Gemini API is temporarily unavailable or over quota.' : rawText.substring(0, 500);
-            
+            // F1: never surface raw API bodies (they may carry key-validity
+            // JSON) to users — full detail stays in console + debug logs.
+            console.error(`[LogChat] Analysis request failed (status ${response.status}):`, rawText.substring(0, 1000));
+            const hadImage = !!((bodyData as any)?.image || (Array.isArray((bodyData as any)?.images) && (bodyData as any).images.length > 0));
+            const genericFailure = isAgent('food')
+              ? (hadImage
+                ? "Couldn't read this photo. Please retake or retry."
+                : "Couldn't analyze this meal. Please try again.")
+              : "Analysis failed. Please try again.";
+
             throw new Error(looksLikeTimeout || is503
               ? "This analysis took too long or the AI service is currently unavailable/over capacity. Please try again or switch models."
-              : `Request failed (${response.status}). Please try again.\n${cleanRaw ? 'Details: ' + cleanRaw : ''}`);
+              : genericFailure);
           }
           break; // success
         } catch (fetchErr: any) {
@@ -4090,11 +4108,14 @@ ${logsText}`);
           try {
             resData = rawText ? JSON.parse(rawText) : {};
           } catch (parseErr) {
-            throw new Error(`Server returned invalid JSON (${response.status}): ${rawText.substring(0, 150)}`);
+            // F1: log the raw body for debug, never render it (may hold key JSON).
+            console.error(`[LogChat] Invalid JSON (status ${response.status}):`, rawText.substring(0, 500));
+            throw new Error("Analysis failed. Please try again.");
           }
         } else {
           const rawText = await response.text().catch(() => "");
-          throw new Error(`Server returned a non-JSON response (${response.status}): ${rawText.substring(0, 150)}`);
+          console.error(`[LogChat] Non-JSON response (status ${response.status}):`, rawText.substring(0, 500));
+          throw new Error("Analysis failed. Please try again.");
         }
       }
       // Save captured agent debug logs. Prefer fetching the full, untruncated log

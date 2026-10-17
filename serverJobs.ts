@@ -240,10 +240,23 @@ export function publishResultReady(jobId: string, cleanResult: any): boolean {
 
 export function listInMemoryServerJobs(userId?: string) {
   const jobs = Array.from(inMemoryServerJobs.values());
-  if (userId) {
-    return jobs.filter(j => j.user_id === userId);
+  // F3 fail-closed: a missing uid returns NOTHING, never the global list.
+  // Every route passes the verified session uid; no caller may browse across
+  // accounts. (Previously `undefined` returned every account's jobs.)
+  if (!userId) {
+    return [];
   }
-  return jobs;
+  return jobs.filter(j => j.user_id === userId);
+}
+
+/**
+ * F3 ownership predicate for single-job reads (GET status?jobId=, delete).
+ * Only an exact user_id match is visible — anything else (including legacy
+ * 'anonymous' rows) is denied so callers can return 404 with no existence
+ * oracle (foreign and missing are indistinguishable).
+ */
+export function isJobOwnedBy(job: any, uid: string): boolean {
+  return !!job && !!uid && (job as any).user_id === uid;
 }
 
 export function deleteInMemoryServerJob(jobId: string) {

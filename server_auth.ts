@@ -203,7 +203,11 @@ export async function registerUser(email: string, password: string, nickname?: s
   };
 }
 
-export async function verifyFirebaseIdToken(req: any): Promise<{ uid: string; email?: string }> {
+export async function verifyFirebaseIdToken(req: any, opts?: { allowBodyFallback?: boolean }): Promise<{ uid: string; email?: string }> {
+  // F3: jobs routes pass { allowBodyFallback: false } so the localhost
+  // body-uid convenience can never be used to spoof another account's id.
+  // Default (true) preserves existing behavior for all other callers.
+  const allowBodyFallback = opts?.allowBodyFallback !== false;
   const host = req.headers?.host || '';
   const isLocalhost = host.includes('localhost') || host.includes('127.0.0.1') || process.env.NODE_ENV !== 'production' || process.env.ALLOW_UNAUTH_SYNC === '1';
 
@@ -211,7 +215,7 @@ export async function verifyFirebaseIdToken(req: any): Promise<{ uid: string; em
   const token = h.startsWith('Bearer ') ? h.slice(7) : '';
 
   if (!token) {
-    if (isLocalhost) {
+    if (allowBodyFallback && isLocalhost) {
       if (req.body && (req.body.uid || req.body.userId || req.body.email || req.body.payload?.user_id)) {
         return { 
           uid: req.body.uid || req.body.userId || req.body.payload?.user_id || 'guest', 
@@ -237,7 +241,7 @@ export async function verifyFirebaseIdToken(req: any): Promise<{ uid: string; em
     console.log('[FreeTier] requireAuth');
     return { uid: decoded.uid, email: decoded.email };
   } catch (authErr) {
-    if (isLocalhost) {
+    if (allowBodyFallback && isLocalhost) {
       console.warn('[FreeTier] Localhost Firebase token verification fallback');
       return { 
         uid: req.body?.uid || req.body?.payload?.user_id || 'localhost_user', 
