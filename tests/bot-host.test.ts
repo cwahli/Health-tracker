@@ -4778,3 +4778,57 @@ describe('TG TUI — a kept pane with no lease stays closeable', () => {
     }
   });
 });
+
+describe('BOT-10 queued media follow-ups', () => {
+  it('queueFollowup holds text plus Telegram file refs, capped at MAX_FOLLOWUPS', async () => {
+    const { queueFollowup, shiftFollowup, queuedFollowups, clearFollowups, MAX_FOLLOWUPS } =
+      await import('../scripts/bot-host.mjs');
+    const chat = `mediaq-text-${Date.now()}`;
+    try {
+      const pos = queueFollowup(chat, 'second photo', [{ fileId: 'file-1', name: 'photo.jpg', kind: 'photo' }]);
+      expect(pos).toBe(1);
+      const held = queuedFollowups(chat);
+      expect(held).toHaveLength(1);
+      expect(held[0]).toEqual({ text: 'second photo', media: [{ fileId: 'file-1', name: 'photo.jpg', kind: 'photo' }] });
+      const next = shiftFollowup(chat);
+      expect(next).toEqual({ text: 'second photo', media: [{ fileId: 'file-1', name: 'photo.jpg', kind: 'photo' }] });
+      expect(queuedFollowups(chat)).toHaveLength(0);
+      for (let i = 0; i < MAX_FOLLOWUPS; i++) queueFollowup(chat, `t${i}`);
+      expect(queueFollowup(chat, 'overflow')).toBeNull();
+    } finally {
+      clearFollowups(chat);
+    }
+  });
+
+  it('messageWithQueuedMedia re-attaches queued file_ids and drops the finished turn media', async () => {
+    const { messageWithQueuedMedia, queueFollowup, clearFollowups } = await import('../scripts/bot-host.mjs');
+    const { selectInboundMedia } = await import('../scripts/lib/inbound-media.mjs');
+    const chat = `mediaq-msg-${Date.now()}`;
+    try {
+      queueFollowup(chat, '', [{ fileId: 'queued-photo', name: 'photo.jpg', kind: 'photo' }]);
+      const { shiftFollowup } = await import('../scripts/bot-host.mjs');
+      const entry = shiftFollowup(chat);
+      // The finished turn's own message carried a different photo: it must not leak into the follow-up.
+      const base = { message_id: 1, chat: { id: 7 }, photo: [{ file_id: 'stale-photo' }], text: 'old turn' };
+      const msg = messageWithQueuedMedia(base, entry);
+      expect(msg.text).toBe('');
+      expect(msg.caption).toBeUndefined();
+      expect(selectInboundMedia(msg)).toEqual([{ fileId: 'queued-photo', name: 'photo.jpg', kind: 'photo' }]);
+      // Text-only follow-up after a photo turn carries no media.
+      const plain = messageWithQueuedMedia(base, { text: 'thanks', media: [] });
+      expect(selectInboundMedia(plain)).toEqual([]);
+    } finally {
+      clearFollowups(chat);
+    }
+  });
+
+  it('messageWithQueuedMedia restores an uncompressed document by filename', async () => {
+    const { messageWithQueuedMedia } = await import('../scripts/bot-host.mjs');
+    const { selectInboundMedia } = await import('../scripts/lib/inbound-media.mjs');
+    const msg = messageWithQueuedMedia(
+      { message_id: 2, chat: { id: 7 } },
+      { text: 'meal scan', media: [{ fileId: 'doc-9', name: 'meal.png', kind: 'document' }] },
+    );
+    expect(selectInboundMedia(msg)).toEqual([{ fileId: 'doc-9', name: 'meal.png', kind: 'document' }]);
+  });
+});

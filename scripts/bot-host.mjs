@@ -1638,11 +1638,14 @@ export function queuedFollowups(chatId) {
   return followupQueues.get(String(chatId)) || [];
 }
 
-export function queueFollowup(chatId, text) {
+export function queueFollowup(chatId, text, media = []) {
   const key = String(chatId);
   const queue = followupQueues.get(key) || [];
   if (queue.length >= MAX_FOLLOWUPS) return null;
-  queue.push(String(text));
+  const refs = (Array.isArray(media) ? media : [])
+    .filter((m) => m && m.fileId)
+    .map((m) => ({ fileId: String(m.fileId), name: String(m.name || 'file'), kind: m.kind === 'document' ? 'document' : 'photo' }));
+  queue.push({ text: String(text ?? ''), media: refs });
   followupQueues.set(key, queue);
   return queue.length;
 }
@@ -1658,6 +1661,29 @@ export function shiftFollowup(chatId) {
 
 export function clearFollowups(chatId) {
   followupQueues.delete(String(chatId));
+}
+
+/**
+ * Follow-up turns are hermetic: the drain re-dispatches with ONLY the queued
+ * entry's media, never the finished turn's message media. Queued entries hold
+ * Telegram file_ids (stable server-side, valid long after upload), so the
+ * drain re-downloads them through the normal collectInboundMedia path at
+ * follow-up time instead of persisting bytes in the queue.
+ */
+export function messageWithQueuedMedia(baseMessage, entry) {
+  const media = Array.isArray(entry?.media) ? entry.media : [];
+  const msg = {
+    ...(baseMessage || {}),
+    text: String(entry?.text ?? ''),
+    caption: undefined,
+    photo: undefined,
+    document: undefined,
+  };
+  const photos = media.filter((m) => m && m.kind === 'photo' && m.fileId);
+  if (photos.length) msg.photo = photos.map((p) => ({ file_id: String(p.fileId) }));
+  const doc = media.find((m) => m && m.kind === 'document' && m.fileId);
+  if (doc) msg.document = { file_id: String(doc.fileId), file_name: String(doc.name || 'document') };
+  return msg;
 }
 
 /** Relay live-channel helpers: same bearer token as the job hand-off. */
@@ -6442,7 +6468,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // turn instead of being rejected. Commands still run (handled above)
     // while the queue stays queued.
     if (hasMedia) {
-      await api.sendMessage(chatId, 'Still working — photos/files cannot queue, please resend them when this turn finishes.');
+      // Mid-run photos/files queue like text does: the file_id refs are held
+      // in the queue entry and re-downloaded when the follow-up turn runs, so
+      // sending several photos at once no longer loses all but the first.
+      const pos = queueFollowup(chatId, text, selectInboundMedia(message));
+      if (pos == null) {
+        await api.sendMessage(chatId, `Follow-up queue is full (${MAX_FOLLOWUPS}). Wait for the current run to finish, then try again.`);
+        return;
+      }
+      await api.sendMessage(chatId, `⏳ Queued as follow-up #${pos} with your photo/file — runs when the current turn finishes.`);
       return;
     }
     if (!text) return;
@@ -7466,7 +7500,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         await api.sendMessage(chatId, `▶️ Running queued follow-up (${queuedFollowups(chatId).length} left in queue)…`).catch(() => {});
         await handleMessage({
           api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy,
-          message: { ...message, text: next, caption: undefined },
+          message: messageWithQueuedMedia(message, typeof next === 'string' ? { text: next, media: [] } : next),
           depth: depth + 1,
         });
       }
