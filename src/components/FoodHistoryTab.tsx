@@ -36,6 +36,69 @@ import { ZoomableImage } from './ZoomableImage';
 import { buildDebugMarkdownReport } from '../utils/debugPayload';
 import { calculateMealDebugRetentionStatus } from '../utils/debugLogRetention';
 
+/** Row action buttons shared between the collapsed header, the expanded
+ *  serving-size row and the expanded card bottom — one source, no copies. */
+function MealDownloadButton({ log, retentionStatusMap, onDownload, title }: any) {
+  const retention = retentionStatusMap.get(log.id);
+  const hasExplicitDebug = Boolean(log.debugUrl || (log as any).backendLogs || (log as any).jobId);
+  if (!(retention ? retention.kept : hasExplicitDebug)) return null;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onDownload(log);
+      }}
+      className="p-4 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800"
+      title={title || 'Download Debug Log'}
+    >
+      <Download className="w-4 h-4" />
+    </button>
+  );
+}
+
+function MealEditButton({ log, onEdit, title }: any) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onEdit(log);
+      }}
+      className="p-4 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800"
+      title={title}
+    >
+      <Edit2 className="w-4 h-4" />
+    </button>
+  );
+}
+
+function MealDeleteButton({ logId, onDelete, title }: any) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onDelete(logId);
+      }}
+      className="p-4 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+      title={title}
+    >
+      <Trash2 className="w-4 h-4" />
+    </button>
+  );
+}
+
+function MealVerdictBadge({ log, language, getColorClass, fullWidth }: any) {
+  const v = resolveMealVerdict(log, language);
+  if (!v?.label) return null;
+  return (
+    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize tracking-wide ${getColorClass(v.label, v.level)}${fullWidth ? ' block w-full text-left' : ''}`}>
+      {v.label}
+    </span>
+  );
+}
+
 interface FoodHistoryTabProps {
   profile: UserProfile;
   foodLogs: FoodLog[];
@@ -1887,74 +1950,44 @@ export default function FoodHistoryTab({
                     </div>
                   ) : (
                     <>
+                      {isExpanded ? (
+                        <>
+                          <div className="min-w-0 text-left">
+                            <h3 className="font-bold text-theme-text text-sm">
+                              {log.name}
+                            </h3>
+                            <div className="text-[10px] font-mono text-slate-400 mt-1">
+                              {formatLogDateTime(log.date, (log as any).updated_at, profile?.timezone)}
+                            </div>
+                          </div>
+                          <div className="mt-1">
+                            <MealVerdictBadge log={log} language={profile?.language} getColorClass={getRecommendationColorClass} fullWidth />
+                          </div>
+                        </>
+                      ) : (
                       <div className="flex justify-between items-start">
                         <div className="min-w-0 flex-1 text-left">
                           <h3 className="font-bold text-theme-text text-sm">
                             {log.name}
                           </h3>
-                          
+
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
                               {formatLogDateTime(log.date, (log as any).updated_at, profile?.timezone)}
                             </span>
-                            {(() => {
-                              const v = resolveMealVerdict(log, profile?.language);
-                              if (!v?.label) return null;
-                              return (
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize tracking-wide ${getRecommendationColorClass(v.label, v.level)}`}>
-                                  {v.label}
-                                </span>
-                              );
-                            })()}
+                            <MealVerdictBadge log={log} language={profile?.language} getColorClass={getRecommendationColorClass} />
                           </div>
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {(() => {
-                            const retention = retentionStatusMap.get(log.id);
-                            const hasExplicitDebug = Boolean(log.debugUrl || (log as any).backendLogs || (log as any).jobId);
-                            const isAvailable = retention ? retention.kept : hasExplicitDebug;
-                            if (!isAvailable) return null;
-                            return (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDownloadDebugLog(log);
-                                }}
-                                className="p-4 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800"
-                                title={t.downloadDebugLog || 'Download Debug Log'}
-                              >
-                                <Download className="w-4 h-4" />
-                              </button>
-                            );
-                          })()}
+                          <MealDownloadButton log={log} retentionStatusMap={retentionStatusMap} onDownload={handleDownloadDebugLog} title={t.downloadDebugLog} />
 
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleStartEdit(log);
-                            }}
-                            className="p-4 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800"
-                            title={t.editFoodLog}
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
+                          <MealEditButton log={log} onEdit={handleStartEdit} title={t.editFoodLog} />
 
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteFoodLog(log.id);
-                            }}
-                            className="p-4 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
-                            title={t.deleteEntry}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <MealDeleteButton logId={log.id} onDelete={onDeleteFoodLog} title={t.deleteEntry} />
                         </div>
                       </div>
+                      )}
 
                       {/* AI Diagnostic Summary */}
                       {(() => {
@@ -1969,7 +2002,7 @@ export default function FoodHistoryTab({
                       
 
                       {/* Meal allowance rings: sat fat / sodium / calories vs daily targets */}
-                      <div className="flex flex-wrap items-center justify-between pt-1 gap-2">
+                      <div className="pt-1">
                         <MealAllowanceRings
                           nutrients={log.nutrients}
                           report={report}
@@ -1978,23 +2011,23 @@ export default function FoodHistoryTab({
                           logDate={log.date}
                           logId={log.id}
                         />
-
-                        {/* Reduce link shown below top nutrients when card is expanded */}
-                        {isExpanded && (
-                          <div className="pt-2 text-left">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setExpandedLogId(null);
-                              }}
-                              className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 underline cursor-pointer inline-flex items-center gap-1"
-                            >
-                              <span>{t.reduce}</span>
-                            </button>
-                          </div>
-                        )}
                       </div>
+
+                      {/* Reduce link sits below the rings row (rings may grow past 3) */}
+                      {isExpanded && (
+                        <div className="pt-2 text-left">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedLogId(null);
+                            }}
+                            className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 underline cursor-pointer inline-flex items-center gap-1"
+                          >
+                            <span>{t.reduce}</span>
+                          </button>
+                        </div>
+                      )}
 
                       {/* Detailed 30 Nutrients Panel & AI Diagnostics */}
                       {isExpanded && (
@@ -2017,6 +2050,9 @@ export default function FoodHistoryTab({
                                 <span className="font-semibold text-emerald-600 dark:text-emerald-400">{log.consumedAmount}x</span>
                               </>
                             )}
+                            <span className="flex-1" />
+                            <MealEditButton log={log} onEdit={handleStartEdit} title={t.editFoodLog} />
+                            <MealDeleteButton logId={log.id} onDelete={onDeleteFoodLog} title={t.deleteEntry} />
                           </div>
 
                           {/* Interactive Meal Composition Gallery & Breakdown */}

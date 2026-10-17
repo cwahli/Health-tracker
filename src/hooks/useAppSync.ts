@@ -1267,7 +1267,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
         // whichever copy (local device or cloud) was actually updated most recently —
         // never let a stale cloud profile silently reapply an old theme or language just because
         // the rest of the profile merge logic happened to prefer the cloud copy.
-        const PREFERENCE_FIELDS: (keyof UserProfile)[] = ['language', 'themePalette', 'fontFamily', 'fontMono', 'fontSize', 'marginScale', 'paddingScale', 'cornerRadius', 'shadowScale', 'themeOverrides', 'customColors', 'fontSizeTitle', 'fontSizeSubtitle', 'fontSizeDescription', 'fontSizeBodySmall', 'fontSizeSubtitleSmall', 'fontSizeKeyMetric', 'fontSizeXS', 'fontSizeBody', 'customFonts', 'themePresets', 'systemPresetOverrides'];
+        const PREFERENCE_FIELDS: (keyof UserProfile)[] = ['language', 'themePalette', 'fontFamily', 'fontMono', 'fontSize', 'marginScale', 'paddingScale', 'cornerRadius', 'shadowScale', 'themeOverrides', 'customColors', 'fontSizeTitle', 'fontSizeSubtitle', 'fontSizeDescription', 'fontSizeBodySmall', 'fontSizeSubtitleSmall', 'fontSizeKeyMetric', 'fontSizeXS', 'fontSizeBody', 'fontScale', 'customFonts', 'themePresets', 'systemPresetOverrides'];
         const hasLocalThemeOverride = sessionStorage.getItem('localThemeOverridesCloud') === 'true';
         if (!forceReplaceLocal && (hasLocalThemeOverride || (localProfile && (localProfile.lastUpdatedAt || 0) >= (cloudProfile?.lastUpdatedAt || 0)))) {
           const newerLocalProfile = localProfile;
