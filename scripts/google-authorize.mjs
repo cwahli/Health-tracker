@@ -256,7 +256,7 @@ async function main() {
       say('\n  google authorize — one consent, every agent\n');
       say(`  listening : 127.0.0.1:${PORT}  (redirect ${REDIRECT})`);
       say('\n  1) on the machine with your browser, tunnel this port to the VPS:');
-      say(`       ssh -N -L ${PORT}:127.0.0.1:${PORT} ubuntu@51.254.217.163`);
+      say(`       ssh -N -L ${PORT}:127.0.0.1:${PORT} -p 20133 root@103.147.32.117`);
       say('  2) then open this URL in that browser:\n');
       say(`     ${url.toString()}\n`);
       say('     (sign in as the account that should own the files; the warning that')
