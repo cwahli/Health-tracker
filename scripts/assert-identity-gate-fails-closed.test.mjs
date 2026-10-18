@@ -19,6 +19,13 @@
  * range unless the caller passes --allow-empty (which only the PR path does,
  * where an empty range really does mean "nothing to do").
  *
+ * 3. A force-push — and a rebase onto main is one, which the workflow asks
+ *    agents to do — leaves `github.event.before` unreachable. ci.yml then ran
+ *    `rev-list <before>..HEAD`, which dies with "fatal: Invalid revision
+ *    range", reddening the push run of a change with nothing wrong with it
+ *    (PR #812's rebase, 2026-10-18). The endpoint is now checked for
+ *    reachability and the fall back to the base tip is announced, not silent.
+ *
  * Run: node scripts/assert-identity-gate-fails-closed.test.mjs
  */
 
@@ -135,6 +142,15 @@ console.log('assert-identity-gate-fails-closed:');
   check('ci.yml reads the dispatched sha', /client_payload\.sha/.test(ci));
   check('ci.yml derives before from the landed commit parent', /rev-parse "\$landed\^"/.test(ci));
   check('ci.yml never falls back silently on a dispatch', /no client_payload\.sha/.test(ci) && /::warning::/.test(ci));
+
+  // A rebase onto main is a force-push, which leaves `github.event.before`
+  // unreachable from any ref — this checkout never fetched it, and
+  // `rev-list $before..HEAD` dies with "fatal: Invalid revision range" on a run
+  // that has nothing wrong with it (PR #812, 2026-10-18). The range endpoint
+  // must therefore be checked for reachability before it is used, and the
+  // fallback must be visible rather than silent.
+  check('ci.yml only judges a reachable `before`', /rev-parse --verify -q "\$before\^\{commit\}"/.test(ci));
+  check('ci.yml says when it fell back from an unreachable `before`', /is unreachable/.test(ci) && /::notice::/.test(ci));
 
   // The PR path may pass --allow-empty; the push and post-merge paths must not.
   // Read each invocation as a whole backslash-continued command, not a single

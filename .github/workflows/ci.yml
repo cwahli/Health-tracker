@@ -104,6 +104,19 @@ jobs:
             exclude_not=1
           fi
           git fetch --no-tags --quiet origin "$base"
+          # A force-push leaves `github.event.before` — the ref value *before*
+          # the push — unreachable from any ref, so this fresh checkout never
+          # fetched it and `rev-list $before..HEAD` dies with "fatal: Invalid
+          # revision range" (hit by PR #812's rebase onto main, 2026-10-18). A
+          # rebase onto main IS a force-push, and the workflow asks agents to
+          # rebase, so a run with nothing wrong with it went red. Treat an
+          # unreachable `before` exactly like an empty one: fall back to the
+          # base tip. With `--not` below, the range is then the pushed commits
+          # either way, and the notice records which case this was.
+          if [ -n "$before" ] && ! git rev-parse --verify -q "$before^{commit}" >/dev/null 2>&1; then
+            echo "::notice::ci: github.event.before ($before) is unreachable — a force-push; judging against origin/$base"
+            before=""
+          fi
           if [ -z "$before" ]; then
             before="$(git rev-parse "origin/$base")"
           fi
@@ -122,6 +135,14 @@ jobs:
             scripts/check-agent-identity.sh \
               --range "$before..HEAD"
           fi
+
+      # The identity gate's own sensor. It existed but was never wired here, so
+      # the reachability bug above could not be caught by CI — exactly the
+      # "a gate that cannot run is indistinguishable from one nobody enabled"
+      # failure. It covers the dispatch/empty-range rules and the force-push
+      # fallback this step depends on.
+      - name: Identity gate sensor (fails closed, uses a reachable range)
+        run: node scripts/assert-identity-gate-fails-closed.test.mjs
 
       # A merge may not silently erase landed work (#143 re-added a file a later
       # PR had deleted; five empty squashes re-landed what was already on
