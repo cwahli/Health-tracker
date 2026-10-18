@@ -53,6 +53,30 @@ describe("server_vision_scout", () => {
     expect(comp?.protein).toBe(57);
   });
 
+  it("normalizes structural dialects (constituentFoods/weightGrams/dish nutrients)", () => {
+    const raw = {
+      dishes: [
+        {
+          dishName: "Gammon Shanks with Tomatoes",
+          weightGrams: 448,
+          nutrients: { energy_kcal: 464, fat_g: 9.44, saturates_g: 3.23, protein_g: 58.06 },
+          constituentFoods: [
+            { foodName: "Gammon", weightGrams: 328, nutrients: { protein_g: 57 } },
+            { foodName: "Tomatoes", weightGrams: 120, nutrients: { protein_g: 1.06 } }
+          ]
+        }
+      ]
+    };
+    const result = parseAndHealVisionScout(raw, () => {});
+    // Sole multi-component dish unrolls into per-food items (pipeline design).
+    expect(result.items.length).toBe(2);
+    expect(result.items[0].originalName).toBe("Gammon");
+    expect(result.items[0].originalName).not.toMatch(/Ingredient/);
+    expect(result.items[0].estimatedWeightGrams).toBe(328);
+    expect(result.items[1].originalName).toBe("Tomatoes");
+    expect(result.items[0].nutrients?.protein).toBe(57);
+  });
+
   it("checkScoutSanity strips item internalReasoning rather than failing", () => {
     const items = [
       {
