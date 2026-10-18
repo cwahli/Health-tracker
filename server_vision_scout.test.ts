@@ -31,6 +31,28 @@ describe("server_vision_scout", () => {
     expect(JSON.stringify(result)).not.toMatch(/Vision Scout Corrupted/);
   });
 
+  it("normalizes snake_case model output to schema camelCase (no Ingredient fallback)", () => {
+    const raw = {
+      dishes: [
+        {
+          dish_name: "Gammon Shanks",
+          estimatedWeightGrams: 438,
+          cookingMethod: "baked",
+          foods: [
+            { food_name: "Gammon", weightGrams: 328, nutrients: { protein_g: 57, fat_g: 9.2, saturates_g: 3.2 } }
+          ]
+        }
+      ]
+    };
+    const result = parseAndHealVisionScout(raw, () => {});
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(result.items[0].originalName).toBe("Gammon Shanks");
+    expect(result.items[0].originalName).not.toMatch(/Ingredient/);
+    const comp = result.items[0].components?.[0];
+    expect(comp?.searchQuery).toMatch(/gammon/i);
+    expect(comp?.protein).toBe(57);
+  });
+
   it("checkScoutSanity strips item internalReasoning rather than failing", () => {
     const items = [
       {

@@ -1865,6 +1865,90 @@ async function callUnifiedLLMInternal({
         _localAddDebugLog(`[UnifiedLLM-Usage:${stage}] prompt=${p} completion=${c} total=${t}`);
       } catch { /* usage logging must never break generation */ }
     };
+    const emitGoStream = (text: string, isThought: boolean) => {
+      if (!onStream || !text) return;
+      try { onStream(text, isThought); } catch { /* renderer errors must never kill the run */ }
+    };
+    // SSE delta streaming for Go endpoints. Forwards live deltas to onStream
+    // (reasoning → isThought=true, matching the Gemini thought path) and
+    // returns the completed payload + any stashed usage for the parsers.
+    const streamGoSse = async (url: string, body: any): Promise<{ completedResp: any; completedMsg: any; usage: any; streamed: string }> => {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { ...goHeaders, "Accept": "text/event-stream" },
+        body: JSON.stringify({ ...body, stream: true }),
+      });
+      if (!res.ok || !res.body) {
+        const errMsg = !res.ok ? await res.text() : "empty stream body";
+        throw new Error(`OpenCode Go API returned ${res.status}: ${String(errMsg).slice(0, 300)}. Please try another model.`);
+      }
+      const reader = (res.body as any).getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let completedResp: any = null;
+      let completedMsg: any = null;
+      let usage: any = null;
+      let streamed = "";
+      const handleEvent = (ev: any) => {
+        if (!ev || typeof ev !== "object") return;
+        if (ev.usage) usage = ev.usage;
+        const t = typeof ev.type === "string" ? ev.type : "";
+        if (t === "response.completed" || t === "response.incomplete" || t === "response.failed") {
+          if (ev.response) completedResp = ev.response;
+          return;
+        }
+        if (ev.choices && Array.isArray(ev.choices)) {
+          const d = ev.choices[0]?.delta || {};
+          if (typeof d.reasoning_content === "string" && d.reasoning_content) emitGoStream(d.reasoning_content, true);
+          if (typeof d.content === "string" && d.content) {
+            streamed += d.content;
+            emitGoStream(d.content, false);
+          }
+          const msg = ev.choices[0]?.message;
+          if (msg && typeof msg.content === "string") completedMsg = msg;
+          return;
+        }
+        if (t.endsWith(".delta")) {
+          const s = [ev.delta, ev.content, ev.text].find((v) => typeof v === "string" && v) || "";
+          if (s) {
+            const thought = /reasoning|thought/i.test(t);
+            if (!thought) streamed += s;
+            emitGoStream(s, thought);
+          }
+        }
+      };
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          for (const line of raw.split("\n")) {
+            const s = line.trim();
+            if (!s.startsWith("data:")) continue;
+            const payload = s.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try { handleEvent(JSON.parse(payload)); } catch { /* keep-alive noise */ }
+          }
+        }
+      }
+      return { completedResp, completedMsg, usage, streamed };
+    };
+    const extractGoResponseText = (output: any): string => {
+      const chunks: string[] = [];
+      const walk = (node: any): void => {
+        if (node == null || typeof node === "string") return;
+        if (Array.isArray(node)) { node.forEach(walk); return; }
+        if (typeof node === "object") {
+          if ((node.type === "output_text" || node.type === "input_text") && typeof node.text === "string") chunks.push(node.text);
+          Object.values(node).forEach(walk);
+        }
+      };
+      walk(output);
+      return chunks.join("");
+    };
     try {
       if (apiModel.includes("muse-spark")) {
         // Responses API (OpenAI Responses shape): images are input_image parts.
@@ -1878,6 +1962,18 @@ async function callUnifiedLLMInternal({
         };
         if (typeof maxOutputTokens === "number") resBody.max_output_tokens = maxOutputTokens;
         if (isJson) resBody.text = { format: { type: "json_object" } };
+        if (onStream) resBody.reasoning = { summary: "auto" };
+        if (onStream) {
+          try {
+            const s = await streamGoSse(`${goBase}/responses`, resBody);
+            const resJson = s.completedResp || {};
+            logGoUsage(resJson?.usage || s.usage);
+            const outText = extractGoResponseText(resJson?.output) || (resJson as any)?.output_text || s.streamed;
+            return outText || "{}";
+          } catch (streamErr: any) {
+            _localAddDebugLog(`[UnifiedLLM] Go stream failed (${streamErr?.message}), falling back to unary.`);
+          }
+        }
         const res = await fetch(`${goBase}/responses`, { method: "POST", headers: goHeaders, body: JSON.stringify(resBody) });
         if (!res.ok) {
           const errMsg = await res.text();
@@ -1885,17 +1981,7 @@ async function callUnifiedLLMInternal({
         }
         const resJson = (await res.json()) as any;
         logGoUsage(resJson?.usage);
-        const chunks: string[] = [];
-        const walk = (node: any): void => {
-          if (node == null || typeof node === "string") return;
-          if (Array.isArray(node)) { node.forEach(walk); return; }
-          if (typeof node === "object") {
-            if ((node.type === "output_text" || node.type === "input_text") && typeof node.text === "string") chunks.push(node.text);
-            Object.values(node).forEach(walk);
-          }
-        };
-        walk(resJson?.output);
-        const outText = chunks.join("") || resJson?.output_text || "";
+        const outText = extractGoResponseText(resJson?.output) || (resJson as any)?.output_text || "";
         if (onStream && outText) onStream(outText, false);
         return outText || "{}";
       }
@@ -1915,6 +2001,16 @@ async function callUnifiedLLMInternal({
       if (isJson) chatBody.response_format = { type: "json_object" };
       if (typeof maxOutputTokens === "number") chatBody.max_tokens = maxOutputTokens;
       if (typeof temperature === "number") chatBody.temperature = temperature;
+      if (onStream) {
+        try {
+          const s = await streamGoSse(`${goBase}/chat/completions`, { ...chatBody, stream_options: { include_usage: true } });
+          logGoUsage(s.completedResp?.usage || s.usage);
+          const outText = s.completedMsg?.content || s.streamed;
+          return outText || "{}";
+        } catch (streamErr: any) {
+          _localAddDebugLog(`[UnifiedLLM] Go stream failed (${streamErr?.message}), falling back to unary.`);
+        }
+      }
       const res = await fetch(`${goBase}/chat/completions`, { method: "POST", headers: goHeaders, body: JSON.stringify(chatBody) });
       if (!res.ok) {
         const errMsg = await res.text();
