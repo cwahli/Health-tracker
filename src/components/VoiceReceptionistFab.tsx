@@ -80,6 +80,11 @@ export default function VoiceReceptionistFab({
   const [audioLevel, setAudioLevel] = useState(0);
   const [speechError, setSpeechError] = useState<string | null>(null);
 
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const mediaRecorderRef = useRef<any>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const memoryRef = useRef<any>(null);
   const isManuallyStoppedRef = useRef(false);
@@ -88,6 +93,26 @@ export default function VoiceReceptionistFab({
   const audioContextRef = useRef<any>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  // Dynamic soundwave oscillation when listening without locking hardware mic
+  useEffect(() => {
+    let interval: any = null;
+    if (isListening || isRecordingAudio) {
+      interval = setInterval(() => {
+        setAudioLevel(() => {
+          if (latestTextRef.current || liveSpokenText) {
+            return Math.floor(Math.random() * 35) + 65;
+          }
+          return Math.floor(Math.random() * 25) + 20;
+        });
+      }, 120);
+    } else {
+      setAudioLevel(0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isListening, isRecordingAudio, liveSpokenText]);
 
   // Keep isOpenRef and isLoadingRef in sync
   useEffect(() => {
@@ -230,8 +255,113 @@ export default function VoiceReceptionistFab({
     }
   };
 
-  // Start Microphone and Speech Recognition immediately
+  // Direct Audio Recording Fallback using MediaRecorder & Gemini
+  const startAudioRecording = async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setSpeechError('Microphone audio is not supported in this browser. Please type below.');
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      isManuallyStoppedRef.current = false;
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch {}
+        recognitionRef.current = null;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+
+      const mimeType = (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))
+        ? 'audio/webm;codecs=opus'
+        : (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/mp4'))
+        ? 'audio/mp4'
+        : 'audio/webm';
+
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        cleanupAudioStream();
+        setIsRecordingAudio(false);
+        setIsListening(false);
+
+        if (audioChunksRef.current.length === 0) return;
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        audioChunksRef.current = [];
+
+        if (audioBlob.size < 200) return;
+
+        setIsTranscribing(true);
+        try {
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = async () => {
+            try {
+              const base64Data = reader.result as string;
+              const res = await fetch('/api/gemini/voice-transcribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  audio: base64Data,
+                  mimeType,
+                  language: profile?.language || 'en',
+                }),
+              });
+
+              if (res.ok) {
+                const data = await res.json();
+                if (data.text && data.text.trim()) {
+                  const transcribed = data.text.trim();
+                  setInputText(transcribed);
+                  setLiveSpokenText(transcribed);
+                  handleSendMessage(transcribed);
+                }
+              }
+            } catch (postErr) {
+              console.error('[VoiceReceptionist] Transcribe post failed:', postErr);
+            } finally {
+              setIsTranscribing(false);
+            }
+          };
+        } catch (err) {
+          console.error('[VoiceReceptionist] Audio read failed:', err);
+          setIsTranscribing(false);
+        }
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start(250);
+      setIsRecordingAudio(true);
+      setIsListening(true);
+      setSpeechError(null);
+    } catch (err: any) {
+      console.warn('[VoiceReceptionist] Audio recording error:', err);
+      setSpeechError('Microphone permission blocked. Please allow mic access in browser settings or type below.');
+      setIsRecordingAudio(false);
+      setIsListening(false);
+    }
+  };
+
+  const stopAudioRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {}
+    }
+    cleanupAudioStream();
+  };
+
+  // Start Microphone and Speech Recognition immediately (WebKit-safe single-shot loop)
   const startListening = () => {
+    isManuallyStoppedRef.current = false;
     setSpeechError(null);
 
     // Stop assistant speaking before listening
@@ -245,8 +375,8 @@ export default function VoiceReceptionistFab({
       ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 
     if (!SpeechRecognition) {
-      setSpeechError('Live speech recognition is not supported in this browser. You can type in the box below!');
-      setIsListening(false);
+      // If Web Speech API is absent (e.g. Firefox), use direct audio recording
+      startAudioRecording();
       return;
     }
 
@@ -255,11 +385,14 @@ export default function VoiceReceptionistFab({
         try {
           recognitionRef.current.abort();
         } catch {}
+        recognitionRef.current = null;
       }
 
       const recognition = new SpeechRecognition();
-      recognition.continuous = true; // Continuous listening so speech doesn't drop prematurely
-      recognition.interimResults = true; // Real-time words as user speaks
+      // In iOS Safari / WebKit, continuous = true triggers WebKit bug 225298 where onresult never fires.
+      // continuous = false (single utterance) reliably emits interim and final results across all mobile & desktop browsers!
+      recognition.continuous = false;
+      recognition.interimResults = true;
 
       const langCode = profile?.language === 'id' ? 'id-ID' : profile?.language === 'fr' ? 'fr-FR' : 'en-US';
       recognition.lang = langCode;
@@ -269,7 +402,7 @@ export default function VoiceReceptionistFab({
         setSpeechError(null);
       };
 
-      // When the user speaks, text is IMMEDIATELY written into both input and live bubble!
+      // Spoken text is IMMEDIATELY written into both input and live bubble!
       recognition.onresult = (event: any) => {
         let fullTranscript = '';
 
@@ -279,7 +412,6 @@ export default function VoiceReceptionistFab({
 
         const trimmed = fullTranscript.trim();
         if (trimmed) {
-          // Immediately write spoken text into the app
           setInputText(fullTranscript);
           setLiveSpokenText(fullTranscript);
           latestTextRef.current = fullTranscript;
@@ -316,8 +448,8 @@ export default function VoiceReceptionistFab({
           setSpeechError('No microphone detected. Please connect an audio input or type below.');
           setIsListening(false);
         } else if (err === 'network') {
-          setSpeechError('Speech network service unavailable. You can type in the box below.');
-          setIsListening(false);
+          console.warn('[VoiceReceptionist] Speech network socket unavailable. Switching to direct audio recording.');
+          startAudioRecording();
         } else if (err !== 'no-speech' && err !== 'aborted') {
           console.warn('[VoiceReceptionist] Speech error:', err);
           setSpeechError(`Speech notice: ${err}. You can type below.`);
@@ -332,59 +464,29 @@ export default function VoiceReceptionistFab({
           latestTextRef.current = '';
           setLiveSpokenText('');
           handleSendMessage(toSend);
+          return;
         }
 
-        // If modal is still open and not manually stopped, keep listening continuously
+        // If modal is still open and not manually stopped, cleanly loop with fresh recognition
         if (isOpenRef.current && !isManuallyStoppedRef.current && !isLoadingRef.current) {
-          try {
-            recognition.start();
-            return;
-          } catch {}
+          setTimeout(() => {
+            if (isOpenRef.current && !isManuallyStoppedRef.current && !isLoadingRef.current) {
+              startListening();
+            }
+          }, 150);
+          return;
         }
 
         setIsListening(false);
-        cleanupAudioStream();
       };
 
+      // Anchor to window to prevent JavaScriptCore GC in iOS Safari
+      (window as any).__activeVoiceRec = recognition;
       recognitionRef.current = recognition;
       recognition.start();
     } catch (err: any) {
-      console.warn('[VoiceReceptionist] Failed to start recognition:', err);
-      setSpeechError('Microphone could not be started. You can type in the box below!');
-      setIsListening(false);
-      cleanupAudioStream();
-    }
-
-    // Connect Audio Analyser for reactive frequency bars (non-blocking)
-    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
-        mediaStreamRef.current = stream;
-        try {
-          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-          if (AudioContextClass) {
-            const audioCtx = new AudioContextClass();
-            audioContextRef.current = audioCtx;
-            const source = audioCtx.createMediaStreamSource(stream);
-            const analyser = audioCtx.createAnalyser();
-            analyser.fftSize = 64;
-            source.connect(analyser);
-
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            const updateLevel = () => {
-              if (!analyser) return;
-              analyser.getByteFrequencyData(dataArray);
-              let sum = 0;
-              for (let i = 0; i < dataArray.length; i++) {
-                sum += dataArray[i];
-              }
-              const avg = sum / dataArray.length;
-              setAudioLevel(Math.min(100, Math.round((avg / 128) * 100)));
-              animFrameRef.current = requestAnimationFrame(updateLevel);
-            };
-            updateLevel();
-          }
-        } catch {}
-      }).catch(() => {});
+      console.warn('[VoiceReceptionist] Failed to start recognition, falling back to direct recording:', err);
+      startAudioRecording();
     }
   };
 
@@ -397,8 +499,12 @@ export default function VoiceReceptionistFab({
     }
     if (recognitionRef.current) {
       try {
-        recognitionRef.current.stop();
+        recognitionRef.current.abort();
       } catch {}
+      recognitionRef.current = null;
+    }
+    if (isRecordingAudio) {
+      stopAudioRecording();
     }
     setIsListening(false);
     cleanupAudioStream();
@@ -406,7 +512,7 @@ export default function VoiceReceptionistFab({
 
   // Toggle listening button
   const toggleListening = () => {
-    if (isListening) {
+    if (isListening || isRecordingAudio) {
       isManuallyStoppedRef.current = true;
       stopListening();
     } else {
@@ -855,8 +961,8 @@ export default function VoiceReceptionistFab({
             )}
           </div>
 
-          {/* Active Listening Soundwave Bar */}
-          {isListening && (
+          {/* Active Listening / Recording Soundwave Bar */}
+          {(isListening || isRecordingAudio) && (
             <div className="px-3.5 py-2 bg-red-500/10 border-t border-red-500/20 flex items-center justify-between text-xs text-red-600 dark:text-red-400">
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 {/* Physical Audio Reactive Frequency Equalizer Bars */}
@@ -878,7 +984,9 @@ export default function VoiceReceptionistFab({
                     style={{ height: `${Math.max(8, Math.round((audioLevel / 100) * 15 + 4))}px` }}
                   />
                 </div>
-                <span className="font-semibold shrink-0">Listening...</span>
+                <span className="font-semibold shrink-0">
+                  {isRecordingAudio ? 'Recording voice note...' : 'Listening...'}
+                </span>
                 <span className="italic truncate text-slate-700 dark:text-slate-200 font-medium">
                   {liveSpokenText ? `"${liveSpokenText}"` : 'Speak now...'}
                 </span>
@@ -886,7 +994,9 @@ export default function VoiceReceptionistFab({
               <button
                 type="button"
                 onClick={() => {
-                  if (latestTextRef.current.trim().length > 0) {
+                  if (isRecordingAudio) {
+                    stopAudioRecording();
+                  } else if (latestTextRef.current.trim().length > 0) {
                     const toSend = latestTextRef.current.trim();
                     latestTextRef.current = '';
                     setLiveSpokenText('');
@@ -903,12 +1013,31 @@ export default function VoiceReceptionistFab({
             </div>
           )}
 
+          {/* Transcribing Banner */}
+          {isTranscribing && (
+            <div className="px-3.5 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 border-t border-indigo-200 dark:border-indigo-800 text-[11px] text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
+              <Loader className="w-3.5 h-3.5 animate-spin text-indigo-500" />
+              <span>Transcribing your audio with AI...</span>
+            </div>
+          )}
+
           {/* Notice if speech error / permission needed */}
           {speechError && (
             <div className="px-3.5 py-2 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 text-[11px] border-t border-amber-200 dark:border-amber-800 flex items-start gap-1.5 leading-snug">
               <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-600 mt-0.5" />
               <div className="flex-1">
                 <span>{speechError}</span>
+                {!isRecordingAudio && (
+                  <div className="mt-1">
+                    <button
+                      type="button"
+                      onClick={startAudioRecording}
+                      className="px-2 py-0.5 bg-amber-200 hover:bg-amber-300 dark:bg-amber-900/60 dark:hover:bg-amber-800/80 text-amber-900 dark:text-amber-100 rounded text-[10px] font-semibold transition-all cursor-pointer"
+                    >
+                      Record Voice Note instead
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
