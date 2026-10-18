@@ -907,11 +907,15 @@ export default function FoodHistoryTab({
   useEffect(() => {
     if (!expandedLogId) return;
     const timer = setTimeout(() => {
-      const el = document.getElementById(`food-log-item-${expandedLogId}`);
+      // Land on the Reduce link (below the rings, above the detail panel),
+      // not the vertical center of the tall expanded card.
+      const reduceEl = document.getElementById(`food-log-reduce-${expandedLogId}`);
+      const rowEl = document.getElementById(`food-log-item-${expandedLogId}`);
+      const el = reduceEl || rowEl;
       if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
-    }, 250);
+    }, 300);
     return () => clearTimeout(timer);
   }, [expandedLogId, currentPage]);
 
@@ -2005,7 +2009,7 @@ export default function FoodHistoryTab({
 
                       {/* Reduce link sits below the rings row (rings may grow past 3) */}
                       {isExpanded && (
-                        <div className="pt-2 text-left">
+                        <div id={`food-log-reduce-${log.id}`} className="pt-2 text-left scroll-mt-2">
                           <button
                             type="button"
                             onClick={(e) => {
@@ -2023,7 +2027,7 @@ export default function FoodHistoryTab({
                       {isExpanded && (
                         <div className="space-y-4 pt-3 border-t border-theme-border/60 animation-slide-down">
                           {/* Weight & Portion Details inside Show-Hide */}
-                          <div className="flex flex-wrap items-center gap-3 text-xs bg-slate-50 dark:bg-slate-900/40 rounded-xl p-3 text-left">
+                          <div className="flex flex-wrap items-center gap-3 text-xs bg-slate-50 dark:bg-slate-900/40 rounded-xl py-3 text-left">
                             <span className="text-theme-text-secondary font-medium">{t.weightColon}</span>
                             <span className="font-semibold text-slate-850 dark:text-slate-200">{log.weightGrams}g</span>
                             {log.quantity && (
@@ -2081,7 +2085,7 @@ export default function FoodHistoryTab({
                             if (scoutItemsList.length === 0 && !effectiveComposition) return null;
 
                             return (
-                              <div className="bg-slate-50 dark:bg-slate-900/40 rounded-xl p-3 text-left space-y-2.5 border border-slate-200/50 dark:border-slate-800/50">
+                              <div className="bg-slate-50 dark:bg-slate-900/40 rounded-xl py-3 text-left space-y-2.5 border border-slate-200/50 dark:border-slate-800/50">
                                 <div className="flex items-center justify-between gap-2">
                                   <span className="text-[10.5px] font-bold text-indigo-500 dark:text-indigo-400 flex items-center gap-1">
                                     🔍 {t.mealComposition} {scoutItemsList.length > 0 ? `(${scoutItemsList.length})` : ''}
@@ -2099,7 +2103,7 @@ export default function FoodHistoryTab({
                                       const isSelectedLabel = openLabelLogMap[log.id] === i;
 
                                       return (
-                                        <div key={i} className="flex flex-col items-center gap-1 shrink-0 relative group w-[95px] sm:w-[110px]">
+                                        <div key={i} className="flex flex-col items-center gap-1 shrink-0 relative group w-[142px] sm:w-[165px]">
                                           <div className="relative w-full">
                                             <div 
                                               className="w-full aspect-square rounded-xl overflow-hidden cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-sm bg-slate-100 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700/50"
@@ -2178,7 +2182,7 @@ export default function FoodHistoryTab({
                             );
                           })()}
 
-                          <div className="space-y-4 py-2 bg-slate-50 dark:bg-slate-900/40 rounded-2xl px-3.5">
+                          <div className="space-y-4 py-2 bg-slate-50 dark:bg-slate-900/40 rounded-2xl">
                             <div>
                               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 pb-0.5 border-b border-slate-200/50 dark:border-slate-800/50">{t.coreNutrients11}</div>
                               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono">
@@ -2251,7 +2255,7 @@ export default function FoodHistoryTab({
 
                               {Array.isArray(effectiveItemsBreakdown) && effectiveItemsBreakdown.length > 0 && (
                                 <div className="border border-theme-border/80 rounded-xl overflow-hidden bg-theme-bg-card shadow-sm">
-                                  <div className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800/60 border-b border-theme-border">
+                                  <div className="py-1.5 bg-slate-50 dark:bg-slate-800/60 border-b border-theme-border">
                                     <span className="text-[10px] font-bold text-theme-text-secondary uppercase tracking-wider">
                                       📊 {t.componentContribution}
                                     </span>

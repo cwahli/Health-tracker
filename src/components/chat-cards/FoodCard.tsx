@@ -1448,10 +1448,10 @@ export const FoodCard: React.FC<AgentCardProps & {
                                const imgIdx = resolveTileImageIndex(item, messageImages.length);
                                const resolvedImgSrc = resolveHistoricalImgSrc(item, messageImages, foodLogs || [], imgIdx);
                                const itemWidthClass = cropTiles.length > 4
-                                 ? 'w-[90px] sm:w-[105px] shrink-0'
+                                 ? 'w-[135px] sm:w-[158px] shrink-0'
                                  : cropTiles.length === 1 
-                                   ? 'w-[130px] sm:w-[150px] shrink-0' 
-                                   : 'w-full max-w-[160px]';
+                                   ? 'w-[195px] sm:w-[225px] shrink-0' 
+                                   : 'w-full max-w-[240px]';
                                return (
                                  <div key={tile.key} className={`flex flex-col items-center gap-1 shrink-0 relative group ${itemWidthClass}`}>
                                    <div className="relative w-full">
@@ -2368,10 +2368,10 @@ export const FoodCard: React.FC<AgentCardProps & {
                                  const resolvedImgSrc = resolveHistoricalImgSrc(item, messageImages, foodLogs || [], imgIdx);
                                  const isSlider = !displayAsMenu && displayedScoutItems.length > 4;
                                  const itemWidthClass = isSlider 
-                                   ? 'w-[90px] sm:w-[105px] snap-start' 
+                                   ? 'w-[135px] sm:w-[158px] snap-start' 
                                    : displayedScoutItems.length === 1 
-                                     ? 'w-[130px] sm:w-[150px]' 
-                                     : 'w-full max-w-[160px]';
+                                     ? 'w-[195px] sm:w-[225px]' 
+                                     : 'w-full max-w-[240px]';
                                  return (
                                    <div key={i} className={`flex flex-col items-center gap-1 shrink-0 relative group ${itemWidthClass}`}>
                                      <div className="relative w-full">
@@ -3144,7 +3144,7 @@ export const FoodCard: React.FC<AgentCardProps & {
                     const imgIdx = resolveTileImageIndex(item, messageImages.length);
                     const resolvedImgSrc = resolveHistoricalImgSrc(item, messageImages, foodLogs || [], imgIdx);
                     return (
-                      <div key={i} className="flex flex-col items-center gap-1 shrink-0 relative group w-[110px] sm:w-[130px]">
+                      <div key={i} className="flex flex-col items-center gap-1 shrink-0 relative group w-[165px] sm:w-[195px]">
                         <div 
                           className="w-full aspect-square rounded-xl overflow-hidden cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-sm bg-slate-100 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700/50"
                           onClick={resolvedImgSrc ? () => setScoutPreviewIdx(i) : undefined}
