@@ -9,7 +9,7 @@
  * "where is the live site" anywhere an agent or bot reads it from.
  *
  * What it checks on THIS box (missing paths are skipped silently, so the
- * same command runs on vps-france, mac, grok-vps, collab, and mobile):
+ * same command runs on vps-id, mac, grok-vps, collab, and mobile):
  *
  *  1. Repo defaults — the files below must not name the old hosts. A hit
  *     here is a repo fix (edit on main), not a local fix.

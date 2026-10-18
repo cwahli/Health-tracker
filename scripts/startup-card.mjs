@@ -11,7 +11,7 @@ import path from 'node:path';
 import { closedRowsFromRoadmap } from './lib/closed-rows.mjs';
 
 export function buildStartupCard({ hostname, location, commits, closedRows } = {}) {
-  const onVm = location === 'vps-france' || location === 'vm';
+  const onVm = location === 'vps-id' || location === 'vps-france' || location === 'vm';
   const lines = [
     `You are on this machine: ${hostname || 'unknown'}.`,
     location ? `Location file: ${location}.` : 'Location file: (none).',
