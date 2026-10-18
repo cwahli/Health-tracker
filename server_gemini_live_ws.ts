@@ -27,6 +27,11 @@
 // Lifecycle: ephemeral micro-sessions. The client owns the 45s-silence
 // disconnect; the relay enforces backstops (idle + absolute max) so token
 // burn stays far under the 65K TPM live quota.
+//
+// Trace telemetry: every session gets a short id and emits single-line
+// `[GeminiLiveWS:trace]` JSON events (setup, ready, first audio in/out,
+// turn summaries, client marks, close). Audio bytes are NEVER logged.
+// Tail with: journalctl -u health-tracker -f | grep 'GeminiLiveWS:trace'
 
 import type { Server as HttpServer, IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
@@ -239,12 +244,30 @@ function safeSend(client: RelaySocket, payload: unknown): void {
 async function handleLiveConnection(clientRaw: unknown): Promise<void> {
   const client = clientRaw as RelaySocket;
   const startedAt = Date.now();
+  const sid = `lv_${startedAt.toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+  const trace = (ev: string, extra?: Record<string, unknown>) => {
+    try {
+      console.log(`[GeminiLiveWS:trace] ${JSON.stringify({ sid, ev, t: Date.now() - startedAt, ...extra })}`);
+    } catch { /* logging must never break the relay */ }
+  };
   let lastActivity = Date.now();
   let closed = false;
   let session: Session | null = null;
   let liveModel = PRIMARY_LIVE_MODEL;
   let setupReceived = false;
   let liveCtx: { profile?: any; recentMeals?: any[] } = {};
+  // Latency anatomy per turn: lastInputAt = latest client->Google stamp
+  // (audio frame or typed text); firstAudioOutAt set on the first Google
+  // audio chunk after it. turnCount + toolCallCount for the close summary.
+  let lastInputAt = 0;
+  let firstAudioOutAt = 0;
+  let firstAudioInAt = 0;
+  let audioInFrames = 0;
+  let audioOutFrames = 0;
+  let turnCount = 0;
+  let toolCallCount = 0;
+  let googleReadyAt = 0;
+  trace('accepted');
 
   const cleanup = (code?: number, reason?: string) => {
     if (closed) return;
@@ -253,6 +276,10 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
     clearInterval(sweeper);
     try { session?.close(); } catch { /* already closed */ }
     session = null;
+    trace('close', {
+      reason, turns: turnCount, toolCalls: toolCallCount,
+      audioInFrames, audioOutFrames, model: liveModel,
+    });
     try {
       if ((client as any).readyState === 1) client.close(code || 1000, reason || 'bye');
     } catch { /* ignore */ }
@@ -310,6 +337,13 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
           const inline = part?.inlineData;
           if (inline?.data && typeof inline.data === 'string' &&
             typeof inline.mimeType === 'string' && inline.mimeType.startsWith('audio/')) {
+            if (!firstAudioOutAt) {
+              firstAudioOutAt = Date.now();
+              trace('audio-out-first', {
+                sinceInputMs: lastInputAt ? firstAudioOutAt - lastInputAt : null,
+              });
+            }
+            audioOutFrames += 1;
             safeSend(client, {
               type: 'audio',
               data: inline.data,
@@ -322,8 +356,20 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
         }
         if (textAcc) safeSend(client, { type: 'text', text: textAcc });
       }
-      if (sc.turnComplete) safeSend(client, { type: 'turnComplete' });
+      if (sc.turnComplete) {
+        turnCount += 1;
+        trace('turn-complete', {
+          turn: turnCount,
+          turnMs: lastInputAt ? Date.now() - lastInputAt : null,
+        });
+        // Next Google audio starts a fresh latency window.
+        lastInputAt = 0;
+        firstAudioOutAt = 0;
+        safeSend(client, { type: 'turnComplete' });
+      }
       if (anyMsg?.toolCall?.functionCalls) {
+        toolCallCount += 1;
+        trace('tool-call', { names: anyMsg.toolCall.functionCalls.map((fc: any) => fc?.name) });
         safeSend(client, { type: 'toolCall', functionCalls: anyMsg.toolCall.functionCalls });
       }
       if (anyMsg?.toolCallCancellation?.ids) {
@@ -354,7 +400,10 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
       recentMeals: setup.recentMeals,
     });
     const candidates = [PRIMARY_LIVE_MODEL, FALLBACK_LIVE_MODEL];
-    for (const model of candidates) {
+    let failedOver = false;
+    const openWithModel = async (model: string): Promise<boolean> => {
+      const attemptAt = Date.now();
+      trace('google-connect-start', { model });
       try {
         session = await openLiveSession({
           apiKey,
@@ -363,24 +412,50 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
           languageCode,
           systemInstruction,
           onmessage: forwardLiveMessage,
+          onopen: () => trace('google-socket-open', { model }),
           onerror: (err) => {
+            trace('google-socket-error', { model, message: String(err?.message || err).slice(0, 200) });
             console.warn(`[GeminiLiveWS] Google socket error (${model}):`, err?.message || err);
           },
-          onclose: () => {
-            if (!closed) {
-              safeSend(client, { type: 'error', message: 'Voice connection closed. Reopen the receptionist to continue.' });
-              cleanup(1000, 'google-closed');
+          onclose: (ev: any) => {
+            const code = ev?.code;
+            const reason = typeof ev?.reason === 'string' ? ev.reason.slice(0, 200) : '';
+            trace('google-closed', { model, code, reason });
+            if (closed) return;
+            // Early drop (handshake accepted, then gone within 15s) usually
+            // means the primary model is unavailable for this key — fail over
+            // to the fallback inside the same browser session instead of
+            // dumping the user to legacy.
+            const earlyMs = Date.now() - googleReadyAt;
+            if (!failedOver && googleReadyAt > 0 && earlyMs < 15 * 1000) {
+              failedOver = true;
+              trace('google-early-drop-failover', { from: model, to: FALLBACK_LIVE_MODEL, aliveMs: earlyMs });
+              safeSend(client, { type: 'status', message: 'Switching voice engine…' });
+              void openWithModel(FALLBACK_LIVE_MODEL);
+              return;
             }
+            safeSend(client, {
+              type: 'error',
+              message: `Voice connection closed${code ? ` (code ${code})` : ''}${reason ? `: ${reason}` : ''}. Reopen the receptionist to continue.`,
+            });
+            cleanup(1000, 'google-closed');
           },
         });
         liveModel = model;
-        safeSend(client, { type: 'ready', model, voice });
+        googleReadyAt = Date.now();
+        safeSend(client, { type: 'ready', model, voice, sid });
+        trace('ready', { model, voice, connectMs: Date.now() - attemptAt });
         console.log(`[GeminiLiveWS] live session open (model=${model} voice=${voice})`);
         return true;
       } catch (err) {
+        trace('google-connect-failed', { model, message: String((err as Error)?.message).slice(0, 200) });
         console.warn(`[GeminiLiveWS] connect failed (${model}):`, (err as Error)?.message);
         session = null;
+        return false;
       }
+    };
+    for (const model of candidates) {
+      if (await openWithModel(model)) return true;
     }
     safeSend(client, { type: 'error', message: 'Could not reach the live voice engine. Please retry in a moment.' });
     return false;
@@ -407,10 +482,22 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
 
     if (frame.type === 'setup') {
       setupReceived = true;
+      trace('setup', {
+        voice: frame.voice, language: frame.language,
+        hasProfile: !!frame.profile,
+        recentMeals: Array.isArray(frame.recentMeals) ? frame.recentMeals.length : 0,
+      });
       if (session) return; // already connected — ignore duplicate setups
       void connectGoogle(frame).then((ok) => {
         if (!ok) cleanup(1000, 'connect-failed');
       });
+      return;
+    }
+
+    // Browser-side performance marks (mic open, socket open, first playback)
+    // forwarded for the same server-side timeline.
+    if (frame.type === 'debug') {
+      trace('client', { ev: frame.ev, tClientMs: frame.tRelMs });
       return;
     }
 
@@ -421,10 +508,21 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
 
     try {
       if (frame.type === 'audio' && typeof frame.data === 'string' && frame.data.length > 0) {
+        if (!firstAudioInAt) {
+          firstAudioInAt = Date.now();
+          trace('audio-in-first', {});
+        }
+        audioInFrames += 1;
+        // Mark the freshest input so the next Google audio chunk yields a
+        // true end-of-speech → first-audio latency.
+        lastInputAt = Date.now();
+        firstAudioOutAt = 0;
         session.sendRealtimeInput({
           audio: { data: frame.data, mimeType: 'audio/pcm;rate=16000' },
         });
       } else if (frame.type === 'text' && typeof frame.text === 'string' && frame.text.trim()) {
+        lastInputAt = Date.now();
+        firstAudioOutAt = 0;
         session.sendRealtimeInput({ text: frame.text.slice(0, 2000) });
       } else if (frame.type === 'toolResponse') {
         const responses = Array.isArray(frame.functionResponses)

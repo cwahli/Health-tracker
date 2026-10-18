@@ -862,7 +862,12 @@ export default function VoiceReceptionistFab({
 
   // Toggle listening button (live pause/resume, or legacy start/stop)
   const toggleListening = () => {
-    if (liveModeRef.current === 'live' || liveModeRef.current === 'connecting') {
+    if (liveModeRef.current === 'connecting') {
+      // A tap while handshaking used to kill the session mid-connect (the
+      // mic-permission prompt invites exactly this tap). Ignore it instead.
+      return;
+    }
+    if (liveModeRef.current === 'live') {
       // Pause the live session (mic + speaker off) but keep the drawer open.
       isManuallyStoppedRef.current = true;
       const c = liveClientRef.current;
@@ -1212,6 +1217,9 @@ export default function VoiceReceptionistFab({
         setIsListening(false);
         setIsSpeaking(false);
         setSpeechError('Live session rested after 45s of quiet — tap the mic to resume.');
+      },
+      onStatus: (message) => {
+        setSpeechError(message);
       },
     });
     liveClientRef.current = client;

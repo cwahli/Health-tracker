@@ -38,6 +38,7 @@ export interface LiveAudioClientEvents {
   onError?: (message: string) => void;
   onClosed?: () => void;
   onAutoSleep?: () => void;
+  onStatus?: (message: string) => void;
 }
 
 export const LIVE_INPUT_RATE = 16000;
@@ -114,6 +115,8 @@ export class GeminiLiveAudioClient {
   private connected = false;
   private closed = false;
   private setup: LiveSessionSetup = {};
+  private t0 = 0;
+  private firstPlaybackMarked = false;
 
   constructor(events: LiveAudioClientEvents = {}) {
     this.events = events;
@@ -121,6 +124,17 @@ export class GeminiLiveAudioClient {
 
   get isConnected(): boolean {
     return this.connected && !this.closed;
+  }
+
+  // Browser-side marks forwarded to the relay so one server timeline shows
+  // mic/socket/playback timing next to Google TTFB.
+  private mark(ev: string): void {
+    try {
+      const tRelMs = Math.round(performance.now() - this.t0);
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: 'debug', ev, tRelMs }));
+      }
+    } catch { /* telemetry never breaks audio */ }
   }
 
   private touchActivity(): void {
@@ -144,9 +158,12 @@ export class GeminiLiveAudioClient {
     }
     this.closed = false;
     this.setup = setup;
+    this.t0 = performance.now();
+    this.firstPlaybackMarked = false;
     this.touchActivity();
 
     await this.startMicrophone();
+    this.mark('mic-ready');
 
     await new Promise<void>((resolve, reject) => {
       this.readyResolve = resolve;
@@ -158,6 +175,7 @@ export class GeminiLiveAudioClient {
         try { ws.close(); } catch { /* ignore */ }
       }, READY_TIMEOUT_MS);
       ws.onopen = () => {
+        this.mark('ws-open');
         ws.send(JSON.stringify({
           type: 'setup',
           profile: setup.profile || null,
@@ -210,6 +228,7 @@ export class GeminiLiveAudioClient {
     switch (frame.type) {
       case 'ready':
         this.connected = true;
+        this.mark('ready');
         if (this.readyTimer) {
           clearTimeout(this.readyTimer);
           this.readyTimer = null;
@@ -257,6 +276,11 @@ export class GeminiLiveAudioClient {
       case 'idleTimeout':
         this.events.onAutoSleep?.();
         void this.disconnect();
+        break;
+      case 'status':
+        if (typeof frame.message === 'string' && frame.message) {
+          this.events.onStatus?.(frame.message);
+        }
         break;
       case 'error':
         if (!this.connected) {
@@ -341,6 +365,10 @@ export class GeminiLiveAudioClient {
     const ctx = this.audioCtx;
     const samples = base64ToFloat32Pcm16(base64);
     if (!samples || samples.length === 0) return;
+    if (!this.firstPlaybackMarked) {
+      this.firstPlaybackMarked = true;
+      this.mark('first-playback');
+    }
     try {
       const buffer = ctx.createBuffer(1, samples.length, LIVE_OUTPUT_RATE);
       buffer.getChannelData(0).set(samples);
