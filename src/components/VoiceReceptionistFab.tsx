@@ -15,7 +15,8 @@ import {
   CheckCircle2,
   AlertCircle,
   HelpCircle,
-  Loader
+  Loader,
+  Save
 } from 'lucide-react';
 import type { UserProfile, FoodLog } from '../types';
 
@@ -36,6 +37,23 @@ export interface VoiceReceptionistFabProps {
   report?: any;
 }
 
+interface UIFormField {
+  name: string;
+  label: string;
+  type: string;
+  required?: boolean;
+  options?: string[];
+  placeholder?: string;
+}
+
+interface UIFormConfig {
+  formId: string;
+  title: string;
+  description?: string;
+  submitLabel?: string;
+  fields: UIFormField[];
+}
+
 interface ChatTurn {
   id: string;
   role: 'user' | 'assistant';
@@ -45,6 +63,110 @@ interface ChatTurn {
     type: 'profile_updated' | 'navigated' | 'agent_handoff' | 'highlight';
     details: string;
   };
+  uiForm?: UIFormConfig | null;
+}
+
+function InlineProfileForm({
+  form,
+  profile,
+  onSave,
+}: {
+  form: UIFormConfig;
+  profile: UserProfile | null;
+  onSave: (vals: Record<string, any>) => Promise<void>;
+}) {
+  const [formData, setFormData] = useState<Record<string, any>>(() => {
+    const init: Record<string, any> = {};
+    form.fields.forEach((f) => {
+      const existing =
+        (profile as any)?.[f.name] ??
+        (f.name === 'heightCm' ? profile?.height : f.name === 'weightKg' ? profile?.weight : '');
+      init[f.name] = existing ?? '';
+    });
+    return init;
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    try {
+      await onSave(formData);
+      setIsSaved(true);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (isSaved) {
+    return (
+      <div className="mt-2.5 p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300">
+        <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+        <span className="font-semibold">Profile updated successfully!</span>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="mt-2.5 p-3.5 bg-slate-50 dark:bg-slate-900/70 border border-theme-border/80 rounded-2xl space-y-2.5 text-xs"
+    >
+      <div className="flex items-center justify-between border-b border-theme-border/60 pb-1.5">
+        <span className="font-bold text-theme-text text-[11px]">{form.title}</span>
+        {form.description && (
+          <span className="text-[10px] text-slate-400 truncate max-w-[180px]">
+            {form.description}
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {form.fields.map((f) => (
+          <div
+            key={f.name}
+            className={f.type === 'select' || form.fields.length === 1 ? 'col-span-2' : 'col-span-1'}
+          >
+            <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+              {f.label} {f.required && <span className="text-red-500">*</span>}
+            </label>
+            {f.type === 'select' && f.options ? (
+              <select
+                value={formData[f.name] || ''}
+                onChange={(e) => setFormData((prev) => ({ ...prev, [f.name]: e.target.value }))}
+                className="w-full bg-white dark:bg-slate-800 border border-theme-border rounded-xl px-2.5 py-1.5 text-xs text-theme-text focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="">{f.placeholder || 'Select...'}</option>
+                {f.options.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type={f.type === 'number' ? 'number' : 'text'}
+                value={formData[f.name] || ''}
+                placeholder={f.placeholder}
+                onChange={(e) => setFormData((prev) => ({ ...prev, [f.name]: e.target.value }))}
+                className="w-full bg-white dark:bg-slate-800 border border-theme-border rounded-xl px-2.5 py-1.5 text-xs text-theme-text focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            )}
+          </div>
+        ))}
+      </div>
+
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="w-full mt-2 py-2 px-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer"
+      >
+        {isSubmitting ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+        <span>{form.submitLabel || 'Save Profile'}</span>
+      </button>
+    </form>
+  );
 }
 
 export default function VoiceReceptionistFab({
@@ -359,10 +481,11 @@ export default function VoiceReceptionistFab({
     cleanupAudioStream();
   };
 
-  // Start Microphone and Speech Recognition immediately (WebKit-safe single-shot loop)
+  // Start Microphone and Speech Recognition immediately (WebKit/Android-safe single-shot loop)
   const startListening = () => {
     isManuallyStoppedRef.current = false;
     setSpeechError(null);
+    setIsListening(true);
 
     // Stop assistant speaking before listening
     if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking) {
@@ -375,7 +498,7 @@ export default function VoiceReceptionistFab({
       ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 
     if (!SpeechRecognition) {
-      // If Web Speech API is absent (e.g. Firefox), use direct audio recording
+      // If Web Speech API is absent (e.g. Firefox Android), use direct audio recording
       startAudioRecording();
       return;
     }
@@ -389,12 +512,17 @@ export default function VoiceReceptionistFab({
       }
 
       const recognition = new SpeechRecognition();
-      // In iOS Safari / WebKit, continuous = true triggers WebKit bug 225298 where onresult never fires.
-      // continuous = false (single utterance) reliably emits interim and final results across all mobile & desktop browsers!
+      // Continuous = false (single utterance loop) reliably emits interim and final results across all mobile & desktop browsers!
       recognition.continuous = false;
       recognition.interimResults = true;
 
-      const langCode = profile?.language === 'id' ? 'id-ID' : profile?.language === 'fr' ? 'fr-FR' : 'en-US';
+      // Auto-match Android Google Speech engine locale (e.g. en-GB, en-US, id-ID, fr-FR)
+      const deviceLang = typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en-US';
+      const langCode = profile?.language === 'id'
+        ? 'id-ID'
+        : profile?.language === 'fr'
+        ? 'fr-FR'
+        : (profile?.language === 'en' ? (deviceLang.startsWith('en') ? deviceLang : 'en-US') : deviceLang);
       recognition.lang = langCode;
 
       recognition.onstart = () => {
@@ -402,19 +530,34 @@ export default function VoiceReceptionistFab({
         setSpeechError(null);
       };
 
+      recognition.onaudiostart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onsoundstart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onspeechstart = () => {
+        setIsListening(true);
+      };
+
       // Spoken text is IMMEDIATELY written into both input and live bubble!
       recognition.onresult = (event: any) => {
         let fullTranscript = '';
 
         for (let i = 0; i < event.results.length; ++i) {
-          fullTranscript += event.results[i][0]?.transcript || '';
+          const piece = event.results[i][0]?.transcript || '';
+          if (piece.trim()) {
+            fullTranscript += (fullTranscript ? ' ' : '') + piece.trim();
+          }
         }
 
         const trimmed = fullTranscript.trim();
         if (trimmed) {
-          setInputText(fullTranscript);
-          setLiveSpokenText(fullTranscript);
-          latestTextRef.current = fullTranscript;
+          setInputText(trimmed);
+          setLiveSpokenText(trimmed);
+          latestTextRef.current = trimmed;
 
           // Auto-scroll to keep live words visible
           if (chatScrollRef.current) {
@@ -441,11 +584,11 @@ export default function VoiceReceptionistFab({
         const err = event.error;
         if (err === 'not-allowed' || err === 'service-not-allowed') {
           setSpeechError(
-            'Microphone access is blocked by browser permissions. Please allow microphone in your address bar (lock/camera icon), or use the chat box below.'
+            'Microphone permission blocked. In Android Chrome, tap the 🔒 icon beside health-tracker.co.uk in the address bar > Permissions > Microphone > Allow, or record an audio note below.'
           );
           setIsListening(false);
         } else if (err === 'audio-capture') {
-          setSpeechError('No microphone detected. Please connect an audio input or type below.');
+          setSpeechError('No microphone detected. Please check audio permissions or type below.');
           setIsListening(false);
         } else if (err === 'network') {
           console.warn('[VoiceReceptionist] Speech network socket unavailable. Switching to direct audio recording.');
@@ -480,7 +623,7 @@ export default function VoiceReceptionistFab({
         setIsListening(false);
       };
 
-      // Anchor to window to prevent JavaScriptCore GC in iOS Safari
+      // Anchor to window to prevent JavaScriptCore GC in mobile browsers
       (window as any).__activeVoiceRec = recognition;
       recognitionRef.current = recognition;
       recognition.start();
@@ -526,6 +669,7 @@ export default function VoiceReceptionistFab({
     setIsOpen(true);
     isOpenRef.current = true;
     isManuallyStoppedRef.current = false;
+    setIsListening(true);
     setSpeechError(null);
 
     // Prime audio synthesis on user gesture for later assistant responses if needed
@@ -632,56 +776,75 @@ export default function VoiceReceptionistFab({
 
       let actionTaken: ChatTurn['actionTaken'] = undefined;
 
-      // 1. Check if profile was updated (e.g. user provided age, weight, goal)
-      if (data.updatedProfile) {
-        const baseProfile: UserProfile = profile || {
-          uid: 'user_' + Date.now(),
-          email: '',
-          nickname: data.updatedProfile.name || 'User',
-          language: 'en',
-          unitPreference: 'SI',
-        };
-        const nextProfile: UserProfile = { ...baseProfile };
-        let hasChanges = false;
-        const changeDetails: string[] = [];
+      // 1. Check if profile was updated via updatedProfile, modificationCommand, or memory snapshots
+      const incomingUpdates: Record<string, any> = {
+        ...(data.updatedProfile || {}),
+      };
 
-        ['age', 'gender', 'ethnicity', 'height', 'weight', 'healthGoal'].forEach((k) => {
-          if (data.updatedProfile[k] !== undefined && data.updatedProfile[k] !== null) {
-            (nextProfile as any)[k] = data.updatedProfile[k];
-            hasChanges = true;
-            changeDetails.push(`${k}: ${data.updatedProfile[k]}`);
+      if (Array.isArray(data.modificationCommand)) {
+        for (const cmd of data.modificationCommand) {
+          if (cmd.action === 'update_profile' && cmd.keyName) {
+            incomingUpdates[cmd.keyName] = cmd.newValue;
+          }
+        }
+      }
+
+      if (data.memory?.userProfileSnapshot) {
+        const snap = data.memory.userProfileSnapshot;
+        ['age', 'gender', 'ethnicity', 'heightCm', 'weightKg', 'targetWeightKg'].forEach((k) => {
+          if (snap[k] !== undefined && snap[k] !== null && incomingUpdates[k] === undefined) {
+            incomingUpdates[k] = snap[k];
           }
         });
+      }
 
-        // Also check heightCm / weightKg
-        if (data.updatedProfile.heightCm && !nextProfile.height) {
-          nextProfile.height = data.updatedProfile.heightCm;
-          hasChanges = true;
-          changeDetails.push(`height: ${data.updatedProfile.heightCm}cm`);
-        }
-        if (data.updatedProfile.weightKg && !nextProfile.weight) {
-          nextProfile.weight = data.updatedProfile.weightKg;
-          hasChanges = true;
-          changeDetails.push(`weight: ${data.updatedProfile.weightKg}kg`);
-        }
+      const baseProfile: UserProfile = profile || {
+        uid: 'user_' + Date.now(),
+        email: '',
+        nickname: incomingUpdates.name || 'User',
+        language: 'en',
+        unitPreference: 'SI',
+      };
+      const nextProfile: UserProfile = { ...baseProfile };
+      let hasChanges = false;
+      const changeDetails: string[] = [];
 
-        if (hasChanges) {
-          setProfile(nextProfile);
-          await saveAndSync(
-            nextProfile,
-            foodLogs,
-            biomarkers,
-            biomarkerHistory,
-            actions,
-            dailyBenefits,
-            report,
-            { type: 'profile' }
-          );
-          actionTaken = {
-            type: 'profile_updated',
-            details: `Saved to Profile: ${changeDetails.join(', ')}`,
-          };
+      ['age', 'gender', 'ethnicity', 'height', 'weight', 'healthGoal'].forEach((k) => {
+        if (incomingUpdates[k] !== undefined && incomingUpdates[k] !== null && incomingUpdates[k] !== '') {
+          (nextProfile as any)[k] = incomingUpdates[k];
+          hasChanges = true;
+          changeDetails.push(`${k}: ${incomingUpdates[k]}`);
         }
+      });
+
+      // Also check heightCm / weightKg
+      if (incomingUpdates.heightCm && (!nextProfile.height || nextProfile.height !== incomingUpdates.heightCm)) {
+        nextProfile.height = Number(incomingUpdates.heightCm) || incomingUpdates.heightCm;
+        hasChanges = true;
+        changeDetails.push(`height: ${incomingUpdates.heightCm}cm`);
+      }
+      if (incomingUpdates.weightKg && (!nextProfile.weight || nextProfile.weight !== incomingUpdates.weightKg)) {
+        nextProfile.weight = Number(incomingUpdates.weightKg) || incomingUpdates.weightKg;
+        hasChanges = true;
+        changeDetails.push(`weight: ${incomingUpdates.weightKg}kg`);
+      }
+
+      if (hasChanges) {
+        setProfile(nextProfile);
+        await saveAndSync(
+          nextProfile,
+          foodLogs,
+          biomarkers,
+          biomarkerHistory,
+          actions,
+          dailyBenefits,
+          report,
+          { type: 'profile' }
+        );
+        actionTaken = {
+          type: 'profile_updated',
+          details: `Saved to Profile: ${changeDetails.join(', ')}`,
+        };
       }
 
       // 2. Check for Navigation / Co-Pilot intent in the conversation
@@ -721,6 +884,7 @@ export default function VoiceReceptionistFab({
         text: replyText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         actionTaken,
+        uiForm: data.uiForm || null,
       };
 
       setMessages((prev) => [...prev, botMsg]);
@@ -799,7 +963,7 @@ export default function VoiceReceptionistFab({
 
       {/* Expanded Voice Receptionist Drawer/Panel */}
       {isOpen && (
-        <div className="fixed inset-x-3 bottom-20 sm:inset-auto sm:bottom-22 sm:right-6 sm:w-[420px] max-h-[82vh] z-50 flex flex-col bg-theme-bg-card/95 backdrop-blur-xl border border-theme-border shadow-2xl rounded-3xl overflow-hidden animate-slide-up">
+        <div className="fixed inset-x-2 bottom-18 sm:inset-auto sm:bottom-22 sm:right-6 sm:w-[420px] max-h-[85vh] z-50 flex flex-col bg-theme-bg-card/95 backdrop-blur-xl border border-theme-border shadow-2xl rounded-3xl overflow-hidden animate-slide-up">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 bg-indigo-600 text-white">
             <div className="flex items-center gap-2.5">
@@ -930,6 +1094,52 @@ export default function VoiceReceptionistFab({
                   <div className="mt-1 flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-[10px] text-emerald-700 dark:text-emerald-300 font-medium">
                     <CheckCircle2 className="w-3 h-3 shrink-0 text-emerald-500" />
                     <span>{m.actionTaken.details}</span>
+                  </div>
+                )}
+
+                {/* Inline Receptionist Interactive UI Form */}
+                {m.uiForm && m.uiForm.fields && m.uiForm.fields.length > 0 && (
+                  <div className="w-full max-w-[95%]">
+                    <InlineProfileForm
+                      form={m.uiForm}
+                      profile={profile}
+                      onSave={async (vals) => {
+                        const baseProfile: UserProfile = profile || {
+                          uid: 'user_' + Date.now(),
+                          email: '',
+                          nickname: 'User',
+                          language: 'en',
+                          unitPreference: 'SI',
+                        };
+                        const nextProfile: UserProfile = { ...baseProfile, ...vals };
+                        if (vals.heightCm) nextProfile.height = Number(vals.heightCm) || vals.heightCm;
+                        if (vals.weightKg) nextProfile.weight = Number(vals.weightKg) || vals.weightKg;
+                        setProfile(nextProfile);
+                        await saveAndSync(
+                          nextProfile,
+                          foodLogs,
+                          biomarkers,
+                          biomarkerHistory,
+                          actions,
+                          dailyBenefits,
+                          report,
+                          { type: 'profile' }
+                        );
+                        setMessages((prev) => [
+                          ...prev,
+                          {
+                            id: `f_${Date.now()}`,
+                            role: 'assistant',
+                            text: 'Thank you! Your profile details have been saved.',
+                            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                            actionTaken: {
+                              type: 'profile_updated',
+                              details: `Saved: ${Object.entries(vals).filter(([_, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ')}`,
+                            },
+                          },
+                        ]);
+                      }}
+                    />
                   </div>
                 )}
 
