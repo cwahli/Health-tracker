@@ -3,6 +3,11 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import VoiceReceptionistFab from './VoiceReceptionistFab';
 import type { UserProfile } from '../types';
+import {
+  GeminiLiveAudioClient,
+  isLiveVoiceSupported,
+  mergeLiveTranscript,
+} from '../services/geminiLiveAudioClient';
 
 describe('VoiceReceptionistFab', () => {
   const mockSaveAndSync = () => Promise.resolve();
@@ -92,5 +97,37 @@ describe('VoiceReceptionistFab', () => {
     expect(html).toContain('aria-label="Open Voice Receptionist"');
     expect(html).toContain('id="voice-receptionist-fab"');
     expect(html).toContain('profile items to set');
+  });
+});
+
+describe('VoiceReceptionistFab live voice (VOICE-LIVE-1)', () => {
+  it('exposes a live-support probe that is boolean in any runtime', () => {
+    expect(typeof isLiveVoiceSupported()).toBe('boolean');
+  });
+
+  it('constructs a disconnected live client without touching the DOM', () => {
+    const client = new GeminiLiveAudioClient({});
+    expect(client.isConnected).toBe(false);
+  });
+
+  it('sendText/interrupt/disconnect are safe no-ops before connect', async () => {
+    const client = new GeminiLiveAudioClient({});
+    expect(() => client.sendText('hello')).not.toThrow();
+    expect(() => client.interrupt()).not.toThrow();
+    expect(() => client.sendToolResult('id1', 'update_profile', { ok: true })).not.toThrow();
+    await expect(client.disconnect()).resolves.toBeUndefined();
+    expect(client.isConnected).toBe(false);
+  });
+
+  it('merges incremental live transcripts without duplicating overlaps', () => {
+    // Empty base cases.
+    expect(mergeLiveTranscript('', 'hello')).toBe('hello');
+    expect(mergeLiveTranscript('hello', '')).toBe('hello');
+    // Cumulative re-transcription replaces the prefix.
+    expect(mergeLiveTranscript('my HbA1c', 'my HbA1c is 5.4')).toBe('my HbA1c is 5.4');
+    // Repeated tail segment is absorbed.
+    expect(mergeLiveTranscript('my HbA1c is 5.4', '5.4')).toBe('my HbA1c is 5.4');
+    // Genuinely new segments append.
+    expect(mergeLiveTranscript('ate tempeh', 'and rice')).toBe('ate tempeh and rice');
   });
 });

@@ -82,6 +82,7 @@ import fs from "fs";
 
 export const SINGLE_STAPLE_RE = /\b(croissant|croissants|baguette|bread|toast|muffin|scone|cookie|cupcake|biscuit|pancake|waffle|pastry|doughnut|donut|bun|roll|brioche)\b/i;
 import path from "path";
+import http from "node:http";
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { submitServerJob, recoverInterruptedServerJobs } from './serverJobs';
 import { biomarkerRouter } from './server_routes_biomarkers.js';
@@ -95,6 +96,7 @@ import { medicalGeminiRouter } from './server_routes_medical_gemini.js';
 import { foodAnalyzeRouter } from './server_routes_food_analyze.js';
 import { scorecardRouter } from './server_routes_scorecard.js';
 import { whatsappRouter } from './server_whatsapp.js';
+import { setupGeminiLiveWebSocket } from './server_gemini_live_ws.js';
 
 export const BEVERAGE_RAW_PATTERN = /\b(beverage|drink|water|juice|beer|wine|soda|cola|tea|coffee|cappuccino|espresso|latte|mocha|macchiato|boba|smoothie|shake|milk|oat\s*milk|oatmilk|almond\s*milk|almondmilk|soy\s*milk|soymilk|coconut\s*milk|dairy|yogurt|fruit|melon|watermelon|apple|orange|banana|berry|berries|grape|citrus|salad|raw|fresh|broth|soup)\b/i;
 
@@ -3955,7 +3957,9 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const httpServer = http.createServer(app);
+  setupGeminiLiveWebSocket(httpServer);
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`[Health Cockpit App] Full-Stack server running on port ${PORT}`);
   });
 }
