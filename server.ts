@@ -37,6 +37,7 @@ import { buildFoodAnalyzeInstruction, buildModeAReviewInstruction, buildModeAEdi
 import { ensureFoodCatalogSchema, resetFoodCatalogSchemaEnsure } from "./server_food_catalog_schema.js";
 import { ensureD1Schema } from "./server_d1_schema.js";
 import { reconcileIngredientsToComponents } from './server_vision_scout.js';
+import { toJsonSchema } from './src/server/food/server_food_analyze_schema.js';
 import { resolveInternalFood, resolveDishCache, upsertFoodItemCandidate, upsertFoodAlias, upsertDishCacheCandidate, recordFoodObservation, recordSyncEvent, normalizeFoodKey, normalizeDishKey, getCatalogSyncStatus, mergeFoodCatalogItems, quarantineAtwaterFailures, checkAtwaterValidity, getFallbackCategoryProfile } from './server_food_catalog.js';
 import { sanitizeDishTitle, isGroceryBrandSync, isUnofficialOrCompositeDish } from './serverBrandMenu.js';
 import {
@@ -1949,6 +1950,64 @@ async function callUnifiedLLMInternal({
       walk(output);
       return chunks.join("");
     };
+    // Native schema enforcement for Go models: convert the caller's
+    // Gemini-typed responseSchema to JSON Schema and send it as json_schema
+    // (chat) / text.format json_schema (responses). Falls back to plain
+    // json_object if the gateway rejects it, so an enforcement failure
+    // never fails the meal outright.
+    let goUseSchema = Boolean(isJson && responseSchema);
+    const goSchemaName = ((logStagePrefix || "response").replace(/^:/, "") || "response").slice(0, 64);
+    const goJsonSchemaDoc = (): any => {
+      if (!goUseSchema) return null;
+      try {
+        return toJsonSchema(responseSchema);
+      } catch (e: any) {
+        _localAddDebugLog(`[UnifiedLLM] Go schema convert failed (${e?.message}), using plain JSON mode.`);
+        goUseSchema = false;
+        return null;
+      }
+    };
+    const applyGoJsonMode = (body: any, kind: "responses" | "chat") => {
+      if (!isJson) return body;
+      const js = goJsonSchemaDoc();
+      if (kind === "responses") {
+        body.text = js
+          ? { format: { type: "json_schema", name: goSchemaName, schema: js, strict: false } }
+          : { format: { type: "json_object" } };
+      } else {
+        body.response_format = js
+          ? { type: "json_schema", json_schema: { name: goSchemaName, schema: js, strict: false } }
+          : { type: "json_object" };
+      }
+      return body;
+    };
+    const isGoSchemaRejection = (err: any) => {
+      const m = String(err?.message || "");
+      return /^OpenCode Go API returned 400/.test(m) && /json_schema|response_format|invalid.schema|schema/i.test(m);
+    };
+    // POST with one schema-strip retry: gateway 400 on json_schema rebuilds
+    // the body in plain JSON mode and tries once more.
+    const postGoJson = async (url: string, buildBody: () => any): Promise<any> => {
+      let res = await fetch(url, { method: "POST", headers: goHeaders, body: JSON.stringify(buildBody()) });
+      if (!res.ok && goUseSchema) {
+        const t = await res.text();
+        if (res.status === 400 && /json_schema|response_format|invalid.schema|schema/i.test(t)) {
+          _localAddDebugLog(`[UnifiedLLM] Go gateway rejected json_schema (${t.slice(0, 120)}), retrying plain JSON mode.`);
+          goUseSchema = false;
+          res = await fetch(url, { method: "POST", headers: goHeaders, body: JSON.stringify(buildBody()) });
+        }
+      }
+      if (!res.ok) {
+        const errMsg = await res.text();
+        throw new Error(`OpenCode Go API returned ${res.status}: ${errMsg.slice(0, 300)}. Please try another model.`);
+      }
+      return res.json();
+    };
+    const parseResponsesStream = (s: { completedResp: any; usage: any; streamed: string }) => {
+      const resJson = s.completedResp || {};
+      logGoUsage(resJson?.usage || s.usage);
+      return extractGoResponseText(resJson?.output) || (resJson as any)?.output_text || s.streamed;
+    };
     try {
       if (apiModel.includes("muse-spark")) {
         // Responses API (OpenAI Responses shape): images are input_image parts.
@@ -1961,25 +2020,32 @@ async function callUnifiedLLMInternal({
           input: [{ role: "user", content: inputContent }],
         };
         if (typeof maxOutputTokens === "number") resBody.max_output_tokens = maxOutputTokens;
-        if (isJson) resBody.text = { format: { type: "json_object" } };
-        if (onStream) resBody.reasoning = { summary: "auto" };
+        const buildResBody = () => {
+          const b: any = { ...resBody, input: resBody.input };
+          applyGoJsonMode(b, "responses");
+          if (onStream) b.reasoning = { summary: "auto" };
+          return b;
+        };
         if (onStream) {
           try {
-            const s = await streamGoSse(`${goBase}/responses`, resBody);
-            const resJson = s.completedResp || {};
-            logGoUsage(resJson?.usage || s.usage);
-            const outText = extractGoResponseText(resJson?.output) || (resJson as any)?.output_text || s.streamed;
+            const outText = parseResponsesStream(await streamGoSse(`${goBase}/responses`, buildResBody()));
             return outText || "{}";
           } catch (streamErr: any) {
-            _localAddDebugLog(`[UnifiedLLM] Go stream failed (${streamErr?.message}), falling back to unary.`);
+            if (isGoSchemaRejection(streamErr)) {
+              goUseSchema = false;
+              _localAddDebugLog(`[UnifiedLLM] Go stream rejected json_schema, retrying stream plain.`);
+              try {
+                const outText = parseResponsesStream(await streamGoSse(`${goBase}/responses`, buildResBody()));
+                return outText || "{}";
+              } catch (e2: any) {
+                _localAddDebugLog(`[UnifiedLLM] Go stream failed (${e2?.message}), falling back to unary.`);
+              }
+            } else {
+              _localAddDebugLog(`[UnifiedLLM] Go stream failed (${streamErr?.message}), falling back to unary.`);
+            }
           }
         }
-        const res = await fetch(`${goBase}/responses`, { method: "POST", headers: goHeaders, body: JSON.stringify(resBody) });
-        if (!res.ok) {
-          const errMsg = await res.text();
-          throw new Error(`OpenCode Go API returned ${res.status}: ${errMsg.slice(0, 300)}. Please try another model.`);
-        }
-        const resJson = (await res.json()) as any;
+        const resJson: any = await postGoJson(`${goBase}/responses`, buildResBody);
         logGoUsage(resJson?.usage);
         const outText = extractGoResponseText(resJson?.output) || (resJson as any)?.output_text || "";
         if (onStream && outText) onStream(outText, false);
@@ -1998,25 +2064,37 @@ async function callUnifiedLLMInternal({
           { role: "user", content: userContent },
         ],
       };
-      if (isJson) chatBody.response_format = { type: "json_object" };
       if (typeof maxOutputTokens === "number") chatBody.max_tokens = maxOutputTokens;
       if (typeof temperature === "number") chatBody.temperature = temperature;
+      const buildChatBody = () => {
+        const b: any = { ...chatBody, messages: chatBody.messages };
+        applyGoJsonMode(b, "chat");
+        return b;
+      };
       if (onStream) {
         try {
-          const s = await streamGoSse(`${goBase}/chat/completions`, { ...chatBody, stream_options: { include_usage: true } });
+          const s = await streamGoSse(`${goBase}/chat/completions`, { ...buildChatBody(), stream_options: { include_usage: true } });
           logGoUsage(s.completedResp?.usage || s.usage);
           const outText = s.completedMsg?.content || s.streamed;
           return outText || "{}";
         } catch (streamErr: any) {
-          _localAddDebugLog(`[UnifiedLLM] Go stream failed (${streamErr?.message}), falling back to unary.`);
+          if (isGoSchemaRejection(streamErr)) {
+            goUseSchema = false;
+            _localAddDebugLog(`[UnifiedLLM] Go stream rejected json_schema, retrying stream plain.`);
+            try {
+              const s2 = await streamGoSse(`${goBase}/chat/completions`, { ...buildChatBody(), stream_options: { include_usage: true } });
+              logGoUsage(s2.completedResp?.usage || s2.usage);
+              const outText2 = s2.completedMsg?.content || s2.streamed;
+              return outText2 || "{}";
+            } catch (e2: any) {
+              _localAddDebugLog(`[UnifiedLLM] Go stream failed (${e2?.message}), falling back to unary.`);
+            }
+          } else {
+            _localAddDebugLog(`[UnifiedLLM] Go stream failed (${streamErr?.message}), falling back to unary.`);
+          }
         }
       }
-      const res = await fetch(`${goBase}/chat/completions`, { method: "POST", headers: goHeaders, body: JSON.stringify(chatBody) });
-      if (!res.ok) {
-        const errMsg = await res.text();
-        throw new Error(`OpenCode Go API returned ${res.status}: ${errMsg.slice(0, 300)}. Please try another model.`);
-      }
-      const chatJson = (await res.json()) as any;
+      const chatJson: any = await postGoJson(`${goBase}/chat/completions`, buildChatBody);
       logGoUsage(chatJson?.usage);
       const outText = chatJson?.choices?.[0]?.message?.content || "";
       if (onStream && outText) onStream(outText, false);

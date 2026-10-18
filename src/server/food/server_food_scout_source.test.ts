@@ -25,7 +25,7 @@ import {
   runScoutRetryLoop,
   countCompareExtracted,
 } from './server_food_scout_source';
-import { visionScoutResponseSchema } from './server_food_analyze_schema';
+import { visionScoutResponseSchema, toJsonSchema } from './server_food_analyze_schema';
 
 describe('F-8.10 shard 9 — scout item sourcing', () => {
   it('inherits finalized items from the active meal for edits', () => {
@@ -836,5 +836,36 @@ describe('preserveLabelTruth', () => {
   it('is a no-op on empty inputs', () => {
     expect(preserveLabelTruth({}).restored).toEqual([]);
     expect(preserveLabelTruth({ priorItems: [{ dishName: 'X', rawNutritionLabel: LABEL }], nextItems: [] }).restored).toEqual([]);
+  });
+});
+
+describe('toJsonSchema (Go native schema enforcement)', () => {
+  it('lowercases Gemini Type enums and unions nullable', () => {
+    const out = toJsonSchema({
+      type: 'OBJECT',
+      properties: {
+        name: { type: 'STRING' },
+        weight: { type: 'NUMBER', nullable: true },
+        tags: { type: 'ARRAY', items: { type: 'STRING' }, nullable: true },
+      },
+      required: ['name'],
+    });
+    expect(out.type).toBe('object');
+    expect(out.properties.name.type).toBe('string');
+    expect(out.properties.weight.type).toEqual(['number', 'null']);
+    expect(out.properties.tags.type).toEqual(['array', 'null']);
+    expect(out.properties.tags.items.type).toBe('string');
+    expect(out.required).toEqual(['name']);
+    expect(JSON.stringify(out)).not.toMatch(/nullable/);
+  });
+
+  it('converts the scout schema without nullable or uppercase types', () => {
+    const out = toJsonSchema(visionScoutResponseSchema);
+    const flat = JSON.stringify(out);
+    expect(flat).not.toMatch(/"type":"[A-Z]+"/);
+    expect(flat).not.toMatch(/nullable/);
+    expect(out.required).toEqual(['contentType', 'diningEnvironment', 'dishes']);
+    expect(out.properties.dishes.items.properties.dishName.type).toBe('string');
+    expect(out.properties.dishes.items.required).toContain('boundingBox2D');
   });
 });
