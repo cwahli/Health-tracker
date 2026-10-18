@@ -198,7 +198,18 @@ export default function AppShell(p: AppViewProps) {
     );
   }
   if (!profile) {
-    return <AuthScreen onLogin={handleLogin} />;
+    return (
+      <div className="relative min-h-screen bg-theme-bg text-theme-text font-sans">
+        <AuthScreen onLogin={handleLogin} />
+        <VoiceReceptionistFab
+          profile={null}
+          setProfile={setProfile}
+          saveAndSync={saveAndSync}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+        />
+      </div>
+    );
   }
   const isMedicalTabFAB = ['medical', 'insights'].includes(activeTab);
   return (
