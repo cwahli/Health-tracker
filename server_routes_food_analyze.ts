@@ -355,7 +355,56 @@ foodAnalyzeRouter.post("/api/gemini/front-desk", async (req, res) => {
   }
 });
 
+// Direct Gemini Voice Transcription Endpoint (universal fallback for Web Speech API)
+foodAnalyzeRouter.post("/api/gemini/voice-transcribe", async (req, res) => {
+  try {
+    const { audio, mimeType, language } = req.body;
+    if (!audio) {
+      return res.status(400).json({ error: "Missing audio payload" });
+    }
 
+    let base64Data = audio;
+    let actualMime = mimeType || "audio/webm";
+    if (typeof audio === 'string' && audio.startsWith("data:")) {
+      const parts = audio.split(";base64,");
+      const match = parts[0].match(/data:(.*)/);
+      if (match) actualMime = match[1];
+      base64Data = parts[1];
+    }
+
+    const ai = getGeminiClient();
+    const langPrompt = language ? ` The audio language is likely ${language}.` : "";
+    const prompt = `Transcribe the spoken words in this audio recording accurately.${langPrompt} Return ONLY the verbatim transcribed text, without commentary, markdown headers, or quotes. If there is no speech or only background noise, return an empty string.`;
+
+    const response = await withGeminiRetry(() =>
+      ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                inlineData: {
+                  data: base64Data,
+                  mimeType: actualMime,
+                },
+              },
+              {
+                text: prompt,
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    const text = (response.text || "").trim();
+    return res.json({ text });
+  } catch (err: any) {
+    console.error("[VoiceTranscribe] Error:", err);
+    return res.status(500).json({ error: err.message || "Failed to transcribe audio" });
+  }
+});
 
 foodAnalyzeRouter.post("/api/gemini/food-analyze", (req, res) => {
   return runFoodAnalyze(req, res);
