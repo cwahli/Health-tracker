@@ -63,3 +63,21 @@ A meal ticket is not reviewable until all three hold:
    can mask a phantom (unreplicated blob reads as notFound) for
    several minutes. The caption file carries name + bytes + md5 so a
    ghost is a two-minute diagnosis, not a re-capture.
+
+## Standing rule — provider/model changes need a live agent-account run
+
+Proven 2026-10-18 (Go models rollout, #816/#826): unit tests + ad-hoc
+API spikes do not prove a model works in the meal pipeline. Before a
+model or provider change goes live, replay one real meal end-to-end:
+
+1. **Agent account, never the user's.** Demo login is local-only and
+   `/api/jobs/submit` answers it 401, so the demo run fails before the
+   server. Use a dedicated server-side account (`/api/auth/signup`,
+   e.g. `agent-probe@…`) with its token injected — the user's ledger
+   stays untouched and the D1 job is traceable to the test account.
+2. **Exact replay.** Same photos (re-fetch via the live `/photos/`
+   proxy when R2 URLs expire) + verbatim user message.
+3. **Cite the job_id visibly** (entry caption + output caption).
+4. **Entry + output shots**, loaded-with-data; send on TG when asked.
+5. **Verify in D1**, not just pixels: canonical keys, boundingBox2D
+   present (not full-frame), nutrients against the label truth.
