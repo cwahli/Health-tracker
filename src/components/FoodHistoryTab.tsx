@@ -1965,26 +1965,16 @@ export default function FoodHistoryTab({
                           </div>
                         </>
                       ) : (
-                      <div className="flex justify-between items-start">
-                        <div className="min-w-0 flex-1 text-left">
-                          <h3 className="font-bold text-theme-text text-sm">
-                            {log.name}
-                          </h3>
+                      <div className="min-w-0 flex-1 text-left">
+                        <h3 className="font-bold text-theme-text text-sm">
+                          {log.name}
+                        </h3>
 
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
-                              {formatLogDateTime(log.date, (log as any).updated_at, profile?.timezone)}
-                            </span>
-                            <MealVerdictBadge log={log} language={profile?.language} getColorClass={getRecommendationColorClass} />
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <MealDownloadButton log={log} retentionStatusMap={retentionStatusMap} onDownload={handleDownloadDebugLog} title={t.downloadDebugLog} />
-
-                          <MealEditButton log={log} onEdit={handleStartEdit} title={t.editFoodLog} />
-
-                          <MealDeleteButton logId={log.id} onDelete={onDeleteFoodLog} title={t.deleteEntry} />
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
+                            {formatLogDateTime(log.date, (log as any).updated_at, profile?.timezone)}
+                          </span>
+                          <MealVerdictBadge log={log} language={profile?.language} getColorClass={getRecommendationColorClass} />
                         </div>
                       </div>
                       )}
@@ -2051,6 +2041,7 @@ export default function FoodHistoryTab({
                               </>
                             )}
                             <span className="flex-1" />
+                            <MealDownloadButton log={log} retentionStatusMap={retentionStatusMap} onDownload={handleDownloadDebugLog} title={t.downloadDebugLog} />
                             <MealEditButton log={log} onEdit={handleStartEdit} title={t.editFoodLog} />
                             <MealDeleteButton logId={log.id} onDelete={onDeleteFoodLog} title={t.deleteEntry} />
                           </div>

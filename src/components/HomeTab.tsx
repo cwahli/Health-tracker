@@ -146,7 +146,6 @@ export default function HomeTab({
   const [reviewingBiomarkerKey, setReviewingBiomarkerKey] = React.useState<string | null>(null);
   const [reviewHistories, setReviewHistories] = React.useState<{[key: string]: ChatMessage[]}>({});
   const [isFoodIdeaChatOpen, setIsFoodIdeaChatOpen] = React.useState(false);
-  const [isDailyRecommendationChatOpen, setIsDailyRecommendationChatOpen] = React.useState(false);
 
   const [jobs, setJobs] = React.useState(() => JobStore.getAllJobs().filter(j => j.kind === 'food_log' || j.kind === 'food_compare' || j.kind === 'medical' || j.kind === 'front_desk'));
   React.useEffect(() => {
@@ -1184,27 +1183,6 @@ export default function HomeTab({
           </div>
         );
       })()}
-
-      {/* Daily Recommendation */}
-      <div id="primary-action-card" className="p-2">
-        <div className="flex items-center justify-between bg-theme-bg-card p-4 rounded-2xl border border-theme-border shadow-sm">
-          <div className="space-y-1">
-            <h3 className="text-sm font-bold text-theme-text flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-indigo-500" />
-              {t.dailyRecommendation}
-            </h3>
-            <p className="text-xs text-theme-text-secondary">
-              {t.dailyRecommendationDesc}
-            </p>
-          </div>
-          <button
-            onClick={() => setIsDailyRecommendationChatOpen(true)}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer whitespace-nowrap"
-          >
-            {t.whatsUpToday}
-          </button>
-        </div>
-      </div>
 
       {/* Nutrition Allowance Tracker Dashboard (MOVED UP just above Health Status & BMI) */}
       <div id="dashboard-nutrition-targets" className="space-y-4">
@@ -2347,23 +2325,6 @@ export default function HomeTab({
           />
         )}
 
-        {isDailyRecommendationChatOpen && (
-          <LogChat 
-            type="daily_recommendation"
-            isOpen={isDailyRecommendationChatOpen}
-            onClose={() => setIsDailyRecommendationChatOpen(false)}
-            profile={profile}
-            foodLogs={activeFoodLogs}
-            biomarkers={biomarkers}
-            biomarkerHistory={activeHistory}
-            report={report}
-            actions={actions}
-            googleSteps={googleSteps}
-            selectedModelId={selectedModelId}
-            onChangeModelId={onChangeModelId}
-            autoSendMessage={t.whatsUpTodayAction}
-          />
-        )}
       </React.Suspense>
 
       {/* Flagged Biomarkers & Telemetry Error Management Modal */}

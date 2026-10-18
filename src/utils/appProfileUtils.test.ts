@@ -21,8 +21,8 @@ describe('q-9 Node1 AppDynamicStyles parity (verbatim extract)', () => {
 
   it('scales every dynamic font size proportionally with fontScale', () => {
     const base = getDynamicStyles({ fontSize: 'normal', fontFamily: 'Inter', fontMono: 'JetBrains Mono' });
-    expect(base).toContain('font-size: 16px');
-    expect(base).toContain('--font-scale: 1');
+    expect(base).toContain('font-size: 17.6px');
+    expect(base).toContain('--font-scale: 1.1');
     const big = getDynamicStyles({ fontSize: 'normal', fontFamily: 'Inter', fontMono: 'JetBrains Mono', fontScale: 1.2 });
     expect(big).toContain('font-size: 19.2px');
     expect(big).toContain('--font-scale: 1.2');
@@ -31,10 +31,10 @@ describe('q-9 Node1 AppDynamicStyles parity (verbatim extract)', () => {
     expect(small).toContain('font-size: 13.6px');
   });
 
-  it('clamps invalid fontScale values to 1', () => {
+  it('clamps invalid fontScale values to the 1.1 default', () => {
     for (const bad of [undefined, null, NaN, 'huge']) {
       const css = getDynamicStyles({ fontSize: 'normal', fontFamily: 'Inter', fontMono: 'JetBrains Mono', fontScale: bad as any });
-      expect(css).toContain('--font-scale: 1');
+      expect(css).toContain('--font-scale: 1.1');
     }
     const low = getDynamicStyles({ fontSize: 'normal', fontFamily: 'Inter', fontMono: 'JetBrains Mono', fontScale: 0.2 });
     expect(low).toContain('--font-scale: 0.8');

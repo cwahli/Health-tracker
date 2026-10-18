@@ -10,11 +10,11 @@ export const getDynamicStyles = (profile: any) => {
   const fontFamily = profile.fontFamily || 'Inter';
   const fontMono = profile.fontMono || 'JetBrains Mono';
   // Global proportional text scale from the theme editor stepper (0.8–1.3).
-  // Sanitized: non-finite or out-of-range values fall back to 1 (no scaling).
+  // Sanitized: non-finite or out-of-range values fall back to 1.1 (default).
   const _rawScale = profile.fontScale === undefined || profile.fontScale === null || profile.fontScale === ''
-    ? 1
+    ? 1.1
     : Number(profile.fontScale);
-  const fontScale = Number.isFinite(_rawScale) ? Math.min(1.3, Math.max(0.8, _rawScale)) : 1;
+  const fontScale = Number.isFinite(_rawScale) ? Math.min(1.3, Math.max(0.8, _rawScale)) : 1.1;
   /** Multiply a '<number>px' size by the global scale, rounded to 0.1px. */
   const scaled = (pxValue: string): string => {
     const n = parseFloat(pxValue);
