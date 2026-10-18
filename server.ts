@@ -1835,6 +1835,102 @@ async function callUnifiedLLMInternal({
     }
   }
 
+  // 0. OpenCode Go models (subscription gateway, OpenAI-compatible HTTP).
+  // Go requires client identification headers; without User-Agent +
+  // x-opencode-session the gateway 403s (verified 2026-10-18).
+  if (normalizedModelId.includes("opencode-go/")) {
+    const opencodeKey = firstEnvValue(['OPENCODE_API_KEY', 'OPENCODE_GO_API_KEY']);
+    if (!opencodeKey) {
+      throw new Error(`API key is not configured for ${rawModelStr}. Set OPENCODE_API_KEY (OpenCode Go subscription) or try another model.`);
+    }
+    const goStageTag = logStagePrefix ? `:${logStagePrefix}` : '';
+    const apiModel = rawModelStr.includes('/') ? rawModelStr.split('/').slice(1).join('/').split('#')[0] : rawModelStr;
+    const goHeaders = {
+      "Authorization": `Bearer ${opencodeKey}`,
+      "Content-Type": "application/json",
+      "User-Agent": "health-tracker/1.0",
+      "x-opencode-session": String(explicitSessionId || logStagePrefix || 'health-tracker'),
+    };
+    const goBase = "https://opencode.ai/zen/go/v1";
+    console.log(`[UnifiedLLM] Calling OpenCode Go API: ${apiModel}`);
+    _localAddDebugLog(`[UnifiedLLM${goStageTag}] Dispatching prompt to model: "${apiModel}" via OpenCode Go. Attaching ${normalizedImagePayloads.length} image part(s).`);
+    const logGoUsage = (usage: any) => {
+      try {
+        const p = Number(usage?.prompt_tokens ?? usage?.input_tokens) || 0;
+        const c = Number(usage?.completion_tokens ?? usage?.output_tokens) || 0;
+        const t = Number(usage?.total_tokens ?? usage?.totalTokens) || (p + c);
+        if (!t) return;
+        const stage = (logStagePrefix || '').replace(/^:/, '') || 'unknown';
+        recordUnifiedUsage(stage, { promptTokens: p, candidatesTokens: c, totalTokens: t });
+        _localAddDebugLog(`[UnifiedLLM-Usage:${stage}] prompt=${p} completion=${c} total=${t}`);
+      } catch { /* usage logging must never break generation */ }
+    };
+    try {
+      if (apiModel.includes("muse-spark")) {
+        // Responses API (OpenAI Responses shape): images are input_image parts.
+        const inputContent: any[] = [{ type: "input_text", text: promptText }];
+        for (const img of normalizedImagePayloads) {
+          inputContent.push({ type: "input_image", image_url: `data:${img.mimeType};base64,${img.data}` });
+        }
+        const resBody: any = {
+          model: apiModel,
+          input: [{ role: "user", content: inputContent }],
+        };
+        if (typeof maxOutputTokens === "number") resBody.max_output_tokens = maxOutputTokens;
+        if (isJson) resBody.text = { format: { type: "json_object" } };
+        const res = await fetch(`${goBase}/responses`, { method: "POST", headers: goHeaders, body: JSON.stringify(resBody) });
+        if (!res.ok) {
+          const errMsg = await res.text();
+          throw new Error(`OpenCode Go API returned ${res.status}: ${errMsg.slice(0, 300)}. Please try another model.`);
+        }
+        const resJson = (await res.json()) as any;
+        logGoUsage(resJson?.usage);
+        const chunks: string[] = [];
+        const walk = (node: any): void => {
+          if (node == null || typeof node === "string") return;
+          if (Array.isArray(node)) { node.forEach(walk); return; }
+          if (typeof node === "object") {
+            if ((node.type === "output_text" || node.type === "input_text") && typeof node.text === "string") chunks.push(node.text);
+            Object.values(node).forEach(walk);
+          }
+        };
+        walk(resJson?.output);
+        const outText = chunks.join("") || resJson?.output_text || "";
+        if (onStream && outText) onStream(outText, false);
+        return outText || "{}";
+      }
+      // Chat Completions API (DeepSeek V4.1 Flash et al, OpenAI-compatible).
+      // Images belong in the user message only (system + image = 400).
+      const userContent: any[] = [{ type: "text", text: promptText }];
+      for (const img of normalizedImagePayloads) {
+        userContent.push({ type: "image_url", image_url: { url: `data:${img.mimeType};base64,${img.data}` } });
+      }
+      const chatBody: any = {
+        model: apiModel,
+        messages: [
+          ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
+          { role: "user", content: userContent },
+        ],
+      };
+      if (isJson) chatBody.response_format = { type: "json_object" };
+      if (typeof maxOutputTokens === "number") chatBody.max_tokens = maxOutputTokens;
+      if (typeof temperature === "number") chatBody.temperature = temperature;
+      const res = await fetch(`${goBase}/chat/completions`, { method: "POST", headers: goHeaders, body: JSON.stringify(chatBody) });
+      if (!res.ok) {
+        const errMsg = await res.text();
+        throw new Error(`OpenCode Go API returned ${res.status}: ${errMsg.slice(0, 300)}. Please try another model.`);
+      }
+      const chatJson = (await res.json()) as any;
+      logGoUsage(chatJson?.usage);
+      const outText = chatJson?.choices?.[0]?.message?.content || "";
+      if (onStream && outText) onStream(outText, false);
+      return outText || "{}";
+    } catch (err: any) {
+      if (/^OpenCode Go API returned/.test(String(err?.message || ""))) throw err;
+      throw new Error(`Error connecting to OpenCode Go: ${err.message || err}. Please try another model.`);
+    }
+  }
+
   // 1. Anthropic Claude Models
   if (normalizedModelId.includes("claude-")) {
     const anthropicKey = process.env.ANTHROPIC_API_KEY;
