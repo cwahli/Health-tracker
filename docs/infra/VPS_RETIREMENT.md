@@ -77,6 +77,20 @@ Notes for whoever goes looking:
    `remote.origin.fetch`. With those branches deleted, `git fetch` would have
    pulled **nothing**, silently. Both now use the standard
    `+refs/heads/*:refs/remotes/origin/*`.
+3. **Google API gems landed in the wrong Ruby.** Ruby on the box is 3.3.8
+   (gem home `/var/lib/gems/3.3.0`) but the Google gems were provisioned under
+   `/var/lib/gems/3.2.0`, so `require 'google/apis/sheets_v4'` failed for every
+   consumer: all five `do-github-sync` sweeps (`sweep_stale`, `watch_activity`,
+   `proof_linker`, `pending_sweep`, `session_link`) exited through
+   `ruby_boot`, and `~/bin/pull_drive_shot.rb` died on `google/apis/drive_v3`
+   every 2 minutes. The box could not file a ticket into
+   `~/.agents/nudges/inbox-vps-id.md` and could not see screenshots dropped in
+   Drive. Fixed by installing, into 3.3, the same versions the 3.2 tree
+   carried — `google-apis-sheets_v4 0.49.0`, `google-apis-drive_v3 0.88.0`,
+   `googleauth 1.17.5` — after which all five sweeps and the mirror run.
+4. **A missing log directory.** `/tmp/opencode/sweep/` did not exist and the
+   four sweep cron lines append into it, so the shell failed before the script
+   ran. Recreated.
 
 ## 5. Still owed
 
@@ -94,3 +108,6 @@ Notes for whoever goes looking:
 - **Firebase authorised domain:** if `/app/login`'s Google popup reports
   `unauthorized-domain`, add `app.health-tracker.co.uk` in the Firebase console
   for project `health-tracker-b04dd`.
+- **Unrelated, observed while auditing this box:** `~/flight-loop.log` reports
+  `colab down/stalled (hb s, last report 0B)` on the 07/27/47 run, last line
+  2026-10-18 09:47. Nothing in the re-home touches it; it wants its own ticket.
