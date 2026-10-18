@@ -35,7 +35,16 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import type { LiveServerMessage, Session } from '@google/genai';
 import { cleanEnvValue, firstEnvValue } from './src/utils/envKey.js';
 
-const wsRequire = createRequire(import.meta.url);
+// The production bundle is CJS (esbuild --format=cjs), where import.meta.url
+// is undefined — so never base createRequire on import.meta. A package.json
+// path works in both tsx dev (ESM) and the bundled CJS server.
+function loadWsServerCtor(): any {
+  const g = globalThis as any;
+  try {
+    if (typeof g.require === 'function') return g.require('ws').WebSocketServer;
+  } catch { /* fall through to createRequire */ }
+  return createRequire(`${process.cwd()}/package.json`)('ws').WebSocketServer;
+}
 
 export const LIVE_WS_PATH = '/api/gemini/live-ws';
 // Primary engine (best clinical reasoning + natural voice); safety failover
@@ -455,7 +464,7 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
 export function setupGeminiLiveWebSocket(server: HttpServer): void {
   let WebSocketServerCtor: any;
   try {
-    WebSocketServerCtor = wsRequire('ws').WebSocketServer;
+    WebSocketServerCtor = loadWsServerCtor();
   } catch (err) {
     console.warn('[GeminiLiveWS] ws unavailable — live voice relay disabled:', (err as Error)?.message);
     return;
