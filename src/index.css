@@ -67,9 +67,14 @@ body {
 
 /* Deep Sea (Accessible) default: floor for fixed-pixel microcopy utilities.
    8-9px hints and 10-11px labels render at readable sizes; all text pairs in
-   the default palette clear AAA 7:1 so size is never a contrast crutch. */
-.text-\[8px\], .text-\[9px\] { font-size: 12px !important; }
-.text-\[10px\], .text-\[11px\] { font-size: 14px !important; }
+   the default palette clear AAA 7:1 so size is never a contrast crutch.
+   Every floor scales with the global text-size setting (--font-scale), so the
+   theme Text Size stepper moves all microcopy together. */
+.text-\[8px\], .text-\[8\.5px\], .text-\[9px\], .text-\[9\.5px\] { font-size: calc(12px * var(--font-scale, 1)) !important; }
+.text-\[10px\], .text-\[10\.5px\], .text-\[11px\], .text-\[11\.5px\] { font-size: calc(14px * var(--font-scale, 1)) !important; }
+.text-\[12px\] { font-size: calc(12px * var(--font-scale, 1)) !important; }
+.text-\[13px\] { font-size: calc(13px * var(--font-scale, 1)) !important; }
+.text-\[15px\] { font-size: calc(15px * var(--font-scale, 1)) !important; }
 
 .form-input-styled {
   background-color: #f8fafc; /* bg-slate-50 */

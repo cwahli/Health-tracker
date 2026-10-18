@@ -201,6 +201,8 @@ test.describe('saved-meal lineage', () => {
     await gotoHistory(page);
     const masterCard = page.locator(`#food-log-item-${master.id}`);
     await expect(masterCard).toBeVisible({ timeout: 15000 });
+    // Actions live inside the expanded area: expand the card first.
+    await masterCard.locator('h3').click();
     await masterCard.locator('button[title="Edit Food Log"]').click();
     await masterCard.locator('input[type="text"]').first().fill('Lineage Oat Bowl v2');
     await masterCard.locator('button[title="Save All Changes"]').click();
@@ -252,6 +254,8 @@ test.describe('saved-meal lineage', () => {
     await gotoHistory(page);
     const card = page.locator(`#food-log-item-${original.id}`);
     await expect(card).toBeVisible({ timeout: 15000 });
+    // Actions live inside the expanded area: expand the card first.
+    await card.locator('h3').click();
     await card.locator('button[title="Edit Food Log"]').click();
     await card.locator('button[title="Review"]').click();
 
