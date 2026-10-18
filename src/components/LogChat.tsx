@@ -183,11 +183,11 @@ export default function LogChat({
   // handoff — Case 1 must render the specialist card in the same modal.
   const chromeAgentKey: AgentType = type === 'front_desk' ? 'front_desk' : (activeAgentKey || (type as AgentType));
   const chromeAgentConfig = AGENT_REGISTRY[chromeAgentKey] || activeAgentConfig;
-  const isUnified = ['food', 'medical', 'food_idea', 'daily_recommendation'].includes(type) && getAgentRolloutStatus(type as AgentType) === 'unified';
+  const isUnified = ['food', 'medical', 'food_idea'].includes(type) && getAgentRolloutStatus(type as AgentType) === 'unified';
   const isAgent = (targetType: AgentType | string) => {
     if (effectiveAgentType === targetType) return true;
     if (targetType === 'health_baseline' && ((effectiveAgentType as any) === 'health_coach' || effectiveAgentType === 'health_baseline')) return true;
-    if (['medical', 'food', 'food_idea', 'daily_recommendation'].includes(targetType)) {
+    if (['medical', 'food', 'food_idea'].includes(targetType)) {
       if (targetType === 'medical' && (effectiveAgentType === 'health_baseline' || (effectiveAgentType as any) === 'health_coach' || (effectiveAgentType as any) === 'front_desk')) {
         return false;
       }
@@ -3321,7 +3321,6 @@ ${logsText}`);
       let endpoint = '';
       if (isAgent('food')) endpoint = '/api/gemini/food-analyze';
       else if (isAgent('food_idea')) endpoint = '/api/gemini/food-idea';
-      else if (isAgent('daily_recommendation')) endpoint = '/api/gemini/daily-recommendation-chat';
       else if (isAgent('health_baseline') || (isHandoffContinuation && (downstreamTargetAgent === 'health_baseline' || !downstreamTargetAgent))) endpoint = '/api/gemini/health-baseline-analyze';
       else if (isAgent('front_desk') && !isHandoffContinuation) endpoint = '/api/gemini/front-desk';
       else endpoint = '/api/gemini/medical-analyze';
@@ -3507,54 +3506,6 @@ ${logsText}`);
           potassiumTarget: remainingAllowance.potassiumTarget,
           unsaturatedFat: remainingAllowance.unsaturatedFat,
           unsaturatedFatTarget: remainingAllowance.unsaturatedFatTarget,
-        };
-      } else if (isAgent('daily_recommendation')) {
-        const now = new Date();
-        const currentYear = now.getFullYear();
-        const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
-        const monthPrefix = `${currentYear}-${currentMonth}`;
-        // Filter food logs for this month
-        const thisMonthFoodLogs = (activeFoodLogs || []).filter(f => f.date && f.date.startsWith(monthPrefix));
-        // Group by day
-        const dailyNutrientIntake: { [date: string]: { [nutrient: string]: number } } = {};
-        thisMonthFoodLogs.forEach(log => {
-          const d = log.date;
-          if (!dailyNutrientIntake[d]) {
-            dailyNutrientIntake[d] = {
-              calories: 0,
-              protein: 0,
-              saturatedFat: 0,
-              sodium: 0,
-              carbohydrates: 0,
-              totalFat: 0
-            };
-          }
-          const nut = (log.nutrients || {}) as any;
-          dailyNutrientIntake[d].calories += Number(nut.calories || 0);
-          dailyNutrientIntake[d].protein += Number(nut.protein || 0);
-          dailyNutrientIntake[d].saturatedFat += Number(nut.saturatedFat || 0);
-          dailyNutrientIntake[d].sodium += Number(nut.sodium || 0);
-          dailyNutrientIntake[d].carbohydrates += Number(nut.carbohydrates || 0);
-          dailyNutrientIntake[d].totalFat += Number(nut.totalFat || 0);
-        });
-        const emailSuffix = profile?.email ? `_${profile.email.toLowerCase().trim()}` : '_guest';
-        const stepsHistoryStr = localStorage.getItem(`googleStepsHistory${emailSuffix}`);
-        let stepsHistory: { date: string, value: number }[] = [];
-        if (stepsHistoryStr) {
-          try {
-            stepsHistory = JSON.parse(stepsHistoryStr);
-          } catch (e) {}
-        }
-        const thisMonthSteps = stepsHistory.filter(h => h.date && h.date.startsWith(monthPrefix));
-        bodyData.foodLogs = (activeFoodLogs || []).map(f => ({ name: f.name, date: f.date, nutrients: f.nutrients }));
-        bodyData.biomarkers = biomarkers;
-        bodyData.report = report;
-        bodyData.actions = actions;
-        bodyData.steps = googleSteps;
-        bodyData.location = loc;
-        bodyData.thisMonthTrends = {
-          dailyNutrientIntake,
-          stepsHistory: thisMonthSteps
         };
       } else if (isAgent('health_baseline') || (isHandoffContinuation && (downstreamTargetAgent === 'health_baseline' || !downstreamTargetAgent))) {
         bodyData.biomarkers = biomarkers;
@@ -4787,7 +4738,7 @@ ${logsText}`);
     });
     if (!autoSendGate.run) return;
     console.log(`[DIAG5] auto-send effect fired: isOpen=${isOpen}, agentType=${agentType}, hasHandoffPayload=${!!handoffPayload}, effectiveAutoSend=${effectiveAutoSend ? JSON.stringify(effectiveAutoSend).slice(0, 120) : 'null'}`);
-    if (isOpen && effectiveAutoSend && (isAgent('medical') || isAgent('daily_recommendation') || isAgent('health_baseline'))) {
+    if (isOpen && effectiveAutoSend && (isAgent('medical') || isAgent('health_baseline'))) {
       if (agentType === 'agent1' || agentType === 'agent2' || agentType === 'agent3' || agentType === 'agent4' || agentType === 'agent5' || agentType === 'agent7') {
         console.log(`[DIAG5] auto-send effect: bailing out early, agentType ${agentType} is in the excluded list`);
         return;
@@ -6151,7 +6102,7 @@ ${logsText}`);
                     </button>
                   ) : null
                 ) : (
-                  !isAgent('food_idea') && !isAgent('daily_recommendation') && !(isAgent('medical') && !agentType) && !isAgent('health_baseline') && (
+                  !isAgent('food_idea') && !(isAgent('medical') && !agentType) && !isAgent('health_baseline') && (
                     <button
                       type="button"
                       onClick={() => {

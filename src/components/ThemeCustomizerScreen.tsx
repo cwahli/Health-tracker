@@ -1009,7 +1009,7 @@ export default function ThemeCustomizerScreen({ theme }: ThemeCustomizerScreenPr
                       type="button"
                       aria-label="Decrease text size"
                       onClick={() => {
-                        const cur = Number.isFinite(Number(profile.fontScale)) ? Number(profile.fontScale) : 1;
+                        const cur = Number.isFinite(Number(profile.fontScale)) ? Number(profile.fontScale) : 1.1;
                         setProfile({ ...profile, fontScale: Math.max(0.8, Math.round((cur - 0.05) * 100) / 100) });
                       }}
                       className="w-11 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xl font-bold cursor-pointer transition-all"
@@ -1017,13 +1017,13 @@ export default function ThemeCustomizerScreen({ theme }: ThemeCustomizerScreenPr
                       −
                     </button>
                     <span className="text-sm font-bold text-slate-800 dark:text-slate-100 w-14 text-center">
-                      {Math.round((Number.isFinite(Number(profile.fontScale)) ? Number(profile.fontScale) : 1) * 100)}%
+                      {Math.round((Number.isFinite(Number(profile.fontScale)) ? Number(profile.fontScale) : 1.1) * 100)}%
                     </span>
                     <button
                       type="button"
                       aria-label="Increase text size"
                       onClick={() => {
-                        const cur = Number.isFinite(Number(profile.fontScale)) ? Number(profile.fontScale) : 1;
+                        const cur = Number.isFinite(Number(profile.fontScale)) ? Number(profile.fontScale) : 1.1;
                         setProfile({ ...profile, fontScale: Math.min(1.3, Math.round((cur + 0.05) * 100) / 100) });
                       }}
                       className="w-11 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xl font-bold cursor-pointer transition-all"
