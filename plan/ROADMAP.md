@@ -33,7 +33,7 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 ## Current work — sequence closed on the VM fleet (2026-10-09)
 
-R-14.1 through R-16 are closed. Do not restart them. Do not give two agents the same file (`scripts/bot-host.mjs`, `scripts/lib/free-lanes.mjs`, `scripts/lib/work-session.mjs`). The open list under this sequence is V-17b (console checks); D-10 DONE 2026-10-12.
+R-14.1 through R-16 are closed. Do not restart them. Do not give two agents the same file (`scripts/bot-host.mjs`, `scripts/lib/free-lanes.mjs`, `scripts/lib/work-session.mjs`). The open list under this sequence is closed: V-17b is done by host retirement (2026-10-18), D-10 DONE 2026-10-12.
 
 1. **R-14.1 COMPLETE (2026-10-06).** Cards in [R14_1_AGENT_PLAN.md](./R14_1_AGENT_PLAN.md), card state and evidence in [R14_1_LIVE_PASS.md](./R14_1_LIVE_PASS.md) — cards 1–8 proven live on `@VM_19485_bot`, card 9 re-scoped on the record to the VM-fleet baseline per owner directive. Location-agnostic spine built and verified.
 2. **TUI steps 1–4 COMPLETE (2026-10-06).** [TUI_IMPLEMENTATION.md](./TUI_IMPLEMENTATION.md) rows S1–S8 landed and deployed (`tui-gateway`, `/tui` Telegram Mini App auth/door, HMAC token renewal, line-by-line scrolling at `linePx = 18`). Mobile on-device touch feel is an open user checkpoint.
@@ -53,7 +53,7 @@ R-14.1 through R-16 are closed. Do not restart them. Do not give two agents the 
    is decided (2026-10-09):** leave `progress.progressMode` as `'gist'`. Do not
    set `'phase'`. Full write-up: `specs/active/progress-surfaces-1.md`.
 
-**Still open.** V-17b is the remaining site move (code-done: Caddy duckdns blocks removed, zero live-code refs, `assert-domain-canonical` 70/0 — left: DuckDNS dashboard DNS deletion + human console checks). D-10 DONE 2026-10-12 (13 orphans deleted, tier2 already-gone, missing keys moot, retention verified-empty, 81 residuals in 30-day grace). Website shipped rows stay shipped. F-13.2 was removed 2026-10-11 per owner directive — do not reopen the lock-merge basis.
+**Closed 2026-10-18.** V-17b is done by host retirement: the code half landed 2026-10-12 (Caddy duckdns blocks removed, zero live-code refs, `assert-domain-canonical` 70/0) and the leftover host itself — OVH `51.254.217.163` ("vps-france"), which served the duckdns blocks — is retired. Production now runs on the re-homed VM behind a Cloudflare Tunnel. Only human residual: delete the DuckDNS A record + the console checks in `COUK_MIGRATION.md` step 7. D-10 DONE 2026-10-12 (13 orphans deleted, tier2 already-gone, missing keys moot, retention verified-empty, 81 residuals in 30-day grace). Website shipped rows stay shipped. F-13.2 was removed 2026-10-11 per owner directive — do not reopen the lock-merge basis.
 
 **Cleared 2026-10-09. Do not execute.** D-3, the D-4 VPS re-run, D-5, D-6, D-7, D-8, R-13.4, R-13.5, V-18, CB-7, CB-8. Decision: **keep D1**. L-5 reopened 2026-10-12 per owner (fr + zh fill this change); en/id/fr/zh are the product. CB-6 stays superseded. V-17 stays superseded by V-17b.
 
@@ -204,7 +204,7 @@ Fixed across 5 layers: (1) `src/utils/syncUtils.ts` awaits `authStateReady()` an
 **BUG-2 — Gemini 503 on food analysis (peak demand mitigation, COMPLETE 2026-09-24).**  
 Enhanced `server_food_scout_source.ts` with emergency safety net: (1) increased backoff delay for 503/UNAVAILABLE to 2500ms; (2) `runScoutRetryLoop` now hops to `gemini-2.5-flash` if both `gemini-3.5-flash-lite` and `gemini-3.1-flash-lite` return 503/UNAVAILABLE during peak demand on the flash-lite infrastructure. Verified via `sync-regression` + `food-calc`, `tsc` 0.
 
-**Still open:** **V-17b** (code-done; DuckDNS dashboard DNS deletion + human console checks). **D-10 DONE 2026-10-12.** F-13.2 removed 2026-10-11 per owner — do not reopen. **Cleared 2026-10-09:** D-3, D-5…D-8, R-13.4, R-13.5, V-18, CB-7, CB-8, the cross-device half of R-16, BOT-24's unstarted packets, BOT-26 L18. **L-5 DONE 2026-10-12** (fr + zh filled per owner). **D-1 is DONE 2026-09-25.** **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), Cloud Run, **VPS SQLite**, dual-write D1+SQLite, **R2 bulk-delete residuals** (D-10 done 2026-10-12; 81 orphans in grace — re-sweep, do not invent a second list). **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
+**Closed 2026-10-18:** **V-17b** is done by host retirement (residual human: DuckDNS dashboard DNS deletion + console checks). **D-10 DONE 2026-10-12.** F-13.2 removed 2026-10-11 per owner — do not reopen. **Cleared 2026-10-09:** D-3, D-5…D-8, R-13.4, R-13.5, V-18, CB-7, CB-8, the cross-device half of R-16, BOT-24's unstarted packets, BOT-26 L18. **L-5 DONE 2026-10-12** (fr + zh filled per owner). **D-1 is DONE 2026-09-25.** **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), Cloud Run, **VPS SQLite**, dual-write D1+SQLite, **R2 bulk-delete residuals** (D-10 done 2026-10-12; 81 orphans in grace — re-sweep, do not invent a second list). **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
 
 **Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 744/0/0 at `5615f1e`, `golden/scorecard/result_summary/LATEST.md`).
 
@@ -244,7 +244,7 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Food identity still wrong | One **class** playbook (`FALSE_FRIEND` first). **Not** USDA. Brand catalog = **F-11**. Delete FDC = **F-12**. |
 | Biomarkers | **B0** Apply smoke, then B2 leftover hygiene, then real G-B2. Chat UX = fill-template (one agent + TS batch), not 10 personas. |
 | Site is slow | **R-8** measure (Q-1 is already green). Then R-9 defer. Not FoodCard/App splits first |
-| Make the site live / leave Render | **Track V is LIVE** on OVH VPS-2 at `https://health-tracker.co.uk`. V-17b is the leftover: DuckDNS log soak, then remove the DuckDNS blocks. Phase 6 (V-19…V-26), V-27, V-28, and V-29 are COMPLETE. |
+| Make the site live / leave Render | **Track V is LIVE** at `https://health-tracker.co.uk` — served from the re-homed VM behind a Cloudflare Tunnel since 2026-10-18 (the OVH VPS-2, "vps-france", is retired). V-17b is done by that retirement. Phase 6 (V-19…V-26), V-27, V-28, and V-29 are COMPLETE. |
 | Localisation leftover | L-1…L-5 landed. fr + zh filled 2026-10-12 per owner (reviewed, placeholder-verified); en/id/fr/zh are the product. |
 | Location, `/project`, `/role`, or the rating council | [R14_1_AGENT_PLAN.md](./R14_1_AGENT_PLAN.md). Not a new bot. Not Antigravity. Not the council draft's offline cloud fallback. |
 | Telegram Mini App TUI (`/tui`) | [TUI_IMPLEMENTATION.md](./TUI_IMPLEMENTATION.md). Proposal: [TG_Tui_Proposal1.md](../TG_Tui_Proposal1.md). Not `Tui_proposal2b.md`'s order. Not the website master scorecard. |
@@ -660,7 +660,7 @@ Canonical plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Live host: `https://
 | **V-15** | Public hostname, Firebase + R2 CORS, deploy loop | `/api/status` 200 off Tailscale | **COMPLETE** (`https://health-tracking.duckdns.org` + Webhook) |
 | **V-16** | DNS cutover; Render still up | Cellular load, no Render splash, meal works | **COMPLETE & LIVE** |
 | **V-17** | Delete Render; scrub `onrender.com` | Old origin dead | **SUPERSEDED by the co.uk migration** — Render deletion folded into full-domain move; last live-code `onrender.com` default retired on `agent/domain-couk-full`. Plan: [COUK_MIGRATION.md](../docs/infra/COUK_MIGRATION.md) |
-| **V-17b** | Full migration to `health-tracker.co.uk` (web app + TUI + TG bot buttons + `web`/`omb`/`tgtg` hosts); retire duckdns | co.uk serves everything; duckdns blocks removed | **CODE-DONE 2026-10-12** (verified: zero live-code duckdns refs, `assert-domain-canonical` 70/0, Caddy duckdns blocks gone, `tui.` redirects to `app.`; left, all human: DuckDNS dashboard DNS deletion — apex/tui/omb/tgtg A records still resolve — + console checks per COUK_MIGRATION.md step 7) |
+| **V-17b** | Full migration to `health-tracker.co.uk` (web app + TUI + TG bot buttons + `web`/`omb`/`tgtg` hosts); retire duckdns | co.uk serves everything; duckdns blocks removed | **DONE 2026-10-18 — by host re-homing.** Code half landed 2026-10-12 (zero live-code duckdns refs, `assert-domain-canonical` 70/0, Caddy duckdns blocks gone, `tui.` redirects to `app.`); the OVH host that served the duckdns blocks ("vps-france") is retired, and production runs on the re-homed VM behind a Cloudflare Tunnel. Residual, human only: delete the DuckDNS A record + console checks (`COUK_MIGRATION.md` step 7). |
 | **V-18** | Confirm Containers/Cloud Run stay off | Runbook matches prod | **CLEARED 2026-10-09.** Containers and Cloud Run stay off. Workers Paid is not a roadmap item. |
 
 ### Track V Phase 6 — Autonomous Journey QA Fleet & Orchestrator Self-Healing Loop
@@ -882,7 +882,7 @@ packet. Q-9/Q-8.2 are green.
 
 | | **Any agent** (Studio / Antigravity / OpenCode / Cline) | **Grok** (quota-scarce) |
 |---|---|---|
-| Prefer | Current work at the top of this file. Q-11 and Q-13 are complete. Still open: V-17b (console checks). D-10 DONE 2026-10-12. F-13.2 removed 2026-10-11. The 2026-10-09 cleared list is not work. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
+| Prefer | Current work at the top of this file. Q-11 and Q-13 are complete. V-17b closed 2026-10-18 by host retirement (residual: human DuckDNS DNS deletion + console checks). D-10 DONE 2026-10-12. F-13.2 removed 2026-10-11. The 2026-10-09 cleared list is not work. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
 | Do not | `npm test`; critic LLM; USDA; invent a primitive; live Gemini as inner loop; wait for Grok | Sit in a live wait loop; rewrite binge; re-lock packets other agents are executing |
 
 ---

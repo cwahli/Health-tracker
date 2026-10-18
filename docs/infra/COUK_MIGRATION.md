@@ -8,6 +8,15 @@ is owned (Cloudflare Registrar), the apex is already live on the VPS, and this
 doc covers what that plan left out — the TG bot buttons, the TUI/web gateway
 hosts, and the retirement sequence.
 
+**2026-10-18 — RETIRED, and this plan closes by host re-homing.** Production was
+re-homed off OVH (`51.254.217.163`, "vps-france") to the current VM
+(`standar-c3r3a-1845`, `103.147.32.117`), which publishes `health-tracker.co.uk`
+and `*.health-tracker.co.uk` through a **Cloudflare Tunnel** (`cloudflared`,
+ingress → `127.0.0.1:80`); TLS is at the Cloudflare edge. The old box no longer
+serves HTTP, so its duckdns site blocks went with it — step 8 is done by
+retirement, not by editing a Caddyfile. The only step left is the human DuckDNS
+dashboard deletion of the `health-tracking.duckdns.org` A record.
+
 **Status ledger (updated as steps land):**
 
 | # | Step | State |
@@ -15,16 +24,16 @@ hosts, and the retirement sequence.
 | 0 | Apex + www live on Caddy (`health-tracker.co.uk`, Let's Encrypt) | DONE (pre-existing) |
 | 1 | GitHub push webhook → `https://health-tracker.co.uk/webhook/deploy` | DONE (pre-existing, hook `682068098`) |
 | 2 | Repo defaults point at co.uk (QA, screenshots, skills, tunnels, gateway defaults) | DONE — #579 merged; audit sweep `agent/domain-couk-audit` moved the last gateway default, test pins, memory seeds, scorecard live origin, and plan canonicals |
-| 3 | DNS: `tui`/`web`/`omb`/`tgtg` A records → `51.254.217.163` (DNS-only) | DONE by human 2026-10-06, verified resolving |
+| 3 | DNS: `tui`/`web`/`omb`/`tgtg` → the production origin | DONE — originally `51.254.217.163` (OVH); since 2026-10-18 the origin is the new VM via the Cloudflare Tunnel (`*.health-tracker.co.uk`) |
 | 4 | Caddy blocks for the four co.uk subdomains | DONE — active, `tui`/`web` 200 (`omb` 502 + `tgtg` 401 = parity with duckdns twins) |
 | 5 | Bot envs: `TUI_GATEWAY_URL` → `https://tui.health-tracker.co.uk` + `OPENCODE_WEB_URL` → `https://web.health-tracker.co.uk` + `OPENCODE_WEB_HOST` → `web.health-tracker.co.uk` | DONE — all bot envs incl. vm4/vm5/vm6/android/opencode/collab/mobile; units restarted, verified in PIDs |
 | 6 | Live verification (site, TUI proof script, bot buttons, sub-services) | DONE — site 200, full TUI proof green on the new host |
 | 9 | Audit sweep: every remaining old-domain reference (gateway default lost in #581 rebuild, scorecard live origin on dead onrender, r14-tree defaults, relay-staging, plan canonicals) | DONE — `agent/domain-couk-audit` |
 | 10 | Relay-staging on co.uk (`/relay-staging/*` → `:8891` in the co.uk block) | after this PR merges (additive Caddy handle + doc updates) |
 | 7 | Console checks: Supabase redirect allowlist, Google OAuth consent links, Health Connect callback | HUMAN (dashboards) |
-| 8 | Retirement: remove duckdns Caddy blocks after access logs go quiet | after step 6 + soak — **but §5.2's log gate cannot see two of the hosts, see rows 11–12** |
-| 11 | DNS: `mc` / `agenda` A records → `51.254.217.163` (DNS-only) | `mc.` DONE (resolves live 2026-10-09); `agenda` pending human DNS |
-| 12 | Caddy blocks for `mc.` and `agenda.` (each **with a `log` block**) | `mc.` DONE (`mc.health-tracker.co.uk` active with TLS + log; duckdns block retired); `agenda.` pending |
+| 8 | Retirement: duckdns Caddy blocks removed | DONE 2026-10-18 — by host re-homing. The OVH box that served them is retired; the new VM (Cloudflare Tunnel) never had duckdns blocks. Human step left: delete the duckdns A record. |
+| 11 | DNS: `mc` / `agenda` → the production origin | `mc.` DONE (resolves live 2026-10-09); origin is now the new VM via the Cloudflare Tunnel (was `51.254.217.163`, OVH) |
+| 12 | Caddy blocks for `mc.` and `agenda.` (each **with a `log` block**) | DONE — both live on the new VM's Caddyfile (`mc.` + `agenda.` co.uk blocks present, TLS at the edge); the duckdns blocks retired with the OVH box |
 
 ## 1. Target layout
 
@@ -89,8 +98,9 @@ After step 5, `/tui` in the vm bot must open `tui.health-tracker.co.uk`.
 
 ## 6. Human console steps (cannot be done from the VPS)
 
-1. **Cloudflare DNS** — A records `tui`, `web`, `omb`, `tgtg`, **`mc`, `agenda`** →
-   `51.254.217.163`, proxy OFF (DNS-only, same as the apex).
+1. **Cloudflare DNS** — `tui`, `web`, `omb`, `tgtg`, **`mc`, `agenda`** now reach
+   the new VM through the Cloudflare Tunnel; there is no OVH origin to repoint at.
+   Verify only — do not point anything at `51.254.217.163`.
 2. **Supabase → Authentication → URL Configuration** — confirm
    `https://health-tracker.co.uk/**` is allowlisted (sign-in uses
    `redirectTo: window.location.origin`).

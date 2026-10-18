@@ -122,7 +122,7 @@ export function workerPrompt(action, key) {
   return [
     `WORKER — an owner answer just unblocked ticket key=${key} (event ${action}). Continue it, nothing else.`,
     'Do exactly this: (1) read the sheet row (spreadsheet 10oPI9AsHaKpb9xRR8XcTm6JyH1gYyykUFBNqeqg2SM0, tab current) — Status, todo, and the Additional question Q&A thread (the latest [human …] line is your new input);',
-    ' (2) claim the row: `ruby /home/ubuntu/.agents/skills/do-github-sync/scripts/claim_ticket.rb --key \'<key>\' --owner "<you> @ vps-france" --session <your-session-id>`;',
+    ' (2) claim the row: `ruby /home/ubuntu/.agents/skills/do-github-sync/scripts/claim_ticket.rb --key \'<key>\' --owner "<you> @ vps-id" --session <your-session-id>`;',
     ' (3) do the work in a worktree (`~/dev/new-worktree.sh <area>`, branch agent/<area>), file proof in Drive folder Work done/1G7dhvqRy7iOmRg7AfN9a6g8cbIhz14yS/<key>, open a draft PR if code changed;',
     ' (4) file the row with `sheet_row.rb`: `--status review` when work is complete with proof, or `--status \'Need info\' --question "..."` for a follow-up — the ONLY sheet writer, never raw API;',
     ` (5) append one JSON line to ${TRIAGE_LOG} with {at, action:"worker", key, sheet_state, canonical_state, sensors, needs_go:false, reason}.`,

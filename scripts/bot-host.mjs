@@ -2464,7 +2464,7 @@ export function workLocation() {
  * identity: every sweep (pending_sweep, session_link, watch_activity,
  * proof_linker) reads `~/.agents/location`, and the duty tells agents to read
  * `~/.agents/nudges/inbox-<location>.md`. Writing proposals to
- * `inbox-vps.md` when the duty says `inbox-vps-france.md` files them where
+ * `inbox-vps.md` when the duty says `inbox-vps-id.md` files them where
  * nobody looks — a proposal no agent will ever read is the same as no proposal.
  *
  * `BOT_MACHINE` overrides for tests and for a box with no location file.

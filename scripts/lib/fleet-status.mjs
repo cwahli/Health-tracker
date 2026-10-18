@@ -261,7 +261,7 @@ export function recordFleetHeartbeat(data, { now = Date.now() } = {}) {
 /** Explicit mapping table: one pane per ticket, no loose substring overlap. */
 export const LOCATION_OWNER_KEYS = {
   'mac': ['mac', 'darwin'],
-  'vm': ['vm', 'vps', 'vps-france'],
+  'vm': ['vm', 'vps', 'vps-id', 'vps-france'],
   'grok vm': ['grok', 'grok-vps'],
   'collab': ['collab', 'colab'],
   'mobile': ['mobile', 'termux', 'phone', 'android'],
@@ -287,7 +287,7 @@ export function matchesLocation(locationName, ownerStr) {
     if (tokens.includes('grok-vps') || tokens.includes('grok') || hostPart.includes('grok')) {
       return false;
     }
-    return tokens.includes('vm') || tokens.includes('vps') || tokens.includes('vps-france') || hostPart === 'vm' || hostPart === 'vps' || hostPart === 'vps-france';
+    return tokens.includes('vm') || tokens.includes('vps') || tokens.includes('vps-id') || tokens.includes('vps-france') || hostPart === 'vm' || hostPart === 'vps' || hostPart === 'vps-id' || hostPart === 'vps-france';
   }
   if (loc === 'mac') {
     return tokens.includes('mac') || tokens.includes('darwin') || hostPart === 'mac';

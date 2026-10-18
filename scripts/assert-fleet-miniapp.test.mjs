@@ -532,7 +532,7 @@ test('VM pane shows one row per live opencode session with model and working mar
   db.close();
 
   // One row per session: no aggregate sentence, each row carries its own model.
-  const tickets = [{ id: 'spec:vm-claim', owner: 'Some Agent @ vps-france', status: 'In progress' }];
+  const tickets = [{ id: 'spec:vm-claim', owner: 'Some Agent @ vps-id', status: 'In progress' }];
   const nodes = getFleetNodes({ now: t0, home: tmpHome, vmOpencodeDb: dbPath, tickets });
   const vmRows = nodes.filter((n) => n.location === 'VM');
   assert.equal(vmRows.length, 4);
