@@ -77,4 +77,20 @@ describe('VoiceReceptionistFab', () => {
 
     expect(html).not.toContain('profile items to set');
   });
+
+  it('renders correctly when profile is null (guest/onboarding state)', () => {
+    const html = renderToStaticMarkup(
+      <VoiceReceptionistFab
+        profile={null}
+        setProfile={mockSetProfile}
+        saveAndSync={mockSaveAndSync}
+        activeTab="home"
+        setActiveTab={mockSetActiveTab}
+      />
+    );
+
+    expect(html).toContain('aria-label="Open Voice Receptionist"');
+    expect(html).toContain('id="voice-receptionist-fab"');
+    expect(html).toContain('profile items to set');
+  });
 });

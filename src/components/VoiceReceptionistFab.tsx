@@ -64,127 +64,114 @@ export default function VoiceReceptionistFab({
   report = null,
 }: VoiceReceptionistFabProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const isOpenRef = useRef(false);
   const [isVoiceActive, setIsVoiceActive] = useState(true);
   const [isSpeakingEnabled, setIsSpeakingEnabled] = useState(true);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [inputText, setInputText] = useState('');
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const [audioLevel, setAudioLevel] = useState(0);
   const [speechError, setSpeechError] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const memoryRef = useRef<any>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const hasSpokenWelcomeRef = useRef(false);
+  const audioContextRef = useRef<any>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+
+  // Keep isOpenRef in sync
+  useEffect(() => {
+    isOpenRef.current = isOpen;
+  }, [isOpen]);
 
   // Compute missing profile fields
   const missingFields = useMemo(() => {
-    if (!profile) return ['all'];
     const missing: { key: string; label: string; prompt: string }[] = [];
-    if (!profile.age) missing.push({ key: 'age', label: 'Age', prompt: 'My age is ' });
-    if (!profile.gender) missing.push({ key: 'gender', label: 'Gender', prompt: 'My gender is ' });
-    if (!profile.ethnicity) missing.push({ key: 'ethnicity', label: 'Ethnicity', prompt: 'My ethnicity is ' });
-    if (!profile.height) missing.push({ key: 'height', label: 'Height', prompt: 'My height is ' });
-    if (!profile.weight) missing.push({ key: 'weight', label: 'Weight', prompt: 'My current weight is ' });
-    const hasGoal = (profile as any).healthGoal || (profile as any).medicalConditions;
+    if (!profile?.age) missing.push({ key: 'age', label: 'Age', prompt: 'My age is ' });
+    if (!profile?.gender) missing.push({ key: 'gender', label: 'Gender', prompt: 'My gender is ' });
+    if (!profile?.ethnicity) missing.push({ key: 'ethnicity', label: 'Ethnicity', prompt: 'My ethnicity is ' });
+    if (!profile?.height) missing.push({ key: 'height', label: 'Height', prompt: 'My height is ' });
+    if (!profile?.weight) missing.push({ key: 'weight', label: 'Weight', prompt: 'My current weight is ' });
+    const hasGoal = (profile as any)?.healthGoal || (profile as any)?.medicalConditions;
     if (!hasGoal) missing.push({ key: 'goal', label: 'Health Goal', prompt: 'My main health goal is ' });
     return missing;
   }, [profile]);
 
-  // Initial welcome greeting
+  // Compute welcome greeting text
+  const welcomeGreetingText = useMemo(() => {
+    const name = profile?.nickname || profile?.email?.split('@')[0] || '';
+    const lang = profile?.language || 'en';
+
+    if (lang === 'id') {
+      return name
+        ? `Halo ${name}! Saya Resepsionis & Asisten Live Anda. Saya siap membantu orientasi akun, menjawab pertanyaan makanan Anda, atau menyimpan profil Anda sambil kita mengobrol.`
+        : `Halo! Selamat datang di Health Tracker. Saya Resepsionis Live Anda. Saya siap membantu orientasi dan melengkapi profil kesehatan Anda. Silakan bicara langsung!`;
+    } else if (lang === 'fr') {
+      return name
+        ? `Bonjour ${name} ! Je suis votre réceptionniste santé. Je peux vous guider dans l'application, analyser vos repas ou renseigner votre profil au fil de notre conversation.`
+        : `Bonjour et bienvenue ! Je suis votre concierge santé. Parlez-moi pour configurer votre profil ou explorer vos données de santé.`;
+    } else {
+      if (!profile) {
+        return `Hello and welcome to Health Tracker! I'm your Live Onboarding Concierge. I can guide you through the app, answer any questions, or help set up your health profile. Feel free to talk or type!`;
+      }
+      if (missingFields.length > 0) {
+        return `Hello ${name || 'there'}! I'm your Live Onboarding Receptionist & Concierge. I can guide you through the app, review your meals, or help complete your profile. We still have a few details to set up—feel free to talk or type!`;
+      }
+      return `Hello ${name || 'there'}! You're all set up! Ask me about your recent meals, explore your biomarkers, or let me know what you'd like to do.`;
+    }
+  }, [profile?.language, profile?.nickname, profile?.email, missingFields.length]);
+
+  // Initial welcome greeting message in transcript
   useEffect(() => {
     if (messages.length === 0) {
-      const name = profile?.nickname || profile?.email?.split('@')[0] || 'there';
-      const lang = profile?.language || 'en';
-      let greeting = `Hello ${name}! I'm your Live Onboarding Receptionist & Concierge. `;
-      if (lang === 'id') {
-        greeting = `Halo ${name}! Saya Resepsionis & Asisten Live Anda. Saya siap membantu orientasi akun, menjawab pertanyaan seputar makanan Anda, atau menyimpan profil Anda sambil kita mengobrol.`;
-      } else if (lang === 'fr') {
-        greeting = `Bonjour ${name} ! Je suis votre réceptionniste et concierge santé. Je peux vous guider dans l'application, analyser vos repas ou renseigner votre profil au fil de notre conversation.`;
-      } else {
-        if (missingFields.length > 0) {
-          greeting += `I can guide you through the app, review your meals, or help complete your profile. We still have a few details to set up—feel free to talk or type!`;
-        } else {
-          greeting += `You're all set up! Ask me about your recent meals, explore your biomarkers, or let me know what you'd like to do.`;
-        }
-      }
-
       setMessages([
         {
           id: 'welcome',
           role: 'assistant',
-          text: greeting,
+          text: welcomeGreetingText,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
     }
-  }, [profile?.language, profile?.nickname, profile?.email, missingFields.length]);
+  }, [welcomeGreetingText, messages.length]);
 
   // Auto-scroll chat
   useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
-  }, [messages, isLoading, isSpeaking]);
+  }, [messages, isLoading, isSpeaking, interimTranscript]);
 
-  // Setup Web Speech Recognition
-  useEffect(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setSpeechError('Speech recognition not supported in this browser. Text chat is ready!');
-      return;
+  // Cleanup audio tracks and animation frame
+  const cleanupAudioStream = () => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
     }
-
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-
-      const langCode = profile?.language === 'id' ? 'id-ID' : profile?.language === 'fr' ? 'fr-FR' : 'en-US';
-      recognition.lang = langCode;
-
-      recognition.onstart = () => {
-        setIsListening(true);
-        setSpeechError(null);
-      };
-
-      recognition.onresult = (event: any) => {
-        const transcript = event.results?.[0]?.[0]?.transcript;
-        if (transcript && transcript.trim().length > 0) {
-          handleSendMessage(transcript.trim());
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        setIsListening(false);
-        if (event.error !== 'no-speech' && event.error !== 'aborted') {
-          console.warn('[VoiceReceptionist] Speech error:', event.error);
-        }
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-    } catch (err: any) {
-      console.warn('[VoiceReceptionist] Failed to init speech recognition:', err);
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
     }
-
-    return () => {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.abort();
-        } catch {}
-      }
-    };
-  }, [profile?.language]);
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch {}
+      audioContextRef.current = null;
+    }
+    setAudioLevel(0);
+  };
 
   // Handle Speech Synthesis (TTS)
-  const speakResponse = (text: string) => {
-    if (!isSpeakingEnabled || !window.speechSynthesis) return;
+  const speakResponse = (text: string, onComplete?: () => void) => {
+    if (!isSpeakingEnabled || typeof window === 'undefined' || !window.speechSynthesis) {
+      if (onComplete) onComplete();
+      return;
+    }
 
     try {
       window.speechSynthesis.cancel(); // Stop existing speech
@@ -195,7 +182,10 @@ export default function VoiceReceptionistFab({
         .replace(/\s+/g, ' ')
         .trim();
 
-      if (!cleanText) return;
+      if (!cleanText) {
+        if (onComplete) onComplete();
+        return;
+      }
 
       const utterance = new SpeechSynthesisUtterance(cleanText);
       const lang = profile?.language || 'en';
@@ -213,45 +203,245 @@ export default function VoiceReceptionistFab({
       }
 
       utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
+      utterance.onend = () => {
+        setIsSpeaking(false);
+        if (onComplete) onComplete();
+      };
+      utterance.onerror = (e) => {
+        console.warn('[VoiceReceptionist] Utterance error:', e);
+        setIsSpeaking(false);
+        if (onComplete) onComplete();
+      };
 
       window.speechSynthesis.speak(utterance);
     } catch (e) {
       console.warn('[VoiceReceptionist] Speech synthesis error:', e);
       setIsSpeaking(false);
+      if (onComplete) onComplete();
     }
   };
 
-  // Toggle listening
-  const toggleListening = () => {
-    if (!recognitionRef.current) {
-      setSpeechError('Microphone not supported. You can type in the box below!');
-      return;
-    }
+  // Start Microphone and Speech Recognition
+  const startListening = async () => {
+    setSpeechError(null);
 
     // Stop speaking if model is currently talking
-    if (window.speechSynthesis && window.speechSynthesis.speaking) {
+    if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking) {
       window.speechSynthesis.cancel();
       setIsSpeaking(false);
     }
 
-    if (isListening) {
+    // 1. Request microphone via MediaDevices for real audio metering & explicit browser permission prompt
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
       try {
-        recognitionRef.current.stop();
-      } catch {}
-      setIsListening(false);
-    } else {
-      try {
-        recognitionRef.current.start();
-      } catch (err: any) {
-        console.warn('Failed to start recognition:', err);
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaStreamRef.current = stream;
+
+        // Connect Analyser for physical soundwave reactivity
+        try {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          if (AudioContextClass) {
+            const audioCtx = new AudioContextClass();
+            audioContextRef.current = audioCtx;
+            const source = audioCtx.createMediaStreamSource(stream);
+            const analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 64;
+            source.connect(analyser);
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            const updateLevel = () => {
+              if (!analyser) return;
+              analyser.getByteFrequencyData(dataArray);
+              let sum = 0;
+              for (let i = 0; i < dataArray.length; i++) {
+                sum += dataArray[i];
+              }
+              const avg = sum / dataArray.length;
+              setAudioLevel(Math.min(100, Math.round((avg / 128) * 100)));
+              animFrameRef.current = requestAnimationFrame(updateLevel);
+            };
+            updateLevel();
+          }
+        } catch (audioErr) {
+          console.warn('[VoiceReceptionist] Audio analyser error:', audioErr);
+        }
+      } catch (permErr: any) {
+        console.warn('[VoiceReceptionist] Mic permission error:', permErr);
+        if (permErr.name === 'NotAllowedError' || permErr.name === 'PermissionDeniedError') {
+          setSpeechError(
+            'Microphone access is blocked. Click the lock/camera icon in your browser URL bar to allow microphone access, or type your message below.'
+          );
+          setIsListening(false);
+          cleanupAudioStream();
+          return;
+        }
       }
+    }
+
+    // 2. Initialize and start Web Speech Recognition
+    const SpeechRecognition =
+      typeof window !== 'undefined' &&
+      ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+
+    if (!SpeechRecognition) {
+      setSpeechError('Live speech recognition is not supported in this browser. You can type in the box below!');
+      setIsListening(false);
+      cleanupAudioStream();
+      return;
+    }
+
+    try {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {}
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true; // Enables live real-time transcription as the user speaks
+
+      const langCode = profile?.language === 'id' ? 'id-ID' : profile?.language === 'fr' ? 'fr-FR' : 'en-US';
+      recognition.lang = langCode;
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setSpeechError(null);
+        setInterimTranscript('');
+      };
+
+      recognition.onresult = (event: any) => {
+        let interim = '';
+        let final = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const item = event.results[i];
+          if (item.isFinal) {
+            final += item[0]?.transcript || '';
+          } else {
+            interim += item[0]?.transcript || '';
+          }
+        }
+
+        if (interim) {
+          setInterimTranscript(interim);
+        }
+
+        if (final.trim()) {
+          setInterimTranscript('');
+          cleanupAudioStream();
+          handleSendMessage(final.trim());
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        setIsListening(false);
+        cleanupAudioStream();
+        const err = event.error;
+        if (err === 'not-allowed' || err === 'service-not-allowed') {
+          setSpeechError(
+            'Microphone access is blocked by browser permissions. Please allow microphone in your address bar, or use the chat box below.'
+          );
+        } else if (err === 'audio-capture') {
+          setSpeechError('No microphone detected. Please connect an audio input or type below.');
+        } else if (err === 'network') {
+          setSpeechError('Speech network service unavailable. You can type in the box below.');
+        } else if (err === 'no-speech') {
+          setSpeechError('No speech detected. Tap the mic button to try again, or type below.');
+        } else if (err !== 'aborted') {
+          console.warn('[VoiceReceptionist] Speech error:', err);
+          setSpeechError(`Speech notice: ${err}. You can type below.`);
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        cleanupAudioStream();
+        // If there was interim text accumulated that wasn't finalized, submit it
+        setInterimTranscript((prev) => {
+          if (prev && prev.trim().length > 1) {
+            handleSendMessage(prev.trim());
+          }
+          return '';
+        });
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err: any) {
+      console.warn('[VoiceReceptionist] Failed to start recognition:', err);
+      setSpeechError('Microphone could not be started. You can type in the box below!');
+      setIsListening(false);
+      cleanupAudioStream();
     }
   };
 
+  // Stop listening
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+    setIsListening(false);
+    cleanupAudioStream();
+
+    if (interimTranscript && interimTranscript.trim().length > 1) {
+      const textToSend = interimTranscript.trim();
+      setInterimTranscript('');
+      handleSendMessage(textToSend);
+    }
+  };
+
+  // Toggle listening button
+  const toggleListening = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  };
+
+  // Open FAB & Trigger Auto-Welcome + Auto-Listen
+  const handleOpenFab = () => {
+    setIsOpen(true);
+    isOpenRef.current = true;
+    setSpeechError(null);
+
+    // Prime audio synthesis on user click gesture (critical for mobile Safari & Chrome)
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      try {
+        const unlock = new SpeechSynthesisUtterance(' ');
+        unlock.volume = 0.01;
+        window.speechSynthesis.speak(unlock);
+      } catch {}
+    }
+
+    // Speak welcome message aloud and start listening once finished
+    if (isSpeakingEnabled && !hasSpokenWelcomeRef.current) {
+      hasSpokenWelcomeRef.current = true;
+      speakResponse(welcomeGreetingText, () => {
+        if (isOpenRef.current) {
+          startListening();
+        }
+      });
+    } else {
+      startListening();
+    }
+  };
+
+  // Close Receptionist Modal
+  const handleClose = () => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    stopListening();
+    setIsOpen(false);
+    isOpenRef.current = false;
+  };
+
   // Highlight DOM element co-pilot utility
-  const highlightElement = (selector: string, note?: string) => {
+  const highlightElement = (selector: string) => {
     try {
       const el = document.querySelector(selector) as HTMLElement;
       if (el) {
@@ -277,6 +467,7 @@ export default function VoiceReceptionistFab({
 
     setMessages((prev) => [...prev, userMsg]);
     setInputText('');
+    setInterimTranscript('');
     setIsLoading(true);
 
     try {
@@ -321,8 +512,15 @@ export default function VoiceReceptionistFab({
       let actionTaken: ChatTurn['actionTaken'] = undefined;
 
       // 1. Check if profile was updated (e.g. user provided age, weight, goal)
-      if (data.updatedProfile && profile) {
-        const nextProfile: UserProfile = { ...profile };
+      if (data.updatedProfile) {
+        const baseProfile: UserProfile = profile || {
+          uid: 'user_' + Date.now(),
+          email: '',
+          nickname: data.updatedProfile.name || 'User',
+          language: 'en',
+          unitPreference: 'SI',
+        };
+        const nextProfile: UserProfile = { ...baseProfile };
         let hasChanges = false;
         const changeDetails: string[] = [];
 
@@ -406,9 +604,13 @@ export default function VoiceReceptionistFab({
 
       setMessages((prev) => [...prev, botMsg]);
 
-      // Speak response aloud if voice is on
-      if (isVoiceActive) {
-        speakResponse(replyText);
+      // Speak response aloud and then auto-resume listening for continuous conversation!
+      if (isVoiceActive && isSpeakingEnabled) {
+        speakResponse(replyText, () => {
+          if (isOpenRef.current) {
+            startListening();
+          }
+        });
       }
     } catch (err: any) {
       console.error('[VoiceReceptionist] Dispatch failed:', err);
@@ -426,6 +628,18 @@ export default function VoiceReceptionistFab({
     }
   };
 
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      cleanupAudioStream();
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {}
+      }
+    };
+  }, []);
+
   return (
     <>
       {/* Floating Receptionist Trigger Button (Bottom Right) */}
@@ -433,7 +647,7 @@ export default function VoiceReceptionistFab({
         <div className="fixed bottom-24 right-4 sm:bottom-22 sm:right-6 z-40 flex items-center gap-2">
           {missingFields.length > 0 && (
             <div
-              onClick={() => setIsOpen(true)}
+              onClick={handleOpenFab}
               className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600/90 text-white rounded-full text-xs font-semibold shadow-lg backdrop-blur cursor-pointer hover:bg-indigo-700 transition-all animate-bounce"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-300" />
@@ -442,11 +656,10 @@ export default function VoiceReceptionistFab({
           )}
           <button
             id="voice-receptionist-fab"
-            onClick={() => setIsOpen(true)}
+            onClick={handleOpenFab}
             aria-label="Open Voice Receptionist"
             className="group relative flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 text-white shadow-xl hover:shadow-indigo-500/30 hover:scale-105 active:scale-95 transition-all duration-300 focus:outline-none cursor-pointer"
           >
-            {/* Animated soundwave ring when listening/speaking */}
             {(isListening || isSpeaking) && (
               <span className="absolute inset-0 rounded-full bg-indigo-400 opacity-75 animate-ping" />
             )}
@@ -476,15 +689,20 @@ export default function VoiceReceptionistFab({
               </div>
               <div>
                 <h3 className="text-sm font-bold leading-tight">Health Concierge & Receptionist</h3>
-                <p className="text-[11px] text-indigo-100 flex items-center gap-1">
+                <p className="text-[11px] text-indigo-100 flex items-center gap-1.5">
                   {isListening ? (
                     <span className="flex items-center gap-1 text-emerald-300 font-semibold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-ping" /> Listening to you...
+                      <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping" />
+                      Listening now... Speak freely
                     </span>
                   ) : isSpeaking ? (
-                    <span className="text-amber-200 font-medium">Speaking response...</span>
+                    <span className="text-amber-200 font-medium flex items-center gap-1">
+                      <Volume2 className="w-3 h-3 animate-pulse" /> Concierge speaking...
+                    </span>
                   ) : isLoading ? (
-                    <span className="text-indigo-200">Processing...</span>
+                    <span className="text-indigo-200 flex items-center gap-1">
+                      <Loader className="w-3 h-3 animate-spin" /> Processing...
+                    </span>
                   ) : (
                     <span>Ready · Tap mic to speak or type</span>
                   )}
@@ -496,7 +714,7 @@ export default function VoiceReceptionistFab({
               {/* Speech Output Audio Toggle */}
               <button
                 onClick={() => {
-                  if (isSpeaking) window.speechSynthesis?.cancel();
+                  if (isSpeaking && typeof window !== 'undefined') window.speechSynthesis?.cancel();
                   setIsSpeakingEnabled(!isSpeakingEnabled);
                 }}
                 title={isSpeakingEnabled ? 'Mute voice output' : 'Enable voice output'}
@@ -507,11 +725,7 @@ export default function VoiceReceptionistFab({
 
               {/* Close Button */}
               <button
-                onClick={() => {
-                  if (window.speechSynthesis) window.speechSynthesis.cancel();
-                  if (recognitionRef.current && isListening) recognitionRef.current.stop();
-                  setIsOpen(false);
-                }}
+                onClick={handleClose}
                 className="p-1.5 hover:bg-white/20 rounded-full transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4 text-white" />
@@ -605,11 +819,51 @@ export default function VoiceReceptionistFab({
             )}
           </div>
 
-          {/* Notice if speech error / not supported */}
+          {/* Active Listening Soundwave & Live Interim Text Banner */}
+          {isListening && (
+            <div className="px-3.5 py-2 bg-red-500/10 border-t border-red-500/20 flex items-center justify-between text-xs text-red-600 dark:text-red-400">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                {/* Physical Audio Reactive Frequency Equalizer Bars */}
+                <div className="flex items-end gap-1 h-4 shrink-0">
+                  <span
+                    className="w-1 bg-red-500 rounded-full transition-all duration-75"
+                    style={{ height: `${Math.max(4, Math.round((audioLevel / 100) * 16))}px` }}
+                  />
+                  <span
+                    className="w-1 bg-red-500 rounded-full transition-all duration-75"
+                    style={{ height: `${Math.max(6, Math.round((audioLevel / 100) * 14 + 3))}px` }}
+                  />
+                  <span
+                    className="w-1 bg-red-500 rounded-full transition-all duration-75"
+                    style={{ height: `${Math.max(3, Math.round((audioLevel / 100) * 16 + 2))}px` }}
+                  />
+                  <span
+                    className="w-1 bg-red-500 rounded-full transition-all duration-75"
+                    style={{ height: `${Math.max(8, Math.round((audioLevel / 100) * 15 + 4))}px` }}
+                  />
+                </div>
+                <span className="font-semibold shrink-0">Listening...</span>
+                <span className="italic truncate text-slate-700 dark:text-slate-200 font-medium">
+                  {interimTranscript ? `"${interimTranscript}"` : 'Speak now...'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={stopListening}
+                className="text-[11px] font-bold text-red-600 dark:text-red-400 hover:underline ml-2 shrink-0 cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
+          )}
+
+          {/* Notice if speech error / permission needed */}
           {speechError && (
-            <div className="px-3 py-1 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 text-[10px] border-t border-amber-200 dark:border-amber-800 flex items-center gap-1">
-              <AlertCircle className="w-3 h-3 shrink-0" />
-              <span>{speechError}</span>
+            <div className="px-3.5 py-2 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 text-[11px] border-t border-amber-200 dark:border-amber-800 flex items-start gap-1.5 leading-snug">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-600 mt-0.5" />
+              <div className="flex-1">
+                <span>{speechError}</span>
+              </div>
             </div>
           )}
 
@@ -618,6 +872,7 @@ export default function VoiceReceptionistFab({
             {/* Live Mic Button */}
             <button
               id="voice-receptionist-mic-btn"
+              type="button"
               onClick={toggleListening}
               title={isListening ? 'Stop listening' : 'Start talking aloud'}
               className={`p-2.5 rounded-full transition-all flex items-center justify-center shrink-0 cursor-pointer ${
@@ -639,12 +894,13 @@ export default function VoiceReceptionistFab({
                   handleSendMessage(inputText);
                 }
               }}
-              placeholder={isListening ? 'Listening... or type here' : 'Talk aloud or type a message...'}
+              placeholder={isListening ? 'Listening to voice... or type here' : 'Talk aloud or type a message...'}
               className="flex-1 bg-slate-100 dark:bg-slate-800/80 border border-theme-border rounded-full px-3.5 py-2 text-xs text-theme-text focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
             />
 
             {/* Send Button */}
             <button
+              type="button"
               onClick={() => handleSendMessage(inputText)}
               disabled={!inputText.trim() || isLoading}
               className="p-2 rounded-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white transition-all shrink-0 cursor-pointer"
