@@ -70,24 +70,33 @@ export default function VoiceReceptionistFab({
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const isLoadingRef = useRef(false);
+
   const [inputText, setInputText] = useState('');
-  const [interimTranscript, setInterimTranscript] = useState('');
+  const [liveSpokenText, setLiveSpokenText] = useState('');
+  const latestTextRef = useRef('');
+  const silenceTimerRef = useRef<any>(null);
+
   const [audioLevel, setAudioLevel] = useState(0);
   const [speechError, setSpeechError] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const memoryRef = useRef<any>(null);
+  const isManuallyStoppedRef = useRef(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const hasSpokenWelcomeRef = useRef(false);
   const audioContextRef = useRef<any>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
-  // Keep isOpenRef in sync
+  // Keep isOpenRef and isLoadingRef in sync
   useEffect(() => {
     isOpenRef.current = isOpen;
   }, [isOpen]);
+
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
 
   // Compute missing profile fields
   const missingFields = useMemo(() => {
@@ -145,7 +154,7 @@ export default function VoiceReceptionistFab({
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
-  }, [messages, isLoading, isSpeaking, interimTranscript]);
+  }, [messages, isLoading, isSpeaking, liveSpokenText]);
 
   // Cleanup audio tracks and animation frame
   const cleanupAudioStream = () => {
@@ -166,7 +175,7 @@ export default function VoiceReceptionistFab({
     setAudioLevel(0);
   };
 
-  // Handle Speech Synthesis (TTS)
+  // Handle Speech Synthesis (TTS) - for replying to user
   const speakResponse = (text: string, onComplete?: () => void) => {
     if (!isSpeakingEnabled || typeof window === 'undefined' || !window.speechSynthesis) {
       if (onComplete) onComplete();
@@ -221,23 +230,135 @@ export default function VoiceReceptionistFab({
     }
   };
 
-  // Start Microphone and Speech Recognition
-  const startListening = async () => {
+  // Start Microphone and Speech Recognition immediately
+  const startListening = () => {
     setSpeechError(null);
 
-    // Stop speaking if model is currently talking
+    // Stop assistant speaking before listening
     if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking) {
       window.speechSynthesis.cancel();
       setIsSpeaking(false);
     }
 
-    // 1. Request microphone via MediaDevices for real audio metering & explicit browser permission prompt
-    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaStreamRef.current = stream;
+    const SpeechRecognition =
+      typeof window !== 'undefined' &&
+      ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 
-        // Connect Analyser for physical soundwave reactivity
+    if (!SpeechRecognition) {
+      setSpeechError('Live speech recognition is not supported in this browser. You can type in the box below!');
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {}
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true; // Continuous listening so speech doesn't drop prematurely
+      recognition.interimResults = true; // Real-time words as user speaks
+
+      const langCode = profile?.language === 'id' ? 'id-ID' : profile?.language === 'fr' ? 'fr-FR' : 'en-US';
+      recognition.lang = langCode;
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setSpeechError(null);
+      };
+
+      // When the user speaks, text is IMMEDIATELY written into both input and live bubble!
+      recognition.onresult = (event: any) => {
+        let fullTranscript = '';
+
+        for (let i = 0; i < event.results.length; ++i) {
+          fullTranscript += event.results[i][0]?.transcript || '';
+        }
+
+        const trimmed = fullTranscript.trim();
+        if (trimmed) {
+          // Immediately write spoken text into the app
+          setInputText(fullTranscript);
+          setLiveSpokenText(fullTranscript);
+          latestTextRef.current = fullTranscript;
+
+          // Auto-scroll to keep live words visible
+          if (chatScrollRef.current) {
+            chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+          }
+
+          // Debounced auto-send after 1.8 seconds of silence
+          if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+          }
+          silenceTimerRef.current = setTimeout(() => {
+            if (latestTextRef.current && latestTextRef.current.trim().length > 1 && !isLoadingRef.current) {
+              const toSend = latestTextRef.current.trim();
+              latestTextRef.current = '';
+              setLiveSpokenText('');
+              stopListening();
+              handleSendMessage(toSend);
+            }
+          }, 1800);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        const err = event.error;
+        if (err === 'not-allowed' || err === 'service-not-allowed') {
+          setSpeechError(
+            'Microphone access is blocked by browser permissions. Please allow microphone in your address bar (lock/camera icon), or use the chat box below.'
+          );
+          setIsListening(false);
+        } else if (err === 'audio-capture') {
+          setSpeechError('No microphone detected. Please connect an audio input or type below.');
+          setIsListening(false);
+        } else if (err === 'network') {
+          setSpeechError('Speech network service unavailable. You can type in the box below.');
+          setIsListening(false);
+        } else if (err !== 'no-speech' && err !== 'aborted') {
+          console.warn('[VoiceReceptionist] Speech error:', err);
+          setSpeechError(`Speech notice: ${err}. You can type below.`);
+          setIsListening(false);
+        }
+      };
+
+      recognition.onend = () => {
+        // If recognition stops but user had spoken text, send it
+        if (latestTextRef.current && latestTextRef.current.trim().length > 1 && !isLoadingRef.current) {
+          const toSend = latestTextRef.current.trim();
+          latestTextRef.current = '';
+          setLiveSpokenText('');
+          handleSendMessage(toSend);
+        }
+
+        // If modal is still open and not manually stopped, keep listening continuously
+        if (isOpenRef.current && !isManuallyStoppedRef.current && !isLoadingRef.current) {
+          try {
+            recognition.start();
+            return;
+          } catch {}
+        }
+
+        setIsListening(false);
+        cleanupAudioStream();
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err: any) {
+      console.warn('[VoiceReceptionist] Failed to start recognition:', err);
+      setSpeechError('Microphone could not be started. You can type in the box below!');
+      setIsListening(false);
+      cleanupAudioStream();
+    }
+
+    // Connect Audio Analyser for reactive frequency bars (non-blocking)
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+        mediaStreamRef.current = stream;
         try {
           const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
           if (AudioContextClass) {
@@ -262,122 +383,18 @@ export default function VoiceReceptionistFab({
             };
             updateLevel();
           }
-        } catch (audioErr) {
-          console.warn('[VoiceReceptionist] Audio analyser error:', audioErr);
-        }
-      } catch (permErr: any) {
-        console.warn('[VoiceReceptionist] Mic permission error:', permErr);
-        if (permErr.name === 'NotAllowedError' || permErr.name === 'PermissionDeniedError') {
-          setSpeechError(
-            'Microphone access is blocked. Click the lock/camera icon in your browser URL bar to allow microphone access, or type your message below.'
-          );
-          setIsListening(false);
-          cleanupAudioStream();
-          return;
-        }
-      }
-    }
-
-    // 2. Initialize and start Web Speech Recognition
-    const SpeechRecognition =
-      typeof window !== 'undefined' &&
-      ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
-
-    if (!SpeechRecognition) {
-      setSpeechError('Live speech recognition is not supported in this browser. You can type in the box below!');
-      setIsListening(false);
-      cleanupAudioStream();
-      return;
-    }
-
-    try {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.abort();
         } catch {}
-      }
-
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true; // Enables live real-time transcription as the user speaks
-
-      const langCode = profile?.language === 'id' ? 'id-ID' : profile?.language === 'fr' ? 'fr-FR' : 'en-US';
-      recognition.lang = langCode;
-
-      recognition.onstart = () => {
-        setIsListening(true);
-        setSpeechError(null);
-        setInterimTranscript('');
-      };
-
-      recognition.onresult = (event: any) => {
-        let interim = '';
-        let final = '';
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const item = event.results[i];
-          if (item.isFinal) {
-            final += item[0]?.transcript || '';
-          } else {
-            interim += item[0]?.transcript || '';
-          }
-        }
-
-        if (interim) {
-          setInterimTranscript(interim);
-        }
-
-        if (final.trim()) {
-          setInterimTranscript('');
-          cleanupAudioStream();
-          handleSendMessage(final.trim());
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        setIsListening(false);
-        cleanupAudioStream();
-        const err = event.error;
-        if (err === 'not-allowed' || err === 'service-not-allowed') {
-          setSpeechError(
-            'Microphone access is blocked by browser permissions. Please allow microphone in your address bar, or use the chat box below.'
-          );
-        } else if (err === 'audio-capture') {
-          setSpeechError('No microphone detected. Please connect an audio input or type below.');
-        } else if (err === 'network') {
-          setSpeechError('Speech network service unavailable. You can type in the box below.');
-        } else if (err === 'no-speech') {
-          setSpeechError('No speech detected. Tap the mic button to try again, or type below.');
-        } else if (err !== 'aborted') {
-          console.warn('[VoiceReceptionist] Speech error:', err);
-          setSpeechError(`Speech notice: ${err}. You can type below.`);
-        }
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-        cleanupAudioStream();
-        // If there was interim text accumulated that wasn't finalized, submit it
-        setInterimTranscript((prev) => {
-          if (prev && prev.trim().length > 1) {
-            handleSendMessage(prev.trim());
-          }
-          return '';
-        });
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch (err: any) {
-      console.warn('[VoiceReceptionist] Failed to start recognition:', err);
-      setSpeechError('Microphone could not be started. You can type in the box below!');
-      setIsListening(false);
-      cleanupAudioStream();
+      }).catch(() => {});
     }
   };
 
   // Stop listening
   const stopListening = () => {
+    isManuallyStoppedRef.current = true;
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -385,30 +402,27 @@ export default function VoiceReceptionistFab({
     }
     setIsListening(false);
     cleanupAudioStream();
-
-    if (interimTranscript && interimTranscript.trim().length > 1) {
-      const textToSend = interimTranscript.trim();
-      setInterimTranscript('');
-      handleSendMessage(textToSend);
-    }
   };
 
   // Toggle listening button
   const toggleListening = () => {
     if (isListening) {
+      isManuallyStoppedRef.current = true;
       stopListening();
     } else {
+      isManuallyStoppedRef.current = false;
       startListening();
     }
   };
 
-  // Open FAB & Trigger Auto-Welcome + Auto-Listen
+  // Open FAB & Immediately Start Listening (DO NOT talk first)
   const handleOpenFab = () => {
     setIsOpen(true);
     isOpenRef.current = true;
+    isManuallyStoppedRef.current = false;
     setSpeechError(null);
 
-    // Prime audio synthesis on user click gesture (critical for mobile Safari & Chrome)
+    // Prime audio synthesis on user gesture for later assistant responses if needed
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       try {
         const unlock = new SpeechSynthesisUtterance(' ');
@@ -417,25 +431,18 @@ export default function VoiceReceptionistFab({
       } catch {}
     }
 
-    // Speak welcome message aloud and start listening once finished
-    if (isSpeakingEnabled && !hasSpokenWelcomeRef.current) {
-      hasSpokenWelcomeRef.current = true;
-      speakResponse(welcomeGreetingText, () => {
-        if (isOpenRef.current) {
-          startListening();
-        }
-      });
-    } else {
-      startListening();
-    }
+    // Do NOT get the agent to talk first. Start listening immediately!
+    startListening();
   };
 
   // Close Receptionist Modal
   const handleClose = () => {
+    isManuallyStoppedRef.current = true;
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
     stopListening();
+    setLiveSpokenText('');
     setIsOpen(false);
     isOpenRef.current = false;
   };
@@ -458,16 +465,24 @@ export default function VoiceReceptionistFab({
   const handleSendMessage = async (text: string) => {
     if (!text || text.trim().length === 0 || isLoading) return;
 
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+
+    const userMsgText = text.trim();
+    setInputText('');
+    setLiveSpokenText('');
+    latestTextRef.current = '';
+
     const userMsg: ChatTurn = {
       id: `u_${Date.now()}`,
       role: 'user',
-      text: text.trim(),
+      text: userMsgText,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
     setMessages((prev) => [...prev, userMsg]);
-    setInputText('');
-    setInterimTranscript('');
     setIsLoading(true);
 
     try {
@@ -487,7 +502,7 @@ export default function VoiceReceptionistFab({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: text.trim(),
+          message: userMsgText,
           profile,
           biomarkers,
           biomarkerHistory,
@@ -564,7 +579,7 @@ export default function VoiceReceptionistFab({
       }
 
       // 2. Check for Navigation / Co-Pilot intent in the conversation
-      const lowerReply = (replyText + ' ' + text).toLowerCase();
+      const lowerReply = (replyText + ' ' + userMsgText).toLowerCase();
       if (lowerReply.includes('go to food') || lowerReply.includes('opening food') || lowerReply.includes('food tab')) {
         if (activeTab !== 'food') {
           setActiveTab('food');
@@ -611,6 +626,8 @@ export default function VoiceReceptionistFab({
             startListening();
           }
         });
+      } else if (isOpenRef.current) {
+        startListening();
       }
     } catch (err: any) {
       console.error('[VoiceReceptionist] Dispatch failed:', err);
@@ -632,6 +649,9 @@ export default function VoiceReceptionistFab({
   useEffect(() => {
     return () => {
       cleanupAudioStream();
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+      }
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
@@ -811,6 +831,22 @@ export default function VoiceReceptionistFab({
               </div>
             ))}
 
+            {/* Real-Time Live Streaming User Speech Bubble */}
+            {isListening && liveSpokenText && (
+              <div className="flex flex-col items-end animate-fade-in">
+                <div className="max-w-[85%] rounded-2xl rounded-br-none px-3.5 py-2.5 bg-indigo-600/90 text-white shadow-md border border-indigo-400/50">
+                  <div className="flex items-center gap-1.5 mb-1 text-[10px] text-indigo-200 font-semibold uppercase tracking-wider">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-ping" />
+                    <span>Listening to you...</span>
+                  </div>
+                  <p className="whitespace-pre-wrap font-medium">
+                    {liveSpokenText}
+                    <span className="inline-block w-1.5 h-3.5 bg-white animate-pulse ml-1 align-middle" />
+                  </p>
+                </div>
+              </div>
+            )}
+
             {isLoading && (
               <div className="flex items-center gap-2 text-slate-400 text-xs py-1">
                 <Loader className="w-3.5 h-3.5 animate-spin text-indigo-500" />
@@ -819,7 +855,7 @@ export default function VoiceReceptionistFab({
             )}
           </div>
 
-          {/* Active Listening Soundwave & Live Interim Text Banner */}
+          {/* Active Listening Soundwave Bar */}
           {isListening && (
             <div className="px-3.5 py-2 bg-red-500/10 border-t border-red-500/20 flex items-center justify-between text-xs text-red-600 dark:text-red-400">
               <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -844,12 +880,22 @@ export default function VoiceReceptionistFab({
                 </div>
                 <span className="font-semibold shrink-0">Listening...</span>
                 <span className="italic truncate text-slate-700 dark:text-slate-200 font-medium">
-                  {interimTranscript ? `"${interimTranscript}"` : 'Speak now...'}
+                  {liveSpokenText ? `"${liveSpokenText}"` : 'Speak now...'}
                 </span>
               </div>
               <button
                 type="button"
-                onClick={stopListening}
+                onClick={() => {
+                  if (latestTextRef.current.trim().length > 0) {
+                    const toSend = latestTextRef.current.trim();
+                    latestTextRef.current = '';
+                    setLiveSpokenText('');
+                    stopListening();
+                    handleSendMessage(toSend);
+                  } else {
+                    stopListening();
+                  }
+                }}
                 className="text-[11px] font-bold text-red-600 dark:text-red-400 hover:underline ml-2 shrink-0 cursor-pointer"
               >
                 Done
@@ -884,24 +930,32 @@ export default function VoiceReceptionistFab({
               {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             </button>
 
-            {/* Text Input for Typing when disconnected/quiet */}
+            {/* Text Input for Typing / Real-time Spoken Text Display */}
             <input
               type="text"
               value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
+              onChange={(e) => {
+                setInputText(e.target.value);
+                setLiveSpokenText(e.target.value);
+                latestTextRef.current = e.target.value;
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
+                  stopListening();
                   handleSendMessage(inputText);
                 }
               }}
-              placeholder={isListening ? 'Listening to voice... or type here' : 'Talk aloud or type a message...'}
+              placeholder={isListening ? '🎙️ Listening... Speak now or type' : 'Talk aloud or type a message...'}
               className="flex-1 bg-slate-100 dark:bg-slate-800/80 border border-theme-border rounded-full px-3.5 py-2 text-xs text-theme-text focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
             />
 
             {/* Send Button */}
             <button
               type="button"
-              onClick={() => handleSendMessage(inputText)}
+              onClick={() => {
+                stopListening();
+                handleSendMessage(inputText);
+              }}
               disabled={!inputText.trim() || isLoading}
               className="p-2 rounded-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white transition-all shrink-0 cursor-pointer"
             >
