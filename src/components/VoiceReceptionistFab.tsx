@@ -18,7 +18,8 @@ import {
   Loader,
   Save,
   Sliders,
-  Play
+  Play,
+  Clock
 } from 'lucide-react';
 import type { UserProfile, FoodLog } from '../types';
 
@@ -212,6 +213,11 @@ export default function VoiceReceptionistFab({
   });
   const [isVoiceSettingsOpen, setIsVoiceSettingsOpen] = useState(false);
 
+  const currentlySpeakingTextRef = useRef<string>('');
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const queuedMessageRef = useRef<string>('');
+  const [queuedMessageText, setQueuedMessageText] = useState<string>('');
+
   const [inputText, setInputText] = useState('');
   const [liveSpokenText, setLiveSpokenText] = useState('');
   const latestTextRef = useRef('');
@@ -234,14 +240,17 @@ export default function VoiceReceptionistFab({
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
-  // Dynamic soundwave oscillation when listening without locking hardware mic
+  // Dynamic soundwave oscillation when listening, speaking, or recording
   useEffect(() => {
     let interval: any = null;
-    if (isListening || isRecordingAudio) {
+    if (isListening || isRecordingAudio || isSpeaking) {
       interval = setInterval(() => {
         setAudioLevel(() => {
           if (latestTextRef.current || liveSpokenText) {
             return Math.floor(Math.random() * 35) + 65;
+          }
+          if (isSpeaking) {
+            return Math.floor(Math.random() * 30) + 40;
           }
           return Math.floor(Math.random() * 25) + 20;
         });
@@ -252,7 +261,7 @@ export default function VoiceReceptionistFab({
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isListening, isRecordingAudio, liveSpokenText]);
+  }, [isListening, isRecordingAudio, liveSpokenText, isSpeaking]);
 
   // Keep isOpenRef and isLoadingRef in sync
   useEffect(() => {
@@ -469,14 +478,19 @@ export default function VoiceReceptionistFab({
         utterance.voice = optimalVoice;
       }
 
-      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onstart = () => {
+        setIsSpeaking(true);
+        currentlySpeakingTextRef.current = cleanText;
+      };
       utterance.onend = () => {
         setIsSpeaking(false);
+        currentlySpeakingTextRef.current = '';
         if (onComplete) onComplete();
       };
       utterance.onerror = (e) => {
         console.warn('[VoiceReceptionist] Utterance error:', e);
         setIsSpeaking(false);
+        currentlySpeakingTextRef.current = '';
         if (onComplete) onComplete();
       };
 
@@ -484,6 +498,7 @@ export default function VoiceReceptionistFab({
     } catch (e) {
       console.warn('[VoiceReceptionist] Speech synthesis error:', e);
       setIsSpeaking(false);
+      currentlySpeakingTextRef.current = '';
       if (onComplete) onComplete();
     }
   };
@@ -592,16 +607,17 @@ export default function VoiceReceptionistFab({
     cleanupAudioStream();
   };
 
-  // Start Microphone and Speech Recognition immediately (WebKit/Android-safe single-shot loop)
-  const startListening = () => {
+  // Start Microphone and Speech Recognition immediately (Continuous loop with barge-in & interleave support)
+  const startListening = (forceStopAssistant = false) => {
     isManuallyStoppedRef.current = false;
     setSpeechError(null);
     setIsListening(true);
 
-    // Stop assistant speaking before listening
-    if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking) {
+    // Stop assistant speaking only if explicitly instructed (e.g. user gesture)
+    if (forceStopAssistant && typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking) {
       window.speechSynthesis.cancel();
       setIsSpeaking(false);
+      currentlySpeakingTextRef.current = '';
     }
 
     const SpeechRecognition =
@@ -623,7 +639,7 @@ export default function VoiceReceptionistFab({
       }
 
       const recognition = new SpeechRecognition();
-      // Continuous = false (single utterance loop) reliably emits interim and final results across all mobile & desktop browsers!
+      // Single utterance loop cleanly catches continuous speech across Android & iOS
       recognition.continuous = false;
       recognition.interimResults = true;
 
@@ -666,6 +682,24 @@ export default function VoiceReceptionistFab({
 
         const trimmed = fullTranscript.trim();
         if (trimmed) {
+          // 1. Barge-in detection: If assistant is speaking aloud, user is cutting in!
+          if (isSpeaking) {
+            const assistantSpeech = (currentlySpeakingTextRef.current || '').toLowerCase();
+            const isEcho =
+              assistantSpeech &&
+              assistantSpeech.includes(trimmed.toLowerCase()) &&
+              trimmed.length < 15;
+
+            if (!isEcho) {
+              // Genuine user interruption: Cut off assistant voice immediately!
+              if (typeof window !== 'undefined' && window.speechSynthesis) {
+                window.speechSynthesis.cancel();
+              }
+              setIsSpeaking(false);
+              currentlySpeakingTextRef.current = '';
+            }
+          }
+
           setInputText(trimmed);
           setLiveSpokenText(trimmed);
           latestTextRef.current = trimmed;
@@ -675,17 +709,32 @@ export default function VoiceReceptionistFab({
             chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
           }
 
-          // Debounced auto-send after 1.1 seconds of silence (fast turnaround, responsive feel)
+          // Debounced auto-send after 1.1 seconds of silence
           if (silenceTimerRef.current) {
             clearTimeout(silenceTimerRef.current);
           }
           silenceTimerRef.current = setTimeout(() => {
-            if (latestTextRef.current && latestTextRef.current.trim().length > 1 && !isLoadingRef.current) {
+            if (latestTextRef.current && latestTextRef.current.trim().length > 1) {
               const toSend = latestTextRef.current.trim();
               latestTextRef.current = '';
               setLiveSpokenText('');
-              stopListening();
-              handleSendMessage(toSend);
+
+              if (isLoadingRef.current) {
+                // User spoke while previous request was still analysing!
+                const isInterrupt = /^(wait|actually|no|cancel|stop|nevermind|instead|hold on|sorry)/i.test(toSend);
+                if (isInterrupt && abortControllerRef.current) {
+                  abortControllerRef.current.abort();
+                  abortControllerRef.current = null;
+                  setIsLoading(false);
+                  handleSendMessage(toSend);
+                } else {
+                  // Queue additional input to run seamlessly once current turn completes
+                  queuedMessageRef.current = toSend;
+                  setQueuedMessageText(toSend);
+                }
+              } else {
+                handleSendMessage(toSend);
+              }
             }
           }, 1100);
         }
@@ -712,22 +761,35 @@ export default function VoiceReceptionistFab({
       };
 
       recognition.onend = () => {
-        // If recognition stops but user had spoken text, send it
-        if (latestTextRef.current && latestTextRef.current.trim().length > 1 && !isLoadingRef.current) {
+        // If recognition stops but user had spoken text, send/queue it
+        if (latestTextRef.current && latestTextRef.current.trim().length > 1) {
           const toSend = latestTextRef.current.trim();
           latestTextRef.current = '';
           setLiveSpokenText('');
-          handleSendMessage(toSend);
-          return;
+
+          if (isLoadingRef.current) {
+            const isInterrupt = /^(wait|actually|no|cancel|stop|nevermind|instead|hold on|sorry)/i.test(toSend);
+            if (isInterrupt && abortControllerRef.current) {
+              abortControllerRef.current.abort();
+              abortControllerRef.current = null;
+              setIsLoading(false);
+              handleSendMessage(toSend);
+            } else {
+              queuedMessageRef.current = toSend;
+              setQueuedMessageText(toSend);
+            }
+          } else {
+            handleSendMessage(toSend);
+          }
         }
 
-        // If modal is still open and not manually stopped, cleanly loop with fresh recognition
-        if (isOpenRef.current && !isManuallyStoppedRef.current && !isLoadingRef.current) {
+        // Loop seamlessly whenever modal is open (never stops during isLoading or isSpeaking!)
+        if (isOpenRef.current && !isManuallyStoppedRef.current) {
           setTimeout(() => {
-            if (isOpenRef.current && !isManuallyStoppedRef.current && !isLoadingRef.current) {
-              startListening();
+            if (isOpenRef.current && !isManuallyStoppedRef.current) {
+              startListening(false);
             }
-          }, 150);
+          }, 100);
           return;
         }
 
@@ -766,12 +828,17 @@ export default function VoiceReceptionistFab({
 
   // Toggle listening button
   const toggleListening = () => {
+    if (isSpeaking && typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      currentlySpeakingTextRef.current = '';
+    }
     if (isListening || isRecordingAudio) {
       isManuallyStoppedRef.current = true;
       stopListening();
     } else {
       isManuallyStoppedRef.current = false;
-      startListening();
+      startListening(true);
     }
   };
 
@@ -792,8 +859,8 @@ export default function VoiceReceptionistFab({
       } catch {}
     }
 
-    // Do NOT get the agent to talk first. Start listening immediately!
-    startListening();
+    // Start listening immediately
+    startListening(true);
   };
 
   // Close Receptionist Modal
@@ -802,6 +869,14 @@ export default function VoiceReceptionistFab({
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
+    setIsSpeaking(false);
+    currentlySpeakingTextRef.current = '';
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    queuedMessageRef.current = '';
+    setQueuedMessageText('');
     stopListening();
     setLiveSpokenText('');
     setIsOpen(false);
@@ -824,12 +899,23 @@ export default function VoiceReceptionistFab({
 
   // Dispatch message to Receptionist Agent
   const handleSendMessage = async (text: string) => {
-    if (!text || text.trim().length === 0 || isLoading) return;
+    if (!text || text.trim().length === 0) return;
 
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
     }
+
+    // Abort previous in-flight request if user is interrupting/overriding
+    if (abortControllerRef.current) {
+      try {
+        abortControllerRef.current.abort();
+      } catch {}
+      abortControllerRef.current = null;
+    }
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     const userMsgText = text.trim();
     setInputText('');
@@ -862,6 +948,7 @@ export default function VoiceReceptionistFab({
       const res = await fetch('/api/gemini/front-desk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({
           message: userMsgText,
           profile,
@@ -1000,29 +1087,44 @@ export default function VoiceReceptionistFab({
 
       setMessages((prev) => [...prev, botMsg]);
 
-      // Speak response aloud and then auto-resume listening for continuous conversation!
+      // Speak response aloud and keep listening for continuous conversation!
       if (isVoiceActive && isSpeakingEnabled) {
         speakResponse(replyText, () => {
           if (isOpenRef.current) {
-            startListening();
+            startListening(false);
           }
         });
       } else if (isOpenRef.current) {
-        startListening();
+        startListening(false);
       }
     } catch (err: any) {
-      console.error('[VoiceReceptionist] Dispatch failed:', err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `err_${Date.now()}`,
-          role: 'assistant',
-          text: "I'm having trouble connecting right now, but feel free to try again or ask me another question.",
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
+      if (err?.name === 'AbortError' || err?.message?.includes('aborted')) {
+        console.log('[VoiceReceptionist] Request was aborted by user steer/interruption');
+      } else {
+        console.error('[VoiceReceptionist] Dispatch failed:', err);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `err_${Date.now()}`,
+            role: 'assistant',
+            text: "I'm having trouble connecting right now, but feel free to try again or ask me another question.",
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+      }
     } finally {
       setIsLoading(false);
+      abortControllerRef.current = null;
+
+      // If user spoke additional input while this request was running, dispatch queued message seamlessly!
+      if (queuedMessageRef.current) {
+        const nextMessage = queuedMessageRef.current;
+        queuedMessageRef.current = '';
+        setQueuedMessageText('');
+        setTimeout(() => {
+          handleSendMessage(nextMessage);
+        }, 200);
+      }
     }
   };
 
@@ -1362,7 +1464,7 @@ export default function VoiceReceptionistFab({
             ))}
 
             {/* Real-Time Live Streaming User Speech Bubble */}
-            {isListening && liveSpokenText && (
+            {liveSpokenText && (
               <div className="flex flex-col items-end animate-fade-in">
                 <div className="max-w-[85%] rounded-2xl rounded-br-none px-3.5 py-2.5 bg-indigo-600/90 text-white shadow-md border border-indigo-400/50">
                   <div className="flex items-center gap-1.5 mb-1 text-[10px] text-indigo-200 font-semibold uppercase tracking-wider">
@@ -1380,60 +1482,136 @@ export default function VoiceReceptionistFab({
             {isLoading && (
               <div className="flex items-center gap-2 text-slate-400 text-xs py-1">
                 <Loader className="w-3.5 h-3.5 animate-spin text-indigo-500" />
-                <span>Receptionist is thinking & checking your data...</span>
+                <span>Receptionist is thinking... (Speak anytime to steer or add)</span>
               </div>
             )}
           </div>
 
-          {/* Active Listening / Recording Soundwave Bar */}
-          {(isListening || isRecordingAudio) && (
-            <div className="px-3.5 py-2 bg-red-500/10 border-t border-red-500/20 flex items-center justify-between text-xs text-red-600 dark:text-red-400">
+          {/* Queued Message Banner */}
+          {queuedMessageText && (
+            <div className="px-3.5 py-1.5 bg-amber-50 dark:bg-amber-950/40 border-t border-amber-200 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-300 flex items-center justify-between">
+              <div className="flex items-center gap-1.5 truncate">
+                <Clock className="w-3.5 h-3.5 shrink-0 text-amber-600 animate-spin" />
+                <span className="truncate">Queued: &ldquo;{queuedMessageText}&rdquo;</span>
+              </div>
+              <span className="text-[10px] opacity-75 shrink-0">Sending next</span>
+            </div>
+          )}
+
+          {/* Active Listening / Recording / Speaking Soundwave Bar */}
+          {(isListening || isRecordingAudio || isSpeaking) && (
+            <div
+              className={`px-3.5 py-2 border-t flex items-center justify-between text-xs transition-colors duration-200 ${
+                isSpeaking && !liveSpokenText
+                  ? 'bg-purple-500/10 border-purple-500/20 text-purple-700 dark:text-purple-300'
+                  : 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
+              }`}
+            >
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 {/* Physical Audio Reactive Frequency Equalizer Bars */}
                 <div className="flex items-end gap-1 h-4 shrink-0">
                   <span
-                    className="w-1 bg-red-500 rounded-full transition-all duration-75"
+                    className={`w-1 rounded-full transition-all duration-75 ${
+                      isSpeaking && !liveSpokenText ? 'bg-purple-500' : 'bg-red-500'
+                    }`}
                     style={{ height: `${Math.max(4, Math.round((audioLevel / 100) * 16))}px` }}
                   />
                   <span
-                    className="w-1 bg-red-500 rounded-full transition-all duration-75"
+                    className={`w-1 rounded-full transition-all duration-75 ${
+                      isSpeaking && !liveSpokenText ? 'bg-purple-500' : 'bg-red-500'
+                    }`}
                     style={{ height: `${Math.max(6, Math.round((audioLevel / 100) * 14 + 3))}px` }}
                   />
                   <span
-                    className="w-1 bg-red-500 rounded-full transition-all duration-75"
+                    className={`w-1 rounded-full transition-all duration-75 ${
+                      isSpeaking && !liveSpokenText ? 'bg-purple-500' : 'bg-red-500'
+                    }`}
                     style={{ height: `${Math.max(3, Math.round((audioLevel / 100) * 16 + 2))}px` }}
                   />
                   <span
-                    className="w-1 bg-red-500 rounded-full transition-all duration-75"
+                    className={`w-1 rounded-full transition-all duration-75 ${
+                      isSpeaking && !liveSpokenText ? 'bg-purple-500' : 'bg-red-500'
+                    }`}
                     style={{ height: `${Math.max(8, Math.round((audioLevel / 100) * 15 + 4))}px` }}
                   />
                 </div>
                 <span className="font-semibold shrink-0">
-                  {isRecordingAudio ? 'Recording voice note...' : 'Listening...'}
+                  {isRecordingAudio
+                    ? 'Recording voice note...'
+                    : isSpeaking && !liveSpokenText
+                    ? 'Speaking (Speak to cut in)...'
+                    : isLoading
+                    ? 'Thinking (Speak to steer)...'
+                    : 'Listening...'}
                 </span>
                 <span className="italic truncate text-slate-700 dark:text-slate-200 font-medium">
-                  {liveSpokenText ? `"${liveSpokenText}"` : 'Speak now...'}
+                  {liveSpokenText
+                    ? `"${liveSpokenText}"`
+                    : isSpeaking
+                    ? 'Microphone active — interrupt anytime'
+                    : isLoading
+                    ? 'Add more or say "Wait"...'
+                    : 'Speak now...'}
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  if (isRecordingAudio) {
-                    stopAudioRecording();
-                  } else if (latestTextRef.current.trim().length > 0) {
-                    const toSend = latestTextRef.current.trim();
-                    latestTextRef.current = '';
-                    setLiveSpokenText('');
-                    stopListening();
-                    handleSendMessage(toSend);
-                  } else {
-                    stopListening();
-                  }
-                }}
-                className="px-2.5 py-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-lg text-[10px] font-bold shadow-sm transition-all ml-2 shrink-0 cursor-pointer flex items-center gap-1"
-              >
-                <span>Send Now</span>
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                {isSpeaking && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== 'undefined' && window.speechSynthesis) {
+                        window.speechSynthesis.cancel();
+                      }
+                      setIsSpeaking(false);
+                      currentlySpeakingTextRef.current = '';
+                    }}
+                    className="px-2 py-1 bg-purple-600 hover:bg-purple-700 active:scale-95 text-white rounded-lg text-[10px] font-bold shadow-sm transition-all cursor-pointer flex items-center gap-1"
+                    title="Silence assistant speech"
+                  >
+                    <span>Mute</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isSpeaking && typeof window !== 'undefined' && window.speechSynthesis) {
+                      window.speechSynthesis.cancel();
+                      setIsSpeaking(false);
+                      currentlySpeakingTextRef.current = '';
+                    }
+                    if (isRecordingAudio) {
+                      stopAudioRecording();
+                    } else if (latestTextRef.current.trim().length > 0) {
+                      const toSend = latestTextRef.current.trim();
+                      latestTextRef.current = '';
+                      setLiveSpokenText('');
+                      if (isLoadingRef.current && abortControllerRef.current) {
+                        abortControllerRef.current.abort();
+                        abortControllerRef.current = null;
+                        setIsLoading(false);
+                      }
+                      handleSendMessage(toSend);
+                    } else if (!isSpeaking) {
+                      stopListening();
+                    }
+                  }}
+                  className={`px-2.5 py-1 text-white rounded-lg text-[10px] font-bold shadow-sm transition-all cursor-pointer flex items-center gap-1 ${
+                    latestTextRef.current.trim().length > 0
+                      ? 'bg-red-600 hover:bg-red-700 active:scale-95'
+                      : 'bg-slate-500 hover:bg-slate-600'
+                  }`}
+                >
+                  <span>
+                    {latestTextRef.current.trim().length > 0
+                      ? isLoading
+                        ? 'Steer Now'
+                        : 'Send Now'
+                      : isSpeaking
+                      ? 'Interrupt'
+                      : 'Stop'}
+                  </span>
+                </button>
+              </div>
             </div>
           )}
 
