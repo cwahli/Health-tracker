@@ -618,6 +618,97 @@ export function reconcileIngredientsToComponents(item: any, addDebugLog?: (msg: 
     }
   }
 }
+/** Same-unit nutrient aliases for snake_case model output. Salt is deliberately
+ *  absent: salt_g → sodium_mg needs unit math, not a rename. */
+const SNAKE_NUTRIENT_ALIASES: Record<string, string> = {
+  protein_g: "protein",
+  fat_g: "totalFat",
+  saturates_g: "saturatedFat",
+  saturated_fat_g: "saturatedFat",
+  carbohydrate_g: "carbohydrates",
+  carbohydrates_g: "carbohydrates",
+  carbs_g: "carbohydrates",
+  fibre_g: "totalFibre",
+  fiber_g: "totalFibre",
+  sugars_g: "totalSugar",
+  sugar_g: "totalSugar",
+  energy_kcal: "calories",
+  calories_kcal: "calories",
+  trans_fat_g: "transFat",
+};
+
+function snakeToCamel(key: string): string {
+  return key.replace(/_([a-z0-9])/g, (_, c) => String(c).toUpperCase());
+}
+
+/** Copy snake_case keys to their camelCase form (never overwrites an
+ *  existing camelCase key) and apply same-unit nutrient aliases. Returns
+ *  the number of keys filled. */
+export function normalizeScoutKeyCasing(node: any): number {
+  if (Array.isArray(node)) return node.reduce((n, v) => n + normalizeScoutKeyCasing(v), 0);
+  if (!node || typeof node !== "object") return 0;
+  let filled = 0;
+  for (const key of Object.keys(node)) {
+    const value = (node as any)[key];
+    if (key.includes("_") && !key.startsWith("_")) {
+      const camel = snakeToCamel(key);
+      if (camel !== key && (node as any)[camel] === undefined) {
+        (node as any)[camel] = value;
+        filled++;
+      }
+      const alias = SNAKE_NUTRIENT_ALIASES[key];
+      if (alias && (node as any)[alias] === undefined) {
+        (node as any)[alias] = value;
+        filled++;
+      }
+    }
+    filled += normalizeScoutKeyCasing(value);
+  }
+  return filled;
+}
+
+/** Structural aliases for model output dialects. Without native responseSchema
+ *  enforcement, models vary the envelope: constituentFoods vs foods,
+ *  weightGrams vs estimatedWeightGrams, dish-level nutrients vs dishNutrients.
+ *  Fills the schema-canonical fields from known aliases (never overwrites). */
+const DISH_FOODS_ALIASES = ["constituentFoods", "items", "components", "ingredients"];
+
+export function normalizeScoutStructure(root: any): number {
+  const dishes = (root as any)?.dishes;
+  if (!Array.isArray(dishes)) return 0;
+  let fixed = 0;
+  for (const d of dishes) {
+    if (!d || typeof d !== "object") continue;
+    if (!Array.isArray((d as any).foods)) {
+      const alt = DISH_FOODS_ALIASES.map((k) => (d as any)[k]).find((v) => Array.isArray(v));
+      if (alt) {
+        (d as any).foods = alt;
+        fixed++;
+      }
+    }
+    const est = Number((d as any).estimatedWeightGrams);
+    if ((!Number.isFinite(est) || est <= 0)) {
+      const w = Number((d as any).weightGrams ?? (d as any).weight_g);
+      if (Number.isFinite(w) && w > 0) {
+        (d as any).estimatedWeightGrams = w;
+        fixed++;
+      }
+    }
+    const dn = (d as any).dishNutrients;
+    if (!dn || typeof dn !== "object" || Object.keys(dn).length === 0) {
+      const n = (d as any).nutrients;
+      if (n && typeof n === "object") {
+        const copy: any = { ...(n as any) };
+        normalizeScoutKeyCasing(copy);
+        if (copy.totalFat === undefined && copy.fat !== undefined) copy.totalFat = copy.fat;
+        (d as any).dishNutrients = copy;
+        fixed++;
+      }
+    }
+  }
+  return fixed;
+}
+
 export function parseAndHealVisionScout(
   scoutOutput: any,
   addDebugLog: (msg: string) => void,
@@ -643,6 +734,19 @@ export function parseAndHealVisionScout(
         parsedScout = { items: [] };
       }
     }
+  }
+  // Model-agnostic key healing: models without native responseSchema
+  // enforcement (observed: Muse Spark via the Responses API) return
+  // snake_case keys (dish_name, food_name, fat_g). Without this, names
+  // resolve to the "Ingredient" fallback and a real meal ships with
+  // placeholder names. No-op for camelCase (Gemini) output.
+  const snakeFixed = normalizeScoutKeyCasing(parsedScout);
+  if (snakeFixed > 0) {
+    addDebugLog(`[Vision Scout] Normalized ${snakeFixed} snake_case key(s) to camelCase (non-Gemini model shape).`);
+  }
+  const structFixed = normalizeScoutStructure(parsedScout);
+  if (structFixed > 0) {
+    addDebugLog(`[Vision Scout] Normalized ${structFixed} structural field(s) (constituentFoods/weightGrams/nutrients aliases).`);
   }
   let isCompareData = isCompareMode || (parsedScout && (Boolean(parsedScout.comparisonTitle) || Array.isArray(parsedScout.groups)));
   if (!isCompareData) {
