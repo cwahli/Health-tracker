@@ -52,7 +52,8 @@ const UNIT = 'ht-allowance-watch';
 const DEPLOY_CLONE = '/home/ubuntu/deploy/Health-tracker';
 /** Trees that serve bots but are never reset to main — a fix copied here is temporary by construction. */
 const NEVER_DEPLOYED = ['/home/ubuntu/bot-host-r14'];
-const DEFAULT_HOST = process.env.HT_DEPLOY_HOST || 'ubuntu@51.254.217.163';
+const DEFAULT_HOST = process.env.HT_DEPLOY_HOST || 'root@103.147.32.117';
+const DEFAULT_PORT = process.env.HT_DEPLOY_PORT || '20133';
 /** The lane whose ❌ was the operator-visible symptom. */
 const HELD_LANE = /muse-spark-1\.3-contributor/i;
 const UNCERTAIN_HOLD = /not installed|uncertain/i;
@@ -264,11 +265,15 @@ export function judge(sections, facts, { now = Date.now() } = {}) {
 }
 
 function probe(host) {
+  const m = host.match(/^(.*?):(\d+)$/);
+  const addr = m ? m[1] : host;
+  const port = m ? m[2] : DEFAULT_PORT;
   const args = [
     '-o', 'BatchMode=yes',
     '-o', 'ConnectTimeout=10',
     '-o', 'StrictHostKeyChecking=accept-new',
-    host,
+    '-p', port,
+    addr,
     PROBE,
   ];
   try {
