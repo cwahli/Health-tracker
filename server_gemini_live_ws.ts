@@ -228,17 +228,16 @@ async function openLiveSession(args: {
       // to cancel playback every ~0.5s in an infinite chop loop), while
       // genuine close-mic speech still trips detection. End sensitivity
       // stays default so turn-taking latency is untouched.
+      // NOTE (2026-10-19): proactivity.proactiveAudio was tried and reverted
+      // the same night — the v1beta wire API rejects it at setup with
+      // 1007 "Unknown name proactivity". The SDK types declare the field
+      // but the server has no such field. Do NOT re-add without a wire
+      // check. Echo containment rests on LOW start sensitivity + AEC +
+      // the client energy gate.
       realtimeInputConfig: {
         automaticActivityDetection: {
           startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
         },
-      },
-      // Let the model ignore out-of-context speech (e.g. residual speaker
-      // bleed the VAD still commits) instead of answering it. Combined with
-      // LOW start sensitivity and the client echo gate, echo should neither
-      // interrupt playback nor become a self-directed turn.
-      proactivity: {
-        proactiveAudio: true,
       },
     },
     callbacks: {
