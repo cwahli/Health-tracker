@@ -292,6 +292,9 @@ export class GeminiLiveAudioClient {
         break;
       case 'error':
         if (!this.connected) {
+          // Transient pre-ready notices (fatal: false) must not kill a
+          // session that is still handshaking — the ready frame follows.
+          if (frame.fatal === false) break;
           this.fail(new Error(typeof frame.message === 'string' ? frame.message : 'Live voice error.'));
         } else {
           this.events.onError?.(typeof frame.message === 'string' ? frame.message : 'Live voice error.');

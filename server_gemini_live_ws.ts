@@ -256,9 +256,31 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
   let liveModel = PRIMARY_LIVE_MODEL;
   let setupReceived = false;
   let liveCtx: { profile?: any; recentMeals?: any[] } = {};
+  // Frames arriving during the Google handshake window (setup received,
+  // session not yet open). Audio/text are buffered and flushed on ready so
+  // the user's first syllable is never eaten; the buffer is tiny because
+  // the handshake is ~100-200ms. Tool responses can't precede a tool call.
+  const pendingInput: Array<{ kind: 'audio' | 'text'; data: string }> = [];
+  const MAX_PENDING_INPUT = 32;
+  const flushPendingInput = () => {
+    if (!session || pendingInput.length === 0) return;
+    const frames = pendingInput.splice(0);
+    try {
+      for (const f of frames) {
+        if (f.kind === 'audio') {
+          session.sendRealtimeInput({ audio: { data: f.data, mimeType: 'audio/pcm;rate=16000' } });
+        } else {
+          session.sendRealtimeInput({ text: f.data });
+        }
+      }
+      trace('pending-input-flushed', { frames: frames.length });
+    } catch (err) {
+      console.warn('[GeminiLiveWS] pending flush failed:', (err as Error)?.message);
+    }
+  };
   // Latency anatomy per turn: lastInputAt = latest client->Google stamp
   // (audio frame or typed text); firstAudioOutAt set on the first Google
-  // audio chunk after it. turnCount + toolCallCount for the close summary.
+  // audio chunk after it.
   let lastInputAt = 0;
   let firstAudioOutAt = 0;
   let firstAudioInAt = 0;
@@ -388,7 +410,7 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
   }): Promise<boolean> => {
     const apiKey = getLiveApiKey();
     if (!apiKey) {
-      safeSend(client, { type: 'error', message: 'Live voice is not configured on this server (missing Gemini API key).' });
+      safeSend(client, { type: 'error', message: 'Live voice is not configured on this server (missing Gemini API key).', fatal: true });
       return false;
     }
     const voice = normalizeLiveVoice(setup.voice);
@@ -443,6 +465,7 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
         });
         liveModel = model;
         googleReadyAt = Date.now();
+        flushPendingInput();
         safeSend(client, { type: 'ready', model, voice, sid });
         trace('ready', { model, voice, connectMs: Date.now() - attemptAt });
         console.log(`[GeminiLiveWS] live session open (model=${model} voice=${voice})`);
@@ -457,7 +480,7 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
     for (const model of candidates) {
       if (await openWithModel(model)) return true;
     }
-    safeSend(client, { type: 'error', message: 'Could not reach the live voice engine. Please retry in a moment.' });
+    safeSend(client, { type: 'error', message: 'Could not reach the live voice engine. Please retry in a moment.', fatal: true });
     return false;
   };
 
@@ -502,7 +525,19 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
     }
 
     if (!session) {
-      safeSend(client, { type: 'error', message: 'Voice session is not ready yet — send setup first.' });
+      // Handshake window: setup received but Google not open yet. Buffer
+      // audio/text and flush on ready — never error, or the client (which
+      // hasn't seen `ready`) treats it as fatal and hangs up.
+      if (setupReceived && (frame.type === 'audio' || frame.type === 'text')) {
+        const data = frame.type === 'audio' ? frame.data : frame.text;
+        if (typeof data === 'string' && data.length > 0) {
+          if (pendingInput.length < MAX_PENDING_INPUT) {
+            pendingInput.push({ kind: frame.type, data: frame.type === 'text' ? data.slice(0, 2000) : data });
+          }
+        }
+        return;
+      }
+      safeSend(client, { type: 'error', message: 'Voice session is not ready yet — send setup first.', fatal: true });
       return;
     }
 
