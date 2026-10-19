@@ -458,7 +458,7 @@ async function proxyPass(req, res, target, { headers: extraHeaders = null, resHe
   try {
     const headers = {};
     for (const [k, v] of Object.entries(req.headers || {})) {
-      if (['host', 'connection', 'content-length'].includes(String(k).toLowerCase())) continue;
+      if (['host', 'connection', 'content-length', 'expect', 'transfer-encoding'].includes(String(k).toLowerCase())) continue;
       headers[k] = v;
     }
     // Extra headers win (e.g. the web UI's upstream Basic credential replaces
@@ -567,7 +567,7 @@ async function proxyWebUi(req, res, url, env, { ttlSec = 900 } = {}) {
   try {
     const headers = {};
     for (const [k, v] of Object.entries(req.headers || {})) {
-      if (['host', 'connection', 'content-length'].includes(String(k).toLowerCase())) continue;
+      if (['host', 'connection', 'content-length', 'expect', 'transfer-encoding'].includes(String(k).toLowerCase())) continue;
       headers[k] = v;
     }
     headers.authorization = auth;
