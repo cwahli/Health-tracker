@@ -8,19 +8,23 @@ import {
   X,
   Sparkles,
   UserCheck,
-  Utensils,
-  Activity,
-  Compass,
-  ArrowRight,
+  Minus,
   CheckCircle2,
   AlertCircle,
   HelpCircle,
   Loader,
   Save,
   Sliders,
-  Play
+  Play,
+  Clock
 } from 'lucide-react';
 import type { UserProfile, FoodLog } from '../types';
+import {
+  GeminiLiveAudioClient,
+  isLiveVoiceSupported,
+  mergeLiveTranscript,
+} from '../services/geminiLiveAudioClient';
+import type { LiveToolCall, LiveVoicePersona } from '../services/geminiLiveAudioClient';
 
 export interface VoiceReceptionistFabProps {
   profile: UserProfile | null;
@@ -212,6 +216,39 @@ export default function VoiceReceptionistFab({
   });
   const [isVoiceSettingsOpen, setIsVoiceSettingsOpen] = useState(false);
 
+  // VOICE-LIVE-1 Phase 3: native Live voice path (primary) with legacy
+  // Web Speech + REST fallback. liveMode drives the header badge and routes
+  // typed messages either into the live socket or the legacy REST dispatch.
+  const [liveMode, setLiveMode] = useState<'idle' | 'connecting' | 'live' | 'legacy'>('idle');
+  const [liveVoice, setLiveVoice] = useState<LiveVoicePersona>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = window.localStorage.getItem('ht_live_voice');
+      if (saved === 'Aoede' || saved === 'Charon' || saved === 'Kore') return saved;
+    }
+    return 'Aoede';
+  });
+  const [liveReplyPreview, setLiveReplyPreview] = useState('');
+  // Follow mode: drawer hidden, session stays live, FAB shows the mic +
+  // live level bars so the user can roam the app guided by voice.
+  const [isMinimized, setIsMinimized] = useState(false);
+  const liveClientRef = useRef<GeminiLiveAudioClient | null>(null);
+  const liveModeRef = useRef<'idle' | 'connecting' | 'live' | 'legacy'>('idle');
+  const liveFailedRef = useRef(false);
+  const liveUserRef = useRef('');
+  const liveAssistantRef = useRef('');
+  const liveActionRef = useRef<ChatTurn['actionTaken']>(undefined);
+  const speakerActiveRef = useRef(false);
+  const speakerQuietTimerRef = useRef<any>(null);
+
+  useEffect(() => {
+    liveModeRef.current = liveMode;
+  }, [liveMode]);
+
+  const currentlySpeakingTextRef = useRef<string>('');
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const queuedMessageRef = useRef<string>('');
+  const [queuedMessageText, setQueuedMessageText] = useState<string>('');
+
   const [inputText, setInputText] = useState('');
   const [liveSpokenText, setLiveSpokenText] = useState('');
   const latestTextRef = useRef('');
@@ -234,14 +271,20 @@ export default function VoiceReceptionistFab({
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
-  // Dynamic soundwave oscillation when listening without locking hardware mic
+  // Dynamic soundwave oscillation when listening, speaking, or recording.
+  // In live mode the levels stream straight from the worklet/speaker meter,
+  // so the synthetic oscillation stays off.
   useEffect(() => {
     let interval: any = null;
-    if (isListening || isRecordingAudio) {
+    if (liveMode === 'live') return () => {};
+    if (isListening || isRecordingAudio || isSpeaking) {
       interval = setInterval(() => {
         setAudioLevel(() => {
           if (latestTextRef.current || liveSpokenText) {
             return Math.floor(Math.random() * 35) + 65;
+          }
+          if (isSpeaking) {
+            return Math.floor(Math.random() * 30) + 40;
           }
           return Math.floor(Math.random() * 25) + 20;
         });
@@ -252,7 +295,7 @@ export default function VoiceReceptionistFab({
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isListening, isRecordingAudio, liveSpokenText]);
+  }, [isListening, isRecordingAudio, liveSpokenText, isSpeaking, liveMode]);
 
   // Keep isOpenRef and isLoadingRef in sync
   useEffect(() => {
@@ -319,7 +362,7 @@ export default function VoiceReceptionistFab({
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
-  }, [messages, isLoading, isSpeaking, liveSpokenText]);
+  }, [messages, isLoading, isSpeaking, liveSpokenText, liveReplyPreview]);
 
   // Cleanup audio tracks and animation frame
   const cleanupAudioStream = () => {
@@ -469,14 +512,19 @@ export default function VoiceReceptionistFab({
         utterance.voice = optimalVoice;
       }
 
-      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onstart = () => {
+        setIsSpeaking(true);
+        currentlySpeakingTextRef.current = cleanText;
+      };
       utterance.onend = () => {
         setIsSpeaking(false);
+        currentlySpeakingTextRef.current = '';
         if (onComplete) onComplete();
       };
       utterance.onerror = (e) => {
         console.warn('[VoiceReceptionist] Utterance error:', e);
         setIsSpeaking(false);
+        currentlySpeakingTextRef.current = '';
         if (onComplete) onComplete();
       };
 
@@ -484,6 +532,7 @@ export default function VoiceReceptionistFab({
     } catch (e) {
       console.warn('[VoiceReceptionist] Speech synthesis error:', e);
       setIsSpeaking(false);
+      currentlySpeakingTextRef.current = '';
       if (onComplete) onComplete();
     }
   };
@@ -592,16 +641,17 @@ export default function VoiceReceptionistFab({
     cleanupAudioStream();
   };
 
-  // Start Microphone and Speech Recognition immediately (WebKit/Android-safe single-shot loop)
-  const startListening = () => {
+  // Start Microphone and Speech Recognition immediately (Continuous loop with barge-in & interleave support)
+  const startListening = (forceStopAssistant = false) => {
     isManuallyStoppedRef.current = false;
     setSpeechError(null);
     setIsListening(true);
 
-    // Stop assistant speaking before listening
-    if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking) {
+    // Stop assistant speaking only if explicitly instructed (e.g. user gesture)
+    if (forceStopAssistant && typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking) {
       window.speechSynthesis.cancel();
       setIsSpeaking(false);
+      currentlySpeakingTextRef.current = '';
     }
 
     const SpeechRecognition =
@@ -623,7 +673,7 @@ export default function VoiceReceptionistFab({
       }
 
       const recognition = new SpeechRecognition();
-      // Continuous = false (single utterance loop) reliably emits interim and final results across all mobile & desktop browsers!
+      // Single utterance loop cleanly catches continuous speech across Android & iOS
       recognition.continuous = false;
       recognition.interimResults = true;
 
@@ -666,6 +716,24 @@ export default function VoiceReceptionistFab({
 
         const trimmed = fullTranscript.trim();
         if (trimmed) {
+          // 1. Barge-in detection: If assistant is speaking aloud, user is cutting in!
+          if (isSpeaking) {
+            const assistantSpeech = (currentlySpeakingTextRef.current || '').toLowerCase();
+            const isEcho =
+              assistantSpeech &&
+              assistantSpeech.includes(trimmed.toLowerCase()) &&
+              trimmed.length < 15;
+
+            if (!isEcho) {
+              // Genuine user interruption: Cut off assistant voice immediately!
+              if (typeof window !== 'undefined' && window.speechSynthesis) {
+                window.speechSynthesis.cancel();
+              }
+              setIsSpeaking(false);
+              currentlySpeakingTextRef.current = '';
+            }
+          }
+
           setInputText(trimmed);
           setLiveSpokenText(trimmed);
           latestTextRef.current = trimmed;
@@ -675,17 +743,32 @@ export default function VoiceReceptionistFab({
             chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
           }
 
-          // Debounced auto-send after 1.1 seconds of silence (fast turnaround, responsive feel)
+          // Debounced auto-send after 1.1 seconds of silence
           if (silenceTimerRef.current) {
             clearTimeout(silenceTimerRef.current);
           }
           silenceTimerRef.current = setTimeout(() => {
-            if (latestTextRef.current && latestTextRef.current.trim().length > 1 && !isLoadingRef.current) {
+            if (latestTextRef.current && latestTextRef.current.trim().length > 1) {
               const toSend = latestTextRef.current.trim();
               latestTextRef.current = '';
               setLiveSpokenText('');
-              stopListening();
-              handleSendMessage(toSend);
+
+              if (isLoadingRef.current) {
+                // User spoke while previous request was still analysing!
+                const isInterrupt = /^(wait|actually|no|cancel|stop|nevermind|instead|hold on|sorry)/i.test(toSend);
+                if (isInterrupt && abortControllerRef.current) {
+                  abortControllerRef.current.abort();
+                  abortControllerRef.current = null;
+                  setIsLoading(false);
+                  handleSendMessage(toSend);
+                } else {
+                  // Queue additional input to run seamlessly once current turn completes
+                  queuedMessageRef.current = toSend;
+                  setQueuedMessageText(toSend);
+                }
+              } else {
+                handleSendMessage(toSend);
+              }
             }
           }, 1100);
         }
@@ -712,22 +795,35 @@ export default function VoiceReceptionistFab({
       };
 
       recognition.onend = () => {
-        // If recognition stops but user had spoken text, send it
-        if (latestTextRef.current && latestTextRef.current.trim().length > 1 && !isLoadingRef.current) {
+        // If recognition stops but user had spoken text, send/queue it
+        if (latestTextRef.current && latestTextRef.current.trim().length > 1) {
           const toSend = latestTextRef.current.trim();
           latestTextRef.current = '';
           setLiveSpokenText('');
-          handleSendMessage(toSend);
-          return;
+
+          if (isLoadingRef.current) {
+            const isInterrupt = /^(wait|actually|no|cancel|stop|nevermind|instead|hold on|sorry)/i.test(toSend);
+            if (isInterrupt && abortControllerRef.current) {
+              abortControllerRef.current.abort();
+              abortControllerRef.current = null;
+              setIsLoading(false);
+              handleSendMessage(toSend);
+            } else {
+              queuedMessageRef.current = toSend;
+              setQueuedMessageText(toSend);
+            }
+          } else {
+            handleSendMessage(toSend);
+          }
         }
 
-        // If modal is still open and not manually stopped, cleanly loop with fresh recognition
-        if (isOpenRef.current && !isManuallyStoppedRef.current && !isLoadingRef.current) {
+        // Loop seamlessly whenever modal is open (never stops during isLoading or isSpeaking!)
+        if (isOpenRef.current && !isManuallyStoppedRef.current) {
           setTimeout(() => {
-            if (isOpenRef.current && !isManuallyStoppedRef.current && !isLoadingRef.current) {
-              startListening();
+            if (isOpenRef.current && !isManuallyStoppedRef.current) {
+              startListening(false);
             }
-          }, 150);
+          }, 100);
           return;
         }
 
@@ -764,26 +860,71 @@ export default function VoiceReceptionistFab({
     cleanupAudioStream();
   };
 
-  // Toggle listening button
+  // Toggle listening button (live pause/resume, or legacy start/stop)
   const toggleListening = () => {
+    if (liveModeRef.current === 'connecting') {
+      // A tap while handshaking used to kill the session mid-connect (the
+      // mic-permission prompt invites exactly this tap). Ignore it instead.
+      return;
+    }
+    if (liveModeRef.current === 'live') {
+      // Pause the live session (mic + speaker off) but keep the drawer open.
+      isManuallyStoppedRef.current = true;
+      const c = liveClientRef.current;
+      liveClientRef.current = null;
+      if (c) void c.disconnect('mic-toggle');
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        try { window.speechSynthesis.cancel(); } catch {}
+      }
+      if (speakerQuietTimerRef.current) {
+        clearTimeout(speakerQuietTimerRef.current);
+        speakerQuietTimerRef.current = null;
+      }
+      speakerActiveRef.current = false;
+      setLiveMode('legacy');
+      setIsListening(false);
+      setIsSpeaking(false);
+      setLiveSpokenText('');
+      setLiveReplyPreview('');
+      return;
+    }
+    if (isSpeaking && typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      currentlySpeakingTextRef.current = '';
+    }
     if (isListening || isRecordingAudio) {
       isManuallyStoppedRef.current = true;
       stopListening();
     } else {
       isManuallyStoppedRef.current = false;
-      startListening();
+      // Prefer a fresh live session; fall back to legacy when live failed.
+      if (isLiveVoiceSupported() && !liveFailedRef.current && isVoiceActive) {
+        void startLiveSession();
+      } else {
+        setLiveMode('legacy');
+        startListening(true);
+      }
     }
   };
 
-  // Open FAB & Immediately Start Listening (DO NOT talk first)
+  // Open FAB: live voice first (sub-400ms studio duplex), legacy fallback.
   const handleOpenFab = () => {
+    setIsMinimized(false);
     setIsOpen(true);
     isOpenRef.current = true;
     isManuallyStoppedRef.current = false;
-    setIsListening(true);
+    liveFailedRef.current = false;
     setSpeechError(null);
+    setIsListening(true);
 
-    // Prime audio synthesis on user gesture for later assistant responses if needed
+    if (isVoiceActive && isLiveVoiceSupported()) {
+      void startLiveSession();
+      return;
+    }
+
+    // Legacy path: prime audio synthesis on user gesture, then listen.
+    setLiveMode('legacy');
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       try {
         const unlock = new SpeechSynthesisUtterance(' ');
@@ -792,16 +933,38 @@ export default function VoiceReceptionistFab({
       } catch {}
     }
 
-    // Do NOT get the agent to talk first. Start listening immediately!
-    startListening();
+    // Start listening immediately
+    startListening(true);
   };
 
   // Close Receptionist Modal
   const handleClose = () => {
     isManuallyStoppedRef.current = true;
+    setIsMinimized(false);
+    const liveClient = liveClientRef.current;
+    liveClientRef.current = null;
+    if (liveClient) void liveClient.disconnect('drawer-close');
+    if (speakerQuietTimerRef.current) {
+      clearTimeout(speakerQuietTimerRef.current);
+      speakerQuietTimerRef.current = null;
+    }
+    speakerActiveRef.current = false;
+    setLiveMode('idle');
+    setLiveReplyPreview('');
+    liveUserRef.current = '';
+    liveAssistantRef.current = '';
+    liveActionRef.current = undefined;
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
+    setIsSpeaking(false);
+    currentlySpeakingTextRef.current = '';
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    queuedMessageRef.current = '';
+    setQueuedMessageText('');
     stopListening();
     setLiveSpokenText('');
     setIsOpen(false);
@@ -822,14 +985,336 @@ export default function VoiceReceptionistFab({
     } catch {}
   };
 
+  // ---------- VOICE-LIVE-1 Phase 3: native Live voice path ----------
+
+  const liveTimestamp = () =>
+    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  // Merge incremental transcript segments without duplicating overlaps.
+  // (Single implementation lives in the live client for unit testing.)
+  const appendTranscript = (prev: string, next: string): string =>
+    mergeLiveTranscript(prev, next);
+
+  // Flush one completed live turn into the transcript (user + assistant).
+  const flushLiveTurn = () => {
+    const userText = liveUserRef.current.trim();
+    const asstText = liveAssistantRef.current.trim();
+    if (userText) {
+      const userMsg: ChatTurn = {
+        id: `lu_${Date.now()}`,
+        role: 'user',
+        text: userText,
+        timestamp: liveTimestamp(),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+    }
+    if (asstText || userText) {
+      const botMsg: ChatTurn = {
+        id: `la_${Date.now()}`,
+        role: 'assistant',
+        text: asstText || '🎙️ (spoken reply — audio played, transcript unavailable)',
+        timestamp: liveTimestamp(),
+        actionTaken: liveActionRef.current,
+      };
+      setMessages((prev) => [...prev, botMsg]);
+    }
+    liveUserRef.current = '';
+    liveAssistantRef.current = '';
+    liveActionRef.current = undefined;
+    setLiveSpokenText('');
+    setLiveReplyPreview('');
+    setIsLoading(false);
+    setIsSpeaking(false);
+    speakerActiveRef.current = false;
+  };
+
+  // Execute a Live tool call against app state, then answer the model so it
+  // keeps speaking without breaking the audio stream.
+  const executeLiveTool = async (call: LiveToolCall) => {
+    const client = liveClientRef.current;
+    const { id, name } = call;
+    const a = (call.args || {}) as Record<string, any>;
+    const answer = (result: any) => {
+      try {
+        client?.sendToolResult(id, name || 'unknown', result);
+      } catch {}
+    };
+    try {
+      if (name === 'update_profile') {
+        const updates = (a.updates && typeof a.updates === 'object' ? a.updates : a) as Record<string, any>;
+        const baseProfile: UserProfile = profile || {
+          uid: 'user_' + Date.now(),
+          email: '',
+          nickname: updates.name || 'User',
+          language: 'en',
+          unitPreference: 'SI',
+        };
+        const nextProfile: UserProfile = { ...baseProfile };
+        const changeDetails: string[] = [];
+        ['age', 'gender', 'ethnicity', 'height', 'weight', 'healthGoal', 'language'].forEach((k) => {
+          if (updates[k] !== undefined && updates[k] !== null && updates[k] !== '') {
+            (nextProfile as any)[k] = updates[k];
+            changeDetails.push(`${k}: ${updates[k]}`);
+          }
+        });
+        if (updates.heightCm && !nextProfile.height) {
+          nextProfile.height = Number(updates.heightCm) || updates.heightCm;
+          changeDetails.push(`height: ${updates.heightCm}cm`);
+        }
+        if (updates.weightKg && !nextProfile.weight) {
+          nextProfile.weight = Number(updates.weightKg) || updates.weightKg;
+          changeDetails.push(`weight: ${updates.weightKg}kg`);
+        }
+        if (changeDetails.length > 0) {
+          setProfile(nextProfile);
+          await saveAndSync(
+            nextProfile,
+            foodLogs,
+            biomarkers,
+            biomarkerHistory,
+            actions,
+            dailyBenefits,
+            report,
+            { type: 'profile' }
+          );
+          liveActionRef.current = {
+            type: 'profile_updated',
+            details: `Saved to Profile: ${changeDetails.join(', ')}`,
+          };
+        }
+        answer({ ok: true, applied: changeDetails });
+      } else if (name === 'navigate_tab') {
+        const raw = String(a.tab || '').toLowerCase();
+        const tabMap: Record<string, string> = {
+          food: 'food',
+          meals: 'food',
+          biomarker: 'health',
+          biomarkers: 'health',
+          health: 'health',
+          trends: 'trends',
+          trend: 'trends',
+          insights: 'insights',
+          insight: 'insights',
+          home: 'home',
+        };
+        const target = tabMap[raw] || raw;
+        if (target) {
+          setActiveTab(target);
+          highlightElement(`#nav-tab-${target}`);
+          liveActionRef.current = { type: 'navigated', details: `Navigated to ${target}` };
+        }
+        answer({ ok: true, tab: target });
+      } else if (name === 'handoff_specialist') {
+        const detail = `Handoff to ${a.specialist || 'specialist'}${a.context ? `: ${a.context}` : ''}`;
+        liveActionRef.current = { type: 'agent_handoff', details: detail };
+        answer({ ok: true });
+      } else if (name === 'log_meal') {
+        const desc =
+          a.description ||
+          (Array.isArray(a.items) ? a.items.join(', ') : 'meal');
+        liveActionRef.current = { type: 'highlight', details: `Meal noted: ${desc}` };
+        answer({ ok: true, noted: desc });
+      } else {
+        answer({ ok: false, error: `unknown tool: ${name}` });
+      }
+    } catch (err: any) {
+      answer({ ok: false, error: String(err?.message || err) });
+    }
+  };
+
+  // Open the bidirectional Live session (mic 16kHz up, studio voice down).
+  const startLiveSession = async () => {
+    if (typeof window === 'undefined' || !isLiveVoiceSupported()) {
+      setLiveMode('legacy');
+      startListening(true);
+      return;
+    }
+    if (liveClientRef.current) {
+      try {
+        await liveClientRef.current.disconnect();
+      } catch {}
+      liveClientRef.current = null;
+    }
+    setLiveMode('connecting');
+    setSpeechError(null);
+    const client = new GeminiLiveAudioClient({
+      onReady: () => {
+        setLiveMode('live');
+        isManuallyStoppedRef.current = false;
+        setIsListening(true);
+        setSpeechError(null);
+      },
+      onInputTranscription: (text) => {
+        liveUserRef.current = appendTranscript(liveUserRef.current, text);
+        setLiveSpokenText(liveUserRef.current);
+        setIsLoading(true);
+      },
+      onOutputTranscription: (text) => {
+        liveAssistantRef.current = appendTranscript(liveAssistantRef.current, text);
+        setLiveReplyPreview(liveAssistantRef.current);
+      },
+      onAssistantText: (text) => {
+        liveAssistantRef.current = appendTranscript(liveAssistantRef.current, text);
+        setLiveReplyPreview(liveAssistantRef.current);
+      },
+      onInterrupted: () => {
+        setIsSpeaking(false);
+        speakerActiveRef.current = false;
+      },
+      onTurnComplete: () => {
+        flushLiveTurn();
+      },
+      onToolCall: (calls) => {
+        for (const c of calls) void executeLiveTool(c);
+      },
+      onMicLevel: (level) => {
+        if (liveModeRef.current !== 'live') return;
+        setAudioLevel(level);
+        // Local barge-in: user cutting in over speaker audio.
+        if (level > 25 && speakerActiveRef.current) {
+          try {
+            liveClientRef.current?.interrupt();
+          } catch {}
+          speakerActiveRef.current = false;
+          setIsSpeaking(false);
+        }
+      },
+      onSpeakerLevel: (level) => {
+        if (liveModeRef.current !== 'live') return;
+        setAudioLevel(level);
+        if (level > 0) {
+          speakerActiveRef.current = true;
+          setIsSpeaking(true);
+          if (speakerQuietTimerRef.current) {
+            clearTimeout(speakerQuietTimerRef.current);
+            speakerQuietTimerRef.current = null;
+          }
+        } else if (speakerActiveRef.current && !speakerQuietTimerRef.current) {
+          speakerQuietTimerRef.current = setTimeout(() => {
+            speakerQuietTimerRef.current = null;
+            speakerActiveRef.current = false;
+            if (liveModeRef.current === 'live') setIsSpeaking(false);
+          }, 700);
+        }
+      },
+      onError: (message) => {
+        if (liveModeRef.current === 'live') {
+          setSpeechError(message);
+        } else {
+          liveFailedRef.current = true;
+          setLiveMode('legacy');
+          setSpeechError(`${message} — using basic voice mode.`);
+          if (isOpenRef.current && !isManuallyStoppedRef.current) startListening(true);
+        }
+      },
+      onClosed: () => {
+        if (liveModeRef.current === 'live' || liveModeRef.current === 'connecting') {
+          setLiveMode('legacy');
+          setIsListening(false);
+          setIsSpeaking(false);
+        }
+      },
+      onAutoSleep: () => {
+        setLiveMode('legacy');
+        setIsListening(false);
+        setIsSpeaking(false);
+        setSpeechError('Live session rested after 45s of quiet — tap the mic to resume.');
+      },
+      onStatus: (message) => {
+        setSpeechError(message);
+      },
+    });
+    liveClientRef.current = client;
+    const recentMealsSummary = (foodLogs || []).slice(0, 5).map((log) => ({
+      date: log.date,
+      name: log.name,
+      calories: log.nutrients?.calories,
+    }));
+    try {
+      await client.connect({
+        profile,
+        language: profile?.language || 'en',
+        voice: liveVoice,
+        recentMeals: recentMealsSummary,
+      });
+    } catch (err: any) {
+      liveFailedRef.current = true;
+      liveClientRef.current = null;
+      setLiveMode('legacy');
+      setSpeechError(`${err?.message || 'Live voice unavailable'} — using basic voice mode.`);
+      if (isOpenRef.current && !isManuallyStoppedRef.current) startListening(true);
+    }
+  };
+
+  // Typed message routing: live socket when connected, legacy REST otherwise.
+  const sendLiveText = (text: string) => {
+    const t = (text || '').trim();
+    if (!t) return;
+    setInputText('');
+    setLiveSpokenText('');
+    latestTextRef.current = '';
+    setMessages((prev) => [
+      ...prev,
+      { id: `u_${Date.now()}`, role: 'user', text: t, timestamp: liveTimestamp() },
+    ]);
+    // User bubble already appended — don't re-flush it on turnComplete.
+    liveUserRef.current = '';
+    liveAssistantRef.current = '';
+    setIsLoading(true);
+    try {
+      liveClientRef.current?.sendText(t);
+    } catch {}
+  };
+
+  const dispatchUserText = (text: string) => {
+    if (liveModeRef.current === 'live' && liveClientRef.current?.isConnected) {
+      sendLiveText(text);
+      return;
+    }
+    stopListening();
+    handleSendMessage(text);
+  };
+
+  const changeLiveVoice = (voice: LiveVoicePersona) => {
+    setLiveVoice(voice);
+    try {
+      if (typeof window !== 'undefined') window.localStorage.setItem('ht_live_voice', voice);
+    } catch {}
+    // Reconnect so the new persona applies immediately.
+    if (liveModeRef.current === 'live' && isOpenRef.current) {
+      const c = liveClientRef.current;
+      liveClientRef.current = null;
+      if (c) {
+        void c.disconnect('voice-change').then(() => {
+          if (isOpenRef.current) void startLiveSession();
+        });
+      } else {
+        void startLiveSession();
+      }
+    }
+  };
+
+  // ---------- legacy REST dispatch (Basic fallback path) ----------
+
   // Dispatch message to Receptionist Agent
   const handleSendMessage = async (text: string) => {
-    if (!text || text.trim().length === 0 || isLoading) return;
+    if (!text || text.trim().length === 0) return;
 
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
     }
+
+    // Abort previous in-flight request if user is interrupting/overriding
+    if (abortControllerRef.current) {
+      try {
+        abortControllerRef.current.abort();
+      } catch {}
+      abortControllerRef.current = null;
+    }
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     const userMsgText = text.trim();
     setInputText('');
@@ -862,6 +1347,7 @@ export default function VoiceReceptionistFab({
       const res = await fetch('/api/gemini/front-desk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({
           message: userMsgText,
           profile,
@@ -1000,35 +1486,53 @@ export default function VoiceReceptionistFab({
 
       setMessages((prev) => [...prev, botMsg]);
 
-      // Speak response aloud and then auto-resume listening for continuous conversation!
+      // Speak response aloud and keep listening for continuous conversation!
       if (isVoiceActive && isSpeakingEnabled) {
         speakResponse(replyText, () => {
           if (isOpenRef.current) {
-            startListening();
+            startListening(false);
           }
         });
       } else if (isOpenRef.current) {
-        startListening();
+        startListening(false);
       }
     } catch (err: any) {
-      console.error('[VoiceReceptionist] Dispatch failed:', err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `err_${Date.now()}`,
-          role: 'assistant',
-          text: "I'm having trouble connecting right now, but feel free to try again or ask me another question.",
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
+      if (err?.name === 'AbortError' || err?.message?.includes('aborted')) {
+        console.log('[VoiceReceptionist] Request was aborted by user steer/interruption');
+      } else {
+        console.error('[VoiceReceptionist] Dispatch failed:', err);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `err_${Date.now()}`,
+            role: 'assistant',
+            text: "I'm having trouble connecting right now, but feel free to try again or ask me another question.",
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+      }
     } finally {
       setIsLoading(false);
+      abortControllerRef.current = null;
+
+      // If user spoke additional input while this request was running, dispatch queued message seamlessly!
+      if (queuedMessageRef.current) {
+        const nextMessage = queuedMessageRef.current;
+        queuedMessageRef.current = '';
+        setQueuedMessageText('');
+        setTimeout(() => {
+          handleSendMessage(nextMessage);
+        }, 200);
+      }
     }
   };
 
   // Clean up on unmount
   useEffect(() => {
     return () => {
+      const liveClient = liveClientRef.current;
+      liveClientRef.current = null;
+      if (liveClient) void liveClient.disconnect('unmount');
       cleanupAudioStream();
       if (silenceTimerRef.current) {
         clearTimeout(silenceTimerRef.current);
@@ -1043,8 +1547,11 @@ export default function VoiceReceptionistFab({
 
   return (
     <>
-      {/* Floating Receptionist Trigger Button (Bottom Right) */}
-      {!isOpen && (
+      {/* Floating Receptionist Trigger Button (Bottom Right).
+          Follow mode: when minimized the drawer hides but the session stays
+          live — the FAB shows the live level bars so the user sees it's
+          still listening. Tap re-opens the drawer without reconnecting. */}
+      {(!isOpen || isMinimized) && (
         <div className="fixed bottom-24 right-4 sm:bottom-22 sm:right-6 z-40 flex items-center gap-2">
           {missingFields.length > 0 && (
             <div
@@ -1058,7 +1565,8 @@ export default function VoiceReceptionistFab({
           <button
             id="voice-receptionist-fab"
             onClick={handleOpenFab}
-            aria-label="Open Voice Concierge"
+            aria-label={isMinimized ? 'Expand Voice Receptionist' : 'Open Voice Receptionist'}
+            title={isMinimized ? 'Voice receptionist listening — tap to expand' : 'Open Voice Receptionist'}
             className="group relative flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 text-white shadow-xl hover:shadow-indigo-500/30 hover:scale-105 active:scale-95 transition-all duration-300 focus:outline-none cursor-pointer"
           >
             {(isListening || isSpeaking) && (
@@ -1066,14 +1574,31 @@ export default function VoiceReceptionistFab({
             )}
             <div className="relative flex items-center justify-center">
               <Mic className="w-6 h-6 text-white group-hover:scale-110 transition-transform" />
-              <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-white" />
+              {isMinimized && liveMode === 'live' ? (
+                <span className="absolute -bottom-1.5 flex items-end gap-px h-3 bg-black/30 rounded-full px-1 py-px">
+                  <span
+                    className="w-0.5 bg-emerald-300 rounded-full transition-all duration-100"
+                    style={{ height: `${Math.max(2, Math.round((audioLevel / 100) * 10))}px` }}
+                  />
+                  <span
+                    className="w-0.5 bg-emerald-300 rounded-full transition-all duration-100"
+                    style={{ height: `${Math.max(3, Math.round((audioLevel / 100) * 8 + 2))}px` }}
+                  />
+                  <span
+                    className="w-0.5 bg-emerald-300 rounded-full transition-all duration-100"
+                    style={{ height: `${Math.max(2, Math.round((audioLevel / 100) * 10))}px` }}
+                  />
+                </span>
+              ) : (
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-white" />
+              )}
             </div>
           </button>
         </div>
       )}
 
       {/* Expanded Voice Receptionist Drawer/Panel */}
-      {isOpen && (
+      {isOpen && !isMinimized && (
         <div className="fixed inset-x-2 bottom-18 sm:inset-auto sm:bottom-22 sm:right-6 sm:w-[420px] max-h-[85vh] z-50 flex flex-col bg-theme-bg-card/95 backdrop-blur-xl border border-theme-border shadow-2xl rounded-3xl overflow-hidden animate-slide-up">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 bg-indigo-600 text-white">
@@ -1089,7 +1614,25 @@ export default function VoiceReceptionistFab({
                 )}
               </div>
               <div>
-                <h3 className="text-sm font-bold leading-tight">Health Concierge & Receptionist</h3>
+                <h3 className="text-sm font-bold leading-tight flex items-center gap-1.5">
+                  Health Concierge & Receptionist
+                  {liveMode === 'live' ? (
+                    <span className="px-1.5 py-px rounded-full bg-emerald-400/90 text-emerald-950 text-[9px] font-extrabold tracking-wide">
+                      ● LIVE
+                    </span>
+                  ) : liveMode === 'connecting' ? (
+                    <span className="px-1.5 py-px rounded-full bg-amber-300/90 text-amber-950 text-[9px] font-extrabold tracking-wide animate-pulse">
+                      CONNECTING…
+                    </span>
+                  ) : (
+                    <span
+                      className="px-1.5 py-px rounded-full bg-white/25 text-white text-[9px] font-extrabold tracking-wide"
+                      title="Basic voice mode (browser speech + text engine)"
+                    >
+                      BASIC
+                    </span>
+                  )}
+                </h3>
                 <p className="text-[11px] text-indigo-100 flex items-center gap-1.5">
                   {isListening ? (
                     <span className="flex items-center gap-1 text-emerald-300 font-semibold">
@@ -1136,6 +1679,16 @@ export default function VoiceReceptionistFab({
                 {isSpeakingEnabled ? <Volume2 className="w-4 h-4 text-white" /> : <VolumeX className="w-4 h-4 text-indigo-200" />}
               </button>
 
+              {/* Minimize to Follow Mode (keeps listening) */}
+              <button
+                type="button"
+                onClick={() => setIsMinimized(true)}
+                title="Minimize — keep listening while you use the app"
+                className="p-1.5 hover:bg-white/20 rounded-full transition-colors cursor-pointer"
+              >
+                <Minus className="w-4 h-4 text-white" />
+              </button>
+
               {/* Close Button */}
               <button
                 onClick={handleClose}
@@ -1162,10 +1715,46 @@ export default function VoiceReceptionistFab({
                 </button>
               </div>
 
+              {/* Live Voice Persona (native studio voices; applies immediately) */}
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                  Live Voice Persona (studio voice):
+                </label>
+                {isLiveVoiceSupported() ? (
+                  <div className="flex items-center gap-1.5">
+                    {(
+                      [
+                        { id: 'Aoede', hint: 'Warm' },
+                        { id: 'Charon', hint: 'Deep' },
+                        { id: 'Kore', hint: 'Bright' },
+                      ] as { id: LiveVoicePersona; hint: string }[]
+                    ).map((v) => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => changeLiveVoice(v.id)}
+                        className={`flex-1 px-2 py-1.5 rounded-xl text-[11px] font-bold transition-all cursor-pointer border ${
+                          liveVoice === v.id
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-theme-border hover:border-indigo-400'
+                        }`}
+                      >
+                        {v.id}
+                        <span className="block text-[9px] font-medium opacity-75">{v.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                    Live voice needs microphone + WebSocket support — basic mode is active on this browser.
+                  </p>
+                )}
+              </div>
+
               {/* Voice Selector */}
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
-                  Voice Model ({availableVoices.length > 0 ? `${availableVoices.length} detected` : 'Detecting voices...'}):
+                  Basic-mode Voice Model ({availableVoices.length > 0 ? `${availableVoices.length} detected` : 'Detecting voices...'}):
                 </label>
                 <div className="flex items-center gap-1.5">
                   <select
@@ -1236,52 +1825,6 @@ export default function VoiceReceptionistFab({
               </div>
             </div>
           )}
-
-          {/* Quick Context & Missing Fields Pill Bar */}
-          <div className="px-3 py-2 bg-slate-50 dark:bg-slate-900/50 border-b border-theme-border/60 flex items-center gap-1.5 overflow-x-auto no-scrollbar text-xs">
-            {missingFields.length > 0 && (
-              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider shrink-0 mr-1">
-                To Complete:
-              </span>
-            )}
-            {missingFields.map((f) => (
-              <button
-                key={f.key}
-                onClick={() => {
-                  setInputText(f.prompt);
-                }}
-                className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-full shrink-0 text-[11px] font-medium transition-colors cursor-pointer"
-              >
-                + {f.label}
-              </button>
-            ))}
-
-            {/* Quick Action Pills */}
-            <button
-              onClick={() => handleSendMessage('Review what I ate today and give me recommendations')}
-              className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-full shrink-0 text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
-            >
-              <Utensils className="w-3 h-3" /> Review today's meals
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab('food');
-                handleSendMessage('Take me to my food history');
-              }}
-              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-full shrink-0 text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
-            >
-              <Compass className="w-3 h-3" /> Go to Food
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab('health');
-                handleSendMessage('Show my health biomarkers');
-              }}
-              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-full shrink-0 text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
-            >
-              <Activity className="w-3 h-3" /> Go to Biomarkers
-            </button>
-          </div>
 
           {/* Chat Transcript Area */}
           <div
@@ -1362,7 +1905,7 @@ export default function VoiceReceptionistFab({
             ))}
 
             {/* Real-Time Live Streaming User Speech Bubble */}
-            {isListening && liveSpokenText && (
+            {liveSpokenText && (
               <div className="flex flex-col items-end animate-fade-in">
                 <div className="max-w-[85%] rounded-2xl rounded-br-none px-3.5 py-2.5 bg-indigo-600/90 text-white shadow-md border border-indigo-400/50">
                   <div className="flex items-center gap-1.5 mb-1 text-[10px] text-indigo-200 font-semibold uppercase tracking-wider">
@@ -1377,63 +1920,165 @@ export default function VoiceReceptionistFab({
               </div>
             )}
 
+            {/* Real-Time Live Assistant Streaming Reply (native Live voice) */}
+            {liveMode === 'live' && liveReplyPreview && (
+              <div className="flex flex-col items-start animate-fade-in">
+                <div className="max-w-[85%] rounded-2xl rounded-bl-none px-3.5 py-2.5 bg-purple-600/90 text-white shadow-md border border-purple-400/50">
+                  <div className="flex items-center gap-1.5 mb-1 text-[10px] text-purple-200 font-semibold uppercase tracking-wider">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
+                    <span>Live reply...</span>
+                  </div>
+                  <p className="whitespace-pre-wrap font-medium">{liveReplyPreview}</p>
+                </div>
+              </div>
+            )}
+
             {isLoading && (
               <div className="flex items-center gap-2 text-slate-400 text-xs py-1">
                 <Loader className="w-3.5 h-3.5 animate-spin text-indigo-500" />
-                <span>Receptionist is thinking & checking your data...</span>
+                <span>
+                  {liveMode === 'live'
+                    ? 'Live voice is replying...'
+                    : 'Receptionist is thinking... (Speak anytime to steer or add)'}
+                </span>
               </div>
             )}
           </div>
 
-          {/* Active Listening / Recording Soundwave Bar */}
-          {(isListening || isRecordingAudio) && (
-            <div className="px-3.5 py-2 bg-red-500/10 border-t border-red-500/20 flex items-center justify-between text-xs text-red-600 dark:text-red-400">
+          {/* Queued Message Banner */}
+          {queuedMessageText && (
+            <div className="px-3.5 py-1.5 bg-amber-50 dark:bg-amber-950/40 border-t border-amber-200 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-300 flex items-center justify-between">
+              <div className="flex items-center gap-1.5 truncate">
+                <Clock className="w-3.5 h-3.5 shrink-0 text-amber-600 animate-spin" />
+                <span className="truncate">Queued: &ldquo;{queuedMessageText}&rdquo;</span>
+              </div>
+              <span className="text-[10px] opacity-75 shrink-0">Sending next</span>
+            </div>
+          )}
+
+          {/* Active Listening / Recording / Speaking Soundwave Bar */}
+          {(isListening || isRecordingAudio || isSpeaking) && (
+            <div
+              className={`px-3.5 py-2 border-t flex items-center justify-between text-xs transition-colors duration-200 ${
+                isSpeaking && !liveSpokenText
+                  ? 'bg-purple-500/10 border-purple-500/20 text-purple-700 dark:text-purple-300'
+                  : 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
+              }`}
+            >
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 {/* Physical Audio Reactive Frequency Equalizer Bars */}
                 <div className="flex items-end gap-1 h-4 shrink-0">
                   <span
-                    className="w-1 bg-red-500 rounded-full transition-all duration-75"
+                    className={`w-1 rounded-full transition-all duration-75 ${
+                      isSpeaking && !liveSpokenText ? 'bg-purple-500' : 'bg-red-500'
+                    }`}
                     style={{ height: `${Math.max(4, Math.round((audioLevel / 100) * 16))}px` }}
                   />
                   <span
-                    className="w-1 bg-red-500 rounded-full transition-all duration-75"
+                    className={`w-1 rounded-full transition-all duration-75 ${
+                      isSpeaking && !liveSpokenText ? 'bg-purple-500' : 'bg-red-500'
+                    }`}
                     style={{ height: `${Math.max(6, Math.round((audioLevel / 100) * 14 + 3))}px` }}
                   />
                   <span
-                    className="w-1 bg-red-500 rounded-full transition-all duration-75"
+                    className={`w-1 rounded-full transition-all duration-75 ${
+                      isSpeaking && !liveSpokenText ? 'bg-purple-500' : 'bg-red-500'
+                    }`}
                     style={{ height: `${Math.max(3, Math.round((audioLevel / 100) * 16 + 2))}px` }}
                   />
                   <span
-                    className="w-1 bg-red-500 rounded-full transition-all duration-75"
+                    className={`w-1 rounded-full transition-all duration-75 ${
+                      isSpeaking && !liveSpokenText ? 'bg-purple-500' : 'bg-red-500'
+                    }`}
                     style={{ height: `${Math.max(8, Math.round((audioLevel / 100) * 15 + 4))}px` }}
                   />
                 </div>
                 <span className="font-semibold shrink-0">
-                  {isRecordingAudio ? 'Recording voice note...' : 'Listening...'}
+                  {isRecordingAudio
+                    ? 'Recording voice note...'
+                    : isSpeaking && !liveSpokenText
+                    ? 'Speaking (Speak to cut in)...'
+                    : isLoading
+                    ? 'Thinking (Speak to steer)...'
+                    : 'Listening...'}
                 </span>
                 <span className="italic truncate text-slate-700 dark:text-slate-200 font-medium">
-                  {liveSpokenText ? `"${liveSpokenText}"` : 'Speak now...'}
+                  {liveSpokenText
+                    ? `"${liveSpokenText}"`
+                    : isSpeaking
+                    ? 'Microphone active — interrupt anytime'
+                    : isLoading
+                    ? 'Add more or say "Wait"...'
+                    : 'Speak now...'}
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  if (isRecordingAudio) {
-                    stopAudioRecording();
-                  } else if (latestTextRef.current.trim().length > 0) {
-                    const toSend = latestTextRef.current.trim();
-                    latestTextRef.current = '';
-                    setLiveSpokenText('');
-                    stopListening();
-                    handleSendMessage(toSend);
-                  } else {
-                    stopListening();
-                  }
-                }}
-                className="px-2.5 py-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-lg text-[10px] font-bold shadow-sm transition-all ml-2 shrink-0 cursor-pointer flex items-center gap-1"
-              >
-                <span>Send Now</span>
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                {isSpeaking && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try { liveClientRef.current?.interrupt(); } catch {}
+                      speakerActiveRef.current = false;
+                      if (typeof window !== 'undefined' && window.speechSynthesis) {
+                        window.speechSynthesis.cancel();
+                      }
+                      setIsSpeaking(false);
+                      currentlySpeakingTextRef.current = '';
+                    }}
+                    className="px-2 py-1 bg-purple-600 hover:bg-purple-700 active:scale-95 text-white rounded-lg text-[10px] font-bold shadow-sm transition-all cursor-pointer flex items-center gap-1"
+                    title="Silence assistant speech"
+                  >
+                    <span>Mute</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (liveModeRef.current === 'live') {
+                      // Live streams continuously — the button cuts assistant audio.
+                      try { liveClientRef.current?.interrupt(); } catch {}
+                      speakerActiveRef.current = false;
+                      setIsSpeaking(false);
+                      return;
+                    }
+                    if (isSpeaking && typeof window !== 'undefined' && window.speechSynthesis) {
+                      window.speechSynthesis.cancel();
+                      setIsSpeaking(false);
+                      currentlySpeakingTextRef.current = '';
+                    }
+                    if (isRecordingAudio) {
+                      stopAudioRecording();
+                    } else if (latestTextRef.current.trim().length > 0) {
+                      const toSend = latestTextRef.current.trim();
+                      latestTextRef.current = '';
+                      setLiveSpokenText('');
+                      if (isLoadingRef.current && abortControllerRef.current) {
+                        abortControllerRef.current.abort();
+                        abortControllerRef.current = null;
+                        setIsLoading(false);
+                      }
+                      handleSendMessage(toSend);
+                    } else if (!isSpeaking) {
+                      stopListening();
+                    }
+                  }}
+                  className={`px-2.5 py-1 text-white rounded-lg text-[10px] font-bold shadow-sm transition-all cursor-pointer flex items-center gap-1 ${
+                    latestTextRef.current.trim().length > 0
+                      ? 'bg-red-600 hover:bg-red-700 active:scale-95'
+                      : 'bg-slate-500 hover:bg-slate-600'
+                  }`}
+                >
+                  <span>
+                    {latestTextRef.current.trim().length > 0
+                      ? isLoading
+                        ? 'Steer Now'
+                        : 'Send Now'
+                      : isSpeaking
+                      ? 'Interrupt'
+                      : 'Stop'}
+                  </span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -1494,8 +2139,7 @@ export default function VoiceReceptionistFab({
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
-                  stopListening();
-                  handleSendMessage(inputText);
+                  dispatchUserText(inputText);
                 }
               }}
               placeholder={isListening ? '🎙️ Listening... Speak now or type' : 'Talk aloud or type a message...'}
@@ -1506,8 +2150,7 @@ export default function VoiceReceptionistFab({
             <button
               type="button"
               onClick={() => {
-                stopListening();
-                handleSendMessage(inputText);
+                dispatchUserText(inputText);
               }}
               disabled={!inputText.trim() || isLoading}
               className="p-2 rounded-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white transition-all shrink-0 cursor-pointer"
