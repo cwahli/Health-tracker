@@ -96,6 +96,34 @@ function isVolumeServing(item: any): boolean {
   return servingStr.includes('ml') || servingStr.includes('liter') || servingStr.includes('fl oz');
 }
 
+// Dual-column printed labels ("10.0g per 100g; 8.5g per pack 85g") name an
+// explicit per-100g figure first. When the serving basis is per-serving (not
+// per-100g), both the parsed number AND the scale must use the per-100g
+// figure — first-number parsing with a serving-based scale understates by
+// ~servingGrams/100x (live job_1792411945320 showed 181 kcal for the 85g
+// pack instead of 154). Same class fixed server-side in parseOcrLabel.
+// Exported for unit testing.
+export function extractPer100Figure(rawStr: string): { value: number; unit: string } | null {
+  const s = String(rawStr);
+  if (!/per\s*100/i.test(s)) return null;
+  // Work on the column segment that names per-100, so a per-serving second
+  // column can never win. Parenthetical equivalents ("181kcal (757kJ) per
+  // 100g") are stripped so the value adjacent to "per 100" is found.
+  const seg = s.split(';').find((part) => /per\s*100/i.test(part)) ?? s;
+  const clean = seg.replace(/\([^)]*\)/g, ' ');
+  let m = clean.match(/([\d]+(?:\.\d+)?)\s*(g|mg|mcg|kcal|kj|kkal|kal|%)?\s*(?:per|\/)\s*100(?![\d])/i);
+  if (!m) m = clean.match(/([\d]+(?:\.\d+)?)\s*(g|mg|mcg|kcal|kj|kkal|kal|%)/i);
+  if (!m) return null;
+  const value = parseFloat(m[1]);
+  if (!Number.isFinite(value)) return null;
+  return { value, unit: (m[2] || '').toLowerCase() };
+}
+
+export function isPer100ServingBasis(servingSize: string): boolean {
+  const ss = String(servingSize || '').trim();
+  return /\b100\s*(?:g|ml)\b/i.test(ss) || /per\s*100/i.test(ss);
+}
+
 function getResolvedItemWeightGrams(item: any): number | null {
   if (!item) return null;
   const directW = Number(item.weightGrams || item.estimatedWeightGrams || item.primaryBaseWeightG);
@@ -1161,17 +1189,32 @@ export function NutritionLabelTable({
                                 originalDisplay = String(sVal);
                               } else if (isFromRawLabel) {
                                 const rawVal = item.rawNutritionLabel[k];
-                                const unit = isCalorieKey ? 'kcal' : (String(rawVal).replace(/[\d.\s]/g, '') || defaultUnit);
+                                const rawStr = String(rawVal);
+                                // Dual-column guard: when the value string names an
+                                // explicit per-100 column but the serving basis is
+                                // per-serving, pin the number, unit and scale to
+                                // per-100g so the Total column matches the locked
+                                // backend nutrients (live job_1792411945320).
+                                const per100 = extractPer100Figure(rawStr);
+                                const usePer100 = per100 !== null && !isPer100ServingBasis(item.rawNutritionLabel?.servingSize);
+                                const unit = usePer100
+                                  ? (isCalorieKey ? 'kcal' : (per100.unit || defaultUnit))
+                                  : (isCalorieKey ? 'kcal' : (rawStr.replace(/[\d.\s]/g, '') || defaultUnit));
                                 let numVal: number | null = null;
-                                if (isCalorieKey) {
+                                if (usePer100) {
+                                  numVal = per100.value;
+                                  if (isCalorieKey && (per100.unit === 'kj' || per100.unit === 'kkal' || per100.unit === 'kal')) {
+                                    numVal = Math.round((numVal / 4.184) * 10) / 10;
+                                  }
+                                } else if (isCalorieKey) {
                                   numVal = parseLabelCalories(rawVal);
                                 } else {
-                                  const match = String(rawVal).match(/[\d.]+/);
+                                  const match = rawStr.match(/[\d.]+/);
                                   if (match) numVal = parseFloat(match[0]);
                                 }
 
-                                const hasUnit = /[a-zA-Z%]/.test(String(rawVal));
-                                originalDisplay = isCalorieKey && numVal !== null ? `${numVal} kcal` : (hasUnit ? String(rawVal) : `${rawVal}${defaultUnit}`);
+                                const hasUnit = /[a-zA-Z%]/.test(rawStr);
+                                originalDisplay = isCalorieKey && numVal !== null ? `${numVal} kcal` : (hasUnit ? rawStr : `${rawVal}${defaultUnit}`);
 
                                 if (numVal !== null && weightToDisplay > 0) {
                                   const ssServingSize = String(item.rawNutritionLabel?.servingSize || '').trim();
@@ -1183,12 +1226,14 @@ export function NutritionLabelTable({
                                   if (item.rawNutritionLabel?.servingSize) {
                                     labelServingGrams = parseServingSizeGrams(String(item.rawNutritionLabel.servingSize), weightToDisplay);
                                   }
+                                  if (usePer100) labelServingGrams = 100;
 
                                   const multiplier = (isDishBasis && (!item.rawNutritionLabel?.servingSize || item.rawNutritionLabel?.servingSize === '1 dish' || item.rawNutritionLabel?.servingSize === '1 serving'))
                                     ? 1.0
                                     : (labelServingGrams > 0 ? (weightToDisplay / labelServingGrams) : 1.0);
 
-                                  const total = (numVal * multiplier).toFixed(1).replace(/\.0$/, '');
+                                  const scaled = numVal * multiplier;
+                                  const total = isCalorieKey ? String(Math.round(scaled)) : scaled.toFixed(1).replace(/\.0$/, '');
                                   totalStr = `${total}${unit}`;
                                 }
                               } else {
