@@ -1170,14 +1170,11 @@ export default function VoiceReceptionistFab({
       onMicLevel: (level) => {
         if (liveModeRef.current !== 'live') return;
         setAudioLevel(level);
-        // Local barge-in: user cutting in over speaker audio.
-        if (level > 25 && speakerActiveRef.current) {
-          try {
-            liveClientRef.current?.interrupt();
-          } catch {}
-          speakerActiveRef.current = false;
-          setIsSpeaking(false);
-        }
+        // No local mic-triggered interrupt: with loudspeaker playback the
+        // mic hears the speaker, so a level gate would chop every reply.
+        // Real barge-in arrives as server 'interrupted' frames (Google-side
+        // AEC distinguishes user speech from speaker bleed); the Mute and
+        // Interrupt buttons stay available for manual cut-in.
       },
       onSpeakerLevel: (level) => {
         if (liveModeRef.current !== 'live') return;

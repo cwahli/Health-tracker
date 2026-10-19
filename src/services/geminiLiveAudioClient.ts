@@ -308,18 +308,19 @@ export class GeminiLiveAudioClient {
   private async startMicrophone(): Promise<void> {
     const w = window as any;
     const AC = w.AudioContext || w.webkitAudioContext;
-    this.audioCtx = new AC({
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    } as any);
+    this.audioCtx = new AC({ latencyHint: 'interactive' });
     const ctx = this.audioCtx;
     if (ctx.state === 'suspended') {
       try { await ctx.resume(); } catch { /* ignore */ }
     }
+    // NOTE: echoCancellation is deliberately OFF. On Android, requesting
+    // platform AEC puts the OS in voice-communication mode and reroutes
+    // speaker output to the phone earpiece. The Live API performs its own
+    // server-side echo cancellation, so dropping client AEC restores
+    // loudspeaker playback without the model hearing itself.
     this.micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: true,
+        echoCancellation: false,
         noiseSuppression: true,
         autoGainControl: true,
       },
