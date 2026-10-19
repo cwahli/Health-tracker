@@ -8,10 +8,7 @@ import {
   X,
   Sparkles,
   UserCheck,
-  Utensils,
-  Activity,
-  Compass,
-  ArrowRight,
+  Minus,
   CheckCircle2,
   AlertCircle,
   HelpCircle,
@@ -231,6 +228,9 @@ export default function VoiceReceptionistFab({
     return 'Aoede';
   });
   const [liveReplyPreview, setLiveReplyPreview] = useState('');
+  // Follow mode: drawer hidden, session stays live, FAB shows the mic +
+  // live level bars so the user can roam the app guided by voice.
+  const [isMinimized, setIsMinimized] = useState(false);
   const liveClientRef = useRef<GeminiLiveAudioClient | null>(null);
   const liveModeRef = useRef<'idle' | 'connecting' | 'live' | 'legacy'>('idle');
   const liveFailedRef = useRef(false);
@@ -910,6 +910,7 @@ export default function VoiceReceptionistFab({
 
   // Open FAB: live voice first (sub-400ms studio duplex), legacy fallback.
   const handleOpenFab = () => {
+    setIsMinimized(false);
     setIsOpen(true);
     isOpenRef.current = true;
     isManuallyStoppedRef.current = false;
@@ -939,6 +940,7 @@ export default function VoiceReceptionistFab({
   // Close Receptionist Modal
   const handleClose = () => {
     isManuallyStoppedRef.current = true;
+    setIsMinimized(false);
     const liveClient = liveClientRef.current;
     liveClientRef.current = null;
     if (liveClient) void liveClient.disconnect('drawer-close');
@@ -1545,8 +1547,11 @@ export default function VoiceReceptionistFab({
 
   return (
     <>
-      {/* Floating Receptionist Trigger Button (Bottom Right) */}
-      {!isOpen && (
+      {/* Floating Receptionist Trigger Button (Bottom Right).
+          Follow mode: when minimized the drawer hides but the session stays
+          live — the FAB shows the live level bars so the user sees it's
+          still listening. Tap re-opens the drawer without reconnecting. */}
+      {(!isOpen || isMinimized) && (
         <div className="fixed bottom-24 right-4 sm:bottom-22 sm:right-6 z-40 flex items-center gap-2">
           {missingFields.length > 0 && (
             <div
@@ -1560,7 +1565,8 @@ export default function VoiceReceptionistFab({
           <button
             id="voice-receptionist-fab"
             onClick={handleOpenFab}
-            aria-label="Open Voice Receptionist"
+            aria-label={isMinimized ? 'Expand Voice Receptionist' : 'Open Voice Receptionist'}
+            title={isMinimized ? 'Voice receptionist listening — tap to expand' : 'Open Voice Receptionist'}
             className="group relative flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 text-white shadow-xl hover:shadow-indigo-500/30 hover:scale-105 active:scale-95 transition-all duration-300 focus:outline-none cursor-pointer"
           >
             {(isListening || isSpeaking) && (
@@ -1568,14 +1574,31 @@ export default function VoiceReceptionistFab({
             )}
             <div className="relative flex items-center justify-center">
               <Mic className="w-6 h-6 text-white group-hover:scale-110 transition-transform" />
-              <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-white" />
+              {isMinimized && liveMode === 'live' ? (
+                <span className="absolute -bottom-1.5 flex items-end gap-px h-3 bg-black/30 rounded-full px-1 py-px">
+                  <span
+                    className="w-0.5 bg-emerald-300 rounded-full transition-all duration-100"
+                    style={{ height: `${Math.max(2, Math.round((audioLevel / 100) * 10))}px` }}
+                  />
+                  <span
+                    className="w-0.5 bg-emerald-300 rounded-full transition-all duration-100"
+                    style={{ height: `${Math.max(3, Math.round((audioLevel / 100) * 8 + 2))}px` }}
+                  />
+                  <span
+                    className="w-0.5 bg-emerald-300 rounded-full transition-all duration-100"
+                    style={{ height: `${Math.max(2, Math.round((audioLevel / 100) * 10))}px` }}
+                  />
+                </span>
+              ) : (
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-white" />
+              )}
             </div>
           </button>
         </div>
       )}
 
       {/* Expanded Voice Receptionist Drawer/Panel */}
-      {isOpen && (
+      {isOpen && !isMinimized && (
         <div className="fixed inset-x-2 bottom-18 sm:inset-auto sm:bottom-22 sm:right-6 sm:w-[420px] max-h-[85vh] z-50 flex flex-col bg-theme-bg-card/95 backdrop-blur-xl border border-theme-border shadow-2xl rounded-3xl overflow-hidden animate-slide-up">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 bg-indigo-600 text-white">
@@ -1654,6 +1677,16 @@ export default function VoiceReceptionistFab({
                 className="p-1.5 hover:bg-white/20 rounded-full transition-colors cursor-pointer"
               >
                 {isSpeakingEnabled ? <Volume2 className="w-4 h-4 text-white" /> : <VolumeX className="w-4 h-4 text-indigo-200" />}
+              </button>
+
+              {/* Minimize to Follow Mode (keeps listening) */}
+              <button
+                type="button"
+                onClick={() => setIsMinimized(true)}
+                title="Minimize — keep listening while you use the app"
+                className="p-1.5 hover:bg-white/20 rounded-full transition-colors cursor-pointer"
+              >
+                <Minus className="w-4 h-4 text-white" />
               </button>
 
               {/* Close Button */}
@@ -1792,52 +1825,6 @@ export default function VoiceReceptionistFab({
               </div>
             </div>
           )}
-
-          {/* Quick Context & Missing Fields Pill Bar */}
-          <div className="px-3 py-2 bg-slate-50 dark:bg-slate-900/50 border-b border-theme-border/60 flex items-center gap-1.5 overflow-x-auto no-scrollbar text-xs">
-            {missingFields.length > 0 && (
-              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider shrink-0 mr-1">
-                To Complete:
-              </span>
-            )}
-            {missingFields.map((f) => (
-              <button
-                key={f.key}
-                onClick={() => {
-                  setInputText(f.prompt);
-                }}
-                className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-full shrink-0 text-[11px] font-medium transition-colors cursor-pointer"
-              >
-                + {f.label}
-              </button>
-            ))}
-
-            {/* Quick Action Pills */}
-            <button
-              onClick={() => dispatchUserText('Review what I ate today and give me recommendations')}
-              className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-full shrink-0 text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
-            >
-              <Utensils className="w-3 h-3" /> Review today's meals
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab('food');
-                dispatchUserText('Take me to my food history');
-              }}
-              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-full shrink-0 text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
-            >
-              <Compass className="w-3 h-3" /> Go to Food
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab('health');
-                dispatchUserText('Show my health biomarkers');
-              }}
-              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-full shrink-0 text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
-            >
-              <Activity className="w-3 h-3" /> Go to Biomarkers
-            </button>
-          </div>
 
           {/* Chat Transcript Area */}
           <div
