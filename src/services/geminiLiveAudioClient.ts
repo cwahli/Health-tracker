@@ -118,6 +118,8 @@ export class GeminiLiveAudioClient {
   private t0 = 0;
   private firstPlaybackMarked = false;
   private pendingMarks: Array<{ ev: string; tRelMs: number }> = [];
+  private lastSpeakerLevel = 0;
+  private lastSpeakerChunkAt = 0;
 
   constructor(events: LiveAudioClientEvents = {}) {
     this.events = events;
@@ -333,7 +335,19 @@ export class GeminiLiveAudioClient {
       if (typeof msg.level === 'number') this.events.onMicLevel?.(msg.level);
       if (msg.type === 'pcm16' && msg.buffer && this.ws?.readyState === WebSocket.OPEN) {
         try {
-          const data = arrayBufferToBase64(msg.buffer as ArrayBuffer);
+          let buffer = msg.buffer as ArrayBuffer;
+          const micLevel = typeof msg.level === 'number' ? msg.level : 0;
+          // Energy gate against speaker bleed: while our own reply is
+          // audible the mic mostly hears the speaker, and forwarding that
+          // bleed makes Google's VAD think the user is barging in — the
+          // interrupt-cancel chop loop. Suppress frames that aren't clearly
+          // louder than the speaker output (genuine close-mic interruptions
+          // pass easily); send silence so stream timing stays stable.
+          const speakerRecent = Date.now() - this.lastSpeakerChunkAt < 800;
+          if (speakerRecent && micLevel < Math.max(this.lastSpeakerLevel * 0.6, 12)) {
+            buffer = new ArrayBuffer(buffer.byteLength);
+          }
+          const data = arrayBufferToBase64(buffer);
           this.ws.send(JSON.stringify({ type: 'audio', data }));
           this.touchActivity();
         } catch { /* drop frame */ }
@@ -367,7 +381,9 @@ export class GeminiLiveAudioClient {
         }
         const level = Math.min(100, Math.round(Math.sqrt(sum / meterBuf.length) * 320));
         // Only report audible playback; idle line noise stays at 0.
-        this.events.onSpeakerLevel?.(level < 4 ? 0 : level);
+        const speakerLevel = level < 4 ? 0 : level;
+        this.lastSpeakerLevel = speakerLevel;
+        this.events.onSpeakerLevel?.(speakerLevel);
       } catch { /* ignore */ }
     }, SPEAKER_METER_MS);
   }
@@ -377,6 +393,7 @@ export class GeminiLiveAudioClient {
     const ctx = this.audioCtx;
     const samples = base64ToFloat32Pcm16(base64);
     if (!samples || samples.length === 0) return;
+    this.lastSpeakerChunkAt = Date.now();
     if (!this.firstPlaybackMarked) {
       this.firstPlaybackMarked = true;
       this.mark('first-playback');

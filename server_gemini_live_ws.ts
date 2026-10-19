@@ -36,7 +36,7 @@
 import type { Server as HttpServer, IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import { createRequire } from 'node:module';
-import { GoogleGenAI, Modality } from '@google/genai';
+import { GoogleGenAI, Modality, StartSensitivity } from '@google/genai';
 import type { LiveServerMessage, Session } from '@google/genai';
 import { cleanEnvValue, firstEnvValue } from './src/utils/envKey.js';
 
@@ -222,6 +222,17 @@ async function openLiveSession(args: {
       tools: buildLiveTools(),
       inputAudioTranscription: {},
       outputAudioTranscription: {},
+      // Echo-barge guard: without client platform AEC the mic hears the
+      // loudspeaker. LOW start sensitivity means muffled speaker bleed is
+      // far less likely to be mistaken for the user cutting in (which used
+      // to cancel playback every ~0.5s in an infinite chop loop), while
+      // genuine close-mic speech still trips detection. End sensitivity
+      // stays default so turn-taking latency is untouched.
+      realtimeInputConfig: {
+        automaticActivityDetection: {
+          startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+        },
+      },
     },
     callbacks: {
       onopen: args.onopen || null,
@@ -343,9 +354,18 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
         }
         return;
       }
-      if (sc.interrupted) safeSend(client, { type: 'interrupted' });
+      if (sc.interrupted) {
+        trace('interrupted', {});
+        safeSend(client, { type: 'interrupted' });
+      }
       const inText = sc.inputTranscription?.text;
       if (typeof inText === 'string' && inText) {
+        // Real user speech detected — stamp it so the next Google audio
+        // chunk yields a true end-of-speech → first-audio latency. (Audio
+        // frames stream continuously, so they must NOT stamp — that made
+        // every TTFB read ~30ms.)
+        lastInputAt = Date.now();
+        firstAudioOutAt = 0;
         safeSend(client, { type: 'inputTranscription', text: inText });
       }
       const outText = sc.outputTranscription?.text;
@@ -548,10 +568,9 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
           trace('audio-in-first', {});
         }
         audioInFrames += 1;
-        // Mark the freshest input so the next Google audio chunk yields a
-        // true end-of-speech → first-audio latency.
-        lastInputAt = Date.now();
-        firstAudioOutAt = 0;
+        // Continuous mic streaming: count frames but do NOT stamp lastInputAt
+        // here (see inputTranscription). Reset the first-audio window only
+        // when a fresh speech onset is plausible — handled via transcription.
         session.sendRealtimeInput({
           audio: { data: frame.data, mimeType: 'audio/pcm;rate=16000' },
         });
