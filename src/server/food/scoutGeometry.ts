@@ -262,6 +262,22 @@ export function clusterSpatialCompositeDishes(
       if (hasDistinctNutrientLabel(primary) && hasDistinctNutrientLabel(other)) {
         continue;
       }
+      // Never fold an unlabeled item into a labeled branded pack (or vice
+      // versa): the union inherits one side's label and the other side's
+      // weight gets scaled by label rates it was never part of (live
+      // job_1792364272052: gammon 328g + tomatoes 100g merged to 428g,
+      // nutrients understated ~1.64x).
+      if (hasDistinctNutrientLabel(primary) !== hasDistinctNutrientLabel(other)) {
+        continue;
+      }
+      // Never fold an unlabeled item into a labeled branded pack (or vice
+      // versa): the union inherits one side's label and the other side's
+      // weight gets scaled by label rates it was never part of (live
+      // job_1792364272052: gammon 328g + tomatoes 100g merged to 428g,
+      // nutrients understated ~1.64x).
+      if (hasDistinctNutrientLabel(primary) !== hasDistinctNutrientLabel(other)) {
+        continue;
+      }
       const boxB = getBBox(other);
       if (isDefaultBox(boxB)) continue;
 
