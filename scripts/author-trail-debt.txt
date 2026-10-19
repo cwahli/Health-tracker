@@ -87,3 +87,4 @@ af32be32  no-trailer queue-sync commit on main, recorded 2026-10-15 (not mine to
 a5e1b6ac  no Author/Agent trailer on main: [queue-sync] refresh WORK_QUEUE.md; authored 2026-10-17; recorded 2026-10-17
 0283afac  no Author/Agent trailer on main: [queue-sync] refresh WORK_QUEUE.md; authored 2026-10-16; recorded 2026-10-17
 6d912419  no Author/Agent trailer on main: [queue-sync] refresh WORK_QUEUE.md; authored 2026-10-18; recorded 2026-10-18
+350e079a  no thinking level in Author trailer (Author: Muse Spark 1.3 Contributor VM); food-lane commit, authored 2026-10-19; recorded 2026-10-19 (not mine to rewrite — owner to fix trailer tooling)
