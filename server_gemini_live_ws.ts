@@ -543,10 +543,12 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
       return;
     }
 
-    // Browser-side performance marks (mic open, socket open, first playback)
-    // forwarded for the same server-side timeline.
+    // Browser-side performance marks and probes forwarded for the same
+    // server-side timeline. `info` carries small JSON payloads (e.g. the
+    // audio-route probe); audio bytes never travel this path. trace()
+    // already try/catches, so an unserializable probe can't break the relay.
     if (frame.type === 'debug') {
-      trace('client', { ev: frame.ev, tClientMs: frame.tRelMs });
+      trace('client', { ev: frame.ev, tClientMs: frame.tRelMs, info: frame.info });
       return;
     }
 

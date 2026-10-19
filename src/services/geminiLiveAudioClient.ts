@@ -133,14 +133,61 @@ export class GeminiLiveAudioClient {
   // mic/socket/playback timing next to Google TTFB. Marks created before the
   // socket opens are queued and flushed on open.
   private mark(ev: string): void {
+    this.sendDebug(ev);
+  }
+
+  // One-time audio-route probe (no PII: kinds/counts/booleans only, never
+  // device labels or ids). Answers: does the browser honor browser-AEC, is a
+  // non-default speaker endpoint routable, can AudioContext sink be set?
+  private probeAudioRoute(): void {
     try {
-      const tRelMs = Math.round(performance.now() - this.t0);
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'debug', ev, tRelMs }));
+      const supported: string[] = typeof navigator?.mediaDevices?.getSupportedConstraints === 'function'
+        ? Object.keys(navigator.mediaDevices.getSupportedConstraints())
+        : [];
+      const track = this.micStream?.getAudioTracks?.()[0];
+      const settings: Record<string, unknown> = {};
+      if (track?.getSettings) {
+        const s = track.getSettings() as any;
+        settings.echoCancellation = s.echoCancellation;
+        settings.echoCancellationType = s.echoCancellationType;
+        settings.noiseSuppression = s.noiseSuppression;
+        settings.sampleRate = s.sampleRate;
+        settings.channelCount = s.channelCount;
+      }
+      const info: Record<string, unknown> = {
+        supportedHasEchoType: supported.includes('echoCancellationType'),
+        settings,
+        hasAudioContextSetSinkId: typeof (this.audioCtx as any)?.setSinkId === 'function',
+      };
+      if (typeof navigator?.mediaDevices?.enumerateDevices === 'function') {
+        navigator.mediaDevices.enumerateDevices().then((devices) => {
+          const outputs = (devices || []).filter((d) => d.kind === 'audiooutput');
+          const inputs = (devices || []).filter((d) => d.kind === 'audioinput');
+          this.sendDebug('audio-route-probe', {
+            ...info,
+            audioOutputs: outputs.length,
+            audioInputs: inputs.length,
+          });
+        }).catch(() => {
+          this.sendDebug('audio-route-probe', info);
+        });
       } else {
-        this.pendingMarks.push({ ev, tRelMs });
+        this.sendDebug('audio-route-probe', info);
       }
     } catch { /* telemetry never breaks audio */ }
+  }
+
+  private sendDebug(ev: string, info?: Record<string, unknown>): void {
+    try {
+      const tRelMs = Math.round(performance.now() - this.t0);
+      const frame: any = { type: 'debug', ev, tRelMs };
+      if (info) frame.info = info;
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify(frame));
+      } else {
+        this.pendingMarks.push(frame);
+      }
+    } catch { /* ignore */ }
   }
 
   private touchActivity(): void {
@@ -315,22 +362,21 @@ export class GeminiLiveAudioClient {
     if (ctx.state === 'suspended') {
       try { await ctx.resume(); } catch { /* ignore */ }
     }
-    // Retest of vendor-sanctioned echo handling (google-gemini/cookbook#356:
-    // "most browsers have built-in echo cancellation, which is why it works
-    // with a speaker on the AI Studio website"). AEC ON asks the OS for full
-    // echo cancellation; server VAD stays LOW, the client energy gate stays
-    // as backup, and proactiveAudio lets the model ignore any residual bleed
-    // instead of answering it. If THIS build routes reply audio to the phone
-    // earpiece, the earlier earpiece report is confirmed as OS routing (not
-    // the chop loop confusing the issue) and we fall back to AEC-off plus
-    // the stronger suppression from the verify alternatives.
+    // Vendor-sanctioned echo handling (google-gemini/cookbook#356: browser
+    // AEC is why AI Studio works on speakers). echoCancellationType browser
+    // requests Chrome's software AEC rather than the OS voice path — on some
+    // Android builds the OS path reroutes Web Audio to the earpiece. Unknown
+    // constraint keys are ignored by browsers, so this is a safe probe: if
+    // unhonored, behavior is unchanged.
     this.micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
+        echoCancellationType: 'browser',
         noiseSuppression: true,
         autoGainControl: true,
-      },
+      } as any,
     });
+    this.probeAudioRoute();
     await ctx.audioWorklet.addModule('/audio-worklet-processor.js');
     this.micSource = ctx.createMediaStreamSource(this.micStream);
     this.workletNode = new AudioWorkletNode(ctx, 'live-pcm-processor');
