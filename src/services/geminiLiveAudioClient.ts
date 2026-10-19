@@ -315,14 +315,18 @@ export class GeminiLiveAudioClient {
     if (ctx.state === 'suspended') {
       try { await ctx.resume(); } catch { /* ignore */ }
     }
-    // NOTE: echoCancellation is deliberately OFF. On Android, requesting
-    // platform AEC puts the OS in voice-communication mode and reroutes
-    // speaker output to the phone earpiece. The Live API performs its own
-    // server-side echo cancellation, so dropping client AEC restores
-    // loudspeaker playback without the model hearing itself.
+    // Retest of vendor-sanctioned echo handling (google-gemini/cookbook#356:
+    // "most browsers have built-in echo cancellation, which is why it works
+    // with a speaker on the AI Studio website"). AEC ON asks the OS for full
+    // echo cancellation; server VAD stays LOW, the client energy gate stays
+    // as backup, and proactiveAudio lets the model ignore any residual bleed
+    // instead of answering it. If THIS build routes reply audio to the phone
+    // earpiece, the earlier earpiece report is confirmed as OS routing (not
+    // the chop loop confusing the issue) and we fall back to AEC-off plus
+    // the stronger suppression from the verify alternatives.
     this.micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: false,
+        echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
       },
