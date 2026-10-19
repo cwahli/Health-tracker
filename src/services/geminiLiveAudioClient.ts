@@ -117,6 +117,7 @@ export class GeminiLiveAudioClient {
   private setup: LiveSessionSetup = {};
   private t0 = 0;
   private firstPlaybackMarked = false;
+  private pendingMarks: Array<{ ev: string; tRelMs: number }> = [];
 
   constructor(events: LiveAudioClientEvents = {}) {
     this.events = events;
@@ -127,12 +128,15 @@ export class GeminiLiveAudioClient {
   }
 
   // Browser-side marks forwarded to the relay so one server timeline shows
-  // mic/socket/playback timing next to Google TTFB.
+  // mic/socket/playback timing next to Google TTFB. Marks created before the
+  // socket opens are queued and flushed on open.
   private mark(ev: string): void {
     try {
       const tRelMs = Math.round(performance.now() - this.t0);
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify({ type: 'debug', ev, tRelMs }));
+      } else {
+        this.pendingMarks.push({ ev, tRelMs });
       }
     } catch { /* telemetry never breaks audio */ }
   }
@@ -142,7 +146,7 @@ export class GeminiLiveAudioClient {
     if (this.closed) return;
     this.sleepTimer = setTimeout(() => {
       this.events.onAutoSleep?.();
-      void this.disconnect();
+      void this.disconnect('auto-sleep');
     }, AUTO_SLEEP_MS);
   }
 
@@ -160,6 +164,7 @@ export class GeminiLiveAudioClient {
     this.setup = setup;
     this.t0 = performance.now();
     this.firstPlaybackMarked = false;
+    this.pendingMarks = [];
     this.touchActivity();
 
     await this.startMicrophone();
@@ -183,6 +188,9 @@ export class GeminiLiveAudioClient {
           voice: setup.voice || 'Aoede',
           recentMeals: setup.recentMeals || [],
         }));
+        for (const m of this.pendingMarks.splice(0)) {
+          try { ws.send(JSON.stringify({ type: 'debug', ev: m.ev, tRelMs: m.tRelMs })); } catch { /* ignore */ }
+        }
       };
       ws.onmessage = (ev) => this.handleFrame(ev.data);
       ws.onerror = () => {
@@ -193,7 +201,7 @@ export class GeminiLiveAudioClient {
           this.fail(new Error('Live voice connection closed before ready.'));
         } else {
           this.events.onClosed?.();
-          void this.disconnect();
+          void this.disconnect('browser-socket-closed');
         }
       };
     });
@@ -212,7 +220,7 @@ export class GeminiLiveAudioClient {
     } else if (this.connected) {
       this.events.onError?.(err.message);
     }
-    void this.disconnect();
+    void this.disconnect(`fail:${err.message.slice(0, 60)}`);
   }
 
   private handleFrame(raw: any): void {
@@ -275,7 +283,7 @@ export class GeminiLiveAudioClient {
         break;
       case 'idleTimeout':
         this.events.onAutoSleep?.();
-        void this.disconnect();
+        void this.disconnect('server-idle');
         break;
       case 'status':
         if (typeof frame.message === 'string' && frame.message) {
@@ -425,7 +433,7 @@ export class GeminiLiveAudioClient {
     }));
   }
 
-  async disconnect(): Promise<void> {
+  async disconnect(reason = 'unknown'): Promise<void> {
     if (this.closed && !this.ws && !this.audioCtx) return;
     this.closed = true;
     this.connected = false;
@@ -444,7 +452,7 @@ export class GeminiLiveAudioClient {
     const ws = this.ws;
     this.ws = null;
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-      try { ws.send(JSON.stringify({ type: 'end' })); } catch { /* ignore */ }
+      try { ws.send(JSON.stringify({ type: 'end', reason })); } catch { /* ignore */ }
       try { ws.close(1000, 'bye'); } catch { /* ignore */ }
     }
     this.cancelScheduledSpeech();

@@ -546,7 +546,9 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
           }
         }
       } else if (frame.type === 'end') {
-        cleanup(1000, 'client-end');
+        const why = typeof frame.reason === 'string' && frame.reason ? `:${frame.reason}` : '';
+        trace('client-end', { why: why || 'unknown' });
+        cleanup(1000, `client-end${why}`);
       }
     } catch (err) {
       console.warn('[GeminiLiveWS] relay send failed:', (err as Error)?.message);

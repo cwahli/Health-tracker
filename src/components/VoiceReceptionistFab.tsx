@@ -872,7 +872,7 @@ export default function VoiceReceptionistFab({
       isManuallyStoppedRef.current = true;
       const c = liveClientRef.current;
       liveClientRef.current = null;
-      if (c) void c.disconnect();
+      if (c) void c.disconnect('mic-toggle');
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         try { window.speechSynthesis.cancel(); } catch {}
       }
@@ -941,7 +941,7 @@ export default function VoiceReceptionistFab({
     isManuallyStoppedRef.current = true;
     const liveClient = liveClientRef.current;
     liveClientRef.current = null;
-    if (liveClient) void liveClient.disconnect();
+    if (liveClient) void liveClient.disconnect('drawer-close');
     if (speakerQuietTimerRef.current) {
       clearTimeout(speakerQuietTimerRef.current);
       speakerQuietTimerRef.current = null;
@@ -1283,7 +1283,7 @@ export default function VoiceReceptionistFab({
       const c = liveClientRef.current;
       liveClientRef.current = null;
       if (c) {
-        void c.disconnect().then(() => {
+        void c.disconnect('voice-change').then(() => {
           if (isOpenRef.current) void startLiveSession();
         });
       } else {
@@ -1530,7 +1530,7 @@ export default function VoiceReceptionistFab({
     return () => {
       const liveClient = liveClientRef.current;
       liveClientRef.current = null;
-      if (liveClient) void liveClient.disconnect();
+      if (liveClient) void liveClient.disconnect('unmount');
       cleanupAudioStream();
       if (silenceTimerRef.current) {
         clearTimeout(silenceTimerRef.current);
