@@ -233,6 +233,13 @@ async function openLiveSession(args: {
           startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
         },
       },
+      // Let the model ignore out-of-context speech (e.g. residual speaker
+      // bleed the VAD still commits) instead of answering it. Combined with
+      // LOW start sensitivity and the client echo gate, echo should neither
+      // interrupt playback nor become a self-directed turn.
+      proactivity: {
+        proactiveAudio: true,
+      },
     },
     callbacks: {
       onopen: args.onopen || null,
