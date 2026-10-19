@@ -1437,7 +1437,11 @@ export function parseAndHealVisionScout(
           const rawCalVal = newItem.rawNutritionLabel.calories ?? newItem.rawNutritionLabel.energy;
           if (rawCalVal != null) {
             const parsedC = parseLabelCalories(rawCalVal);
-            if (parsedC !== null && parsedC > 0) {
+            // Preserve dual-column strings ("181kcal per 100g; 154kcal per
+            // pack"): collapsing to the first figure destroys the per-100
+            // column the display Totals scale needs (live job_1792411945320
+            // showed 181 kcal for the 85g pack instead of 154).
+            if (parsedC !== null && parsedC > 0 && !/per\s*100/i.test(String(rawCalVal))) {
               newItem.rawNutritionLabel.calories = `${parsedC} kcal`;
             }
           }
