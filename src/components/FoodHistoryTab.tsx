@@ -1995,7 +1995,7 @@ export default function FoodHistoryTab({
                       })()}
                       
 
-                      {/* Meal allowance rings: sat fat / sodium / calories vs daily targets */}
+                      {/* Meal allowance rings: Home top-nutrient list vs daily targets (swipe for more) */}
                       <div className="pt-1">
                         <MealAllowanceRings
                           nutrients={log.nutrients}

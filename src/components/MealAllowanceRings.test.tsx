@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { MealAllowanceRings, computeMealAllowanceRings, formatRingNumber } from './MealAllowanceRings';
+import { MealAllowanceRings, computeMealAllowanceRings, formatRingNumber, resolveRingKeys } from './MealAllowanceRings';
 
 const report = {
   dailyNutrientTargets: {
@@ -18,17 +18,17 @@ describe('computeMealAllowanceRings', () => {
       report,
       profile: { language: 'en' },
     });
-    expect(rings.map((r) => r.key)).toEqual(['saturatedFat', 'sodium', 'calories']);
-    const sat = rings[0];
+    expect(rings.map((r) => r.key)).toEqual(['calories', 'saturatedFat', 'sodium']);
+    const sat = rings[1];
     expect(sat.max).toBe(20);
     expect(sat.value).toBeCloseTo(18.7, 5);
     expect(sat.pct).toBeCloseTo(0.935, 5);
-    const sod = rings[1];
+    const sod = rings[2];
     expect(sod.unit).toBe('g');
     expect(sod.value).toBeCloseTo(2.75, 5);
     expect(sod.max).toBeCloseTo(2.3, 5);
     expect(sod.pct).toBeGreaterThan(1);
-    expect(rings[2].max).toBe(2000);
+    expect(rings[0].max).toBe(2000);
   });
 
   it('sums the full day across logs sharing the date', () => {
@@ -44,9 +44,9 @@ describe('computeMealAllowanceRings', () => {
       logDate: '2026-10-17',
       logId: 'b',
     });
-    expect(rings[0].value).toBeCloseTo(18.7, 5);
-    expect(rings[1].value).toBeCloseTo(2.75, 5);
-    expect(rings[2].value).toBe(1193);
+    expect(rings[1].value).toBeCloseTo(18.7, 5);
+    expect(rings[2].value).toBeCloseTo(2.75, 5);
+    expect(rings[0].value).toBe(1193);
   });
 
   it('falls back to app defaults without a report', () => {
@@ -54,9 +54,9 @@ describe('computeMealAllowanceRings', () => {
       nutrients: { saturatedFat: 5, sodium: 500, calories: 600 },
       profile: { language: 'en' },
     });
-    expect(rings[0].max).toBe(15);
-    expect(rings[1].max).toBeCloseTo(1.5, 5);
-    expect(rings[2].max).toBe(2000);
+    expect(rings[1].max).toBe(15);
+    expect(rings[2].max).toBeCloseTo(1.5, 5);
+    expect(rings[0].max).toBe(2000);
   });
 
   it('uses short translated names', () => {
@@ -65,7 +65,7 @@ describe('computeMealAllowanceRings', () => {
       report,
       profile: { language: 'en' },
     });
-    expect(rings.map((r) => r.name)).toEqual(['Sat Fat', 'Sodium', 'Calories']);
+    expect(rings.map((r) => r.name)).toEqual(['Calories', 'Sat Fat', 'Sodium']);
   });
 });
 
@@ -93,5 +93,64 @@ describe('MealAllowanceRings render', () => {
     expect(html).toContain('data-testid="allowance-ring-calories"');
     expect(html).toContain('2.75');
     expect(html).toContain('1193');
+  });
+});
+
+describe('resolveRingKeys (matches Home top-nutrient list)', () => {
+  it('falls back to the legacy triple without a report', () => {
+    expect(resolveRingKeys(undefined, { language: 'en' })).toEqual(['calories', 'saturatedFat', 'sodium']);
+    expect(resolveRingKeys(report, { language: 'en' })).toEqual(['calories', 'saturatedFat', 'sodium']);
+  });
+
+  it('mirrors report topNutrientTargets in order', () => {
+    const homeReport = {
+      ...report,
+      topNutrientTargets: ['protein', 'potassium', 'addedSugar', 'totalFibre', 'carbohydrates'],
+    };
+    expect(resolveRingKeys(homeReport, { language: 'en' })).toEqual(
+      ['protein', 'potassium', 'addedSugar', 'totalFibre', 'carbohydrates'],
+    );
+  });
+});
+
+describe('MealAllowanceRings dynamic list + slider', () => {
+  const homeReport = {
+    dailyNutrientTargets: {
+      protein: '70g',
+      potassium: '3500mg',
+      addedSugar: '25g',
+      totalFibre: '25g',
+      carbohydrates: '200g',
+    },
+    topNutrientTargets: ['protein', 'potassium', 'addedSugar', 'totalFibre', 'carbohydrates'],
+  };
+
+  it('renders one ring per Home top nutrient with app-default fallbacks', () => {
+    const rings = computeMealAllowanceRings({
+      nutrients: { protein: 30, potassium: 1500, addedSugar: 10, totalFibre: 8, carbohydrates: 120 },
+      report: homeReport,
+      profile: { language: 'en' },
+    });
+    expect(rings.map((r) => r.key)).toEqual(
+      ['protein', 'potassium', 'addedSugar', 'totalFibre', 'carbohydrates'],
+    );
+    expect(rings.find((r) => r.key === 'protein')?.max).toBe(70);
+    expect(rings.find((r) => r.key === 'potassium')?.max).toBe(3500);
+    expect(rings.find((r) => r.key === 'potassium')?.unit).toBe('mg');
+  });
+
+  it('renders a horizontal snap slider holding every ring', () => {
+    const html = renderToStaticMarkup(
+      <MealAllowanceRings
+        nutrients={{ protein: 30, potassium: 1500, addedSugar: 10, totalFibre: 8, carbohydrates: 120 }}
+        report={homeReport}
+        profile={{ language: 'en' }}
+      />,
+    );
+    expect(html).toContain('overflow-x-auto');
+    expect(html).toContain('snap-start');
+    for (const key of ['protein', 'potassium', 'addedSugar', 'totalFibre', 'carbohydrates']) {
+      expect(html).toContain(`data-testid="allowance-ring-${key}"`);
+    }
   });
 });
