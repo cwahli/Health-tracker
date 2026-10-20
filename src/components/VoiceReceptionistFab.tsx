@@ -1686,38 +1686,26 @@ export default function VoiceReceptionistFab({
         <div className="fixed inset-x-2 bottom-18 sm:inset-auto sm:bottom-22 sm:right-6 sm:w-[420px] max-h-[85vh] z-50 flex flex-col bg-theme-bg-card/95 backdrop-blur-xl border border-theme-border shadow-2xl rounded-3xl overflow-hidden animate-slide-up">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 bg-indigo-600 text-white">
-            <div className="flex items-center gap-2.5">
-              <div className="relative w-9 h-9 rounded-full bg-white/20 flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-amber-300" />
-                {(isListening || isSpeaking) && (
-                  <div className="absolute -bottom-0.5 -right-0.5 flex gap-0.5 items-end h-3">
-                    <span className="w-0.5 h-2 bg-emerald-300 animate-pulse" />
-                    <span className="w-0.5 h-3 bg-emerald-300 animate-pulse delay-75" />
-                    <span className="w-0.5 h-1.5 bg-emerald-300 animate-pulse delay-150" />
-                  </div>
-                )}
-              </div>
-              <div>
-                <h3 className="text-sm font-bold leading-tight flex items-center gap-1.5">
-                  Health Concierge & Receptionist
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold leading-tight truncate">Receptionist</h3>
+                <p className="text-[11px] text-indigo-100 flex items-center gap-1.5">
                   {liveMode === 'live' ? (
-                    <span className="px-1.5 py-px rounded-full bg-emerald-400/90 text-emerald-950 text-[9px] font-extrabold tracking-wide">
+                    <span className="px-1.5 py-px rounded-full bg-emerald-400/90 text-emerald-950 text-[9px] font-extrabold tracking-wide shrink-0">
                       ● LIVE
                     </span>
                   ) : liveMode === 'connecting' ? (
-                    <span className="px-1.5 py-px rounded-full bg-amber-300/90 text-amber-950 text-[9px] font-extrabold tracking-wide animate-pulse">
+                    <span className="px-1.5 py-px rounded-full bg-amber-300/90 text-amber-950 text-[9px] font-extrabold tracking-wide shrink-0 animate-pulse">
                       CONNECTING…
                     </span>
                   ) : (
                     <span
-                      className="px-1.5 py-px rounded-full bg-white/25 text-white text-[9px] font-extrabold tracking-wide"
+                      className="px-1.5 py-px rounded-full bg-white/25 text-white text-[9px] font-extrabold tracking-wide shrink-0"
                       title="Basic voice mode (browser speech + text engine)"
                     >
                       BASIC
                     </span>
                   )}
-                </h3>
-                <p className="text-[11px] text-indigo-100 flex items-center gap-1.5">
                   {isListening ? (
                     <span className="flex items-center gap-1 text-emerald-300 font-semibold">
                       <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping" />
@@ -1725,7 +1713,7 @@ export default function VoiceReceptionistFab({
                     </span>
                   ) : isSpeaking ? (
                     <span className="text-amber-200 font-medium flex items-center gap-1">
-                      <Volume2 className="w-3 h-3 animate-pulse" /> Concierge speaking...
+                      <Volume2 className="w-3 h-3 animate-pulse" /> Speaking…
                     </span>
                   ) : isLoading ? (
                     <span className="text-indigo-200 flex items-center gap-1">
@@ -1738,7 +1726,7 @@ export default function VoiceReceptionistFab({
               </div>
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 shrink-0">
               {/* Voice & Sound Settings Toggle */}
               <button
                 type="button"
@@ -1749,18 +1737,6 @@ export default function VoiceReceptionistFab({
                 }`}
               >
                 <Sliders className="w-4 h-4" />
-              </button>
-
-              {/* Speech Output Audio Toggle */}
-              <button
-                onClick={() => {
-                  if (isSpeaking && typeof window !== 'undefined') window.speechSynthesis?.cancel();
-                  setIsSpeakingEnabled(!isSpeakingEnabled);
-                }}
-                title={isSpeakingEnabled ? 'Mute voice output' : 'Enable voice output'}
-                className="p-1.5 hover:bg-white/20 rounded-full transition-colors cursor-pointer"
-              >
-                {isSpeakingEnabled ? <Volume2 className="w-4 h-4 text-white" /> : <VolumeX className="w-4 h-4 text-indigo-200" />}
               </button>
 
               {/* Minimize to Follow Mode (keeps listening) */}
@@ -1833,6 +1809,36 @@ export default function VoiceReceptionistFab({
                     Live voice needs microphone + WebSocket support — basic mode is active on this browser.
                   </p>
                 )}
+              </div>
+
+              {/* Speaker Output Toggle (moved in from the header) */}
+              <div className="flex items-center justify-between gap-2 py-1">
+                <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  {isSpeakingEnabled ? (
+                    <Volume2 className="w-3.5 h-3.5 text-indigo-600" />
+                  ) : (
+                    <VolumeX className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                  Speaker output
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={isSpeakingEnabled}
+                  onClick={() => {
+                    if (isSpeaking && typeof window !== 'undefined') window.speechSynthesis?.cancel();
+                    setIsSpeakingEnabled(!isSpeakingEnabled);
+                  }}
+                  className={`relative w-9 h-5 rounded-full transition-colors shrink-0 cursor-pointer ${
+                    isSpeakingEnabled ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-700'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+                      isSpeakingEnabled ? 'left-[18px]' : 'left-0.5'
+                    }`}
+                  />
+                </button>
               </div>
 
               {/* Voice Selector */}
