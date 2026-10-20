@@ -26,7 +26,7 @@ export interface LiveToolCall {
 }
 
 export interface LiveAudioClientEvents {
-  onReady?: (info: { model: string; voice: string }) => void;
+  onReady?: (info: { model: string; voice: string; resumed?: boolean }) => void;
   onInputTranscription?: (text: string) => void;
   onOutputTranscription?: (text: string) => void;
   onAssistantText?: (text: string) => void;
@@ -39,6 +39,7 @@ export interface LiveAudioClientEvents {
   onClosed?: () => void;
   onAutoSleep?: () => void;
   onStatus?: (message: string) => void;
+  onReconnecting?: (attempt: number) => void;
 }
 
 export const LIVE_INPUT_RATE = 16000;
@@ -115,6 +116,14 @@ export class GeminiLiveAudioClient {
   private connected = false;
   private closed = false;
   private setup: LiveSessionSetup = {};
+  // Auto-reconnect state. wantConnection survives socket drops (retry with
+  // backoff); only an explicit disconnect() clears it. resumeHandle is the
+  // Google session handle for transparent resume across reconnects.
+  private wantConnection = false;
+  private retryTimer: any = null;
+  private retryAttempt = 0;
+  private socketGen = 0;
+  private resumeHandle: string | null = null;
   private t0 = 0;
   private firstPlaybackMarked = false;
   private pendingMarks: Array<any> = [];
@@ -214,7 +223,15 @@ export class GeminiLiveAudioClient {
     if (!isLiveVoiceSupported()) {
       throw new Error('Live voice is not supported in this browser.');
     }
+    // Explicit connect = fresh session: drop any stale resume handle.
     this.closed = false;
+    this.wantConnection = true;
+    this.retryAttempt = 0;
+    this.resumeHandle = null;
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
     this.setup = setup;
     this.t0 = performance.now();
     this.firstPlaybackMarked = false;
@@ -224,16 +241,66 @@ export class GeminiLiveAudioClient {
     await this.startMicrophone();
     this.mark('mic-ready');
 
-    await new Promise<void>((resolve, reject) => {
+    await this.openSocket();
+  }
+
+  // Max 6 attempts: ~0.4s, 0.8s, 1.6s, 3.2s, 5s, 5s + jitter (~16s total).
+  // Then give up to the legacy fallback instead of retrying forever.
+  private static readonly MAX_RETRY_ATTEMPTS = 6;
+
+  private scheduleReconnect(why: string): void {
+    if (!this.wantConnection || this.retryTimer) return;
+    if (this.retryAttempt >= GeminiLiveAudioClient.MAX_RETRY_ATTEMPTS) {
+      this.giveUp(`reconnects-exhausted:${why}`);
+      return;
+    }
+    const delay = Math.min(400 * 2 ** this.retryAttempt, 5000);
+    const jittered = Math.round(delay * (0.75 + Math.random() * 0.5));
+    this.retryAttempt += 1;
+    this.touchActivity();
+    try {
+      this.events.onReconnecting?.(this.retryAttempt);
+    } catch { /* ignore */ }
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      if (!this.wantConnection) return;
+      this.mark('reconnect-attempt');
+      void this.openSocket().catch(() => { /* handled via schedule/giveUp */ });
+    }, jittered);
+  }
+
+  private giveUp(reason: string): void {
+    this.wantConnection = false;
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+    try {
+      this.events.onClosed?.();
+    } catch { /* ignore */ }
+    void this.disconnect(`giveup:${reason}`);
+  }
+
+  private openSocket(): Promise<void> {
+    const gen = ++this.socketGen;
+    const setup = this.setup;
+    return new Promise<void>((resolve, reject) => {
+      if (!this.wantConnection) {
+        reject(new Error('Live voice connection cancelled.'));
+        return;
+      }
       this.readyResolve = resolve;
       this.readyReject = reject;
       const ws = new WebSocket(this.relayUrl());
       this.ws = ws;
       this.readyTimer = setTimeout(() => {
-        reject(new Error('Live voice connection timed out.'));
+        // Handshake stall (the setup-timeout case): close the socket and
+        // let the normal retry path handle it instead of failing outright.
         try { ws.close(); } catch { /* ignore */ }
+        this.scheduleReconnect('ready-timeout');
       }, READY_TIMEOUT_MS);
       ws.onopen = () => {
+        if (gen !== this.socketGen) return;
         this.mark('ws-open');
         ws.send(JSON.stringify({
           type: 'setup',
@@ -241,21 +308,29 @@ export class GeminiLiveAudioClient {
           language: setup.language || setup.profile?.language || 'en',
           voice: setup.voice || 'Aoede',
           recentMeals: setup.recentMeals || [],
+          ...(this.resumeHandle ? { resumeHandle: this.resumeHandle } : {}),
         }));
         for (const m of this.pendingMarks.splice(0)) {
           try { ws.send(JSON.stringify(m)); } catch { /* ignore */ }
         }
       };
-      ws.onmessage = (ev) => this.handleFrame(ev.data);
+      ws.onmessage = (ev) => {
+        if (gen !== this.socketGen) return;
+        this.handleFrame(ev.data);
+      };
       ws.onerror = () => {
-        this.fail(new Error('Live voice socket error.'));
+        if (gen !== this.socketGen) return;
+        // Errors are almost always followed by close; let the close handler
+        // drive a single retry decision instead of double-scheduling here.
+        this.mark('socket-error');
       };
       ws.onclose = () => {
-        if (!this.connected && this.readyReject) {
-          this.fail(new Error('Live voice connection closed before ready.'));
+        if (gen !== this.socketGen) return;
+        if (!this.wantConnection) return;
+        if (!this.connected) {
+          this.scheduleReconnect('closed-before-ready');
         } else {
-          this.events.onClosed?.();
-          void this.disconnect('browser-socket-closed');
+          this.scheduleReconnect('socket-closed');
         }
       };
     });
@@ -274,6 +349,11 @@ export class GeminiLiveAudioClient {
     } else if (this.connected) {
       this.events.onError?.(err.message);
     }
+    this.wantConnection = false;
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
     void this.disconnect(`fail:${err.message.slice(0, 60)}`);
   }
 
@@ -290,7 +370,13 @@ export class GeminiLiveAudioClient {
     switch (frame.type) {
       case 'ready':
         this.connected = true;
+        this.retryAttempt = 0;
+        if (this.retryTimer) {
+          clearTimeout(this.retryTimer);
+          this.retryTimer = null;
+        }
         this.mark('ready');
+        if (frame.resumed) this.mark('resumed');
         if (this.readyTimer) {
           clearTimeout(this.readyTimer);
           this.readyTimer = null;
@@ -298,7 +384,17 @@ export class GeminiLiveAudioClient {
         this.readyResolve?.();
         this.readyResolve = null;
         this.readyReject = null;
-        this.events.onReady?.({ model: frame.model, voice: frame.voice });
+        this.events.onReady?.({ model: frame.model, voice: frame.voice, resumed: !!frame.resumed });
+        break;
+      case 'sessionUpdate':
+        if (typeof frame.handle === 'string' && frame.handle.length > 0) {
+          this.resumeHandle = frame.handle;
+        }
+        break;
+      case 'goAway':
+        // The relay owns Google-side graceful migration; the browser socket
+        // stays up, so there is nothing to do here but note it.
+        this.mark('goaway-noted');
         break;
       case 'audio':
         if (typeof frame.data === 'string') this.playPcmChunk(frame.data);
@@ -534,9 +630,21 @@ export class GeminiLiveAudioClient {
   }
 
   async disconnect(reason = 'unknown'): Promise<void> {
-    if (this.closed && !this.ws && !this.audioCtx) return;
+    if (this.closed && !this.ws && !this.audioCtx && !this.retryTimer && !this.wantConnection) return;
     this.closed = true;
     this.connected = false;
+    this.wantConnection = false;
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+    if (this.readyReject) {
+      try {
+        this.readyReject(new Error('Live voice disconnected.'));
+      } catch { /* ignore */ }
+      this.readyReject = null;
+      this.readyResolve = null;
+    }
     if (this.readyTimer) {
       clearTimeout(this.readyTimer);
       this.readyTimer = null;

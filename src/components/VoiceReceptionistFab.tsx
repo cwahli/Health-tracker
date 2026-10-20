@@ -1138,11 +1138,23 @@ export default function VoiceReceptionistFab({
     setLiveMode('connecting');
     setSpeechError(null);
     const client = new GeminiLiveAudioClient({
-      onReady: () => {
+      onReady: (info) => {
+        if (info?.resumed) {
+          // A resumed Google session continues mid-conversation: close out
+          // any partially accumulated turn first so transcript text can't
+          // duplicate across the drop.
+          flushLiveTurn();
+        }
         setLiveMode('live');
         isManuallyStoppedRef.current = false;
         setIsListening(true);
         setSpeechError(null);
+      },
+      onReconnecting: (attempt) => {
+        // Brief transport drop — the client is already retrying with
+        // backoff + Google session resume. Keep the drawer open; audio
+        // resumes on its own. Only the final give-up falls back to BASIC.
+        setSpeechError(`Reconnecting live voice… (attempt ${attempt})`);
       },
       onInputTranscription: (text) => {
         liveUserRef.current = appendTranscript(liveUserRef.current, text);
