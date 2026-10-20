@@ -1546,8 +1546,9 @@ export default function VoiceReceptionistFab({
     <>
       {/* Floating Receptionist Trigger Button (Bottom Right).
           Follow mode: when minimized the drawer hides but the session stays
-          live — the FAB shows the live level bars so the user sees it's
-          still listening. Tap re-opens the drawer without reconnecting. */}
+          live. The FAB itself becomes the state light — emerald + dancing
+          bars = listening, purple + bars = assistant speaking. No mic icon
+          in follow mode; tap re-opens the drawer without reconnecting. */}
       {(!isOpen || isMinimized) && (
         <div className="fixed bottom-24 right-4 sm:bottom-22 sm:right-6 z-40 flex items-center gap-2">
           {missingFields.length > 0 && (
@@ -1562,32 +1563,72 @@ export default function VoiceReceptionistFab({
           <button
             id="voice-receptionist-fab"
             onClick={handleOpenFab}
-            aria-label={isMinimized ? 'Expand Voice Receptionist' : 'Open Voice Receptionist'}
-            title={isMinimized ? 'Voice receptionist listening — tap to expand' : 'Open Voice Receptionist'}
-            className="group relative flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 text-white shadow-xl hover:shadow-indigo-500/30 hover:scale-105 active:scale-95 transition-all duration-300 focus:outline-none cursor-pointer"
+            aria-label={
+              isMinimized && liveMode === 'live'
+                ? isSpeaking
+                  ? 'Voice receptionist speaking — tap to open'
+                  : 'Voice receptionist listening — tap to open'
+                : isMinimized
+                ? 'Expand Voice Receptionist'
+                : 'Open Voice Receptionist'
+            }
+            title={
+              isMinimized && liveMode === 'live'
+                ? isSpeaking
+                  ? 'Speaking — tap to open the transcript'
+                  : 'Listening now — tap to open the transcript'
+                : isMinimized
+                ? 'Voice receptionist paused in basic mode — tap to open'
+                : 'Open Voice Receptionist'
+            }
+            className={`group relative flex items-center justify-center w-14 h-14 rounded-full text-white shadow-xl active:scale-95 transition-all duration-300 focus:outline-none cursor-pointer ${
+              isMinimized && liveMode === 'live'
+                ? isSpeaking
+                  ? 'bg-gradient-to-tr from-purple-600 via-fuchsia-500 to-purple-600 hover:shadow-purple-500/40 hover:scale-105'
+                  : 'bg-gradient-to-tr from-emerald-600 via-emerald-500 to-teal-600 hover:shadow-emerald-500/40 hover:scale-105'
+                : 'bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 hover:shadow-indigo-500/30 hover:scale-105'
+            }`}
           >
             {(isListening || isSpeaking) && (
-              <span className="absolute inset-0 rounded-full bg-indigo-400 opacity-75 animate-ping" />
+              <span
+                className={`absolute inset-0 rounded-full opacity-75 animate-ping ${
+                  isMinimized && liveMode === 'live'
+                    ? isSpeaking
+                      ? 'bg-purple-400'
+                      : 'bg-emerald-400'
+                    : 'bg-indigo-400'
+                }`}
+              />
             )}
             <div className="relative flex items-center justify-center">
-              <Mic className="w-6 h-6 text-white group-hover:scale-110 transition-transform" />
               {isMinimized && liveMode === 'live' ? (
-                <span className="absolute -bottom-1.5 flex items-end gap-px h-3 bg-black/30 rounded-full px-1 py-px">
+                <span className="flex items-end gap-1 h-6" aria-hidden="true">
                   <span
-                    className="w-0.5 bg-emerald-300 rounded-full transition-all duration-100"
-                    style={{ height: `${Math.max(2, Math.round((audioLevel / 100) * 10))}px` }}
+                    className="w-1 bg-white/90 rounded-full transition-all duration-100"
+                    style={{ height: `${Math.max(5, Math.round((audioLevel / 100) * 22))}px` }}
                   />
                   <span
-                    className="w-0.5 bg-emerald-300 rounded-full transition-all duration-100"
-                    style={{ height: `${Math.max(3, Math.round((audioLevel / 100) * 8 + 2))}px` }}
+                    className="w-1 bg-white/90 rounded-full transition-all duration-100"
+                    style={{ height: `${Math.max(8, Math.round((audioLevel / 100) * 18 + 5))}px` }}
                   />
                   <span
-                    className="w-0.5 bg-emerald-300 rounded-full transition-all duration-100"
-                    style={{ height: `${Math.max(2, Math.round((audioLevel / 100) * 10))}px` }}
+                    className="w-1 bg-white/90 rounded-full transition-all duration-100"
+                    style={{ height: `${Math.max(4, Math.round((audioLevel / 100) * 24))}px` }}
+                  />
+                  <span
+                    className="w-1 bg-white/90 rounded-full transition-all duration-100"
+                    style={{ height: `${Math.max(8, Math.round((audioLevel / 100) * 16 + 6))}px` }}
+                  />
+                  <span
+                    className="w-1 bg-white/90 rounded-full transition-all duration-100"
+                    style={{ height: `${Math.max(5, Math.round((audioLevel / 100) * 20))}px` }}
                   />
                 </span>
               ) : (
-                <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-white" />
+                <>
+                  <Mic className="w-6 h-6 text-white group-hover:scale-110 transition-transform" />
+                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-white" />
+                </>
               )}
             </div>
           </button>
