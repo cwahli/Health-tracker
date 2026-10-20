@@ -117,7 +117,7 @@ export class GeminiLiveAudioClient {
   private setup: LiveSessionSetup = {};
   private t0 = 0;
   private firstPlaybackMarked = false;
-  private pendingMarks: Array<{ ev: string; tRelMs: number }> = [];
+  private pendingMarks: Array<any> = [];
   private lastSpeakerLevel = 0;
   private lastSpeakerChunkAt = 0;
 
@@ -238,7 +238,7 @@ export class GeminiLiveAudioClient {
           recentMeals: setup.recentMeals || [],
         }));
         for (const m of this.pendingMarks.splice(0)) {
-          try { ws.send(JSON.stringify({ type: 'debug', ev: m.ev, tRelMs: m.tRelMs })); } catch { /* ignore */ }
+          try { ws.send(JSON.stringify(m)); } catch { /* ignore */ }
         }
       };
       ws.onmessage = (ev) => this.handleFrame(ev.data);
