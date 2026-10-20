@@ -26,6 +26,11 @@ const CODE_TTL_MS = 5 * 60 * 1000;
 const CODE_BYTES = 16; // 128-bit
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX = 5;
+// /complete is polled by the waiting browser every 2s for up to CODE_TTL_MS
+// (~150 POSTs per session), so it gets its own generous per-IP budget rather
+// than sharing the tight issuance budget above.
+const COMPLETE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const COMPLETE_RATE_LIMIT_MAX = 300;
 const SEEN_CACHE_MAX = 5000;
 
 export function getWaConfig() {
@@ -85,11 +90,13 @@ export interface WaLoginCode {
 const memCodes = new Map<string, WaLoginCode>();
 const memSeen = new Set<string>();
 const memRate = new Map<string, number[]>();
+const memCompleteRate = new Map<string, number[]>();
 
 export function __resetWaMemoryForTests() {
   memCodes.clear();
   memSeen.clear();
   memRate.clear();
+  memCompleteRate.clear();
 }
 
 function sha256hex(s: string): string {
@@ -168,7 +175,14 @@ export async function markCodeVerified(codeHash: string, waId: string, now: numb
        WHERE code_hash = ? AND verified_at IS NULL AND consumed_at IS NULL AND expires_at > ?`,
       [waId, now, codeHash, now],
     );
-    return res.success;
+    // The WHERE clause is the single-use guard under concurrency: two tabs
+    // racing the same code must not both win. D1 reports rows touched in
+    // meta.changes — 0 means we lost the race (or the row expired between
+    // the read above and this write). Missing meta (older API shape) falls
+    // back to the pre-change success bit.
+    if (!res.success) return false;
+    if (typeof res.meta?.changes === 'number') return res.meta.changes === 1;
+    return true;
   }
   const mem = memCodes.get(codeHash);
   if (!mem || mem.verifiedAt || mem.consumedAt || mem.expiresAt <= now) return false;
@@ -186,7 +200,10 @@ export async function consumeCode(sessionId: string, now: number): Promise<WaLog
        WHERE session_id = ? AND consumed_at IS NULL AND verified_at IS NOT NULL AND expires_at > ?`,
       [now, sessionId, now],
     );
+    // Same race guard as markCodeVerified: changes === 0 means another
+    // holder consumed first — report failure so only one login mints.
     if (!res.success) return null;
+    if (typeof res.meta?.changes === 'number' && res.meta.changes !== 1) return null;
     return { ...rec, consumedAt: now };
   }
   const mem = [...memCodes.values()].find((r) => r.sessionId === sessionId);
@@ -197,6 +214,11 @@ export async function consumeCode(sessionId: string, now: number): Promise<WaLog
 
 export async function hasSeenWamid(wamid: string): Promise<boolean> {
   if (isD1Configured()) {
+    // Atomic claim: INSERT OR IGNORE + changes bit, no SELECT-then-INSERT
+    // gap for concurrent same-wamid redeliveries to slip through.
+    const ins = await d1Query('INSERT OR IGNORE INTO wa_webhook_seen (wamid, created_at) VALUES (?, ?)', [wamid, Date.now()]);
+    if (typeof ins.meta?.changes === 'number') return ins.meta.changes === 0;
+    // Legacy fallback (no meta shape): previous select-then-insert order.
     const res = await d1Query('SELECT wamid FROM wa_webhook_seen WHERE wamid = ? LIMIT 1', [wamid]);
     if (res.success && res.results.length > 0) return true;
     await d1Query('INSERT OR IGNORE INTO wa_webhook_seen (wamid, created_at) VALUES (?, ?)', [wamid, Date.now()]);
@@ -219,25 +241,64 @@ export function checkRequestRate(ip: string, now: number): boolean {
   return true;
 }
 
+export function checkCompleteRate(ip: string, now: number): boolean {
+  const hits = (memCompleteRate.get(ip) || []).filter((t) => now - t < COMPLETE_RATE_LIMIT_WINDOW_MS);
+  if (hits.length >= COMPLETE_RATE_LIMIT_MAX) return false;
+  hits.push(now);
+  memCompleteRate.set(ip, hits);
+  return true;
+}
+
 // --- Inbound sender identity (BSUID-aware) ----------------------------------
 // Sole identity is the signed-webhook sender: messages[].from today,
 // messages[].from_user_id (BSUID) or contacts[].wa_id as fallback.
 // A client-claimed phone number is never trusted.
-export function extractSenderFromPayload(payload: any): { waId: string | null; text: string | null; wamid: string | null } {
+export interface WaInboundMessage {
+  waId: string | null;
+  text: string | null;
+  wamid: string | null;
+}
+
+function senderFromMessage(msg: any, contactsWaId: string | null): WaInboundMessage {
+  if (!msg || msg.type !== 'text') return { waId: null, text: null, wamid: typeof msg?.id === 'string' ? msg.id : null };
+  const waId =
+    (typeof msg.from === 'string' && msg.from) ||
+    (typeof msg.from_user_id === 'string' && msg.from_user_id) ||
+    contactsWaId ||
+    null;
+  const text = typeof msg.text?.body === 'string' ? msg.text.body : null;
+  return { waId, text, wamid: typeof msg.id === 'string' ? msg.id : null };
+}
+
+/** Every text message in the POST: Meta may batch several entries, changes,
+ * and messages in one delivery. Reading only messages[0] silently drops a
+ * login code that arrives anywhere else in the batch. */
+export function extractMessagesFromPayload(payload: any): WaInboundMessage[] {
   try {
-    const changes = payload?.entry?.[0]?.changes?.[0]?.value;
-    const msg = changes?.messages?.[0];
-    if (!msg || msg.type !== 'text') return { waId: null, text: null, wamid: msg?.id || null };
-    const waId =
-      (typeof msg.from === 'string' && msg.from) ||
-      (typeof msg.from_user_id === 'string' && msg.from_user_id) ||
-      (typeof changes?.contacts?.[0]?.wa_id === 'string' && changes.contacts[0].wa_id) ||
-      null;
-    const text = typeof msg.text?.body === 'string' ? msg.text.body : null;
-    return { waId, text, wamid: typeof msg.id === 'string' ? msg.id : null };
+    const entries = payload?.entry;
+    if (!Array.isArray(entries)) return [];
+    const out: WaInboundMessage[] = [];
+    for (const entry of entries) {
+      const changes = entry?.changes;
+      if (!Array.isArray(changes)) continue;
+      for (const change of changes) {
+        const value = change?.value;
+        const msgs = value?.messages;
+        if (!Array.isArray(msgs)) continue;
+        const contactsWaId =
+          (typeof value?.contacts?.[0]?.wa_id === 'string' && value.contacts[0].wa_id) || null;
+        for (const msg of msgs) out.push(senderFromMessage(msg, contactsWaId));
+      }
+    }
+    return out;
   } catch {
-    return { waId: null, text: null, wamid: null };
+    return [];
   }
+}
+
+export function extractSenderFromPayload(payload: any): WaInboundMessage {
+  const all = extractMessagesFromPayload(payload);
+  return all[0] || { waId: null, text: null, wamid: null };
 }
 
 // --- Router -----------------------------------------------------------------
@@ -251,7 +312,10 @@ whatsappRouter.get('/api/auth/whatsapp/webhook', (req, res) => {
   if (!checkWebhookVerifyToken(mode, token, verifyToken)) {
     return res.status(403).send('Forbidden');
   }
-  return res.status(200).send(String(challenge || ''));
+  if (typeof challenge !== 'string' || challenge.length === 0) {
+    return res.status(400).send('Missing challenge');
+  }
+  return res.status(200).send(challenge);
 });
 
 /** Inbound messages. Raw body required: mount express.raw() for this path. */
@@ -269,13 +333,15 @@ whatsappRouter.post('/api/auth/whatsapp/webhook', async (req, res) => {
   } catch {
     return res.status(200).send('ok');
   }
-  const { waId, text, wamid } = extractSenderFromPayload(payload);
-  if (!wamid) return res.status(200).send('ok');
-  if (await hasSeenWamid(wamid)) return res.status(200).send('ok'); // at-least-once retry
-  if (!waId || !text) return res.status(200).send('ok'); // statuses[], non-text: ack only
-  const code = parseLoginCode(text);
-  if (!code) return res.status(200).send('ok'); // chatter without a code: ack only
-  await markCodeVerified(sha256hex(code), waId, Date.now());
+  const inbound = extractMessagesFromPayload(payload);
+  for (const msg of inbound) {
+    if (!msg.wamid) continue;
+    if (await hasSeenWamid(msg.wamid)) continue; // at-least-once retry
+    if (!msg.waId || !msg.text) continue; // statuses[], non-text: ack only
+    const code = parseLoginCode(msg.text);
+    if (!code) continue; // chatter without a code: ack only
+    await markCodeVerified(sha256hex(code), msg.waId, Date.now());
+  }
   return res.status(200).send('ok');
 });
 
@@ -287,6 +353,11 @@ whatsappRouter.get('/api/auth/whatsapp/config', (_req, res) => {
 
 /** Issue a pending session code. Rate-limited per IP. */
 whatsappRouter.post('/api/auth/whatsapp/request-code', async (req, res) => {
+  if (!isWaLoginAvailable()) {
+    // Fail fast instead of entering a 5-minute dead wait with no number to
+    // message: the UI surfaces data.error via waUnavailable.
+    return res.status(503).json({ error: 'WhatsApp login is not configured yet.' });
+  }
   const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
   if (!checkRequestRate(ip, Date.now())) {
     return res.status(429).json({ error: 'Too many code requests. Try again later.' });
@@ -302,6 +373,15 @@ whatsappRouter.post('/api/auth/whatsapp/request-code', async (req, res) => {
     waId: null,
     verifiedAt: null,
   });
+  if (isD1Configured()) {
+    // Opportunistic purge: every issuance (including abandoned polls) leaves
+    // a row otherwise. Best-effort, never fails the login.
+    try {
+      await d1Query('DELETE FROM wa_login_codes WHERE expires_at < ?', [now]);
+    } catch {
+      /* ignore */
+    }
+  }
   const { businessNumber } = getWaConfig();
   const waLink = businessNumber
     ? `https://wa.me/${businessNumber}?text=${encodeURIComponent(`LOGIN ${code}`)}`
@@ -317,6 +397,10 @@ whatsappRouter.post('/api/auth/whatsapp/request-code', async (req, res) => {
 whatsappRouter.post('/api/auth/whatsapp/complete', async (req, res) => {
   const { sessionId } = req.body || {};
   if (!sessionId) return res.status(400).json({ error: 'sessionId required' });
+  const cip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
+  if (!checkCompleteRate(cip, Date.now())) {
+    return res.status(429).json({ error: 'Too many attempts. Try again later.' });
+  }
   const rec = await consumeCode(String(sessionId), Date.now());
   if (!rec || !rec.waId) {
     return res.status(400).json({ error: 'Not verified yet or code expired.' });
@@ -384,8 +468,6 @@ whatsappRouter.post('/api/auth/whatsapp/complete', async (req, res) => {
         if (!user) return res.status(409).json({ error: 'Number identity conflict. Contact support.' });
       }
     }
-    const { signSessionToken: sign } = await import('./server_auth.js');
-    void sign;
     const token = signSessionToken({
       uid: user.id,
       email: user.email,

@@ -13,7 +13,9 @@ import {
   consumeCode,
   hasSeenWamid,
   checkRequestRate,
+  checkCompleteRate,
   extractSenderFromPayload,
+  extractMessagesFromPayload,
   whatsappRouter,
   __resetWaMemoryForTests,
   __resetWaUsersForTests,
@@ -157,6 +159,48 @@ describe('server_whatsapp: session codes (WA-2)', () => {
     expect(await hasSeenWamid('wamid.X')).toBe(true);
   });
 
+  it('extracts every message in a batched delivery, not just messages[0]', () => {
+    const batched = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: '111',
+          changes: [
+            {
+              value: {
+                messaging_product: 'whatsapp',
+                contacts: [{ wa_id: '447700900123' }],
+                messages: [
+                  { from: '447700900123', id: 'wamid.CHAT', timestamp: '1700000000', type: 'text', text: { body: 'hello there' } },
+                  { from: '447700900123', id: 'wamid.CODE', timestamp: '1700000001', type: 'text', text: { body: `LOGIN wa_${'c'.repeat(32)}` } },
+                ],
+              },
+              field: 'messages',
+            },
+          ],
+        },
+        {
+          id: '222',
+          changes: [{ value: { messaging_product: 'whatsapp', messages: [] }, field: 'messages' }],
+        },
+      ],
+    };
+    const all = extractMessagesFromPayload(batched);
+    expect(all.length).toBe(2);
+    expect(all[0].wamid).toBe('wamid.CHAT');
+    expect(all[1].text).toBe(`LOGIN wa_${'c'.repeat(32)}`);
+    // first-message wrapper keeps its contract
+    expect(extractSenderFromPayload(batched).wamid).toBe('wamid.CHAT');
+    expect(extractMessagesFromPayload({})).toEqual([]);
+  });
+
+  it('rate-limits complete polls on a separate generous budget', () => {
+    const now = Date.now();
+    for (let i = 0; i < 300; i++) expect(checkCompleteRate('9.9.9.9', now)).toBe(true);
+    expect(checkCompleteRate('9.9.9.9', now)).toBe(false);
+    expect(checkCompleteRate('8.8.8.8', now)).toBe(true);
+  });
+
   it('extracts sender BSUID-aware, ignores non-text', () => {
     const { waId, text, wamid } = extractSenderFromPayload(metaPayload('LOGIN hi'));
     expect(waId).toBe('447700900123');
@@ -200,12 +244,14 @@ describe('server_whatsapp: HTTP flow (WA-1..WA-3)', () => {
     if (server) await new Promise((resolve) => server.close(resolve));
   });
 
-  it('handshakes GET verify, 403 on bad token', async () => {
+  it('handshakes GET verify, 403 on bad token, 400 without challenge', async () => {
     const ok = await fetch(`${base}/api/auth/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=${TOKEN}&hub.challenge=CHAL`);
     expect(ok.status).toBe(200);
     expect(await ok.text()).toBe('CHAL');
     const bad = await fetch(`${base}/api/auth/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=nope&hub.challenge=CHAL`);
     expect(bad.status).toBe(403);
+    const nochal = await fetch(`${base}/api/auth/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=${TOKEN}`);
+    expect(nochal.status).toBe(400);
   });
 
   it('full flow: request -> signed inbound -> complete -> htk token; replay dead', async () => {
@@ -308,6 +354,60 @@ describe('server_whatsapp: HTTP flow (WA-1..WA-3)', () => {
     ).json();
     expect(done2.success).toBe(true);
     expect(done2.userProfile.uid).toBe(done1.userProfile.uid);
+  });
+
+  it('batched delivery verifies a code in a later message', async () => {
+    const rc = await (await fetch(`${base}/api/auth/whatsapp/request-code`, { method: 'POST' })).json();
+    expect(rc.success).toBe(true);
+    const batched = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: '111',
+          changes: [
+            {
+              value: {
+                messaging_product: 'whatsapp',
+                contacts: [{ wa_id: '447700900123' }],
+                messages: [
+                  { from: '447700900123', id: 'wamid.B1', timestamp: '1700000000', type: 'text', text: { body: 'hi' } },
+                  { from: '447700900123', id: 'wamid.B2', timestamp: '1700000001', type: 'text', text: { body: `LOGIN ${rc.code}` } },
+                ],
+              },
+              field: 'messages',
+            },
+          ],
+        },
+      ],
+    };
+    const raw = Buffer.from(JSON.stringify(batched));
+    const inbound = await fetch(`${base}/api/auth/whatsapp/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': sign(raw) },
+      body: raw,
+    });
+    expect(inbound.status).toBe(200);
+    const done = await (
+      await fetch(`${base}/api/auth/whatsapp/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: rc.sessionId }),
+      })
+    ).json();
+    expect(done.success).toBe(true);
+    expect(done.token).toMatch(/^htk\./);
+  });
+
+  it('request-code fails fast when no business number is configured', async () => {
+    const saved = process.env.WHATSAPP_BUSINESS_NUMBER;
+    process.env.WHATSAPP_BUSINESS_NUMBER = '';
+    try {
+      const r = await fetch(`${base}/api/auth/whatsapp/request-code`, { method: 'POST' });
+      expect(r.status).toBe(503);
+      expect((await r.json()).error).toBeTruthy();
+    } finally {
+      process.env.WHATSAPP_BUSINESS_NUMBER = saved;
+    }
   });
 
   it('config endpoint reports the surface', async () => {
