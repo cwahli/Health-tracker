@@ -70,6 +70,13 @@ const IDLE_CLOSE_MS = 120 * 1000;
 const MAX_SESSION_MS = 10 * 60 * 1000;
 const MAX_CLIENT_MESSAGE_BYTES = 2 * 1024 * 1024;
 
+// Wire capability probe: plain sessionResumption is accepted on Developer
+// API keys, but enterprise-only sub-fields (transparent, and previously
+// proactivity) are rejected at setup with 1007. Start optimistic; a
+// resumption-named rejection disables it process-wide and we fall back to
+// fresh sessions plus relay-side buffering and client auto-retry.
+let trySessionResumption = true;
+
 // Minimal socket surface so this file compiles without @types/ws
 // (ws arrives transitively via @google/genai; never add it to the browser).
 interface RelaySocket {
@@ -223,15 +230,18 @@ async function openLiveSession(args: {
       tools: buildLiveTools(),
       inputAudioTranscription: {},
       outputAudioTranscription: {},
-      // Transparent session resumption: Google returns resumption handles
-      // plus last_consumed_client_message_index, so a dropped-then-resumed
-      // session loses nothing. The relay holds a small indexed outbox and
-      // replays unacked frames after resume; audio older than the drop is
-      // dropped, never replayed (stale speech must not re-enter the turn).
-      sessionResumption: {
-        transparent: true,
-        ...(args.resumeHandle ? { handle: args.resumeHandle } : {}),
-      },
+      // Session resumption (plain handles only): when the server sends
+      // sessionResumptionUpdate we store newHandle and hand it to the
+      // browser, which presents it on reconnect so Google restores session
+      // state instead of starting cold. No transparent mode (enterprise
+      // only — rejected with 1007 on Developer API keys).
+      ...(trySessionResumption
+        ? {
+            sessionResumption: {
+              ...(args.resumeHandle ? { handle: args.resumeHandle } : {}),
+            },
+          }
+        : {}),
       // Echo-barge guard: without client platform AEC the mic hears the
       // loudspeaker. LOW start sensitivity means muffled speaker bleed is
       // far less likely to be mistaken for the user cutting in (which used
@@ -308,24 +318,16 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
   let turnCount = 0;
   let toolCallCount = 0;
   let googleReadyAt = 0;
-  // Transparent resume (Live API sessionResumption): Google hands us a
-  // resumable handle plus last_consumed_client_message_index. Every Google
-  // send is indexed into a small outbox; on resume we re-send only what
-  // Google never consumed. Audio older than the drop is dropped, never
-  // replayed — stale speech must not re-enter a live turn.
+  // Plain resume bookkeeping: Google hands us a resumable handle per
+  // sessionResumptionUpdate; the browser presents it on reconnect so Google
+  // restores session state instead of starting cold. Sends go straight
+  // through (no replay buffer — without transparent mode there is no
+  // last-consumed index, and re-sending risks duplicates; outage windows are
+  // covered by the pending-input buffer for fresh frames, while pre-drop
+  // in-flight audio (sub-second) is accepted as an ordinary speech gap).
   let resumeHandle: string | null = null;
-  let clientMsgIndex = 0;
-  let googleDropAt = 0;
-  const outbox: Array<{ index: number; kind: 'audio' | 'text' | 'tool'; payload: any; at: number }> = [];
-  const MAX_OUTBOX = 48;
-  const pruneOutbox = (consumed: number) => {
-    while (outbox.length > 0 && outbox[0].index <= consumed) outbox.shift();
-  };
   const sendToGoogle = (kind: 'audio' | 'text' | 'tool', payload: any): void => {
     if (!session) return;
-    clientMsgIndex += 1;
-    outbox.push({ index: clientMsgIndex, kind, payload, at: Date.now() });
-    while (outbox.length > MAX_OUTBOX) outbox.shift();
     try {
       if (kind === 'audio') {
         session.sendRealtimeInput({ audio: { data: payload, mimeType: 'audio/pcm;rate=16000' } });
@@ -337,32 +339,6 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
     } catch (err) {
       console.warn('[GeminiLiveWS] send failed:', (err as Error)?.message);
     }
-  };
-  const replayOutbox = (): void => {
-    if (!session || outbox.length === 0) return;
-    const cutoff = googleDropAt > 0 ? googleDropAt - 1000 : 0;
-    let replayed = 0;
-    let dropped = 0;
-    for (const f of outbox.splice(0)) {
-      if (f.kind === 'audio' && f.at < cutoff) {
-        dropped += 1;
-        continue;
-      }
-      clientMsgIndex += 1;
-      try {
-        if (f.kind === 'audio') {
-          session.sendRealtimeInput({ audio: { data: f.payload, mimeType: 'audio/pcm;rate=16000' } });
-        } else if (f.kind === 'text') {
-          session.sendRealtimeInput({ text: f.payload });
-        } else {
-          session.sendToolResponse({ functionResponses: f.payload });
-        }
-        replayed += 1;
-      } catch {
-        break;
-      }
-    }
-    trace('resume-replay', { replayed, droppedStaleAudio: dropped });
   };
   trace('accepted');
 
@@ -411,9 +387,7 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
           resumeHandle = resumeUpdate.newHandle;
           safeSend(client, { type: 'sessionUpdate', handle: resumeHandle });
         }
-        const consumed = Number(resumeUpdate.lastConsumedClientMessageIndex);
-        if (Number.isFinite(consumed)) pruneOutbox(consumed);
-        trace('session-update', { hasHandle: !!resumeHandle, consumed: Number.isFinite(consumed) ? consumed : null });
+        trace('session-update', { hasHandle: !!resumeHandle });
       }
       const sc = anyMsg?.serverContent;
       if (!sc) {
@@ -565,9 +539,9 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
             }
             if (googleReadyAt > 0 && resumeAttempts < MAX_RESUME_ATTEMPTS && !closed) {
               // Late drop on a healthy session (network blip, GoAway): resume
-              // transparently on the same model. Browser stays connected.
+              // on the same model with the stored handle. Browser stays
+              // connected; pending frames buffer and flush on ready.
               resumeAttempts += 1;
-              googleDropAt = Date.now();
               session = null;
               trace('google-resume-attempt', { model, attempt: resumeAttempts, hasHandle: !!resumeHandle });
               safeSend(client, { type: 'status', message: 'Reconnecting live voice…' });
@@ -590,16 +564,21 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
           resumeAttempts = 0;
           trace('resume-ready', { model });
         }
-        replayOutbox();
         flushPendingInput();
         safeSend(client, { type: 'ready', model, voice, sid, ...(opts?.isResume ? { resumed: true } : {}) });
         trace('ready', { model, voice, connectMs: Date.now() - attemptAt, resumed: !!opts?.isResume });
         console.log(`[GeminiLiveWS] live session open (model=${model} voice=${voice})`);
         return true;
       } catch (err) {
-        trace('google-connect-failed', { model, message: String((err as Error)?.message).slice(0, 200), resume: !!opts?.isResume });
-        console.warn(`[GeminiLiveWS] connect failed (${model}):`, (err as Error)?.message);
+        const errMsg = String((err as Error)?.message || err);
+        trace('google-connect-failed', { model, message: errMsg.slice(0, 200), resume: !!opts?.isResume });
+        console.warn(`[GeminiLiveWS] connect failed (${model}):`, errMsg);
         session = null;
+        if (!opts?.handle && trySessionResumption && /resumption|transparent/i.test(errMsg)) {
+          trySessionResumption = false;
+          trace('resumption-disabled', { model });
+          return openWithModel(model);
+        }
         return false;
       }
     };
