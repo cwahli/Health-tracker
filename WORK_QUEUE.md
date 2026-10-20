@@ -1,28 +1,31 @@
-# Work queue (generated 2026-10-19T12:05:03Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
+# Work queue (generated 2026-10-20T10:54:45Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
 
-## Ready to merge (3)
+## Ready to merge (2)
 
-- #781 `agent/meal-qa-queue` — chore(meal-qa): snapshot pending loop queue (5 requests + state, 2026-10-08/09) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 143)
-- #804 `agent/attach-visible` — fix(picker): attached sessions never hide, like the session in use (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 24)
-- #827 `agent/voice-live` — feat(voice): lock VOICE-LIVE-1 spec and roadmap for Gemini 3.8 Live WebSocket (owner: Gemini 3.8 Flash (High) Mac; behind main: 1)
+- #781 `agent/meal-qa-queue` — chore(meal-qa): snapshot pending loop queue (5 requests + state, 2026-10-08/09) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 157)
+- #804 `agent/attach-visible` — fix(picker): attached sessions never hide, like the session in use (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 38)
 
 ## In flight (0)
 
 _Empty — everything open is unblocked._
 
-## Unowned carry-over (6)
+## Unowned carry-over (13)
 
+- agent/voice-minibadge (named by merged #842; branch gone, no follow-up)
+- agent/voice-halfduplex (named by merged #840; branch gone, no follow-up)
+- agent/whatsapp-verify-fixes (named by merged #839; branch gone, no follow-up)
+- agent/voice-probe-fix (named by merged #838; branch gone, no follow-up)
+- agent/voice-speaker-route (named by merged #837; branch gone, no follow-up)
+- agent/voice-drop-proactivity (named by merged #836; branch gone, no follow-up)
+- agent/voice-aec-retest (named by merged #835; branch gone, no follow-up)
+- agent/voice-echo-gate (named by merged #834; branch gone, no follow-up)
+- agent/voice-speaker (named by merged #832; branch gone, no follow-up)
+- plan/ROADMAP.md (named by merged #830; live notes)
+- plan/ROADMAP.md (named by merged #829; live notes)
 - plan/ROADMAP.md (named by merged #828; live notes)
 - agent/voice-android (named by merged #825; branch gone, no follow-up)
-- agent/voice-receptionist (named by merged #822; branch gone, no follow-up)
-- agent/voice-receptionist (named by merged #818; branch gone, no follow-up)
-- agent/meal-ui-audit-2 (named by merged #815; branch gone, no follow-up)
-- agent/meal-ui-tweaks (named by merged #813; branch exists, no open PR)
 
-## Dangling pointers (4)
+## Dangling pointers (0)
 
-- Merge (named by merged #823; resolves to nothing)
-- Merge (named by merged #821; resolves to nothing)
-- Merge (named by merged #820; resolves to nothing)
-- human (named by merged #812; resolves to nothing)
+_None._
 
