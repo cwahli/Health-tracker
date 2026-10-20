@@ -198,6 +198,7 @@ async function openLiveSession(args: {
   voice: LiveVoicePersona;
   languageCode?: string;
   systemInstruction: string;
+  resumeHandle?: string;
   onmessage: (msg: LiveServerMessage) => void;
   onerror: (err: any) => void;
   onclose: (ev: any) => void;
@@ -222,6 +223,15 @@ async function openLiveSession(args: {
       tools: buildLiveTools(),
       inputAudioTranscription: {},
       outputAudioTranscription: {},
+      // Transparent session resumption: Google returns resumption handles
+      // plus last_consumed_client_message_index, so a dropped-then-resumed
+      // session loses nothing. The relay holds a small indexed outbox and
+      // replays unacked frames after resume; audio older than the drop is
+      // dropped, never replayed (stale speech must not re-enter the turn).
+      sessionResumption: {
+        transparent: true,
+        ...(args.resumeHandle ? { handle: args.resumeHandle } : {}),
+      },
       // Echo-barge guard: without client platform AEC the mic hears the
       // loudspeaker. LOW start sensitivity means muffled speaker bleed is
       // far less likely to be mistaken for the user cutting in (which used
@@ -282,18 +292,10 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
   const flushPendingInput = () => {
     if (!session || pendingInput.length === 0) return;
     const frames = pendingInput.splice(0);
-    try {
-      for (const f of frames) {
-        if (f.kind === 'audio') {
-          session.sendRealtimeInput({ audio: { data: f.data, mimeType: 'audio/pcm;rate=16000' } });
-        } else {
-          session.sendRealtimeInput({ text: f.data });
-        }
-      }
-      trace('pending-input-flushed', { frames: frames.length });
-    } catch (err) {
-      console.warn('[GeminiLiveWS] pending flush failed:', (err as Error)?.message);
+    for (const f of frames) {
+      sendToGoogle(f.kind, f.kind === 'text' ? f.data.slice(0, 2000) : f.data);
     }
+    trace('pending-input-flushed', { frames: frames.length });
   };
   // Latency anatomy per turn: lastInputAt = latest client->Google stamp
   // (audio frame or typed text); firstAudioOutAt set on the first Google
@@ -306,6 +308,62 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
   let turnCount = 0;
   let toolCallCount = 0;
   let googleReadyAt = 0;
+  // Transparent resume (Live API sessionResumption): Google hands us a
+  // resumable handle plus last_consumed_client_message_index. Every Google
+  // send is indexed into a small outbox; on resume we re-send only what
+  // Google never consumed. Audio older than the drop is dropped, never
+  // replayed — stale speech must not re-enter a live turn.
+  let resumeHandle: string | null = null;
+  let clientMsgIndex = 0;
+  let googleDropAt = 0;
+  const outbox: Array<{ index: number; kind: 'audio' | 'text' | 'tool'; payload: any; at: number }> = [];
+  const MAX_OUTBOX = 48;
+  const pruneOutbox = (consumed: number) => {
+    while (outbox.length > 0 && outbox[0].index <= consumed) outbox.shift();
+  };
+  const sendToGoogle = (kind: 'audio' | 'text' | 'tool', payload: any): void => {
+    if (!session) return;
+    clientMsgIndex += 1;
+    outbox.push({ index: clientMsgIndex, kind, payload, at: Date.now() });
+    while (outbox.length > MAX_OUTBOX) outbox.shift();
+    try {
+      if (kind === 'audio') {
+        session.sendRealtimeInput({ audio: { data: payload, mimeType: 'audio/pcm;rate=16000' } });
+      } else if (kind === 'text') {
+        session.sendRealtimeInput({ text: payload });
+      } else {
+        session.sendToolResponse({ functionResponses: payload });
+      }
+    } catch (err) {
+      console.warn('[GeminiLiveWS] send failed:', (err as Error)?.message);
+    }
+  };
+  const replayOutbox = (): void => {
+    if (!session || outbox.length === 0) return;
+    const cutoff = googleDropAt > 0 ? googleDropAt - 1000 : 0;
+    let replayed = 0;
+    let dropped = 0;
+    for (const f of outbox.splice(0)) {
+      if (f.kind === 'audio' && f.at < cutoff) {
+        dropped += 1;
+        continue;
+      }
+      clientMsgIndex += 1;
+      try {
+        if (f.kind === 'audio') {
+          session.sendRealtimeInput({ audio: { data: f.payload, mimeType: 'audio/pcm;rate=16000' } });
+        } else if (f.kind === 'text') {
+          session.sendRealtimeInput({ text: f.payload });
+        } else {
+          session.sendToolResponse({ functionResponses: f.payload });
+        }
+        replayed += 1;
+      } catch {
+        break;
+      }
+    }
+    trace('resume-replay', { replayed, droppedStaleAudio: dropped });
+  };
   trace('accepted');
 
   const cleanup = (code?: number, reason?: string) => {
@@ -347,6 +405,16 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
     lastActivity = Date.now();
     try {
       const anyMsg = msg as any;
+      const resumeUpdate = anyMsg?.sessionResumptionUpdate;
+      if (resumeUpdate) {
+        if (typeof resumeUpdate.newHandle === 'string' && resumeUpdate.newHandle) {
+          resumeHandle = resumeUpdate.newHandle;
+          safeSend(client, { type: 'sessionUpdate', handle: resumeHandle });
+        }
+        const consumed = Number(resumeUpdate.lastConsumedClientMessageIndex);
+        if (Number.isFinite(consumed)) pruneOutbox(consumed);
+        trace('session-update', { hasHandle: !!resumeHandle, consumed: Number.isFinite(consumed) ? consumed : null });
+      }
       const sc = anyMsg?.serverContent;
       if (!sc) {
         if (anyMsg?.toolCall?.functionCalls) {
@@ -433,12 +501,17 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
     language?: string;
     voice?: unknown;
     recentMeals?: any[];
+    resumeHandle?: unknown;
   }): Promise<boolean> => {
     const apiKey = getLiveApiKey();
     if (!apiKey) {
       safeSend(client, { type: 'error', message: 'Live voice is not configured on this server (missing Gemini API key).', fatal: true });
       return false;
     }
+    const browserHandle = typeof setup.resumeHandle === 'string' && setup.resumeHandle.length > 0 && setup.resumeHandle.length < 500
+      ? setup.resumeHandle
+      : undefined;
+    if (browserHandle) trace('client-resume-setup', { hasHandle: true });
     const voice = normalizeLiveVoice(setup.voice);
     const languageCode = normalizeLiveLanguage(setup.language ?? setup.profile?.language);
     liveCtx = { profile: setup.profile, recentMeals: setup.recentMeals };
@@ -447,11 +520,18 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
       language: setup.language,
       recentMeals: setup.recentMeals,
     });
-    const candidates = [PRIMARY_LIVE_MODEL, FALLBACK_LIVE_MODEL];
+    // Relay-owned Google session, transparent to the browser: if Google
+    // drops mid-session, the relay re-opens with the resumption handle
+    // (same model) and replays unacked outbox frames — the browser socket
+    // never flaps. Only when resume is impossible does the browser hear an
+    // error and fall back to legacy. Model-level failover (early drops) is
+    // separate and never carries a handle across models.
     let failedOver = false;
-    const openWithModel = async (model: string): Promise<boolean> => {
+    let resumeAttempts = 0;
+    const MAX_RESUME_ATTEMPTS = 3;
+    const openWithModel = async (model: string, opts?: { handle?: string; isResume?: boolean }): Promise<boolean> => {
       const attemptAt = Date.now();
-      trace('google-connect-start', { model });
+      trace('google-connect-start', { model, resume: !!opts?.isResume, hasHandle: !!opts?.handle });
       try {
         session = await openLiveSession({
           apiKey,
@@ -459,6 +539,7 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
           voice,
           languageCode,
           systemInstruction,
+          resumeHandle: opts?.handle,
           onmessage: forwardLiveMessage,
           onopen: () => trace('google-socket-open', { model }),
           onerror: (err) => {
@@ -468,18 +549,32 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
           onclose: (ev: any) => {
             const code = ev?.code;
             const reason = typeof ev?.reason === 'string' ? ev.reason.slice(0, 200) : '';
-            trace('google-closed', { model, code, reason });
+            trace('google-closed', { model, code, reason, wasReady: googleReadyAt > 0 });
             if (closed) return;
-            // Early drop (handshake accepted, then gone within 15s) usually
-            // means the primary model is unavailable for this key — fail over
-            // to the fallback inside the same browser session instead of
-            // dumping the user to legacy.
-            const earlyMs = Date.now() - googleReadyAt;
-            if (!failedOver && googleReadyAt > 0 && earlyMs < 15 * 1000) {
+            const aliveMs = googleReadyAt > 0 ? Date.now() - googleReadyAt : 0;
+            if (!failedOver && googleReadyAt > 0 && aliveMs < 15 * 1000) {
+              // Early drop (handshake accepted, then gone within 15s) usually
+              // means the model is unavailable for this key — fail over to
+              // the fallback inside the same browser session instead of
+              // dumping the user to legacy.
               failedOver = true;
-              trace('google-early-drop-failover', { from: model, to: FALLBACK_LIVE_MODEL, aliveMs: earlyMs });
+              trace('google-early-drop-failover', { from: model, to: FALLBACK_LIVE_MODEL, aliveMs });
               safeSend(client, { type: 'status', message: 'Switching voice engine…' });
               void openWithModel(FALLBACK_LIVE_MODEL);
+              return;
+            }
+            if (googleReadyAt > 0 && resumeAttempts < MAX_RESUME_ATTEMPTS && !closed) {
+              // Late drop on a healthy session (network blip, GoAway): resume
+              // transparently on the same model. Browser stays connected.
+              resumeAttempts += 1;
+              googleDropAt = Date.now();
+              session = null;
+              trace('google-resume-attempt', { model, attempt: resumeAttempts, hasHandle: !!resumeHandle });
+              safeSend(client, { type: 'status', message: 'Reconnecting live voice…' });
+              setTimeout(() => {
+                if (closed) return;
+                void openWithModel(model, { handle: resumeHandle || undefined, isResume: true });
+              }, 800 * resumeAttempts);
               return;
             }
             safeSend(client, {
@@ -491,19 +586,31 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
         });
         liveModel = model;
         googleReadyAt = Date.now();
+        if (opts?.isResume) {
+          resumeAttempts = 0;
+          trace('resume-ready', { model });
+        }
+        replayOutbox();
         flushPendingInput();
-        safeSend(client, { type: 'ready', model, voice, sid });
-        trace('ready', { model, voice, connectMs: Date.now() - attemptAt });
+        safeSend(client, { type: 'ready', model, voice, sid, ...(opts?.isResume ? { resumed: true } : {}) });
+        trace('ready', { model, voice, connectMs: Date.now() - attemptAt, resumed: !!opts?.isResume });
         console.log(`[GeminiLiveWS] live session open (model=${model} voice=${voice})`);
         return true;
       } catch (err) {
-        trace('google-connect-failed', { model, message: String((err as Error)?.message).slice(0, 200) });
+        trace('google-connect-failed', { model, message: String((err as Error)?.message).slice(0, 200), resume: !!opts?.isResume });
         console.warn(`[GeminiLiveWS] connect failed (${model}):`, (err as Error)?.message);
         session = null;
         return false;
       }
     };
-    for (const model of candidates) {
+    // Attempt plan: browser-supplied resume handle first (returning user),
+    // then a fresh primary session, then the fallback model. A stale handle
+    // fails fast into the fresh path.
+    if (browserHandle) {
+      if (await openWithModel(PRIMARY_LIVE_MODEL, { handle: browserHandle })) return true;
+      trace('resume-handle-rejected', {});
+    }
+    for (const model of [PRIMARY_LIVE_MODEL, FALLBACK_LIVE_MODEL]) {
       if (await openWithModel(model)) return true;
     }
     safeSend(client, { type: 'error', message: 'Could not reach the live voice engine. Please retry in a moment.', fatal: true });
@@ -535,6 +642,7 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
         voice: frame.voice, language: frame.language,
         hasProfile: !!frame.profile,
         recentMeals: Array.isArray(frame.recentMeals) ? frame.recentMeals.length : 0,
+        hasResumeHandle: typeof frame.resumeHandle === 'string' && frame.resumeHandle.length > 0,
       });
       if (session) return; // already connected — ignore duplicate setups
       void connectGoogle(frame).then((ok) => {
@@ -577,15 +685,13 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
         }
         audioInFrames += 1;
         // Continuous mic streaming: count frames but do NOT stamp lastInputAt
-        // here (see inputTranscription). Reset the first-audio window only
-        // when a fresh speech onset is plausible — handled via transcription.
-        session.sendRealtimeInput({
-          audio: { data: frame.data, mimeType: 'audio/pcm;rate=16000' },
-        });
+        // here (see inputTranscription). Indexed via sendToGoogle so a
+        // mid-session drop can replay exactly the unacked tail.
+        sendToGoogle('audio', frame.data);
       } else if (frame.type === 'text' && typeof frame.text === 'string' && frame.text.trim()) {
         lastInputAt = Date.now();
         firstAudioOutAt = 0;
-        session.sendRealtimeInput({ text: frame.text.slice(0, 2000) });
+        sendToGoogle('text', frame.text.slice(0, 2000));
       } else if (frame.type === 'toolResponse') {
         const responses = Array.isArray(frame.functionResponses)
           ? frame.functionResponses
@@ -593,7 +699,7 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
               ? [{ id: frame.id, name: frame.name, response: frame.response ?? { ok: true } }]
               : []);
         if (responses.length > 0) {
-          session.sendToolResponse({ functionResponses: responses as any });
+          sendToGoogle('tool', responses);
           // Apply profile updates server-side context so follow-up turns
           // stay consistent even if the browser state lags.
           for (const r of responses) {
