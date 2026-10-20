@@ -1554,6 +1554,23 @@ export default function VoiceReceptionistFab({
     };
   }, []);
 
+  // Minimized follow-mode transcript: surface the latest user/agent turn
+  // so the conversation stays readable without opening the drawer (e.g.
+  // when the audio is turned down). Live speech/reply take precedence over
+  // the settled transcript.
+  const miniTranscript: { role: 'user' | 'assistant'; text: string } | null = (() => {
+    if (liveSpokenText.trim()) return { role: 'user' as const, text: liveSpokenText.trim() };
+    if (liveReplyPreview.trim()) return { role: 'assistant' as const, text: liveReplyPreview.trim() };
+    if (messages.length > 0) {
+      const m = messages[messages.length - 1];
+      if (m.role === 'user' || m.role === 'assistant') return { role: m.role, text: m.text };
+    }
+    return null;
+  })();
+  const miniTranscriptText = miniTranscript && miniTranscript.text.length > 140
+    ? `${miniTranscript.text.slice(0, 140)}…`
+    : miniTranscript?.text || '';
+
   return (
     <>
       {/* Floating Receptionist Trigger Button (Bottom Right).
@@ -1563,7 +1580,7 @@ export default function VoiceReceptionistFab({
           in follow mode; tap re-opens the drawer without reconnecting. */}
       {(!isOpen || isMinimized) && (
         <div className="fixed bottom-24 right-4 sm:bottom-22 sm:right-6 z-40 flex items-center gap-2">
-          {missingFields.length > 0 && (
+          {missingFields.length > 0 && !(isMinimized && miniTranscriptText) && (
             <div
               onClick={handleOpenFab}
               className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600/90 text-white rounded-full text-xs font-semibold shadow-lg backdrop-blur cursor-pointer hover:bg-indigo-700 transition-all animate-bounce"
@@ -1572,6 +1589,23 @@ export default function VoiceReceptionistFab({
               <span>{missingFields.length} profile items to set</span>
             </div>
           )}
+          {isMinimized && miniTranscript && miniTranscriptText ? (
+            <button
+              type="button"
+              onClick={handleOpenFab}
+              title="Tap to open the full conversation"
+              className="max-w-[62vw] sm:max-w-[300px] text-left px-3 py-2 rounded-2xl shadow-xl backdrop-blur border border-white/10 bg-slate-900/90 text-slate-100 cursor-pointer hover:bg-slate-800/95 transition-colors"
+            >
+              <span
+                className={`block text-[9px] font-extrabold uppercase tracking-wider mb-0.5 ${
+                  miniTranscript.role === 'user' ? 'text-indigo-300' : 'text-fuchsia-300'
+                }`}
+              >
+                {liveSpokenText ? 'You (live)' : liveReplyPreview ? 'Concierge (live)' : miniTranscript.role === 'user' ? 'You' : 'Concierge'}
+              </span>
+              <span className="block text-xs leading-snug line-clamp-2">{miniTranscriptText}</span>
+            </button>
+          ) : null}
           <button
             id="voice-receptionist-fab"
             onClick={handleOpenFab}
