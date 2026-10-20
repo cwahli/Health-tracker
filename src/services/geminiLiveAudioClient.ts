@@ -120,6 +120,11 @@ export class GeminiLiveAudioClient {
   private pendingMarks: Array<any> = [];
   private lastSpeakerLevel = 0;
   private lastSpeakerChunkAt = 0;
+  // Half-duplex uplink mute: performance.now() horizon until which mic
+  // frames are replaced with silence because our own reply is audible.
+  private speakerUntilMs = 0;
+  private mutedFrames = 0;
+  private passedFrames = 0;
 
   constructor(events: LiveAudioClientEvents = {}) {
     this.events = events;
@@ -318,6 +323,11 @@ export class GeminiLiveAudioClient {
         this.events.onInterrupted?.();
         break;
       case 'turnComplete':
+        if (this.mutedFrames > 0 || this.passedFrames > 0) {
+          this.sendDebug('uplink', { muted: this.mutedFrames, passed: this.passedFrames });
+        }
+        this.mutedFrames = 0;
+        this.passedFrames = 0;
         this.events.onTurnComplete?.();
         break;
       case 'toolCall':
@@ -362,19 +372,24 @@ export class GeminiLiveAudioClient {
     if (ctx.state === 'suspended') {
       try { await ctx.resume(); } catch { /* ignore */ }
     }
-    // Vendor-sanctioned echo handling (google-gemini/cookbook#356: browser
-    // AEC is why AI Studio works on speakers). echoCancellationType browser
-    // requests Chrome's software AEC rather than the OS voice path — on some
-    // Android builds the OS path reroutes Web Audio to the earpiece. Unknown
-    // constraint keys are ignored by browsers, so this is a safe probe: if
-    // unhonored, behavior is unchanged.
+    // Half-duplex uplink mute (field-proven pattern: ElevenLabs-style
+    // widgets disable STT/VAD while the agent speaks; OpenAI documents the
+    // same push-to-talk shape). Rationale, verified on-device 2026-10-20:
+    // (a) platform AEC puts this Android build in voice-communication mode
+    // whose output is the earpiece — so AEC stays OFF to keep the
+    // loudspeaker media path; (b) the LiveKit mobile-echo thread (#3758)
+    // shows AGC boosts and AEC warm-up gaps make software-only echo
+    // cancellation unreliable on phones, so instead of filtering echo we
+    // never transmit during our own playback. autoGainControl is also OFF:
+    // field reports show AGC volume boosts re-amplify residual echo into
+    // false speech onsets. Voice barge-in during playback is via the
+    // Interrupt button (clears the mute horizon immediately).
     this.micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: true,
-        echoCancellationType: 'browser',
+        echoCancellation: false,
         noiseSuppression: true,
-        autoGainControl: true,
-      } as any,
+        autoGainControl: false,
+      },
     });
     this.probeAudioRoute();
     await ctx.audioWorklet.addModule('/audio-worklet-processor.js');
@@ -387,15 +402,24 @@ export class GeminiLiveAudioClient {
         try {
           let buffer = msg.buffer as ArrayBuffer;
           const micLevel = typeof msg.level === 'number' ? msg.level : 0;
-          // Energy gate against speaker bleed: while our own reply is
-          // audible the mic mostly hears the speaker, and forwarding that
-          // bleed makes Google's VAD think the user is barging in — the
-          // interrupt-cancel chop loop. Suppress frames that aren't clearly
-          // louder than the speaker output (genuine close-mic interruptions
-          // pass easily); send silence so stream timing stays stable.
-          const speakerRecent = Date.now() - this.lastSpeakerChunkAt < 800;
-          if (speakerRecent && micLevel < Math.max(this.lastSpeakerLevel * 0.6, 12)) {
+          // Half-duplex: while our own reply is audible (inside the mute
+          // horizon set per played chunk) the uplink carries silence. The mic
+          // physically hears the speaker on this device and no client-side
+          // filter proved sufficient, so we never transmit during playback —
+          // echo becomes impossible by construction. Voice barge-in during
+          // playback is via the Interrupt button, which clears the horizon.
+          if (performance.now() < this.speakerUntilMs) {
             buffer = new ArrayBuffer(buffer.byteLength);
+            this.mutedFrames += 1;
+          } else {
+            // Second layer for the hangover edge: suppress frames that aren't
+            // clearly louder than the speaker output. Genuine close-mic
+            // interruptions pass easily; send silence so timing stays stable.
+            const speakerRecent = Date.now() - this.lastSpeakerChunkAt < 800;
+            if (speakerRecent && micLevel < Math.max(this.lastSpeakerLevel * 0.6, 12)) {
+              buffer = new ArrayBuffer(buffer.byteLength);
+            }
+            this.passedFrames += 1;
           }
           const data = arrayBufferToBase64(buffer);
           this.ws.send(JSON.stringify({ type: 'audio', data }));
@@ -413,7 +437,7 @@ export class GeminiLiveAudioClient {
 
     // Speaker metering chain (playback sources connect through this).
     this.speakerGain = ctx.createGain();
-    this.speakerGain.gain.value = 1;
+    this.speakerGain.gain.value = 0.85; // -1.4dB: less echo coupling, still clearly audible
     this.speakerAnalyser = ctx.createAnalyser();
     this.speakerAnalyser.fftSize = 512;
     this.speakerGain.connect(this.speakerAnalyser);
@@ -457,6 +481,10 @@ export class GeminiLiveAudioClient {
       const startAt = Math.max(this.nextPlayTime, ctx.currentTime + 0.01);
       src.start(startAt);
       this.nextPlayTime = startAt + buffer.duration;
+      // Keep the uplink muted until this chunk has finished playing, plus a
+      // hangover for room echo tail. performance.now and AudioContext time
+      // share the time origin, so the conversion is exact.
+      this.speakerUntilMs = performance.now() + Math.max(0, (this.nextPlayTime - ctx.currentTime) * 1000) + 400;
       this.scheduledSources.push(src);
       src.onended = () => {
         const idx = this.scheduledSources.indexOf(src);
@@ -485,6 +513,7 @@ export class GeminiLiveAudioClient {
     if (this.audioCtx) {
       this.nextPlayTime = this.audioCtx.currentTime;
     }
+    this.speakerUntilMs = 0;
   }
 
   sendText(text: string): void {
