@@ -7,7 +7,7 @@ Restart from a shell: cd /content/Health-tracker && git pull origin main && pyth
 
 VPS queue (root@103.147.32.117:~/queue)
   inbox/<job>.txt     job prompt. Optional header lines at the top (stripped from the prompt):
-                        MODEL: <opencode model id, e.g. ollama/qwen2.5-coder:7b or opencode-go/qwen3.8-flash>
+                        MODEL: <opencode model id, e.g. ollama/qwen3-coder:30b, ollama/gemma4:26b-a4b-it-qat or opencode-go/qwen3.8-flash>
                         TIMEOUT: <hours, default 6>
   running/<job>.txt   claimed job (atomic mv); running/<job>.hb = per-job heartbeat (epoch)
   done/<job>/         the job dir tarred back (REPORT.md, run.log, PROMPT.txt, JOB.txt)
@@ -193,17 +193,25 @@ gpu_setup(){
   fi
   local free m ctx i
   free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits | head -1 | tr -dc 0-9)
-  if [ "${free:-0}" -ge 20000 ]; then m=${GROKQ_OLLAMA_MODEL:-qwen2.5-coder:14b}; ctx=32768; else m=${GROKQ_OLLAMA_MODEL:-qwen2.5-coder:7b}; ctx=16384; fi
+  # GPU tiers (ollama.com/library, checked 2026-10-21). All tags carry the "tools" capability OpenCode needs.
+  #   A100 40/80GB (>=36GB free): qwen3.6:35b-a3b-coding (MoE, 3B active, 24GB)   + gemma4:26b-a4b (MoE, 4B active, 16-19GB)
+  #   L4 24GB      (>=20GB free): qwen3-coder:30b (MoE 30B-A3B, 19GB)            + gemma4:26b-a4b-it-qat (16GB)
+  #   T4 16GB / smaller:          qwen3.5:9b (6.6GB)                             + gemma4:e4b (6.6-9.5GB)
+  # GROKQ_OLLAMA_MODEL / GROKQ_GEMMA_MODEL / GROKQ_OLLAMA_CTX override.
+  local g
+  if [ "${free:-0}" -ge 36000 ]; then m=qwen3.6:35b-a3b-coding; g=gemma4:26b-a4b; ctx=65536
+  elif [ "${free:-0}" -ge 20000 ]; then m=qwen3-coder:30b; g=gemma4:26b-a4b-it-qat; ctx=16384
+  else m=qwen3.5:9b; g=gemma4:e4b; ctx=32768; fi
+  m=${GROKQ_OLLAMA_MODEL:-$m}; g=${GROKQ_GEMMA_MODEL:-$g}; ctx=${GROKQ_OLLAMA_CTX:-$ctx}
   echo "gpu: ${free}MiB free -> $m (ctx $ctx)"
   if ! curl -s -m 3 http://127.0.0.1:11434/api/version >/dev/null; then
-    OLLAMA_HOST=127.0.0.1:11434 OLLAMA_CONTEXT_LENGTH=$ctx OLLAMA_KEEP_ALIVE=30m nohup ollama serve >> "$R/ollama.log" 2>&1 < /dev/null &
+    OLLAMA_HOST=127.0.0.1:11434 OLLAMA_CONTEXT_LENGTH=$ctx OLLAMA_KEEP_ALIVE=30m OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_MAX_LOADED_MODELS=1 nohup ollama serve >> "$R/ollama.log" 2>&1 < /dev/null &
     echo $! > "$R/ollama.pid"
     for i in $(seq 60); do curl -s -m 2 http://127.0.0.1:11434/api/version >/dev/null && break; sleep 2; done
   fi
   ollama pull "$m" > "$R/ollama-pull.log" 2>&1 || { echo "gpu: pull $m failed"; ping gpu "COLAB_GPU_FAILED pull $m"; return 1; }
   local models=("$m")
-  if [ -n "$GROKQ_GEMMA" ]; then
-    local g=gemma3:4b; [ "${free:-0}" -ge 20000 ] && g=gemma3:12b
+  if [ -z "$GROKQ_NO_GEMMA" ] && [ "$g" != "$m" ]; then  # Gemma now registered by default; GROKQ_NO_GEMMA=1 skips it
     ollama pull "$g" >> "$R/ollama-pull.log" 2>&1 && models+=("$g") || echo "gpu: optional $g pull failed"
   fi
   python3 - "$ctx" "${models[@]}" <<'PY' || { echo "gpu: opencode config write failed"; return 1; }
