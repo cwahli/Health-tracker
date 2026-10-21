@@ -88,3 +88,7 @@ a5e1b6ac  no Author/Agent trailer on main: [queue-sync] refresh WORK_QUEUE.md; a
 0283afac  no Author/Agent trailer on main: [queue-sync] refresh WORK_QUEUE.md; authored 2026-10-16; recorded 2026-10-17
 6d912419  no Author/Agent trailer on main: [queue-sync] refresh WORK_QUEUE.md; authored 2026-10-18; recorded 2026-10-18
 350e079a  no thinking level in Author trailer (Author: Muse Spark 1.3 Contributor VM); food-lane commit, authored 2026-10-19; recorded 2026-10-19 (not mine to rewrite — owner to fix trailer tooling)
+6c3b1ba1  no Author/Agent trailer; landed on main 2026-10-21 without a trailer; authored 2026-10-21; recorded 2026-10-21
+6c433c5b  no Author/Agent trailer; landed on main 2026-10-21 without a trailer; authored 2026-10-21; recorded 2026-10-21
+2d5efab1  no Author/Agent trailer; landed on main 2026-10-21 without a trailer; authored 2026-10-21; recorded 2026-10-21
+0ddc831c  bad thinking level "Mac" in trailer "Author: Sage work (Grok Bot) Mac"; authored 2026-10-21; recorded 2026-10-21
