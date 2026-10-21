@@ -123,6 +123,32 @@ EOF
   echo $! > "$R/tunnel.pid"; echo "attach: reverse tunnel loop pid $! -> VPS $AS"
 }
 
+ensure_ollama(){  # $1 = tag (without ollama/); idempotent; on failure prints the reason and returns 1
+  local t=$1 i
+  exec 8>"$R/ollama.lock"; flock -w 1800 8 || { echo "timed out waiting for another job's Ollama setup"; return 1; }  # parallel jobs: one setup at a time (subshell, so lock drops on return)
+  command -v ollama >/dev/null || { (command -v zstd >/dev/null || apt-get -qq install -y zstd >/dev/null 2>&1 || (apt-get -qq update && apt-get -qq install -y zstd) >/dev/null 2>&1); curl -fsSL https://ollama.com/install.sh | sh >> "$R/ollama-install.log" 2>&1; } 
+  command -v ollama >/dev/null || { echo "ollama install failed (see $R/ollama-install.log)"; return 1; }
+  if ! curl -s -m 3 http://localhost:11434/api/version >/dev/null; then
+    OLLAMA_CONTEXT_LENGTH=32768 nohup ollama serve > /content/ollama.log 2>&1 < /dev/null 8>&- &
+    for i in $(seq 30); do curl -s -m 2 http://localhost:11434/api/version >/dev/null && break; sleep 2; done
+    curl -s -m 3 http://localhost:11434/api/version >/dev/null || { echo "ollama serve did not come up within 60s (see /content/ollama.log)"; return 1; }
+  fi
+  ollama list 2>/dev/null | awk 'NR>1{print $1}' | grep -qxF "$t" || ollama pull "$t" >> "$R/ollama-pull.log" 2>&1 || { echo "ollama pull $t failed: $(tail -c 300 "$R/ollama-pull.log" | tr -d '\r')"; return 1; }
+  curl -s -m 600 http://localhost:11434/api/generate -d "{\"model\":\"$t\",\"prompt\":\"hi\",\"stream\":false,\"options\":{\"num_predict\":1}}" | grep -q '"done":true' || { echo "ollama warm-up generate for $t failed (out of GPU memory?)"; return 1; }
+  python3 - "$t" "$HOME/.config/opencode/opencode.json" <<'PY' || { echo "opencode config merge failed"; return 1; }
+import json, os, sys
+t, p = sys.argv[1], sys.argv[2]; os.makedirs(os.path.dirname(p), exist_ok=True)
+try: cfg = json.load(open(p))
+except Exception: cfg = {}
+cfg.setdefault("$schema", "https://opencode.ai/config.json")
+o = cfg.setdefault("provider", {}).setdefault("ollama", {})
+o.setdefault("npm", "@ai-sdk/openai-compatible"); o.setdefault("name", "Ollama")
+o.setdefault("options", {})["baseURL"] = "http://localhost:11434/v1"
+o.setdefault("models", {})[t] = {"name": t, "tools": True, "limit": {"context": 32768, "output": 8192}}
+json.dump(cfg, open(p, "w"), indent=2)
+PY
+}
+
 run_job(){
   local n=$1 d=$HOME/jobs/$1 model= hrs=6 hdr=1 line me=$BASHPID
   mkdir -p "$d"; cd "$d" || return 1
@@ -141,17 +167,29 @@ run_job(){
   done < JOB.txt
   [[ "$hrs" =~ ^[0-9]+(\.[0-9]+)?$ ]] || hrs=6
   [[ "$model" =~ ^[A-Za-z0-9._:/@-]*$ ]] || { echo "job $n: ignoring bad MODEL '$model'"; model=; }
-  if [[ "$model" == ollama/* ]] && [ ! -e "$R/gpu.ready" ]; then
-    echo "job $n waits for local model $model"; local w=0
-    while [ ! -e "$R/gpu.ready" ] && [ $w -lt 180 ]; do sleep 10; w=$((w+1)); done
+  local osetup=""
+  if [[ "$model" == ollama/* ]]; then
+    echo "job $n: ensuring local model $model"
+    osetup=$(ensure_ollama "${model#ollama/}" 2>&1) && osetup="" || { [ -n "$osetup" ] || osetup="unknown error"; echo "job $n: ollama setup failed: $osetup"; }
   fi
   echo "job $n start model=${model:-default} timeout=${hrs}h $(date)"
   ( while sleep 60; do kill -0 $me 2>/dev/null || exit 0; $S $V "date +%s > $Q/heartbeat; date +%s > $Q/running/$n.hb; cat > $Q/running/$n.status" < <( echo "model=${model:-default} started=$(stat -c %Y JOB.txt 2>/dev/null) continues=$(grep -c 'continue #' "$HOME/grokq.log" 2>/dev/null)"; echo "--- REPORT.md"; head -c 2500 REPORT.md 2>/dev/null; echo; echo "--- run.log (tail)"; tail -c 1500 run.log 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' ) 2>/dev/null; done ) & local hb=$!
   local margs=(); [ -n "$model" ] && margs=(-m "$model")
-  printf '%s' '{"$schema":"https://opencode.ai/config.json","permission":{"edit":"allow","bash":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"}}' > opencode.json
+  python3 - "$model" > opencode.json <<'PY'
+import json, sys
+m = sys.argv[1]
+c = {"$schema": "https://opencode.ai/config.json", "permission": {"edit": "allow", "bash": "allow", "webfetch": "allow", "external_directory": "allow", "doom_loop": "allow"}}
+if m.startswith("ollama/"):
+    t = m[len("ollama/"):]
+    c["provider"] = {"ollama": {"npm": "@ai-sdk/openai-compatible", "name": "Ollama", "options": {"baseURL": "http://localhost:11434/v1"}, "models": {t: {"name": t, "tools": True, "limit": {"context": 32768, "output": 8192}}}}}
+print(json.dumps(c))
+PY
   local secs; secs=$(awk -v h="$hrs" 'BEGIN{printf "%d", h*3600}')   # fractional hours OK (0.5 = 30 min)
   local end=$(( $(date +%s) + ${secs:-21600} + 60 )) rc=0 k=0 left
   left=$(( end - $(date +%s) ))
+  if [ -n "$osetup" ]; then
+    printf 'STATUS: FAILED\n\nOllama setup for %s failed before the job could run:\n%s\n' "$model" "$osetup" > REPORT.md; echo "$osetup" > run.log; rc=3
+  else
   timeout "$left" opencode run "${margs[@]}" "$(cat PROMPT.txt)
 (Work only in $d. You may install packages and use any directory. Keep REPORT.md updated; its first line must stay 'STATUS: IN PROGRESS' until you are fully done, then 'STATUS: COMPLETE'.)" > run.log 2>&1 < /dev/null; rc=$?
   # opencode run exits after one turn; keep nudging it while the report says it is unfinished
@@ -160,6 +198,7 @@ run_job(){
     echo "job $n continue #$k $(date)"
     timeout "$left" opencode run --continue "${margs[@]}" "Continue the task from PROMPT.txt in $d. Do the next untested items, update REPORT.md, and set its first line to 'STATUS: COMPLETE' only when every test is done and the verdict is written." >> run.log 2>&1 < /dev/null; rc=$?
   done
+  fi
   head -1 REPORT.md 2>/dev/null | grep -q 'STATUS: COMPLETE' && rc=0
   kill $hb 2>/dev/null
   [ -s REPORT.md ] || tail -c 3000 run.log > REPORT.md
