@@ -44,7 +44,7 @@ export PATH="$HOME/.opencode/bin:/usr/local/bin:$PATH"
 V=${GROKQ_V:-colabq@51.254.217.163}
 Q=${GROKQ_Q:-queue}                         # queue dir, relative to the remote home
 K=${GROKQ_KEY:-$HOME/.ssh/colabq}
-S="ssh -i $K -p 20133 -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o BatchMode=yes"
+S="ssh -i $K -p ${GROKQ_PORT:-22} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o BatchMode=yes"
 R=$HOME/.grokq.run; mkdir -p "$R" "$HOME/jobs" "$HOME/.grokq.chat"
 exec 9>"$R/lock"
 flock -w 120 9 || { echo "another grokq loop holds $R/lock; exiting $(date)"; exit 1; }
