@@ -7,7 +7,9 @@
  * - 8 human headers from current tab by name, keeping Pending/In progress unchanged
  * - Zero Google Sheets writes on read path
  * - Gateway authentication: admits valid initData, refuses bad HMAC / tampered signatures
- * - Gateway endpoints: /fleet, /fleet/app, /fleet/api/state, /fleet/api/heartbeat
+ * - Gateway endpoints: /fleet, /fleet/app, /fleet/api/state, /fleet/api/heartbeat,
+ *   /fleet/api/snapshot
+ * - Live fleet rows: location / tool / model / status / task / allowance
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,7 +37,11 @@ import {
   getFleetBots as getStatusBots,
   driveFileIdFrom,
   ticketFromRow,
+  normalizeFleetSnapshot,
+  recordFleetSnapshot,
+  getFleetSnapshot,
 } from './lib/fleet-status.mjs';
+import { pushSnapshot } from './fleet-snapshot-push.mjs';
 
 function makeInitData(botToken, { user = { id: 123456, first_name: 'Test' }, authDate = Math.floor(Date.now() / 1000) } = {}) {
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
@@ -217,9 +223,16 @@ test('gateway /fleet routes: landing, auth, app, state, and heartbeat', async ()
     assert.equal(appRes.status, 200);
     const appHtml = await appRes.text();
     assert.ok(appHtml.includes('Fleet Status'));
+    assert.ok(appHtml.includes('id="table-fleet"'));
+    assert.ok(appHtml.includes('id="body-fleet"'));
     assert.ok(appHtml.includes('id="table-tickets"'));
-    assert.ok(appHtml.includes('id="table-terms"'));
     assert.ok(appHtml.includes('id="table-bots"'));
+    assert.ok(appHtml.includes('>Location<'));
+    assert.ok(appHtml.includes('>Tool<'));
+    assert.ok(appHtml.includes('>Model<'));
+    assert.ok(appHtml.includes('>Status<'));
+    assert.ok(appHtml.includes('>Task<'));
+    assert.ok(appHtml.includes('>Allowance<'));
 
     // 4. POST /fleet/api/heartbeat records heartbeat
     const beatRes = await fetch(`${base}/fleet/api/heartbeat`, {
@@ -253,6 +266,166 @@ test('gateway /fleet routes: landing, auth, app, state, and heartbeat', async ()
   } finally {
     server.close();
   }
+});
+
+const SNAPSHOT_FIXTURE = {
+  project: 'sage-prototypes',
+  updated: '2026-10-22 23:40:00 BST',
+  channels: [
+    {
+      name: 'Mac (local)',
+      host: 'this Mac',
+      resources: [
+        {
+          id: '366cf834-aa39-443f-bb49-e5d9aeeaaf41',
+          name: 'Freebuff DeepSeek',
+          tool: 'freebuff',
+          model: 'm-ddc687c50f',
+          model_name: 'Nemotron 3.5 Lightning',
+          weight: '?',
+          state: 'DEPLETED',
+          resets_at: '2026-10-22T23:00:07+00:00',
+          detail: 'Nemotron 3.5 Lightning · weight ? · DEPLETED: remaining_h 0 h · thread Building Sage Canadian Tax Product UI · last turn completed',
+        },
+        {
+          id: 'mac-open',
+          name: 'Mac OpenCode / Cline',
+          tool: 'opencode/cline',
+          model: 'local',
+          model_name: 'Local OpenCode/Cline',
+          state: 'WORKING',
+          detail: '1 process(es) · Cline hub daemon',
+        },
+      ],
+    },
+    {
+      name: 'Indonesia VPS',
+      resources: [
+        {
+          id: 'vps-open',
+          name: 'Indonesia VPS OpenCode',
+          tool: 'opencode',
+          model: 'deepseek-v4.1-flash-free',
+          model_name: 'DeepSeek V4.1 Flash Free',
+          state: 'AVAILABLE',
+          detail: '0 proc(s) · DONE product-ui-isolation',
+        },
+      ],
+    },
+  ],
+  agents: [
+    { agent: 'Freebuff 366cf834', tool: 'freebuff', model: 'm-ddc687c50f', state: 'idle', now: 'pm-wait.py: event waiter' },
+    { agent: 'Mac OpenCode / Cline', tool: 'opencode/cline', now: 'Build the live fleet table' },
+  ],
+  lanes: { mac_opencode: { active_task: 'Build the live fleet table', last_log_tail: 'DONE caret-r3-vl [exit]' } },
+  quota: { remaining_h: 0, resets_at: '2026-10-22T23:00:07+00:00', resets_in: '0h 20m', stale: false },
+};
+
+test('normalizeFleetSnapshot gives one row per resource with task and allowance', () => {
+  const t0 = 10000000;
+  const snap = normalizeFleetSnapshot(SNAPSHOT_FIXTURE, { now: t0 });
+  assert.ok(snap);
+  assert.equal(snap.rows.length, 3);
+  assert.equal(snap.channels.length, 2);
+
+  const freebuff = snap.rows[0];
+  assert.equal(freebuff.location, 'Mac (local)');
+  assert.equal(freebuff.tool, 'freebuff');
+  assert.equal(freebuff.model, 'Nemotron 3.5 Lightning');
+  assert.equal(freebuff.status, 'depleted');
+  // A thread title beats the `pm-wait.py` process sentence.
+  assert.equal(freebuff.task, 'Building Sage Canadian Tax Product UI');
+  assert.ok(freebuff.allowance.text.includes('h left'));
+  assert.equal(freebuff.allowance.renewAt, '2026-10-22T23:00:07+00:00');
+
+  const mac = snap.rows[1];
+  assert.equal(mac.status, 'working');
+  assert.equal(mac.task, 'Build the live fleet table');
+
+  const vps = snap.rows[2];
+  assert.equal(vps.location, 'Indonesia VPS');
+  assert.equal(vps.status, 'available');
+  assert.equal(vps.allowance.text, '—');
+});
+
+test('recordFleetSnapshot ages and clears with the fleet cache', () => {
+  resetFleetStateForTest();
+  const t0 = 10000000;
+  const saved = recordFleetSnapshot(SNAPSHOT_FIXTURE, { now: t0 });
+  assert.equal(saved.ok, true);
+  assert.equal(saved.snapshot.stale, false);
+
+  const fresh = getFleetSnapshot({ now: t0 + 5000 });
+  assert.equal(fresh.rows.length, 3);
+  assert.equal(fresh.ageSec, 5);
+  assert.equal(fresh.stale, false);
+
+  const stale = getFleetSnapshot({ now: t0 + 120000 });
+  assert.equal(stale.stale, true);
+
+  resetFleetStateForTest();
+  assert.equal(getFleetSnapshot(), null);
+});
+
+test('gateway /fleet/api/snapshot stores rows and state serves them', async () => {
+  resetFleetStateForTest();
+  const secret = 'gateway-snapshot-secret-321';
+  const handle = createGateway({ env: { FLEET_TELEMETRY_SECRET: secret, TUI_GATEWAY_SECRET: secret } });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const noSecret = await fetch(`${base}/fleet/api/snapshot`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: SNAPSHOT_FIXTURE }),
+    });
+    assert.equal(noSecret.status, 401);
+
+    const pushed = await fetch(`${base}/fleet/api/snapshot`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-telemetry-secret': secret },
+      body: JSON.stringify({ source: 'fleet-status.py', status: SNAPSHOT_FIXTURE }),
+    });
+    assert.equal(pushed.status, 200);
+    const pushedData = await pushed.json();
+    assert.equal(pushedData.ok, true);
+    assert.equal(pushedData.rows, 3);
+
+    // The state route serialises this same accessor; asserting the accessor
+    // keeps this sensor off the Google Sheets path the ticket read owns.
+    const stored = getFleetSnapshot();
+    assert.ok(stored);
+    assert.equal(stored.rows.length, 3);
+    assert.equal(stored.rows[0].location, 'Mac (local)');
+    assert.equal(stored.rows[0].task, 'Building Sage Canadian Tax Product UI');
+  } finally {
+    server.closeAllConnections?.();
+    server.close();
+  }
+});
+
+test('pushSnapshot posts the local status.json to the gateway snapshot door', async () => {
+  const calls = [];
+  const fetchImpl = async (url, opts = {}) => {
+    calls.push({ url, opts });
+    if (calls.length === 1) {
+      return { ok: true, status: 200, json: async () => SNAPSHOT_FIXTURE };
+    }
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, rows: 3, receivedAt: '2026-10-22T23:40:00.000Z', stale: false }),
+    };
+  };
+  const res = await pushSnapshot({ fetchImpl, secret: 's3cret', gatewayUrl: 'https://example.test' });
+  assert.equal(res.ok, true);
+  assert.equal(res.rows, 3);
+  assert.ok(calls[1].url.endsWith('/fleet/api/snapshot'));
+  assert.equal(calls[1].opts.headers['x-fleet-telemetry-secret'], 's3cret');
+  const body = JSON.parse(calls[1].opts.body);
+  assert.equal(body.status.project, 'sage-prototypes');
 });
 
 test('getFleetNodes separates PM ticket claim from worker liveness badge', () => {

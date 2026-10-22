@@ -931,6 +931,8 @@ export const BOOTSTRAP_FLEET = [
 import {
   getFleetTickets as getFleetTicketsStatus,
   recordFleetHeartbeat as recordFleetHeartbeatStatus,
+  recordFleetSnapshot as recordFleetSnapshotStatus,
+  getFleetSnapshot as getFleetSnapshotStatus,
   getFleetNodes as getFleetNodesStatus,
   getFleetBots as getFleetBotsStatus,
   resetFleetState as resetFleetStateStatus,
@@ -1220,6 +1222,49 @@ const buf = Buffer.isBuffer(got.bytes) ? got.bytes : Buffer.from(got.bytes || ''
 }
 
 export const fleetSseClients = new Set();
+
+/**
+ * Telemetry door for machines that own a fleet pane. One helper so the
+ * heartbeat and the full-snapshot routes cannot drift apart: the same secret
+ * set is accepted, and a host-scoped secret may only report its own host while
+ * a claimed `x-fleet-host` is honoured exactly as before.
+ */
+export function authenticateFleetTelemetry({ req, url, env = {}, secret = '' } = {}) {
+  const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+  const reqSecret = req.headers['x-fleet-telemetry-secret'] || url.searchParams.get('secret') || '';
+  const claimedHost = String(req.headers['x-fleet-host'] || '').trim().toLowerCase();
+  const defaultSecret = String(env.FLEET_TELEMETRY_SECRET || secret || '').trim();
+
+  if (isTestAuth && !reqSecret && !claimedHost) return { ok: true, host: null, claimedHost };
+  if (!reqSecret) return { ok: false, reason: 'unauthenticated: missing telemetry secret' };
+  if (defaultSecret && reqSecret === defaultSecret) return { ok: true, host: null, claimedHost };
+
+  // Check per-host secrets (e.g. FLEET_SECRET_MAC, FLEET_TELEMETRY_SECRET_MAC)
+  for (const [k, v] of Object.entries(env)) {
+    if (!v) continue;
+    let h = null;
+    if (k.startsWith('FLEET_SECRET_')) h = k.slice('FLEET_SECRET_'.length).toLowerCase();
+    else if (k.startsWith('FLEET_TELEMETRY_SECRET_')) h = k.slice('FLEET_TELEMETRY_SECRET_'.length).toLowerCase();
+    if (h && reqSecret === String(v).trim()) return { ok: true, host: h, claimedHost };
+  }
+
+  if (isTestAuth && reqSecret === 'valid-secret') return { ok: true, host: null, claimedHost };
+  return { ok: false, reason: 'invalid telemetry secret' };
+}
+
+/** True when a telemetry key scoped to `host` may report `location`. */
+export function fleetHostMayReport(host, location) {
+  if (!host || !location) return true;
+  const h = String(host).toLowerCase();
+  const loc = String(location).toLowerCase();
+  const allowed = [h];
+  if (h === 'vps' || h === 'vm') allowed.push('vm', 'vps');
+  if (h === 'mac') allowed.push('mac');
+  if (h === 'grok') allowed.push('grok', 'grok vm');
+  if (h === 'collab') allowed.push('collab');
+  if (h === 'mobile') allowed.push('mobile');
+  return allowed.includes(loc);
+}
 
 export const reviewSseClients = new Set();
 
@@ -2402,8 +2447,9 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         getFleetBots({ root: REPO_ROOT }),
       ]);
       const terminals = getFleetNodes({ tickets });
+      const fleet = getFleetSnapshot();
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      return res.end(JSON.stringify({ ok: true, tickets, terminals, bots, generatedAt: new Date().toISOString() }));
+      return res.end(JSON.stringify({ ok: true, tickets, terminals, bots, fleet, generatedAt: new Date().toISOString() }));
     }
 
     if (url.pathname.startsWith('/fleet/api/proof/')) {
@@ -2467,53 +2513,17 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         getFleetBots({ root: REPO_ROOT }),
       ]).then(([tickets, bots]) => {
         const terminals = getFleetNodes({ tickets });
-        res.write(`event: state\ndata: ${JSON.stringify({ tickets, terminals, bots })}\n\n`);
+        const fleet = getFleetSnapshot();
+        res.write(`event: state\ndata: ${JSON.stringify({ tickets, terminals, bots, fleet })}\n\n`);
       }).catch(() => {});
       return;
     }
 
     if (url.pathname === '/fleet/api/heartbeat' && req.method === 'POST') {
-      const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
-      const reqSecret = req.headers['x-fleet-telemetry-secret'] || url.searchParams.get('secret') || '';
-      const claimedHost = req.headers['x-fleet-host'] || '';
-      const defaultSecret = String(env.FLEET_TELEMETRY_SECRET || secret || '').trim();
-
-      let authenticated = false;
-      let authenticatedHost = null;
-
-      if (isTestAuth && !reqSecret && !claimedHost) {
-        authenticated = true;
-      } else {
-        if (!reqSecret) {
-          res.writeHead(401, { 'content-type': 'application/json' });
-          return res.end(JSON.stringify({ ok: false, error: 'unauthenticated: missing telemetry secret' }));
-        }
-
-        if (defaultSecret && reqSecret === defaultSecret) {
-          authenticated = true;
-        }
-
-        // Check per-host secrets (e.g. FLEET_SECRET_MAC, FLEET_TELEMETRY_SECRET_MAC)
-        for (const [k, v] of Object.entries(env)) {
-          if (!v) continue;
-          let h = null;
-          if (k.startsWith('FLEET_SECRET_')) h = k.slice('FLEET_SECRET_'.length).toLowerCase();
-          else if (k.startsWith('FLEET_TELEMETRY_SECRET_')) h = k.slice('FLEET_TELEMETRY_SECRET_'.length).toLowerCase();
-          if (h && reqSecret === String(v).trim()) {
-            authenticated = true;
-            authenticatedHost = h;
-            break;
-          }
-        }
-
-        if (!authenticated && isTestAuth && reqSecret === 'valid-secret') {
-          authenticated = true;
-        }
-      }
-
-      if (!authenticated) {
+      const auth = authenticateFleetTelemetry({ req, url, env, secret });
+      if (!auth.ok) {
         res.writeHead(401, { 'content-type': 'application/json' });
-        return res.end(JSON.stringify({ ok: false, error: 'invalid telemetry secret' }));
+        return res.end(JSON.stringify({ ok: false, error: auth.reason }));
       }
 
       let body = '';
@@ -2524,31 +2534,14 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
           const payloadLoc = String(data.location || '').trim().toLowerCase();
 
           // Anti-spoofing: verify location against authenticated host or claimed host
-          if (authenticatedHost && payloadLoc) {
-            const allowed = [authenticatedHost];
-            if (authenticatedHost === 'vps' || authenticatedHost === 'vm') allowed.push('vm', 'vps');
-            if (authenticatedHost === 'mac') allowed.push('mac');
-            if (authenticatedHost === 'grok') allowed.push('grok', 'grok vm');
-            if (authenticatedHost === 'collab') allowed.push('collab');
-            if (authenticatedHost === 'mobile') allowed.push('mobile');
-            if (!allowed.includes(payloadLoc)) {
-              res.writeHead(403, { 'content-type': 'application/json' });
-              return res.end(JSON.stringify({ ok: false, error: `location mismatch: authenticated for ${authenticatedHost} but reported ${data.location}` }));
-            }
+          if (auth.host && !fleetHostMayReport(auth.host, payloadLoc)) {
+            res.writeHead(403, { 'content-type': 'application/json' });
+            return res.end(JSON.stringify({ ok: false, error: `location mismatch: authenticated for ${auth.host} but reported ${data.location}` }));
           }
 
-          if (claimedHost && payloadLoc) {
-            const ch = claimedHost.toLowerCase();
-            const allowed = [ch];
-            if (ch === 'vps' || ch === 'vm') allowed.push('vm', 'vps');
-            if (ch === 'mac') allowed.push('mac');
-            if (ch === 'grok') allowed.push('grok', 'grok vm');
-            if (ch === 'collab') allowed.push('collab');
-            if (ch === 'mobile') allowed.push('mobile');
-            if (!allowed.includes(payloadLoc)) {
-              res.writeHead(403, { 'content-type': 'application/json' });
-              return res.end(JSON.stringify({ ok: false, error: `location mismatch: x-fleet-host ${claimedHost} does not match payload location ${data.location}` }));
-            }
+          if (auth.claimedHost && !fleetHostMayReport(auth.claimedHost, payloadLoc)) {
+            res.writeHead(403, { 'content-type': 'application/json' });
+            return res.end(JSON.stringify({ ok: false, error: `location mismatch: x-fleet-host ${auth.claimedHost} does not match payload location ${data.location}` }));
           }
 
           const saved = recordFleetHeartbeat(data);
@@ -2558,6 +2551,43 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
           }
           res.writeHead(200, { 'content-type': 'application/json' });
           return res.end(JSON.stringify(saved));
+        } catch (err) {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
+        }
+      });
+      return;
+    }
+
+    // Full fleet snapshot (the dashboard that owns the rows pushes them here).
+    // The local fleet-status loopback is unreachable from this host, so the
+    // reporter sends the same status.json its own page renders. Auth uses the
+    // telemetry secret (a snapshot spans every channel, so no host-scope check).
+    if (url.pathname === '/fleet/api/snapshot' && req.method === 'POST') {
+      const auth = authenticateFleetTelemetry({ req, url, env, secret });
+      if (!auth.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: auth.reason }));
+      }
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(body || '{}');
+          const status = parsed && parsed.status && typeof parsed.status === 'object' ? parsed.status : parsed;
+          const saved = recordFleetSnapshotStatus(status);
+          if (!saved.ok) {
+            res.writeHead(400, { 'content-type': 'application/json' });
+            return res.end(JSON.stringify(saved));
+          }
+          broadcastFleetEvent('snapshot', saved.snapshot);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({
+            ok: true,
+            rows: saved.snapshot.rows.length,
+            receivedAt: saved.snapshot.receivedAt,
+            stale: saved.snapshot.stale,
+          }));
         } catch (err) {
           res.writeHead(400, { 'content-type': 'application/json' });
           return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
