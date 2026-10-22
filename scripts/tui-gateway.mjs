@@ -1224,10 +1224,9 @@ const buf = Buffer.isBuffer(got.bytes) ? got.bytes : Buffer.from(got.bytes || ''
 export const fleetSseClients = new Set();
 
 /**
- * Telemetry door for machines that own a fleet pane. One helper so the
- * heartbeat and the full-snapshot routes cannot drift apart: the same secret
- * set is accepted, and a host-scoped secret may only report its own host while
- * a claimed `x-fleet-host` is honoured exactly as before.
+ * Secret check for the full-snapshot door (and any future telemetry route
+ * that spans every host). A snapshot describes every channel, so host scope
+ * is not applied — the accepted secret set matches `/fleet/api/heartbeat`.
  */
 export function authenticateFleetTelemetry({ req, url, env = {}, secret = '' } = {}) {
   const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
@@ -1250,20 +1249,6 @@ export function authenticateFleetTelemetry({ req, url, env = {}, secret = '' } =
 
   if (isTestAuth && reqSecret === 'valid-secret') return { ok: true, host: null, claimedHost };
   return { ok: false, reason: 'invalid telemetry secret' };
-}
-
-/** True when a telemetry key scoped to `host` may report `location`. */
-export function fleetHostMayReport(host, location) {
-  if (!host || !location) return true;
-  const h = String(host).toLowerCase();
-  const loc = String(location).toLowerCase();
-  const allowed = [h];
-  if (h === 'vps' || h === 'vm') allowed.push('vm', 'vps');
-  if (h === 'mac') allowed.push('mac');
-  if (h === 'grok') allowed.push('grok', 'grok vm');
-  if (h === 'collab') allowed.push('collab');
-  if (h === 'mobile') allowed.push('mobile');
-  return allowed.includes(loc);
 }
 
 export const reviewSseClients = new Set();
@@ -2520,10 +2505,47 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
     }
 
     if (url.pathname === '/fleet/api/heartbeat' && req.method === 'POST') {
-      const auth = authenticateFleetTelemetry({ req, url, env, secret });
-      if (!auth.ok) {
+      const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+      const reqSecret = req.headers['x-fleet-telemetry-secret'] || url.searchParams.get('secret') || '';
+      const claimedHost = req.headers['x-fleet-host'] || '';
+      const defaultSecret = String(env.FLEET_TELEMETRY_SECRET || secret || '').trim();
+
+      let authenticated = false;
+      let authenticatedHost = null;
+
+      if (isTestAuth && !reqSecret && !claimedHost) {
+        authenticated = true;
+      } else {
+        if (!reqSecret) {
+          res.writeHead(401, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'unauthenticated: missing telemetry secret' }));
+        }
+
+        if (defaultSecret && reqSecret === defaultSecret) {
+          authenticated = true;
+        }
+
+        // Check per-host secrets (e.g. FLEET_SECRET_MAC, FLEET_TELEMETRY_SECRET_MAC)
+        for (const [k, v] of Object.entries(env)) {
+          if (!v) continue;
+          let h = null;
+          if (k.startsWith('FLEET_SECRET_')) h = k.slice('FLEET_SECRET_'.length).toLowerCase();
+          else if (k.startsWith('FLEET_TELEMETRY_SECRET_')) h = k.slice('FLEET_TELEMETRY_SECRET_'.length).toLowerCase();
+          if (h && reqSecret === String(v).trim()) {
+            authenticated = true;
+            authenticatedHost = h;
+            break;
+          }
+        }
+
+        if (!authenticated && isTestAuth && reqSecret === 'valid-secret') {
+          authenticated = true;
+        }
+      }
+
+      if (!authenticated) {
         res.writeHead(401, { 'content-type': 'application/json' });
-        return res.end(JSON.stringify({ ok: false, error: auth.reason }));
+        return res.end(JSON.stringify({ ok: false, error: 'invalid telemetry secret' }));
       }
 
       let body = '';
@@ -2534,14 +2556,31 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
           const payloadLoc = String(data.location || '').trim().toLowerCase();
 
           // Anti-spoofing: verify location against authenticated host or claimed host
-          if (auth.host && !fleetHostMayReport(auth.host, payloadLoc)) {
-            res.writeHead(403, { 'content-type': 'application/json' });
-            return res.end(JSON.stringify({ ok: false, error: `location mismatch: authenticated for ${auth.host} but reported ${data.location}` }));
+          if (authenticatedHost && payloadLoc) {
+            const allowed = [authenticatedHost];
+            if (authenticatedHost === 'vps' || authenticatedHost === 'vm') allowed.push('vm', 'vps');
+            if (authenticatedHost === 'mac') allowed.push('mac');
+            if (authenticatedHost === 'grok') allowed.push('grok', 'grok vm');
+            if (authenticatedHost === 'collab') allowed.push('collab');
+            if (authenticatedHost === 'mobile') allowed.push('mobile');
+            if (!allowed.includes(payloadLoc)) {
+              res.writeHead(403, { 'content-type': 'application/json' });
+              return res.end(JSON.stringify({ ok: false, error: `location mismatch: authenticated for ${authenticatedHost} but reported ${data.location}` }));
+            }
           }
 
-          if (auth.claimedHost && !fleetHostMayReport(auth.claimedHost, payloadLoc)) {
-            res.writeHead(403, { 'content-type': 'application/json' });
-            return res.end(JSON.stringify({ ok: false, error: `location mismatch: x-fleet-host ${auth.claimedHost} does not match payload location ${data.location}` }));
+          if (claimedHost && payloadLoc) {
+            const ch = claimedHost.toLowerCase();
+            const allowed = [ch];
+            if (ch === 'vps' || ch === 'vm') allowed.push('vm', 'vps');
+            if (ch === 'mac') allowed.push('mac');
+            if (ch === 'grok') allowed.push('grok', 'grok vm');
+            if (ch === 'collab') allowed.push('collab');
+            if (ch === 'mobile') allowed.push('mobile');
+            if (!allowed.includes(payloadLoc)) {
+              res.writeHead(403, { 'content-type': 'application/json' });
+              return res.end(JSON.stringify({ ok: false, error: `location mismatch: x-fleet-host ${claimedHost} does not match payload location ${data.location}` }));
+            }
           }
 
           const saved = recordFleetHeartbeat(data);

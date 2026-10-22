@@ -85,6 +85,41 @@
   .model-cell { min-width: 160px; }
   .tool-cell { white-space: nowrap; }
 
+  /* Phones: six columns must fit the viewport, not hide Task/Allowance behind
+     a sideways swipe. Fixed layout + wrapping keeps every field on screen. */
+  @media (max-width: 720px) {
+    #table-fleet { table-layout: fixed; width: 100%; }
+    #table-fleet .col-location { width: 15%; }
+    #table-fleet .col-tool { width: 16%; }
+    #table-fleet .col-model { width: 17%; }
+    #table-fleet .col-status { width: 16%; }
+    #table-fleet .col-task { width: 20%; }
+    #table-fleet .col-allowance { width: 16%; }
+    #table-fleet th, #table-fleet td {
+      padding: 6px 5px; font-size: 11px; line-height: 1.35;
+      word-break: normal; overflow-wrap: break-word;
+    }
+    #table-fleet th { font-size: 9px; letter-spacing: 0; white-space: normal; }
+    #table-fleet th:first-child, #table-fleet td:first-child {
+      width: auto; min-width: 0; max-width: none;
+      position: static; box-shadow: none;
+    }
+    #table-fleet .task-cell { min-width: 0; max-width: none; }
+    #table-fleet .model-cell { min-width: 0; }
+    #table-fleet .tool-cell { white-space: normal; }
+    #table-fleet .tool-cell code { font-size: 9.5px; padding: 1px 3px; overflow-wrap: break-word; word-break: normal; }
+    #table-fleet .badge { font-size: 8px; padding: 1px 4px; }
+    #table-fleet .renew { white-space: normal; }
+  }
+
+  /* Long agent sentences must not turn one fleet row into half the screen. */
+  .task-clamp {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
   /* Tab Navigation */
   .tabbar > input { position: absolute; opacity: 0; pointer-events: none; }
   .tabbar .masthead {
@@ -157,6 +192,14 @@
       <div class="sticky-table">
         <div class="st-scroll">
           <table class="st-table" id="table-fleet">
+            <colgroup>
+              <col class="col-location">
+              <col class="col-tool">
+              <col class="col-model">
+              <col class="col-status">
+              <col class="col-task">
+              <col class="col-allowance">
+            </colgroup>
             <thead>
               <tr>
                 <th>Location</th>
@@ -368,7 +411,7 @@
         '<td class="tool-cell">' + tool + '</td>' +
         '<td class="model-cell">' + model + '</td>' +
         '<td>' + renderStatusBadge(r.status) + '</td>' +
-        '<td class="task-cell"' + title + '>' + task + '</td>' +
+        '<td class="task-cell"' + title + '><div class="task-clamp">' + task + '</div></td>' +
         '<td>' + allowanceCell(r) + '</td>' +
         '</tr>';
     }).join('');
