@@ -1,9 +1,10 @@
-# Work queue (generated 2026-10-21T11:08:16Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
+# Work queue (generated 2026-10-22T11:07:55Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
 
-## Ready to merge (2)
+## Ready to merge (3)
 
-- #781 `agent/meal-qa-queue` — chore(meal-qa): snapshot pending loop queue (5 requests + state, 2026-10-08/09) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 164)
-- #804 `agent/attach-visible` — fix(picker): attached sessions never hide, like the session in use (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 45)
+- #781 `agent/meal-qa-queue` — chore(meal-qa): snapshot pending loop queue (5 requests + state, 2026-10-08/09) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 169)
+- #804 `agent/attach-visible` — fix(picker): attached sessions never hide, like the session in use (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 50)
+- #849 `agent/colab-queue-host` — fix(colab): queue host back to this VPS (root@103.147.32.117) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 0)
 
 ## In flight (0)
 
