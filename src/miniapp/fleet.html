@@ -308,7 +308,10 @@
     var at = Date.parse(iso);
     if (isNaN(at)) return '';
     var mins = Math.round((at - Date.now()) / 60000);
-    if (mins <= 0) return 'renewed';
+    // The reset instant has passed. A minute of slack reads as "renewed"; a
+    // stale allowance.json (quote expired, no fresh reset) reads as overdue
+    // instead of pretending the quota came back.
+    if (mins <= 0) return mins > -2 ? 'renewed' : 'renewal overdue';
     if (mins < 60) return 'renew in ' + mins + 'm';
     var h = Math.floor(mins / 60);
     var m = mins % 60;

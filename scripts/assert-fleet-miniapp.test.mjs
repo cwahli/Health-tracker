@@ -406,6 +406,37 @@ test('gateway /fleet/api/snapshot stores rows and state serves them', async () =
   }
 });
 
+test('gateway /fleet/api/state serialises the recorded fleet snapshot', async () => {
+  resetFleetStateForTest();
+  recordFleetSnapshot(SNAPSHOT_FIXTURE, { now: Date.now() });
+
+  // Keep this sensor off the Google Sheets path: the ticket read is a
+  // best-effort network call, and a throwing fetch makes it fall through to
+  // the local projection instead of hanging on a live request.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('network disabled in sensor'); };
+
+  const handle = createGateway({ env: { FLEET_TEST_AUTH: '1', FLEET_TELEMETRY_SECRET: 'state-secret' } });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  try {
+    const res = await realFetch(`http://127.0.0.1:${server.address().port}/fleet/api/state`);
+    // Drain the body before asserting so a failure never leaves a socket open.
+    const data = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(data.ok, true);
+    assert.equal(data.fleet.rows.length, 3);
+    assert.equal(data.fleet.rows[0].task, 'Building Sage Canadian Tax Product UI');
+    assert.ok(Array.isArray(data.tickets));
+    assert.ok(Array.isArray(data.terminals));
+  } finally {
+    globalThis.fetch = realFetch;
+    server.closeAllConnections?.();
+    server.close();
+  }
+});
+
 test('pushSnapshot posts the local status.json to the gateway snapshot door', async () => {
   const calls = [];
   const fetchImpl = async (url, opts = {}) => {

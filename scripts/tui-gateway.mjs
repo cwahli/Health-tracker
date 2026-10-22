@@ -2447,7 +2447,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         getFleetBots({ root: REPO_ROOT }),
       ]);
       const terminals = getFleetNodes({ tickets });
-      const fleet = getFleetSnapshot();
+      const fleet = getFleetSnapshotStatus();
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify({ ok: true, tickets, terminals, bots, fleet, generatedAt: new Date().toISOString() }));
     }
@@ -2513,7 +2513,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         getFleetBots({ root: REPO_ROOT }),
       ]).then(([tickets, bots]) => {
         const terminals = getFleetNodes({ tickets });
-        const fleet = getFleetSnapshot();
+        const fleet = getFleetSnapshotStatus();
         res.write(`event: state\ndata: ${JSON.stringify({ tickets, terminals, bots, fleet })}\n\n`);
       }).catch(() => {});
       return;
