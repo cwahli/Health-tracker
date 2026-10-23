@@ -276,10 +276,21 @@ PY
 }
 
 echo "loop start $(date) pid $$ parallel=$N gpu=${GPU:-no}"
-if [ -z "$GROKQ_KEY" ] && ! $S $V true 2>/dev/null; then
-  rm -f ~/.ssh/colabq ~/.ssh/colabq.pub; ssh-keygen -q -t ed25519 -N "" -C colab-auto -f ~/.ssh/colabq
-  echo "key rejected; generated new key, asked Grok to authorize it"
-  ping pubkey "COLAB_PUBKEY $(cat ~/.ssh/colabq.pub)"
+# Never delete a key this loop did not create. A launcher may have just installed
+# a working one, and a failed probe does not prove the key is wrong: on 2026-10-23
+# the probe failed because fail2ban was rejecting the lane (Colab saw ECONNREFUSED),
+# so every start deleted the one good credential and replaced it with a key nobody
+# had authorized - the loop re-keyed itself once per start and could never connect.
+if [ -z "$GROKQ_KEY" ]; then
+  if [ ! -s "$K" ]; then
+    ssh-keygen -q -t ed25519 -N "" -C colab-auto -f "$K"
+    echo "no key at $K; generated one and asked Grok to authorize it"
+    ping pubkey "COLAB_PUBKEY $(cat "$K.pub")"
+  elif ! $S $V true 2>/dev/null; then
+    echo "key $K exists but did not authenticate; keeping it (delete it by hand to re-key)"
+  else
+    echo "key $K authenticates"
+  fi
 fi
 [ -n "$GPU" ] && [ -z "$GROKQ_NO_OLLAMA" ] && { gpu_setup >> "$R/gpu.log" 2>&1 9>&- & }
 printf 'set -g history-limit 20000\nset -g status-right "grokq %%H:%%M"\n' > "$R/tmux.conf"
