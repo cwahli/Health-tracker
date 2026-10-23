@@ -401,6 +401,28 @@ def _save_tg(home, token, chat_id):
         json.dump({"token": token.strip(), "chat_id": int(chat_id or os.environ.get("COLLAB_CHAT_ID", "6218257274"))}, f)
     os.chmod(p, 0o600)
 
+def _key_ok(home):
+    """True when ~/.ssh/colabq already authenticates to the queue host.
+
+    Why: the notebook may install a working key itself (the launcher cell writes
+    one), and a stale COLABQ_KEY secret must not overwrite it. Replacing a key
+    that works is how a runner ends up generating a fresh key, failing to get it
+    authorized, and looping on "Permission denied (publickey)".
+    """
+    k = f"{home}/.ssh/colabq"
+    if not os.path.exists(k):
+        return False
+    v = os.environ.get("GROKQ_V", "colabq@103.147.32.117")
+    port = os.environ.get("GROKQ_PORT", "22")
+    try:
+        return subprocess.run(
+            ["ssh", "-i", k, "-p", str(port), "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+             "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=/dev/null", v, "true"],
+            capture_output=True, timeout=30).returncode == 0
+    except Exception:
+        return False
+
+
 def start(tg_token=None, chat_id=None):
     key = url = auth = None
     try:
@@ -424,9 +446,21 @@ def start(tg_token=None, chat_id=None):
     if not (key and url and auth):
         print("• Grok queue: COLABQ_KEY / HT_WAKE_WEBHOOK_URL / HT_WAKE_WEBHOOK_AUTH missing, skipped."); return False
     os.makedirs(f"{home}/.ssh", exist_ok=True)
-    with open(f"{home}/.ssh/colabq", "w") as f: f.write(_fix_key(key))
-    os.chmod(f"{home}/.ssh/colabq", 0o600)
-    with open(f"{home}/.grokq.env", "w") as f: f.write(f"WURL='{url.strip()}'\nWAUTH='{auth.strip()}'\n")
+    keyfile = f"{home}/.ssh/colabq"
+    if _key_ok(home):
+        print("• Grok queue: the queue key on this machine already works; keeping it.")
+    else:
+        with open(keyfile, "w") as f: f.write(_fix_key(key))
+        os.chmod(keyfile, 0o600)
+        print("• Grok queue: installed the key from COLABQ_KEY (loop re-tests it).")
+    # Merge, never truncate: the launcher cell may have written GROKQ_V/GROKQ_PORT
+    # here, and wiping them silently sends the loop back to the default host.
+    envp = f"{home}/.grokq.env"
+    lines = open(envp).read().splitlines() if os.path.exists(envp) else []
+    for name, val in (("WURL", url), ("WAUTH", auth)):
+        if val and not any(l.split("=", 1)[0].strip() == name for l in lines if "=" in l):
+            lines.append(f"{name}='{val.strip()}'")
+    with open(envp, "w") as f: f.write("\n".join(lines) + "\n")
     return _launch(home)
 
 def _kill_old(pidf):
