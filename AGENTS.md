@@ -1,6 +1,6 @@
 # AGENTS.md — Always-on rules (keep short)
 
-**Updated:** 2026-09-17
+**Updated:** 2026-10-23 · **Global habits:** `~/.agents/USER.md` · **Session start card:** `node scripts/startup-card.mjs` (or `python3 ~/.agents/bin/start-card.py`)
 
 **Token rule:** Read **this file first**. Load domain files **only** from the table in §1. Do not open `plan/FOOD.md` Part A/B, `plan/QUALITY.md`, or old `AI_HANDOVER` history unless that table says so.
 
