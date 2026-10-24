@@ -28,6 +28,7 @@ import {
   resetFleetStateForTest,
   issueToken,
   COOKIE_NAME,
+  FLEET_SW_JS,
 } from './tui-gateway.mjs';
 
 import {
@@ -40,8 +41,11 @@ import {
   normalizeFleetSnapshot,
   recordFleetSnapshot,
   getFleetSnapshot,
+  normalizeMacTelemetry,
+  queueMacAction,
+  drainMacActions,
 } from './lib/fleet-status.mjs';
-import { pushSnapshot } from './fleet-snapshot-push.mjs';
+import { pushSnapshot, collectMacSystemStatus, executeMacAction } from './fleet-snapshot-push.mjs';
 
 function makeInitData(botToken, { user = { id: 123456, first_name: 'Test' }, authDate = Math.floor(Date.now() / 1000) } = {}) {
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
@@ -844,4 +848,105 @@ test('a row projects from either current-tab layout, not just the curated one', 
   // No proof column in the projected layout, so the cell stays text, not a guess.
   assert.equal(b.proofFileId, '');
   assert.equal(b.completionProof, '—');
+});
+
+test('normalizeMacTelemetry normalises switches, system resources and top processes', () => {
+  const rawMac = {
+    hostname: 'test-mac',
+    switches: [
+      { id: 'fleetd', label: 'Fleet Daemon', on: true, detail: 'PID 1234' },
+      { id: 'sage_sync', label: 'Sage Sync', on: false },
+    ],
+    resources: {
+      cpuCount: 8,
+      loadAvg: [1.5, 2.0, 2.5],
+      memory: { totalGb: 16, usedGb: 10, wiredGb: 4, compressedGb: 2, freeGb: 6, usedPct: 62 },
+      disk: { totalGib: 500, usedGib: 300, availGib: 200, usedPct: 60 },
+    },
+    processes: [
+      { pid: 1001, name: 'node', command: 'node server.js', cpuPct: 15.2, rssMb: 250, killable: true },
+      { pid: 99, name: 'kernel_task', cpuPct: 5.0, killable: false },
+    ],
+  };
+
+  const norm = normalizeMacTelemetry(rawMac);
+  assert.ok(norm);
+  assert.equal(norm.hostname, 'test-mac');
+  assert.equal(norm.switches.length, 2);
+  assert.equal(norm.switches[0].id, 'fleetd');
+  assert.equal(norm.switches[0].on, true);
+  assert.equal(norm.resources.cpuCount, 8);
+  assert.equal(norm.resources.memory.usedPct, 62);
+  assert.equal(norm.processes.length, 2);
+  assert.equal(norm.processes[0].pid, 1001);
+  assert.equal(norm.processes[0].killable, true);
+});
+
+test('queueMacAction validates switch toggles and pids, and drains cleanly', () => {
+  resetFleetStateForTest();
+  const q1 = queueMacAction({ type: 'toggle_switch', target: 'fleetd', state: 'off' });
+  assert.equal(q1.ok, true);
+  assert.equal(q1.action.target, 'fleetd');
+  assert.equal(q1.action.state, 'off');
+
+  const qBad = queueMacAction({ type: 'toggle_switch', target: 'unknown_service', state: 'on' });
+  assert.equal(qBad.ok, false);
+
+  const qKill = queueMacAction({ type: 'kill_pid', pid: 4321 });
+  assert.equal(qKill.ok, true);
+
+  const actions = drainMacActions();
+  assert.equal(actions.length, 2);
+  assert.equal(actions[0].target, 'fleetd');
+  assert.equal(actions[1].pid, 4321);
+
+  // Drained: subsequent call returns empty
+  assert.equal(drainMacActions().length, 0);
+});
+
+test('gateway serves /fleet/sw.js and /fleet/api/mac-action with auth', async () => {
+  resetFleetStateForTest();
+  const secret = 'gw-test-sec-999';
+  const handle = createGateway({ env: { FLEET_TEST_AUTH: '1', FLEET_TELEMETRY_SECRET: secret, TUI_GATEWAY_SECRET: secret } });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. GET /fleet/sw.js returns Service Worker
+    const swRes = await fetch(`${base}/fleet/sw.js`);
+    assert.equal(swRes.status, 200);
+    assert.equal(swRes.headers.get('service-worker-allowed'), '/');
+    const swBody = await swRes.text();
+    assert.ok(swBody.includes('ht-fleet-offline-v1'));
+
+    // 2. POST /fleet/api/mac-action queues action
+    const actRes = await fetch(`${base}/fleet/api/mac-action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'toggle_switch', target: 'fleetd', state: 'off' }),
+    });
+    assert.equal(actRes.status, 200);
+    const actData = await actRes.json();
+    assert.equal(actData.ok, true);
+    assert.equal(actData.action.target, 'fleetd');
+
+    // 3. POST /fleet/api/snapshot returns pending actions to reporter
+    const snapRes = await fetch(`${base}/fleet/api/snapshot`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-telemetry-secret': secret },
+      body: JSON.stringify({
+        status: SNAPSHOT_FIXTURE,
+        mac: { hostname: 'my-mac', switches: [{ id: 'fleetd', on: true }] },
+      }),
+    });
+    assert.equal(snapRes.status, 200);
+    const snapData = await snapRes.json();
+    assert.equal(snapData.ok, true);
+    assert.equal(snapData.pendingActions.length, 1);
+    assert.equal(snapData.pendingActions[0].target, 'fleetd');
+  } finally {
+    server.closeAllConnections?.();
+    server.close();
+  }
 });

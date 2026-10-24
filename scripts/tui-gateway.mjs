@@ -933,6 +933,9 @@ import {
   recordFleetHeartbeat as recordFleetHeartbeatStatus,
   recordFleetSnapshot as recordFleetSnapshotStatus,
   getFleetSnapshot as getFleetSnapshotStatus,
+  queueMacAction as queueMacActionStatus,
+  drainMacActions as drainMacActionsStatus,
+  getPendingMacActions as getPendingMacActionsStatus,
   getFleetNodes as getFleetNodesStatus,
   getFleetBots as getFleetBotsStatus,
   resetFleetState as resetFleetStateStatus,
@@ -941,6 +944,35 @@ import {
   findVmSessionTarget as findVmSessionTargetStatus,
   FLEET_CACHE_TTL_MS,
 } from './lib/fleet-status.mjs';
+
+export const FLEET_SW_JS = [
+  'const CACHE_NAME = "ht-fleet-offline-v1";',
+  'self.addEventListener("install", (e) => { self.skipWaiting(); });',
+  'self.addEventListener("activate", (e) => { e.waitUntil(self.clients.claim()); });',
+  'self.addEventListener("fetch", (e) => {',
+  '  const req = e.request;',
+  '  if (req.method !== "GET") return;',
+  '  const url = new URL(req.url);',
+  '  if (!url.pathname.startsWith("/fleet") && !url.pathname.startsWith("/app")) return;',
+  '  if (url.pathname === "/fleet/api/events") return;',
+  '  e.respondWith((async () => {',
+  '    const cache = await caches.open(CACHE_NAME);',
+  '    try {',
+  '      const net = await fetch(req);',
+  '      if (net && net.status === 200) {',
+  '        cache.put(req, net.clone());',
+  '        if (url.pathname === "/fleet/app") cache.put("/fleet/app", net.clone());',
+  '        if (url.pathname === "/fleet/api/state") cache.put("/fleet/api/state", net.clone());',
+  '      }',
+  '      return net;',
+  '    } catch (err) {',
+  '      const hit = (await cache.match(req)) || (await cache.match(url.pathname));',
+  '      if (hit) return hit;',
+  '      throw err;',
+  '    }',
+  '  })());',
+  '});',
+].join('\n');
 
 import {
   REVIEW_IMAGE_MAX,
@@ -2395,6 +2427,15 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       return res.end();
     }
 
+    if (url.pathname === '/fleet/sw.js') {
+      res.writeHead(200, {
+        'content-type': 'application/javascript; charset=utf-8',
+        'service-worker-allowed': '/',
+        'cache-control': 'no-cache',
+      });
+      return res.end(FLEET_SW_JS);
+    }
+
     if (url.pathname === '/fleet/app') {
       const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
       const verdict = isTestAuth ? { ok: true } : verifyAnyToken(req, url, secret);
@@ -2426,15 +2467,17 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
       }
+      const persistPath = env.FLEET_SNAPSHOT_CACHE_PATH || (isTestAuth ? '' : path.join(REPO_ROOT, '.cache', 'fleet-snapshot.json'));
       const forceRefresh = url.searchParams.get('refresh') === '1' || req.headers['x-refresh'] === '1';
       const [tickets, bots] = await Promise.all([
         getFleetTickets({ env, root: REPO_ROOT, refresh: forceRefresh }),
         getFleetBots({ root: REPO_ROOT }),
       ]);
       const terminals = getFleetNodes({ tickets });
-      const fleet = getFleetSnapshotStatus();
+      const fleet = getFleetSnapshotStatus({ persistPath });
+      const pendingMacActions = getPendingMacActionsStatus();
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      return res.end(JSON.stringify({ ok: true, tickets, terminals, bots, fleet, generatedAt: new Date().toISOString() }));
+      return res.end(JSON.stringify({ ok: true, tickets, terminals, bots, fleet, pendingMacActions, generatedAt: new Date().toISOString() }));
     }
 
     if (url.pathname.startsWith('/fleet/api/proof/')) {
@@ -2493,12 +2536,13 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       res.flushHeaders?.();
       fleetSseClients.add(res);
       req.on('close', () => { fleetSseClients.delete(res); });
+      const persistPath = env.FLEET_SNAPSHOT_CACHE_PATH || (isTestAuth ? '' : path.join(REPO_ROOT, '.cache', 'fleet-snapshot.json'));
       Promise.all([
         getFleetTickets({ env, root: REPO_ROOT }),
         getFleetBots({ root: REPO_ROOT }),
       ]).then(([tickets, bots]) => {
         const terminals = getFleetNodes({ tickets });
-        const fleet = getFleetSnapshotStatus();
+        const fleet = getFleetSnapshotStatus({ persistPath });
         res.write(`event: state\ndata: ${JSON.stringify({ tickets, terminals, bots, fleet })}\n\n`);
       }).catch(() => {});
       return;
@@ -2598,34 +2642,74 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       return;
     }
 
-    // Full fleet snapshot (the dashboard that owns the rows pushes them here).
-    // The local fleet-status loopback is unreachable from this host, so the
-    // reporter sends the same status.json its own page renders. Auth uses the
-    // telemetry secret (a snapshot spans every channel, so no host-scope check).
-    if (url.pathname === '/fleet/api/snapshot' && req.method === 'POST') {
-      const auth = authenticateFleetTelemetry({ req, url, env, secret });
-      if (!auth.ok) {
+    if (url.pathname === '/fleet/api/mac-action' && req.method === 'POST') {
+      const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+      const authHeader = req.headers['x-telegram-init-data'] || '';
+      let verdict = isTestAuth ? { ok: true } : verifyAnyToken(req, url, secret);
+      if (!verdict.ok && authHeader) {
+        const authVer = authorizeForgeAtGateway({ initData: String(authHeader), env });
+        if (authVer.ok) verdict = { ok: true };
+      }
+      if (!verdict.ok) {
         res.writeHead(401, { 'content-type': 'application/json' });
-        return res.end(JSON.stringify({ ok: false, error: auth.reason }));
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
       }
       let body = '';
       req.on('data', (chunk) => { body += chunk; });
       req.on('end', () => {
         try {
           const parsed = JSON.parse(body || '{}');
-          const status = parsed && parsed.status && typeof parsed.status === 'object' ? parsed.status : parsed;
-          const saved = recordFleetSnapshotStatus(status);
+          const queued = queueMacActionStatus(parsed);
+          if (!queued.ok) {
+            res.writeHead(400, { 'content-type': 'application/json' });
+            return res.end(JSON.stringify(queued));
+          }
+          broadcastFleetEvent('mac_action', queued);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify(queued));
+        } catch (err) {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
+        }
+      });
+      return;
+    }
+
+    // Full fleet snapshot (the dashboard that owns the rows pushes them here).
+    // The local fleet-status loopback is unreachable from this host, so the
+    // reporter sends the same status.json its own page renders. Auth uses the
+    // telemetry secret (a snapshot spans every channel, so no host-scope check).
+    if (url.pathname === '/fleet/api/snapshot' && req.method === 'POST') {
+      const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+      const auth = authenticateFleetTelemetry({ req, url, env, secret });
+      if (!auth.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: auth.reason }));
+      }
+      const persistPath = env.FLEET_SNAPSHOT_CACHE_PATH || (isTestAuth ? '' : path.join(REPO_ROOT, '.cache', 'fleet-snapshot.json'));
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(body || '{}');
+          const rawStatus = parsed && parsed.status && typeof parsed.status === 'object' ? parsed.status : parsed;
+          const status = rawStatus && typeof rawStatus === 'object' && parsed.mac && !rawStatus.mac
+            ? { ...rawStatus, mac: parsed.mac }
+            : rawStatus;
+          const saved = recordFleetSnapshotStatus(status, { persistPath });
           if (!saved.ok) {
             res.writeHead(400, { 'content-type': 'application/json' });
             return res.end(JSON.stringify(saved));
           }
           broadcastFleetEvent('snapshot', saved.snapshot);
+          const pendingActions = drainMacActionsStatus();
           res.writeHead(200, { 'content-type': 'application/json' });
           return res.end(JSON.stringify({
             ok: true,
             rows: saved.snapshot.rows.length,
             receivedAt: saved.snapshot.receivedAt,
             stale: saved.snapshot.stale,
+            pendingActions,
           }));
         } catch (err) {
           res.writeHead(400, { 'content-type': 'application/json' });

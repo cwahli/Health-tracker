@@ -264,8 +264,126 @@ export function recordFleetHeartbeat(data, { now = Date.now() } = {}) {
 // deployed gateway cannot reach that loopback server, so the reporter pushes
 // the dashboard's own status.json here and every Fleet client reads one shape.
 export const FLEET_SNAPSHOT_STALE_MS = 90 * 1000;
+export const MAC_REPORTER_OFFLINE_SEC = 20;
 
 let fleetSnapshotCache = { at: 0, data: null };
+let macPendingActions = [];
+
+export function normalizeMacTelemetry(mac) {
+  if (!mac || typeof mac !== 'object') return null;
+  const switches = Array.isArray(mac.switches)
+    ? mac.switches
+        .filter((s) => s && typeof s === 'object')
+        .map((s) => ({
+          id: snapshotText(s.id || '', 60),
+          label: snapshotText(s.label || s.id || '', 120),
+          on: Boolean(s.on),
+          detail: snapshotText(s.detail || '', 200),
+          toggleable: s.toggleable !== false,
+        }))
+    : [];
+  const res = mac.resources && typeof mac.resources === 'object' ? mac.resources : {};
+  const mem = res.memory && typeof res.memory === 'object' ? res.memory : {};
+  const disk = res.disk && typeof res.disk === 'object' ? res.disk : {};
+  const loadAvg = Array.isArray(res.loadAvg) ? res.loadAvg.slice(0, 3).map((n) => Number(n) || 0) : [];
+  const processes = Array.isArray(mac.processes)
+    ? mac.processes
+        .filter((p) => p && typeof p === 'object' && Number.isInteger(Number(p.pid)))
+        .slice(0, 25)
+        .map((p) => ({
+          pid: Number(p.pid),
+          name: snapshotText(p.name || '', 80),
+          command: snapshotText(p.command || p.name || '', 220),
+          cpuPct: Number(p.cpuPct) || 0,
+          memPct: Number(p.memPct) || 0,
+          rssMb: Number(p.rssMb) || 0,
+          killable: p.killable !== false,
+        }))
+    : [];
+
+  return {
+    hostname: snapshotText(mac.hostname || 'Mac', 80),
+    collectedAt: snapshotText(mac.collectedAt || '', 60),
+    reporterOnline: mac.reporterOnline !== false,
+    switches,
+    resources: {
+      cpuCount: Number(res.cpuCount) || 0,
+      loadAvg,
+      memory: {
+        totalGb: Number(mem.totalGb) || 0,
+        usedGb: Number(mem.usedGb) || 0,
+        wiredGb: Number(mem.wiredGb) || 0,
+        compressedGb: Number(mem.compressedGb) || 0,
+        freeGb: Number(mem.freeGb) || 0,
+        usedPct: Number(mem.usedPct) || 0,
+        swapUsedMb: Number(mem.swapUsedMb) || 0,
+      },
+      disk: {
+        totalGib: Number(disk.totalGib) || 0,
+        usedGib: Number(disk.usedGib) || 0,
+        availGib: Number(disk.availGib) || 0,
+        usedPct: Number(disk.usedPct) || 0,
+      },
+    },
+    processes,
+    lastActionResult: mac.lastActionResult && typeof mac.lastActionResult === 'object'
+      ? {
+          id: snapshotText(mac.lastActionResult.id || '', 60),
+          ok: Boolean(mac.lastActionResult.ok),
+          message: snapshotText(mac.lastActionResult.message || '', 220),
+          at: snapshotText(mac.lastActionResult.at || '', 60),
+        }
+      : null,
+  };
+}
+
+export function queueMacAction(action, { now = Date.now() } = {}) {
+  if (!action || typeof action !== 'object') return { ok: false, error: 'invalid action' };
+  const type = String(action.type || '').trim();
+  if (type !== 'toggle_switch' && type !== 'kill_pid') {
+    return { ok: false, error: 'unsupported action type' };
+  }
+  if (type === 'toggle_switch') {
+    const target = String(action.target || '').trim();
+    const allowed = new Set(['fleetd', 'fleet_snapshot', 'fleet_status_srv', 'sage_sync', 'http_servers']);
+    if (!allowed.has(target)) return { ok: false, error: `unknown switch: ${target}` };
+    const state = String(action.state || '').trim().toLowerCase();
+    if (state !== 'on' && state !== 'off') return { ok: false, error: 'state must be on or off' };
+    const item = {
+      id: `act-${now}-${Math.random().toString(36).slice(2, 7)}`,
+      type,
+      target,
+      state,
+      requestedAt: new Date(now).toISOString(),
+    };
+    macPendingActions.push(item);
+    if (macPendingActions.length > 20) macPendingActions = macPendingActions.slice(-20);
+    return { ok: true, action: item, pending: macPendingActions.length };
+  }
+  const pid = Number(action.pid);
+  if (!Number.isInteger(pid) || pid <= 100) {
+    return { ok: false, error: 'invalid pid' };
+  }
+  const item = {
+    id: `act-${now}-${Math.random().toString(36).slice(2, 7)}`,
+    type,
+    pid,
+    requestedAt: new Date(now).toISOString(),
+  };
+  macPendingActions.push(item);
+  if (macPendingActions.length > 20) macPendingActions = macPendingActions.slice(-20);
+  return { ok: true, action: item, pending: macPendingActions.length };
+}
+
+export function drainMacActions() {
+  const out = macPendingActions.slice();
+  macPendingActions = [];
+  return out;
+}
+
+export function getPendingMacActions() {
+  return macPendingActions.slice();
+}
 
 const SNAPSHOT_STATUS = new Map([
   ['working', 'working'],
@@ -464,28 +582,67 @@ export function normalizeFleetSnapshot(payload, { now = Date.now() } = {}) {
     warnings: (Array.isArray(payload.warnings_all) ? payload.warnings_all : (Array.isArray(payload.warnings) ? payload.warnings : []))
       .slice(0, 12)
       .map((w) => snapshotText(w, 240)),
+    mac: normalizeMacTelemetry(payload.mac),
   };
 }
 
 /** Store the newest pushed snapshot. Returns the normalised payload handed to clients. */
-export function recordFleetSnapshot(payload, { now = Date.now() } = {}) {
+export function recordFleetSnapshot(payload, { now = Date.now(), persistPath = '' } = {}) {
   const data = normalizeFleetSnapshot(payload, { now });
   if (!data) return { ok: false, error: 'invalid snapshot: channels[] required' };
   fleetSnapshotCache = { at: now, data };
+  if (persistPath) {
+    try {
+      fs.mkdirSync(path.dirname(persistPath), { recursive: true });
+      fs.writeFileSync(persistPath, JSON.stringify(fleetSnapshotCache), 'utf8');
+    } catch {
+      // Best-effort offline cache on disk
+    }
+  }
   return { ok: true, snapshot: withSnapshotAge(data, now) };
 }
 
 function withSnapshotAge(data, now) {
   const ageMs = Math.max(0, now - fleetSnapshotCache.at);
+  const ageSec = Math.round(ageMs / 1000);
+  const stale = ageMs > FLEET_SNAPSHOT_STALE_MS;
+  let mac = data.mac ? { ...data.mac } : null;
+  if (mac) {
+    const reporterOnline = ageSec <= MAC_REPORTER_OFFLINE_SEC && mac.reporterOnline !== false;
+    mac.reporterOnline = reporterOnline;
+    if (Array.isArray(mac.switches)) {
+      mac.switches = mac.switches.map((sw) => {
+        if (sw.id === 'fleet_snapshot' && !reporterOnline) {
+          return {
+            ...sw,
+            on: false,
+            detail: sw.on === false && sw.detail ? sw.detail : `Stopped / offline (last push ${ageSec}s ago)`,
+          };
+        }
+        return sw;
+      });
+    }
+  }
   return {
     ...data,
-    ageSec: Math.round(ageMs / 1000),
-    stale: ageMs > FLEET_SNAPSHOT_STALE_MS,
+    mac,
+    ageSec,
+    stale,
   };
 }
 
 /** The newest pushed snapshot, aged at read time; null before the first push. */
-export function getFleetSnapshot({ now = Date.now() } = {}) {
+export function getFleetSnapshot({ now = Date.now(), persistPath = '' } = {}) {
+  if (!fleetSnapshotCache.data && persistPath) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(persistPath, 'utf8'));
+      if (raw && typeof raw.at === 'number' && raw.data && Array.isArray(raw.data.rows)) {
+        fleetSnapshotCache = { at: raw.at, data: raw.data };
+      }
+    } catch {
+      // Ignore missing or unreadable disk cache
+    }
+  }
   if (!fleetSnapshotCache.data) return null;
   return withSnapshotAge(fleetSnapshotCache.data, now);
 }
@@ -1209,4 +1366,5 @@ export function resetFleetState() {
   fleetTicketsCache = { cachedAt: 0, rows: [] };
   fleetNodeHeartbeats.clear();
   fleetSnapshotCache = { at: 0, data: null };
+  macPendingActions = [];
 }
