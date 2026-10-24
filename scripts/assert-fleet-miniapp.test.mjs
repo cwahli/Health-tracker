@@ -7,7 +7,9 @@
  * - 8 human headers from current tab by name, keeping Pending/In progress unchanged
  * - Zero Google Sheets writes on read path
  * - Gateway authentication: admits valid initData, refuses bad HMAC / tampered signatures
- * - Gateway endpoints: /fleet, /fleet/app, /fleet/api/state, /fleet/api/heartbeat
+ * - Gateway endpoints: /fleet, /fleet/app, /fleet/api/state, /fleet/api/heartbeat,
+ *   /fleet/api/snapshot
+ * - Live fleet rows: location / tool / model / status / task / allowance
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,6 +28,7 @@ import {
   resetFleetStateForTest,
   issueToken,
   COOKIE_NAME,
+  FLEET_SW_JS,
 } from './tui-gateway.mjs';
 
 import {
@@ -35,7 +38,14 @@ import {
   getFleetBots as getStatusBots,
   driveFileIdFrom,
   ticketFromRow,
+  normalizeFleetSnapshot,
+  recordFleetSnapshot,
+  getFleetSnapshot,
+  normalizeMacTelemetry,
+  queueMacAction,
+  drainMacActions,
 } from './lib/fleet-status.mjs';
+import { pushSnapshot, collectMacSystemStatus, executeMacAction } from './fleet-snapshot-push.mjs';
 
 function makeInitData(botToken, { user = { id: 123456, first_name: 'Test' }, authDate = Math.floor(Date.now() / 1000) } = {}) {
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
@@ -217,9 +227,16 @@ test('gateway /fleet routes: landing, auth, app, state, and heartbeat', async ()
     assert.equal(appRes.status, 200);
     const appHtml = await appRes.text();
     assert.ok(appHtml.includes('Fleet Status'));
+    assert.ok(appHtml.includes('id="table-fleet"'));
+    assert.ok(appHtml.includes('id="body-fleet"'));
     assert.ok(appHtml.includes('id="table-tickets"'));
-    assert.ok(appHtml.includes('id="table-terms"'));
     assert.ok(appHtml.includes('id="table-bots"'));
+    assert.ok(appHtml.includes('>Location<'));
+    assert.ok(appHtml.includes('>Tool<'));
+    assert.ok(appHtml.includes('>Model<'));
+    assert.ok(appHtml.includes('>Status<'));
+    assert.ok(appHtml.includes('>Task<'));
+    assert.ok(appHtml.includes('>Allowance<'));
 
     // 4. POST /fleet/api/heartbeat records heartbeat
     const beatRes = await fetch(`${base}/fleet/api/heartbeat`, {
@@ -253,6 +270,197 @@ test('gateway /fleet routes: landing, auth, app, state, and heartbeat', async ()
   } finally {
     server.close();
   }
+});
+
+const SNAPSHOT_FIXTURE = {
+  project: 'sage-prototypes',
+  updated: '2026-10-22 23:40:00 BST',
+  channels: [
+    {
+      name: 'Mac (local)',
+      host: 'this Mac',
+      resources: [
+        {
+          id: '366cf834-aa39-443f-bb49-e5d9aeeaaf41',
+          name: 'Freebuff DeepSeek',
+          tool: 'freebuff',
+          model: 'm-ddc687c50f',
+          model_name: 'Nemotron 3.5 Lightning',
+          weight: '?',
+          state: 'DEPLETED',
+          resets_at: '2026-10-22T23:00:07+00:00',
+          detail: 'Nemotron 3.5 Lightning · weight ? · DEPLETED: remaining_h 0 h · thread Building Sage Canadian Tax Product UI · last turn completed',
+        },
+        {
+          id: 'mac-open',
+          name: 'Mac OpenCode / Cline',
+          tool: 'opencode/cline',
+          model: 'local',
+          model_name: 'Local OpenCode/Cline',
+          state: 'WORKING',
+          detail: '1 process(es) · Cline hub daemon',
+        },
+      ],
+    },
+    {
+      name: 'Indonesia VPS',
+      resources: [
+        {
+          id: 'vps-open',
+          name: 'Indonesia VPS OpenCode',
+          tool: 'opencode',
+          model: 'deepseek-v4.1-flash-free',
+          model_name: 'DeepSeek V4.1 Flash Free',
+          state: 'AVAILABLE',
+          detail: '0 proc(s) · DONE product-ui-isolation',
+        },
+      ],
+    },
+  ],
+  agents: [
+    { agent: 'Freebuff 366cf834', tool: 'freebuff', model: 'm-ddc687c50f', state: 'idle', now: 'pm-wait.py: event waiter' },
+    { agent: 'Mac OpenCode / Cline', tool: 'opencode/cline', now: 'Build the live fleet table' },
+  ],
+  lanes: { mac_opencode: { active_task: 'Build the live fleet table', last_log_tail: 'DONE caret-r3-vl [exit]' } },
+  quota: { remaining_h: 0, resets_at: '2026-10-22T23:00:07+00:00', resets_in: '0h 20m', stale: false },
+};
+
+test('normalizeFleetSnapshot gives one row per resource with task and allowance', () => {
+  const t0 = 10000000;
+  const snap = normalizeFleetSnapshot(SNAPSHOT_FIXTURE, { now: t0 });
+  assert.ok(snap);
+  assert.equal(snap.rows.length, 3);
+  assert.equal(snap.channels.length, 2);
+
+  const freebuff = snap.rows[0];
+  assert.equal(freebuff.location, 'Mac (local)');
+  assert.equal(freebuff.tool, 'freebuff');
+  assert.equal(freebuff.model, 'Nemotron 3.5 Lightning');
+  assert.equal(freebuff.status, 'depleted');
+  // A thread title beats the `pm-wait.py` process sentence.
+  assert.equal(freebuff.task, 'Building Sage Canadian Tax Product UI');
+  assert.ok(freebuff.allowance.text.includes('h left'));
+  assert.equal(freebuff.allowance.renewAt, '2026-10-22T23:00:07+00:00');
+
+  const mac = snap.rows[1];
+  assert.equal(mac.status, 'working');
+  assert.equal(mac.task, 'Build the live fleet table');
+
+  const vps = snap.rows[2];
+  assert.equal(vps.location, 'Indonesia VPS');
+  assert.equal(vps.status, 'available');
+  assert.equal(vps.allowance.text, '—');
+});
+
+test('recordFleetSnapshot ages and clears with the fleet cache', () => {
+  resetFleetStateForTest();
+  const t0 = 10000000;
+  const saved = recordFleetSnapshot(SNAPSHOT_FIXTURE, { now: t0 });
+  assert.equal(saved.ok, true);
+  assert.equal(saved.snapshot.stale, false);
+
+  const fresh = getFleetSnapshot({ now: t0 + 5000 });
+  assert.equal(fresh.rows.length, 3);
+  assert.equal(fresh.ageSec, 5);
+  assert.equal(fresh.stale, false);
+
+  const stale = getFleetSnapshot({ now: t0 + 120000 });
+  assert.equal(stale.stale, true);
+
+  resetFleetStateForTest();
+  assert.equal(getFleetSnapshot(), null);
+});
+
+test('gateway /fleet/api/snapshot stores rows and state serves them', async () => {
+  resetFleetStateForTest();
+  const secret = 'gateway-snapshot-secret-321';
+  const handle = createGateway({ env: { FLEET_TELEMETRY_SECRET: secret, TUI_GATEWAY_SECRET: secret } });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const noSecret = await fetch(`${base}/fleet/api/snapshot`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: SNAPSHOT_FIXTURE }),
+    });
+    assert.equal(noSecret.status, 401);
+
+    const pushed = await fetch(`${base}/fleet/api/snapshot`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-telemetry-secret': secret },
+      body: JSON.stringify({ source: 'fleet-status.py', status: SNAPSHOT_FIXTURE }),
+    });
+    assert.equal(pushed.status, 200);
+    const pushedData = await pushed.json();
+    assert.equal(pushedData.ok, true);
+    assert.equal(pushedData.rows, 3);
+
+    // The state route serialises this same accessor; asserting the accessor
+    // keeps this sensor off the Google Sheets path the ticket read owns.
+    const stored = getFleetSnapshot();
+    assert.ok(stored);
+    assert.equal(stored.rows.length, 3);
+    assert.equal(stored.rows[0].location, 'Mac (local)');
+    assert.equal(stored.rows[0].task, 'Building Sage Canadian Tax Product UI');
+  } finally {
+    server.closeAllConnections?.();
+    server.close();
+  }
+});
+
+test('gateway /fleet/api/state serialises the recorded fleet snapshot', async () => {
+  resetFleetStateForTest();
+  recordFleetSnapshot(SNAPSHOT_FIXTURE, { now: Date.now() });
+
+  // Keep this sensor off the Google Sheets path: the ticket read is a
+  // best-effort network call, and a throwing fetch makes it fall through to
+  // the local projection instead of hanging on a live request.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('network disabled in sensor'); };
+
+  const handle = createGateway({ env: { FLEET_TEST_AUTH: '1', FLEET_TELEMETRY_SECRET: 'state-secret' } });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  try {
+    const res = await realFetch(`http://127.0.0.1:${server.address().port}/fleet/api/state`);
+    // Drain the body before asserting so a failure never leaves a socket open.
+    const data = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(data.ok, true);
+    assert.equal(data.fleet.rows.length, 3);
+    assert.equal(data.fleet.rows[0].task, 'Building Sage Canadian Tax Product UI');
+    assert.ok(Array.isArray(data.tickets));
+    assert.ok(Array.isArray(data.terminals));
+  } finally {
+    globalThis.fetch = realFetch;
+    server.closeAllConnections?.();
+    server.close();
+  }
+});
+
+test('pushSnapshot posts the local status.json to the gateway snapshot door', async () => {
+  const calls = [];
+  const fetchImpl = async (url, opts = {}) => {
+    calls.push({ url, opts });
+    if (calls.length === 1) {
+      return { ok: true, status: 200, json: async () => SNAPSHOT_FIXTURE };
+    }
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, rows: 3, receivedAt: '2026-10-22T23:40:00.000Z', stale: false }),
+    };
+  };
+  const res = await pushSnapshot({ fetchImpl, secret: 's3cret', gatewayUrl: 'https://example.test' });
+  assert.equal(res.ok, true);
+  assert.equal(res.rows, 3);
+  assert.ok(calls[1].url.endsWith('/fleet/api/snapshot'));
+  assert.equal(calls[1].opts.headers['x-fleet-telemetry-secret'], 's3cret');
+  const body = JSON.parse(calls[1].opts.body);
+  assert.equal(body.status.project, 'sage-prototypes');
 });
 
 test('getFleetNodes separates PM ticket claim from worker liveness badge', () => {
@@ -640,4 +848,105 @@ test('a row projects from either current-tab layout, not just the curated one', 
   // No proof column in the projected layout, so the cell stays text, not a guess.
   assert.equal(b.proofFileId, '');
   assert.equal(b.completionProof, '—');
+});
+
+test('normalizeMacTelemetry normalises switches, system resources and top processes', () => {
+  const rawMac = {
+    hostname: 'test-mac',
+    switches: [
+      { id: 'fleetd', label: 'Fleet Daemon', on: true, detail: 'PID 1234' },
+      { id: 'sage_sync', label: 'Sage Sync', on: false },
+    ],
+    resources: {
+      cpuCount: 8,
+      loadAvg: [1.5, 2.0, 2.5],
+      memory: { totalGb: 16, usedGb: 10, wiredGb: 4, compressedGb: 2, freeGb: 6, usedPct: 62 },
+      disk: { totalGib: 500, usedGib: 300, availGib: 200, usedPct: 60 },
+    },
+    processes: [
+      { pid: 1001, name: 'node', command: 'node server.js', cpuPct: 15.2, rssMb: 250, killable: true },
+      { pid: 99, name: 'kernel_task', cpuPct: 5.0, killable: false },
+    ],
+  };
+
+  const norm = normalizeMacTelemetry(rawMac);
+  assert.ok(norm);
+  assert.equal(norm.hostname, 'test-mac');
+  assert.equal(norm.switches.length, 2);
+  assert.equal(norm.switches[0].id, 'fleetd');
+  assert.equal(norm.switches[0].on, true);
+  assert.equal(norm.resources.cpuCount, 8);
+  assert.equal(norm.resources.memory.usedPct, 62);
+  assert.equal(norm.processes.length, 2);
+  assert.equal(norm.processes[0].pid, 1001);
+  assert.equal(norm.processes[0].killable, true);
+});
+
+test('queueMacAction validates switch toggles and pids, and drains cleanly', () => {
+  resetFleetStateForTest();
+  const q1 = queueMacAction({ type: 'toggle_switch', target: 'fleetd', state: 'off' });
+  assert.equal(q1.ok, true);
+  assert.equal(q1.action.target, 'fleetd');
+  assert.equal(q1.action.state, 'off');
+
+  const qBad = queueMacAction({ type: 'toggle_switch', target: 'unknown_service', state: 'on' });
+  assert.equal(qBad.ok, false);
+
+  const qKill = queueMacAction({ type: 'kill_pid', pid: 4321 });
+  assert.equal(qKill.ok, true);
+
+  const actions = drainMacActions();
+  assert.equal(actions.length, 2);
+  assert.equal(actions[0].target, 'fleetd');
+  assert.equal(actions[1].pid, 4321);
+
+  // Drained: subsequent call returns empty
+  assert.equal(drainMacActions().length, 0);
+});
+
+test('gateway serves /fleet/sw.js and /fleet/api/mac-action with auth', async () => {
+  resetFleetStateForTest();
+  const secret = 'gw-test-sec-999';
+  const handle = createGateway({ env: { FLEET_TEST_AUTH: '1', FLEET_TELEMETRY_SECRET: secret, TUI_GATEWAY_SECRET: secret } });
+  const server = http.createServer(handle);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. GET /fleet/sw.js returns Service Worker
+    const swRes = await fetch(`${base}/fleet/sw.js`);
+    assert.equal(swRes.status, 200);
+    assert.equal(swRes.headers.get('service-worker-allowed'), '/');
+    const swBody = await swRes.text();
+    assert.ok(swBody.includes('ht-fleet-offline-v1'));
+
+    // 2. POST /fleet/api/mac-action queues action
+    const actRes = await fetch(`${base}/fleet/api/mac-action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'toggle_switch', target: 'fleetd', state: 'off' }),
+    });
+    assert.equal(actRes.status, 200);
+    const actData = await actRes.json();
+    assert.equal(actData.ok, true);
+    assert.equal(actData.action.target, 'fleetd');
+
+    // 3. POST /fleet/api/snapshot returns pending actions to reporter
+    const snapRes = await fetch(`${base}/fleet/api/snapshot`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-telemetry-secret': secret },
+      body: JSON.stringify({
+        status: SNAPSHOT_FIXTURE,
+        mac: { hostname: 'my-mac', switches: [{ id: 'fleetd', on: true }] },
+      }),
+    });
+    assert.equal(snapRes.status, 200);
+    const snapData = await snapRes.json();
+    assert.equal(snapData.ok, true);
+    assert.equal(snapData.pendingActions.length, 1);
+    assert.equal(snapData.pendingActions[0].target, 'fleetd');
+  } finally {
+    server.closeAllConnections?.();
+    server.close();
+  }
 });

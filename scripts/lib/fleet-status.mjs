@@ -258,6 +258,395 @@ export function recordFleetHeartbeat(data, { now = Date.now() } = {}) {
   return { ok: true, node: record };
 }
 
+// ---- Live fleet snapshot ----------------------------------------------------
+// The machine that runs the local fleet dashboard (`fleet-status.py --serve`)
+// owns the authoritative location/tool/model/status/task/allowance rows. The
+// deployed gateway cannot reach that loopback server, so the reporter pushes
+// the dashboard's own status.json here and every Fleet client reads one shape.
+export const FLEET_SNAPSHOT_STALE_MS = 90 * 1000;
+export const MAC_REPORTER_OFFLINE_SEC = 20;
+
+let fleetSnapshotCache = { at: 0, data: null };
+let macPendingActions = [];
+
+export function normalizeMacTelemetry(mac) {
+  if (!mac || typeof mac !== 'object') return null;
+  const switches = Array.isArray(mac.switches)
+    ? mac.switches
+        .filter((s) => s && typeof s === 'object')
+        .map((s) => ({
+          id: snapshotText(s.id || '', 60),
+          label: snapshotText(s.label || s.id || '', 120),
+          on: Boolean(s.on),
+          detail: snapshotText(s.detail || '', 200),
+          toggleable: s.toggleable !== false,
+        }))
+    : [];
+  const res = mac.resources && typeof mac.resources === 'object' ? mac.resources : {};
+  const mem = res.memory && typeof res.memory === 'object' ? res.memory : {};
+  const disk = res.disk && typeof res.disk === 'object' ? res.disk : {};
+  const loadAvg = Array.isArray(res.loadAvg) ? res.loadAvg.slice(0, 3).map((n) => Number(n) || 0) : [];
+  const processes = Array.isArray(mac.processes)
+    ? mac.processes
+        .filter((p) => p && typeof p === 'object' && Number.isInteger(Number(p.pid)))
+        .slice(0, 25)
+        .map((p) => ({
+          pid: Number(p.pid),
+          name: snapshotText(p.name || '', 80),
+          command: snapshotText(p.command || p.name || '', 220),
+          cpuPct: Number(p.cpuPct) || 0,
+          memPct: Number(p.memPct) || 0,
+          rssMb: Number(p.rssMb) || 0,
+          killable: p.killable !== false,
+        }))
+    : [];
+
+  return {
+    hostname: snapshotText(mac.hostname || 'Mac', 80),
+    collectedAt: snapshotText(mac.collectedAt || '', 60),
+    reporterOnline: mac.reporterOnline !== false,
+    switches,
+    resources: {
+      cpuCount: Number(res.cpuCount) || 0,
+      loadAvg,
+      memory: {
+        totalGb: Number(mem.totalGb) || 0,
+        usedGb: Number(mem.usedGb) || 0,
+        wiredGb: Number(mem.wiredGb) || 0,
+        compressedGb: Number(mem.compressedGb) || 0,
+        freeGb: Number(mem.freeGb) || 0,
+        usedPct: Number(mem.usedPct) || 0,
+        swapUsedMb: Number(mem.swapUsedMb) || 0,
+      },
+      disk: {
+        totalGib: Number(disk.totalGib) || 0,
+        usedGib: Number(disk.usedGib) || 0,
+        availGib: Number(disk.availGib) || 0,
+        usedPct: Number(disk.usedPct) || 0,
+      },
+    },
+    processes,
+    lastActionResult: mac.lastActionResult && typeof mac.lastActionResult === 'object'
+      ? {
+          id: snapshotText(mac.lastActionResult.id || '', 60),
+          ok: Boolean(mac.lastActionResult.ok),
+          message: snapshotText(mac.lastActionResult.message || '', 220),
+          at: snapshotText(mac.lastActionResult.at || '', 60),
+        }
+      : null,
+  };
+}
+
+export function queueMacAction(action, { now = Date.now() } = {}) {
+  if (!action || typeof action !== 'object') return { ok: false, error: 'invalid action' };
+  const type = String(action.type || '').trim();
+  if (type !== 'toggle_switch' && type !== 'kill_pid') {
+    return { ok: false, error: 'unsupported action type' };
+  }
+  if (type === 'toggle_switch') {
+    const target = String(action.target || '').trim();
+    const allowed = new Set(['fleetd', 'fleet_snapshot', 'fleet_status_srv', 'sage_sync', 'http_servers']);
+    if (!allowed.has(target)) return { ok: false, error: `unknown switch: ${target}` };
+    const state = String(action.state || '').trim().toLowerCase();
+    if (state !== 'on' && state !== 'off') return { ok: false, error: 'state must be on or off' };
+    const item = {
+      id: `act-${now}-${Math.random().toString(36).slice(2, 7)}`,
+      type,
+      target,
+      state,
+      requestedAt: new Date(now).toISOString(),
+    };
+    macPendingActions.push(item);
+    if (macPendingActions.length > 20) macPendingActions = macPendingActions.slice(-20);
+    return { ok: true, action: item, pending: macPendingActions.length };
+  }
+  const pid = Number(action.pid);
+  if (!Number.isInteger(pid) || pid <= 100) {
+    return { ok: false, error: 'invalid pid' };
+  }
+  const item = {
+    id: `act-${now}-${Math.random().toString(36).slice(2, 7)}`,
+    type,
+    pid,
+    requestedAt: new Date(now).toISOString(),
+  };
+  macPendingActions.push(item);
+  if (macPendingActions.length > 20) macPendingActions = macPendingActions.slice(-20);
+  return { ok: true, action: item, pending: macPendingActions.length };
+}
+
+export function drainMacActions() {
+  const out = macPendingActions.slice();
+  macPendingActions = [];
+  return out;
+}
+
+export function getPendingMacActions() {
+  return macPendingActions.slice();
+}
+
+const SNAPSHOT_STATUS = new Map([
+  ['working', 'working'],
+  ['running', 'working'],
+  ['busy', 'working'],
+  ['available', 'available'],
+  ['avail', 'available'],
+  ['idle', 'available'],
+  ['depleted', 'depleted'],
+  ['down', 'down'],
+  ['disconnected', 'down'],
+  ['unreachable', 'down'],
+  ['offline', 'down'],
+  ['disabled', 'disabled'],
+  ['stale', 'stale'],
+  ['error', 'error'],
+  ['failed', 'error'],
+]);
+
+function snapshotText(value, max = 240) {
+  const s = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+export function snapshotStatus(raw) {
+  return SNAPSHOT_STATUS.get(String(raw ?? '').trim().toLowerCase()) || 'idle';
+}
+
+/** The thread title a channel card embeds as `thread <title>` (not `thread state 3m`). */
+export function snapshotThreadTitle(detail) {
+  const m = String(detail || '').match(/\bthread (?!state\b)([^·]+)/i);
+  return m ? snapshotText(m[1], 180) : '';
+}
+
+function snapshotAgentFor(row, agents) {
+  const id = String(row?.id || '').toLowerCase();
+  const short = id.slice(0, 8);
+  const threadId = /^[0-9a-f]{8}-/.test(id);
+  const tool = String(row?.tool || '').toLowerCase();
+  const model = String(row?.model_name || row?.model || '').toLowerCase();
+  return (Array.isArray(agents) ? agents : []).find((a) => {
+    if (threadId && short && String(a?.agent || '').toLowerCase().includes(short)) return true;
+    if (!tool || String(a?.tool || '').toLowerCase() !== tool) return false;
+    if (model && String(a?.model_name || '').toLowerCase() === model) return true;
+    return false;
+  }) || null;
+}
+
+/**
+ * The current task for one resource. Channel cards only carry prose, so this
+ * reads the richer fields the same document already publishes: the thread
+ * title in `detail`, the per-thread `agents[].now`, and the lane probes.
+ * A blank task is honest; never a process command pretending to be work.
+ */
+export function snapshotTask(row, agents, lanes) {
+  if (row?.task) return snapshotText(row.task, 180);
+  const tool = String(row?.tool || '').toLowerCase();
+  const title = snapshotThreadTitle(row?.detail);
+  const agent = snapshotAgentFor(row, agents);
+  const lane = (name) => (lanes && typeof lanes === 'object' ? lanes[name] || {} : {});
+
+  if (tool === 'freebuff') {
+    if (title) return title;
+    const now = snapshotText(agent?.now, 180);
+    if (now && now !== '-' && !/pm-wait\.py|not dispatched by tracker/i.test(now)) return now;
+  }
+  if (tool === 'cmd') {
+    const m = String(agent?.last || '').match(/last assistant:\s*(.+)$/i);
+    if (m) return snapshotText(m[1], 180);
+  }
+  if (tool === 'opencode/cline') {
+    const moc = lane('mac_opencode');
+    const active = snapshotText(moc.active_task || agent?.now, 180);
+    // The Cline hub daemon is the process, not the task it is doing.
+    if (active && /\.cline\b/i.test(active)) return 'Cline hub daemon';
+    if (active && active !== '-') return active;
+    const tail = snapshotText(moc.last_log_tail || agent?.last, 180);
+    if (tail && tail !== '-' && !/\[exit\]/i.test(tail)) return tail;
+  }
+  if (tool === 'opencode') {
+    const voc = lane('vps_opencode');
+    if (voc.last_text) return snapshotText(voc.last_text, 180);
+  }
+  if (tool === 'colab' || tool === 'colab-gpu') {
+    const now = snapshotText(agent?.now, 180);
+    if (now && now !== '-') return now;
+    const col = lane('colab');
+    if (col.last_text) return snapshotText(col.last_text, 180);
+  }
+  if (tool === 'claude') {
+    const last = snapshotText(agent?.last, 180);
+    if (last && last !== '-') return last === 'app open' ? 'Outside reviewer (app open)' : last;
+  }
+  const now = snapshotText(agent?.now, 180);
+  if (now && now !== '-') return now;
+  if (title) return title;
+  // Last resort: the card's first sentence is still the task it reports.
+  return snapshotText(String(row?.detail || '').split(' · ')[0], 180);
+}
+
+/** Freebuff rows share the daily allowance: what is left and when it renews. */
+export function snapshotAllowance(row, quota) {
+  const tool = String(row?.tool || '').toLowerCase();
+  if (tool !== 'freebuff') return { text: '—', renewAt: null, stale: false };
+  const q = quota && typeof quota === 'object' ? quota : {};
+  const weight = snapshotText(row?.weight || '', 12);
+  const free = weight === '0×' || weight === '0x' || weight === '0';
+  const remaining = q.remaining_h;
+  const left = remaining === null || remaining === undefined
+    ? 'unknown'
+    : `${Number(remaining).toFixed(1).replace(/\.0$/, '')} h left`;
+  return {
+    text: free ? `${weight || '0×'} free` : `${weight ? `${weight} · ` : ''}${left}`,
+    renewAt: q.resets_at || row?.resets_at || null,
+    stale: Boolean(q.stale),
+  };
+}
+
+function snapshotQuota(payload) {
+  const q = payload?.quota && typeof payload.quota === 'object' ? payload.quota : {};
+  return {
+    remaining_h: q.remaining_h ?? null,
+    as_of: q.as_of ?? null,
+    resets_at: q.resets_at ?? null,
+    resets_in: q.resets_in ?? null,
+    stale: Boolean(q.stale),
+  };
+}
+
+/**
+ * Normalise one dashboard status.json into the flat rows the Fleet table
+ * renders. Pure and tolerant: an unknown channel/status still becomes a row,
+ * so one new tool on the Mac shows up without a deploy.
+ */
+export function normalizeFleetSnapshot(payload, { now = Date.now() } = {}) {
+  if (!payload || typeof payload !== 'object') return null;
+  const channels = Array.isArray(payload.channels) ? payload.channels : null;
+  if (!channels) return null;
+  const agents = Array.isArray(payload.agents) ? payload.agents : [];
+  const lanes = payload.lanes && typeof payload.lanes === 'object' ? payload.lanes : {};
+  const quota = snapshotQuota(payload);
+  const receivedAt = new Date(now).toISOString();
+  const rows = [];
+  const channelRows = [];
+
+  for (const channel of channels) {
+    if (!channel || typeof channel !== 'object') continue;
+    const location = snapshotText(channel.name || channel.channel || 'Unknown', 80);
+    const resources = Array.isArray(channel.resources) ? channel.resources : [];
+    channelRows.push({
+      name: location,
+      host: snapshotText(channel.host || '', 180),
+      counts: channel.counts && typeof channel.counts === 'object' ? { ...channel.counts } : {},
+      resources: resources.length,
+    });
+    for (const row of resources) {
+      if (!row || typeof row !== 'object') continue;
+      const status = snapshotStatus(row.state);
+      rows.push({
+        id: snapshotText(row.id || '', 120),
+        location,
+        tool: snapshotText(row.tool || '—', 40),
+        model: snapshotText(row.model_name || row.model || '—', 120),
+        modelId: snapshotText(row.model || '', 120),
+        status,
+        task: snapshotTask(row, agents, lanes),
+        allowance: snapshotAllowance(row, quota),
+        weight: snapshotText(row.weight || '', 12),
+        role: snapshotText(row.role || 'worker', 20),
+        enabled: row.enabled !== false,
+        source: snapshotText(row.source || '', 40),
+        age: snapshotText(row.age || '', 20),
+        detail: snapshotText(row.detail || '', 440),
+        updatedAt: receivedAt,
+      });
+    }
+  }
+
+  return {
+    project: snapshotText(payload.project || '', 120),
+    reportedAt: snapshotText(payload.updated || '', 80),
+    receivedAt,
+    channels: channelRows,
+    rows,
+    quota,
+    allowance: payload.allowance && typeof payload.allowance === 'object'
+      ? {
+          remaining: payload.allowance.remaining ?? null,
+          total: payload.allowance.total ?? null,
+          burn: payload.allowance.burn ?? 0,
+          projected: payload.allowance.projected ?? null,
+          as_of: payload.allowance.as_of ?? null,
+          stale: Boolean(payload.allowance.stale),
+        }
+      : null,
+    warnings: (Array.isArray(payload.warnings_all) ? payload.warnings_all : (Array.isArray(payload.warnings) ? payload.warnings : []))
+      .slice(0, 12)
+      .map((w) => snapshotText(w, 240)),
+    mac: normalizeMacTelemetry(payload.mac),
+  };
+}
+
+/** Store the newest pushed snapshot. Returns the normalised payload handed to clients. */
+export function recordFleetSnapshot(payload, { now = Date.now(), persistPath = '' } = {}) {
+  const data = normalizeFleetSnapshot(payload, { now });
+  if (!data) return { ok: false, error: 'invalid snapshot: channels[] required' };
+  fleetSnapshotCache = { at: now, data };
+  if (persistPath) {
+    try {
+      fs.mkdirSync(path.dirname(persistPath), { recursive: true });
+      fs.writeFileSync(persistPath, JSON.stringify(fleetSnapshotCache), 'utf8');
+    } catch {
+      // Best-effort offline cache on disk
+    }
+  }
+  return { ok: true, snapshot: withSnapshotAge(data, now) };
+}
+
+function withSnapshotAge(data, now) {
+  const ageMs = Math.max(0, now - fleetSnapshotCache.at);
+  const ageSec = Math.round(ageMs / 1000);
+  const stale = ageMs > FLEET_SNAPSHOT_STALE_MS;
+  let mac = data.mac ? { ...data.mac } : null;
+  if (mac) {
+    const reporterOnline = ageSec <= MAC_REPORTER_OFFLINE_SEC && mac.reporterOnline !== false;
+    mac.reporterOnline = reporterOnline;
+    if (Array.isArray(mac.switches)) {
+      mac.switches = mac.switches.map((sw) => {
+        if (sw.id === 'fleet_snapshot' && !reporterOnline) {
+          return {
+            ...sw,
+            on: false,
+            detail: sw.on === false && sw.detail ? sw.detail : `Stopped / offline (last push ${ageSec}s ago)`,
+          };
+        }
+        return sw;
+      });
+    }
+  }
+  return {
+    ...data,
+    mac,
+    ageSec,
+    stale,
+  };
+}
+
+/** The newest pushed snapshot, aged at read time; null before the first push. */
+export function getFleetSnapshot({ now = Date.now(), persistPath = '' } = {}) {
+  if (!fleetSnapshotCache.data && persistPath) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(persistPath, 'utf8'));
+      if (raw && typeof raw.at === 'number' && raw.data && Array.isArray(raw.data.rows)) {
+        fleetSnapshotCache = { at: raw.at, data: raw.data };
+      }
+    } catch {
+      // Ignore missing or unreadable disk cache
+    }
+  }
+  if (!fleetSnapshotCache.data) return null;
+  return withSnapshotAge(fleetSnapshotCache.data, now);
+}
+
 /** Explicit mapping table: one pane per ticket, no loose substring overlap. */
 export const LOCATION_OWNER_KEYS = {
   'mac': ['mac', 'darwin'],
@@ -976,4 +1365,6 @@ export function formatFleetStatusTable(rows, { chatId, via } = {}) {
 export function resetFleetState() {
   fleetTicketsCache = { cachedAt: 0, rows: [] };
   fleetNodeHeartbeats.clear();
+  fleetSnapshotCache = { at: 0, data: null };
+  macPendingActions = [];
 }
