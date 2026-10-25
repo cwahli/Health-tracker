@@ -1,11 +1,11 @@
-# Work queue (generated 2026-10-24T10:15:38Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
+# Work queue (generated 2026-10-25T10:41:13Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
 
 ## Ready to merge (4)
 
-- #781 `agent/meal-qa-queue` — chore(meal-qa): snapshot pending loop queue (5 requests + state, 2026-10-08/09) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 175)
-- #804 `agent/attach-visible` — fix(picker): attached sessions never hide, like the session in use (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 56)
-- #850 `agent/fleet-live-table` — feat(fleet): live fleet table in the mini-app (owner: DeepSeek V4.1 Flash Free (none) Mac; behind main: 5)
-- #855 `agent/voice-live` — docs(voice): add VOICE-LIVE-1 roadmap and spec for Gemini 3.8 Live WebSocket (owner: Gemini 3.1 Pro (high) Mac; behind main: 33)
+- #781 `agent/meal-qa-queue` — chore(meal-qa): snapshot pending loop queue (5 requests + state, 2026-10-08/09) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 176)
+- #804 `agent/attach-visible` — fix(picker): attached sessions never hide, like the session in use (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 57)
+- #850 `agent/fleet-live-table` — feat(fleet): live fleet table in the mini-app (owner: DeepSeek V4.1 Flash Free (none) Mac; behind main: 6)
+- #855 `agent/voice-live` — docs(voice): add VOICE-LIVE-1 roadmap and spec for Gemini 3.8 Live WebSocket (owner: Gemini 3.1 Pro (high) Mac; behind main: 34)
 
 ## In flight (0)
 
