@@ -101,10 +101,35 @@ export function normalizeLiveVoice(input: unknown): LiveVoicePersona {
     : DEFAULT_VOICE;
 }
 
+export const LIVE_SUPPORTED_LANGUAGES = {
+  'en-US': 'English',
+  'id-ID': 'Indonesian (Bahasa Indonesia)',
+  'fr-FR': 'French (Francais)',
+  'cmn-CN': 'Mandarin Chinese',
+} as const;
+export type LiveLanguageCode = keyof typeof LIVE_SUPPORTED_LANGUAGES;
+const LIVE_LANGUAGE_ALIASES: Record<string, LiveLanguageCode> = {
+  en: 'en-US',
+  'en-us': 'en-US',
+  'en-gb': 'en-US',
+  id: 'id-ID',
+  'id-id': 'id-ID',
+  in: 'id-ID',
+  fr: 'fr-FR',
+  'fr-fr': 'fr-FR',
+  'fr-ca': 'fr-FR',
+  zh: 'cmn-CN',
+  'zh-cn': 'cmn-CN',
+  'zh-hans': 'cmn-CN',
+  'zh-hant': 'cmn-CN',
+  'cmn-cn': 'cmn-CN',
+  'cmn-hans-cn': 'cmn-CN',
+};
+
 export function normalizeLiveLanguage(input: unknown): string | undefined {
   if (typeof input !== 'string') return undefined;
-  const code = input.trim().slice(0, 12);
-  return /^[A-Za-z]{2}(-[A-Za-z]{2,4})?$/.test(code) ? code : undefined;
+  const key = input.trim().slice(0, 12).toLowerCase();
+  return LIVE_LANGUAGE_ALIASES[key];
 }
 
 export function buildLiveSystemInstruction(opts: {
@@ -112,9 +137,9 @@ export function buildLiveSystemInstruction(opts: {
   language?: string;
   recentMeals?: any[];
 }): string {
-  const language = typeof opts.language === 'string' && opts.language
-    ? opts.language
-    : (opts.profile?.language || 'en');
+  const languageCode = normalizeLiveLanguage(opts.language ?? opts.profile?.language) || 'en-US';
+  const languageName =
+    LIVE_SUPPORTED_LANGUAGES[languageCode as LiveLanguageCode] || 'English';
   let profileJson = '{}';
   try {
     profileJson = JSON.stringify(opts.profile || {}).slice(0, 1500);
@@ -126,7 +151,8 @@ export function buildLiveSystemInstruction(opts: {
   } catch { /* keep [] */ }
   return [
     'You are the Health Tracker voice receptionist: a warm, terse spoken assistant.',
-    `Reply in the user's language (${language}). HARD BREVITY RULE: every spoken reply is 1-2 short sentences, max ~30 words, no exceptions unless the user explicitly says "tell me more" or "explain". Answer first, omit background, never monologue, never list more than 2 items aloud. Acknowledge briefly, then stop and listen.`,
+    `RESPOND IN ${languageName}. YOU MUST RESPOND UNMISTAKABLY IN ${languageName} (${languageCode}). HARD BREVITY RULE: every spoken reply is 1-2 short sentences, max ~30 words, no exceptions unless the user explicitly says "tell me more" or "explain". Answer first, omit background, never monologue, never list more than 2 items aloud. Acknowledge briefly, then stop and listen.`,
+    'You ONLY speak these 4 languages: English (en-US), Indonesian / Bahasa Indonesia (id-ID), French (fr-FR), Mandarin Chinese (cmn-CN). NEVER reply in Spanish or any other language. If you hear another language, answer in ' + languageName + ' and briefly note you support only those four.',
     'You hear the user via speech recognition — you are accurate on medical biomarkers (HbA1c, ApoB, triglycerides, blood pressure) and food terms with weights (e.g. "150g tempeh").',
     'Use tools instead of asking twice: update_profile when the user states age, gender, height, weight, or goals; navigate_tab to move them around the app; handoff_specialist to route clinical or meal-analysis work; log_meal to capture a food they report.',
     `Known user profile: ${profileJson}`,
@@ -228,7 +254,7 @@ async function openLiveSession(args: {
       },
       systemInstruction: args.systemInstruction,
       tools: buildLiveTools(),
-      inputAudioTranscription: {},
+      inputAudioTranscription: args.languageCode ? { languageCodes: [args.languageCode] } : {},
       outputAudioTranscription: {},
       // Session resumption (plain handles only): when the server sends
       // sessionResumptionUpdate we store newHandle and hand it to the
@@ -487,7 +513,10 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
       : undefined;
     if (browserHandle) trace('client-resume-setup', { hasHandle: true });
     const voice = normalizeLiveVoice(setup.voice);
-    const languageCode = normalizeLiveLanguage(setup.language ?? setup.profile?.language);
+    // Allowlist only: en-US, id-ID, fr-FR, cmn-CN. Anything else (e.g.
+    // Spanish) falls back to en-US so the session can never drift into an
+    // unsupported language.
+    const languageCode = normalizeLiveLanguage(setup.language ?? setup.profile?.language) || 'en-US';
     liveCtx = { profile: setup.profile, recentMeals: setup.recentMeals };
     const systemInstruction = buildLiveSystemInstruction({
       profile: setup.profile,

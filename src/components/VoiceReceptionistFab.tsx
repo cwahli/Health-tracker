@@ -461,10 +461,12 @@ export default function VoiceReceptionistFab({
         ? 'Halo! Ini adalah contoh suara saya. Bagaimana menurut Anda?'
         : profile?.language === 'fr'
         ? 'Bonjour ! Voici un exemple de ma voix. Comment me trouvez-vous ?'
+        : profile?.language === 'zh'
+        ? '你好！这是我的声音示例。你觉得怎么样？'
         : 'Hello! This is how my voice sounds. I am ready to help you with your health and meals!';
     const utterance = new SpeechSynthesisUtterance(sampleText);
     const lang = profile?.language || 'en';
-    utterance.lang = lang === 'id' ? 'id-ID' : lang === 'fr' ? 'fr-FR' : 'en-GB';
+    utterance.lang = lang === 'id' ? 'id-ID' : lang === 'fr' ? 'fr-FR' : lang === 'zh' ? 'zh-CN' : 'en-GB';
     utterance.rate = speed;
     utterance.pitch = 1.0;
 
@@ -501,7 +503,7 @@ export default function VoiceReceptionistFab({
 
       const utterance = new SpeechSynthesisUtterance(cleanText);
       const lang = profile?.language || 'en';
-      utterance.lang = lang === 'id' ? 'id-ID' : lang === 'fr' ? 'fr-FR' : 'en-GB';
+      utterance.lang = lang === 'id' ? 'id-ID' : lang === 'fr' ? 'fr-FR' : lang === 'zh' ? 'zh-CN' : 'en-GB';
       utterance.rate = voiceSpeed;
       utterance.pitch = 1.0;
 
@@ -683,6 +685,8 @@ export default function VoiceReceptionistFab({
         ? 'id-ID'
         : profile?.language === 'fr'
         ? 'fr-FR'
+        : profile?.language === 'zh'
+        ? 'zh-CN'
         : (profile?.language === 'en' ? (deviceLang.startsWith('en') ? deviceLang : 'en-US') : deviceLang);
       recognition.lang = langCode;
 
