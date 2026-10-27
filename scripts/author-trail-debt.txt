@@ -92,3 +92,5 @@ a5e1b6ac  no Author/Agent trailer on main: [queue-sync] refresh WORK_QUEUE.md; a
 6c433c5b  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-10-21; recorded 2026-10-22
 2d5efab1  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-10-21; recorded 2026-10-22
 0ddc831c  thinking level is not a word (n/a and friends); authored 2026-10-21; recorded 2026-10-22
+e302982f  no Author/Agent trailer on main: bootstrap git identity; authored 2026-10-27; recorded 2026-10-27
+d9ddd11d  no Author/Agent trailer on main: feat(colab) idempotent bootstrap; authored 2026-10-27; recorded 2026-10-27
