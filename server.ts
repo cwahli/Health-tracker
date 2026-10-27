@@ -1317,6 +1317,7 @@ app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD");
   res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Session-ID, X-Requested-With, Accept, Origin");
+  res.header("Access-Control-Expose-Headers", "WWW-Authenticate, Content-Type, Authorization");
   res.header("Access-Control-Max-Age", "86400");
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);

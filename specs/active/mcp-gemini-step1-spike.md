@@ -13,6 +13,7 @@ allowed_files:
   - server_mcp.test.ts
   - plan/ROADMAP.md
   - AI_HANDOVER.md
+  - scripts/author-trail-debt.txt
 frozen_files:
   - agents/**
   - server_dish_finalize.ts

@@ -32,11 +32,13 @@ export function clearInMemoryMcpProfiles(): void {
   inMemoryMcpProfiles.clear();
 }
 
+const MCP_PATHS = ['/api/mcp', '/mcp'];
+
 /**
  * Authentication Middleware for MCP endpoints.
  * Emits 401 with RFC 9728 resource_metadata challenge if Bearer token is missing/invalid.
  */
-mcpRouter.use('/api/mcp', (req: Request, res: Response, next) => {
+mcpRouter.use(MCP_PATHS, (req: Request, res: Response, next) => {
   const authHeader = req.headers['authorization'];
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     const baseUrl = getBaseUrl(req);
@@ -153,9 +155,27 @@ const MCP_TOOLS = [
 ];
 
 // ---------------------------------------------------------------------------
-// MCP Protocol Handler: POST /api/mcp
+// MCP Protocol Handler: GET & POST /api/mcp and /mcp
 // ---------------------------------------------------------------------------
-mcpRouter.post('/api/mcp', async (req: Request, res: Response) => {
+mcpRouter.get(MCP_PATHS, (req: Request, res: Response) => {
+  if (req.headers.accept?.includes('text/event-stream')) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    if (typeof (res as any).flushHeaders === 'function') (res as any).flushHeaders();
+    res.write(`event: endpoint\ndata: ${getBaseUrl(req)}/api/mcp\n\n`);
+    return;
+  }
+  return res.json({
+    name: 'health-tracker-mcp',
+    version: '1.0.0',
+    protocolVersion: '2024-11-05',
+    transport: 'streamable-http',
+    status: 'ready'
+  });
+});
+
+mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
   const { jsonrpc, id, method, params } = req.body || {};
 
   if (jsonrpc !== '2.0') {
