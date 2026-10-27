@@ -96,6 +96,8 @@ import { medicalGeminiRouter } from './server_routes_medical_gemini.js';
 import { foodAnalyzeRouter } from './server_routes_food_analyze.js';
 import { scorecardRouter } from './server_routes_scorecard.js';
 import { whatsappRouter } from './server_whatsapp.js';
+import { mcpAuthRouter } from './server_routes_mcp_auth.js';
+import { mcpRouter } from './server_routes_mcp.js';
 import { setupGeminiLiveWebSocket } from './server_gemini_live_ws.js';
 
 export const BEVERAGE_RAW_PATTERN = /\b(beverage|drink|water|juice|beer|wine|soda|cola|tea|coffee|cappuccino|espresso|latte|mocha|macchiato|boba|smoothie|shake|milk|oat\s*milk|oatmilk|almond\s*milk|almondmilk|soy\s*milk|soymilk|coconut\s*milk|dairy|yogurt|fruit|melon|watermelon|apple|orange|banana|berry|berries|grape|citrus|salad|raw|fresh|broth|soup)\b/i;
@@ -1340,6 +1342,8 @@ app.use(medicalGeminiRouter);
 app.use(foodAnalyzeRouter);
 app.use(scorecardRouter);
 app.use(whatsappRouter);
+app.use(mcpAuthRouter);
+app.use(mcpRouter);
 
 // Nutrient table demo page
 app.get('/nutrient-table', (req, res) => {
