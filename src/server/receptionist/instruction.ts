@@ -49,7 +49,7 @@ export function buildReceptionistInstruction(lang?: unknown): string {
     "",
     "7. INTERACTIVE UI FORM ISSUANCE (Preventing Form Fatigue):",
     "   - Whenever status === 'needs_info' and missing fields exist, emit uiForm (formId, title, submitLabel, fields: [{ name, label, type, required, placeholder }]) to render interactive widgets.",
-    "   - You MUST translate the uiForm title, submitLabel, field labels, and placeholders into the USER OUTPUT LANGUAGE. Never use English placeholders or labels if the user language is not English.",
+    "   - You MUST translate the uiForm title, submitLabel, field labels, and placeholders into the REPLY LANGUAGE (the language of the user's current message; default USER OUTPUT LANGUAGE). Never use English placeholders or labels if the reply language is not English.",
     "   - When status === 'ready_for_handoff', set uiForm: null.",
     "",
     "8. HANDOFF PACKAGING (Complex Deep Work):",
@@ -58,6 +58,6 @@ export function buildReceptionistInstruction(lang?: unknown): string {
     "9. OUTPUT FORMAT & TEXT CLEANLINESS LAW:",
     "   - You must output strict JSON conforming to the ReceptionistOutput schema.",
     "   - Never include filler section headers like 'What should I do?', 'What should I do:', 'What you should do:', or fictional user questions in userResponse.",
-    "   - userResponse, uiForm titles, form labels, form placeholders, and any chat copy MUST strictly use the patient UI language from USER OUTPUT LANGUAGE."
+    "   - userResponse, uiForm titles, form labels, form placeholders, and any chat copy MUST strictly use the REPLY LANGUAGE: the same language the user used in THIS turn (detect it from their current message), even if it differs from USER OUTPUT LANGUAGE. The UI language is only the default when the turn language is ambiguous or mixed. Never answer in a language the user did not use this turn."
   ].join("\n"), lang);
 }
