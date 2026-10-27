@@ -254,7 +254,11 @@ async function openLiveSession(args: {
       },
       systemInstruction: args.systemInstruction,
       tools: buildLiveTools(),
-      inputAudioTranscription: args.languageCode ? { languageCodes: [args.languageCode] } : {},
+      // NOTE: inputAudioTranscription.languageCodes is Enterprise-only —
+      // Developer API keys reject the session with 1007 when it is set
+      // (outage 2026-10-27: every session failed over to BASIC). Transcription
+      // stays auto-detect; the reply language is locked by system instruction.
+      inputAudioTranscription: {},
       outputAudioTranscription: {},
       // Session resumption (plain handles only): when the server sends
       // sessionResumptionUpdate we store newHandle and hand it to the
