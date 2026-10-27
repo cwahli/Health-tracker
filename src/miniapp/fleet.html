@@ -16,7 +16,7 @@
   }
   .wrap { max-width: none; margin: 0; }
   h1 { color: #f8fafc; font-size: clamp(18px, 3.5vw, 24px); margin: 0; }
-  h2 { color: #93c5fd; font-size: clamp(15px, 3vw, 19px); margin: 24px var(--gutter) 8px;
+  h2 { color: #93c5fd; font-size: clamp(15px, 3vw, 19px); margin: 20px var(--gutter) 8px;
        border-bottom: 1px solid #334155; padding-bottom: 4px; }
   p { margin: 8px var(--gutter); font-size: 13px; color: #94a3b8; }
   a { color: #7dd3fc; text-decoration: none; }
@@ -28,7 +28,7 @@
   /* Sticky-header data grid: single table in scroll container */
   .sticky-table { margin: 0; }
   .st-scroll {
-    max-height: calc(100vh - 56px);
+    max-height: calc(100vh - 96px);
     overflow: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-y: contain; /* Prevents Telegram swipe-down dismiss */
@@ -60,17 +60,111 @@
   tbody tr.highlight td:first-child { background: #1e3a8a !important; }
 
   /* Status Badges */
-  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 9999px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 9999px; font-size: 11px; font-weight: 600; text-transform: uppercase; white-space: nowrap; }
   .badge-working { background: #065f46; color: #a7f3d0; border: 1px solid #059669; }
+  .badge-available { background: #1e40af; color: #bfdbfe; border: 1px solid #3b82f6; }
   .badge-waiting { background: #854d0e; color: #fef08a; border: 1px solid #ca8a04; }
+  .badge-depleted { background: #7c2d12; color: #fed7aa; border: 1px solid #ea580c; }
   .badge-stale   { background: #451a03; color: #fdba74; border: 1px solid #c2410c; }
   .badge-idle    { background: #334155; color: #cbd5e1; border: 1px solid #475569; }
+  .badge-disabled { background: #1f2937; color: #9ca3af; border: 1px solid #4b5563; }
   .badge-offline { background: #450a0a; color: #fecaca; border: 1px solid #dc2626; }
   .badge-active  { background: #1e40af; color: #bfdbfe; border: 1px solid #3b82f6; }
   .badge-multi   { background: #581c87; color: #e9d5ff; border: 1px solid #9333ea; font-size: 10px; padding: 1px 5px; border-radius: 4px; margin-left: 6px; }
   .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .badge-dot.pulse { animation: pulse 1.8s infinite; }
   @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.85); } }
+
+  /* Fleet summary strip & offline banner */
+  .fleet-summary { margin: 10px var(--gutter) 0; background: #1e293b; border: 1px solid #334155;
+                   border-radius: 8px; padding: 10px 12px; font-size: 12.5px; color: #cbd5e1; }
+  .fleet-summary b { color: #f8fafc; }
+  .fleet-summary .warn { color: #fdba74; }
+  .offline-banner {
+    display: none; margin: 8px var(--gutter) 0; padding: 8px 12px; border-radius: 8px;
+    background: #451a03; border: 1px solid #c2410c; color: #fed7aa; font-size: 12.5px;
+    align-items: center; justify-content: space-between; gap: 8px;
+  }
+  .offline-banner.visible { display: flex; }
+  .renew { color: #fbbf24; white-space: nowrap; }
+  .task-cell { min-width: 220px; max-width: 420px; color: #e2e8f0; }
+  .model-cell { min-width: 160px; }
+  .tool-cell { white-space: nowrap; }
+
+  /* Switch pill in masthead */
+  .switch-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600;
+    border: 1px solid #334155; background: #1e293b; color: #cbd5e1;
+    cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  .switch-pill:hover { background: #334155; }
+  .switch-pill.on { background: #064e3b; border-color: #059669; color: #a7f3d0; }
+  .switch-pill.partial { background: #451a03; border-color: #d97706; color: #fde68a; }
+  .switch-pill.off { background: #450a0a; border-color: #dc2626; color: #fecaca; }
+
+  /* Mac tab cards & controls */
+  .mac-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px; margin: 10px var(--gutter);
+  }
+  .mac-card {
+    background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px;
+  }
+  .mac-card-title { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #94a3b8; margin-bottom: 4px; }
+  .mac-card-val { font-size: 18px; font-weight: 700; color: #f8fafc; }
+  .mac-card-sub { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+  .meter { height: 6px; background: #0f172a; border-radius: 999px; overflow: hidden; margin-top: 6px; border: 1px solid #334155; }
+  .meter-fill { height: 100%; background: #3b82f6; border-radius: 999px; transition: width 0.25s; }
+  .meter-fill.warn { background: #f59e0b; }
+  .meter-fill.crit { background: #ef4444; }
+
+  .btn-act {
+    background: #1e293b; border: 1px solid #475569; color: #e2e8f0;
+    border-radius: 6px; padding: 4px 10px; font-size: 11.5px; font-weight: 600;
+    cursor: pointer; white-space: nowrap;
+  }
+  .btn-act:hover { background: #334155; }
+  .btn-act.btn-on { background: #065f46; border-color: #059669; color: #a7f3d0; }
+  .btn-act.btn-off { background: #7f1d1d; border-color: #dc2626; color: #fecaca; }
+  .btn-act:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Phones: six columns must fit the viewport, not hide Task/Allowance behind
+     a sideways swipe. Fixed layout + wrapping keeps every field on screen. */
+  @media (max-width: 720px) {
+    #table-fleet { table-layout: fixed; width: 100%; }
+    #table-fleet .col-location { width: 15%; }
+    #table-fleet .col-tool { width: 16%; }
+    #table-fleet .col-model { width: 17%; }
+    #table-fleet .col-status { width: 16%; }
+    #table-fleet .col-task { width: 20%; }
+    #table-fleet .col-allowance { width: 16%; }
+    #table-fleet th, #table-fleet td {
+      padding: 6px 5px; font-size: 11px; line-height: 1.35;
+      word-break: normal; overflow-wrap: break-word;
+    }
+    #table-fleet th { font-size: 9px; letter-spacing: 0; white-space: normal; }
+    #table-fleet th:first-child, #table-fleet td:first-child {
+      width: auto; min-width: 0; max-width: none;
+      position: static; box-shadow: none;
+    }
+    #table-fleet .task-cell { min-width: 0; max-width: none; }
+    #table-fleet .model-cell { min-width: 0; }
+    #table-fleet .tool-cell { white-space: normal; }
+    #table-fleet .tool-cell code { font-size: 9.5px; padding: 1px 3px; overflow-wrap: break-word; word-break: normal; }
+    #table-fleet .badge { font-size: 8px; padding: 1px 4px; }
+    #table-fleet .renew { white-space: normal; }
+    .tabbar .masthead { flex-wrap: wrap; }
+    .tabbar .tabs label { padding: 5px 9px; font-size: 11.5px; }
+  }
+
+  /* Long agent sentences must not turn one fleet row into half the screen. */
+  .task-clamp {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 
   /* Tab Navigation */
   .tabbar > input { position: absolute; opacity: 0; pointer-events: none; }
@@ -80,7 +174,7 @@
     background: #0f172a; padding: 8px var(--gutter); margin: 0;
     border-bottom: 1px solid #334155;
   }
-  .tabbar .masthead .title-group { display: flex; align-items: center; gap: 8px; }
+  .tabbar .masthead .title-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981; }
   .btn-refresh {
     background: #1e293b; border: 1px solid #334155; color: #93c5fd;
@@ -108,6 +202,8 @@
   #btabs-vw-1:checked ~ .masthead label[for="btabs-vw-1"] { background: #1d4ed8; color: #fff; border-color: #1e40af; }
   #btabs-vw-2:checked ~ .btabs-v-2 { display: block; }
   #btabs-vw-2:checked ~ .masthead label[for="btabs-vw-2"] { background: #1d4ed8; color: #fff; border-color: #1e40af; }
+  #btabs-vw-3:checked ~ .btabs-v-3 { display: block; }
+  #btabs-vw-3:checked ~ .masthead label[for="btabs-vw-3"] { background: #1d4ed8; color: #fff; border-color: #1e40af; }
 
   .clickable-row { cursor: pointer; }
   .clickable-row:hover td { background: #233554 !important; }
@@ -123,6 +219,7 @@
     <input type="radio" name="btabs" id="btabs-vw-0" checked>
     <input type="radio" name="btabs" id="btabs-vw-1">
     <input type="radio" name="btabs" id="btabs-vw-2">
+    <input type="radio" name="btabs" id="btabs-vw-3">
 
     <div class="masthead">
       <div class="title-group">
@@ -130,16 +227,55 @@
         <span class="live-dot" id="live-indicator" title="Connected"></span>
         <h1>Fleet</h1>
         <button id="btn-refresh" class="btn-refresh" title="Refresh state" aria-label="Refresh state">🔄</button>
+        <button id="mac-switch-pill" class="switch-pill" type="button" title="Jump to Mac switches &amp; resources">Mac: —</button>
       </div>
       <div class="tabs">
-        <label for="btabs-vw-0" id="tab-label-tickets">Tickets (<span id="count-tickets">0</span>)</label>
-        <label for="btabs-vw-1" id="tab-label-terms">Term (<span id="count-terms">0</span>)</label>
+        <label for="btabs-vw-0" id="tab-label-fleet">Fleet (<span id="count-fleet">0</span>)</label>
+        <label for="btabs-vw-1" id="tab-label-tickets">Tickets (<span id="count-tickets">0</span>)</label>
         <label for="btabs-vw-2" id="tab-label-bots">Bots (<span id="count-bots">0</span>)</label>
+        <label for="btabs-vw-3" id="tab-label-mac">Mac (<span id="count-mac">0</span>)</label>
       </div>
     </div>
 
-    <!-- VIEW 0: TICKETS -->
+    <div class="offline-banner" id="offline-banner">
+      <span id="offline-banner-text">Viewing offline cached snapshot.</span>
+      <button type="button" class="btn-act" onclick="window._retryOnline()">Retry now</button>
+    </div>
+
+    <!-- VIEW 0: LIVE FLEET -->
     <section class="view btabs-v-0">
+      <div class="fleet-summary" id="fleet-summary">Waiting for the live fleet snapshot…</div>
+      <div class="sticky-table">
+        <div class="st-scroll">
+          <table class="st-table" id="table-fleet">
+            <colgroup>
+              <col class="col-location">
+              <col class="col-tool">
+              <col class="col-model">
+              <col class="col-status">
+              <col class="col-task">
+              <col class="col-allowance">
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Location</th>
+                <th>Tool</th>
+                <th>Model</th>
+                <th>Status</th>
+                <th>Task</th>
+                <th>Allowance</th>
+              </tr>
+            </thead>
+            <tbody id="body-fleet">
+              <tr><td colspan="6" style="text-align:center;padding:24px;color:#94a3b8">Loading fleet…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 1: TICKETS -->
+    <section class="view btabs-v-1">
       <div class="sticky-table">
         <div class="st-scroll">
           <table class="st-table" id="table-tickets">
@@ -157,29 +293,6 @@
             </thead>
             <tbody id="body-tickets">
               <tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8">Loading tickets…</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- VIEW 1: TERMINALS / MULTI-LOCATION PANES -->
-    <section class="view btabs-v-1">
-      <div class="sticky-table">
-        <div class="st-scroll">
-          <table class="st-table" id="table-terms">
-            <thead>
-              <tr>
-                <th>Location</th>
-                <th>Agent / Model</th>
-                <th>Status</th>
-                <th>Current Task</th>
-                <th>Linked Ticket</th>
-                <th>Updated</th>
-              </tr>
-            </thead>
-            <tbody id="body-terms">
-              <tr><td colspan="6" style="text-align:center;padding:24px;color:#94a3b8">Loading terminal panes…</td></tr>
             </tbody>
           </table>
         </div>
@@ -207,11 +320,84 @@
         </div>
       </div>
     </section>
+
+    <!-- VIEW 3: MAC SWITCHES, MEMORY & CPU -->
+    <section class="view btabs-v-3">
+      <div class="fleet-summary" id="mac-summary">Checking Mac switches and system resources…</div>
+      <div class="mac-grid" id="mac-resources-grid">
+        <div class="mac-card">
+          <div class="mac-card-title">Processor / Load</div>
+          <div class="mac-card-val" id="mac-cpu-val">—</div>
+          <div class="meter"><div class="meter-fill" id="mac-cpu-bar" style="width:0%"></div></div>
+          <div class="mac-card-sub" id="mac-cpu-sub">Waiting for Mac snapshot…</div>
+        </div>
+        <div class="mac-card">
+          <div class="mac-card-title">Memory Usage</div>
+          <div class="mac-card-val" id="mac-mem-val">—</div>
+          <div class="meter"><div class="meter-fill" id="mac-mem-bar" style="width:0%"></div></div>
+          <div class="mac-card-sub" id="mac-mem-sub">Waiting for Mac snapshot…</div>
+        </div>
+        <div class="mac-card">
+          <div class="mac-card-title">Disk Space</div>
+          <div class="mac-card-val" id="mac-disk-val">—</div>
+          <div class="meter"><div class="meter-fill" id="mac-disk-bar" style="width:0%"></div></div>
+          <div class="mac-card-sub" id="mac-disk-sub">Waiting for Mac snapshot…</div>
+        </div>
+      </div>
+
+      <h2>Automation Switches (On / Off)</h2>
+      <div class="sticky-table">
+        <table class="st-table" id="table-mac-switches">
+          <thead>
+            <tr>
+              <th>Switch</th>
+              <th>State</th>
+              <th>Detail</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="body-mac-switches">
+            <tr><td colspan="4" style="text-align:center;padding:18px;color:#94a3b8">No Mac switch telemetry yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>Top Mac Processes (Memory &amp; CPU)</h2>
+      <div class="sticky-table">
+        <div class="st-scroll">
+          <table class="st-table" id="table-mac-procs">
+            <thead>
+              <tr>
+                <th>Process</th>
+                <th>PID</th>
+                <th>CPU %</th>
+                <th>Memory</th>
+                <th>MEM %</th>
+                <th>Command</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="body-mac-procs">
+              <tr><td colspan="7" style="text-align:center;padding:24px;color:#94a3b8">No Mac process list yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   </div>
 </div>
 
 <script>
 (function () {
+  var CACHE_KEY = 'ht_fleet_state_v1';
+
+  // 0. Register Service Worker so /fleet/app and /app/login?tab=fleet work offline
+  if ('serviceWorker' in navigator) {
+    try {
+      navigator.serviceWorker.register('/fleet/sw.js', { scope: '/' }).catch(function () {});
+    } catch (e) {}
+  }
+
   // 1. Telegram WebApp initialization
   if (window.Telegram && window.Telegram.WebApp) {
     try {
@@ -222,15 +408,67 @@
     } catch (e) {}
   }
 
-  var state = { tickets: [], terminals: [], bots: [] };
+  var state = { tickets: [], terminals: [], bots: [], fleet: null, cachedAt: null, offline: false };
+
+  function saveOfflineCache() {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        tickets: state.tickets,
+        terminals: state.terminals,
+        bots: state.bots,
+        fleet: state.fleet,
+        cachedAt: state.cachedAt || new Date().toISOString(),
+      }));
+    } catch (e) {}
+  }
+
+  function loadOfflineCache() {
+    try {
+      var raw = localStorage.getItem(CACHE_KEY);
+      if (!raw) return false;
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return false;
+      if (Array.isArray(parsed.tickets)) state.tickets = parsed.tickets;
+      if (Array.isArray(parsed.terminals)) state.terminals = parsed.terminals;
+      if (Array.isArray(parsed.bots)) state.bots = parsed.bots;
+      if (parsed.fleet) state.fleet = parsed.fleet;
+      state.cachedAt = parsed.cachedAt || null;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function updateOfflineBanner(isOffline, reason) {
+    state.offline = Boolean(isOffline);
+    var banner = document.getElementById('offline-banner');
+    var txt = document.getElementById('offline-banner-text');
+    if (!banner || !txt) return;
+    if (!isOffline) {
+      banner.classList.remove('visible');
+      return;
+    }
+    var when = state.cachedAt ? formatTimeAgo(state.cachedAt) : 'earlier';
+    txt.innerHTML = '<b>Offline mode</b> · ' + rawEsc(reason || 'Network unreachable') + ' · showing cached state from ' + when;
+    banner.classList.add('visible');
+  }
 
   function renderStatusBadge(status) {
     var s = (status || 'idle').toLowerCase();
-    if (s === 'working') return '<span class="badge badge-working"><span class="badge-dot pulse"></span>Working</span>';
-    if (s === 'waiting_prompt' || s === 'waiting') return '<span class="badge badge-waiting"><span class="badge-dot"></span>Waiting</span>';
+    if (s === 'working' || s === 'running' || s === 'busy' || s === 'on') {
+      return '<span class="badge badge-working"><span class="badge-dot pulse"></span>' + (s === 'on' ? 'ON' : 'Working') + '</span>';
+    }
+    if (s === 'available' || s === 'idle') {
+      return '<span class="badge badge-available"><span class="badge-dot"></span>Available</span>';
+    }
+    if (s === 'depleted') return '<span class="badge badge-depleted"><span class="badge-dot"></span>Depleted</span>';
+    if (s === 'down' || s === 'offline' || s === 'disconnected' || s === 'unreachable' || s === 'error' || s === 'off') {
+      return '<span class="badge badge-offline"><span class="badge-dot"></span>' + (s === 'off' ? 'OFF' : (s === 'error' ? 'Error' : 'Down')) + '</span>';
+    }
+    if (s === 'disabled') return '<span class="badge badge-disabled"><span class="badge-dot"></span>Disabled</span>';
     if (s === 'stale') return '<span class="badge badge-stale"><span class="badge-dot"></span>Stale</span>';
-    if (s === 'offline') return '<span class="badge badge-offline"><span class="badge-dot"></span>Offline</span>';
-    return '<span class="badge badge-idle"><span class="badge-dot"></span>Idle</span>';
+    if (s === 'waiting_prompt' || s === 'waiting') return '<span class="badge badge-waiting"><span class="badge-dot"></span>Waiting</span>';
+    return '<span class="badge badge-idle"><span class="badge-dot"></span>' + esc(s) + '</span>';
   }
 
   // Proof screenshots ride the same session the API calls already use: the
@@ -252,6 +490,334 @@
       .replace(/"/g, '&quot;');
   }
 
+  function rawEsc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function formatTimeAgo(isoString) {
+    if (!isoString) return '<span class="empty-cell">—</span>';
+    try {
+      var dt = new Date(isoString);
+      var now = new Date();
+      var diffMs = now - dt;
+      if (isNaN(diffMs) || diffMs < 0) diffMs = 0;
+      var mins = Math.floor(diffMs / 60000);
+      var timeStr = dt.toTimeString().slice(0, 5);
+      if (mins < 1) return timeStr + ' (now)';
+      if (mins < 60) return timeStr + ' (' + mins + 'm)';
+      var hrs = Math.floor(mins / 60);
+      return timeStr + ' (' + hrs + 'h)';
+    } catch (e) {
+      return esc(String(isoString).slice(11, 19));
+    }
+  }
+
+  /* Renew countdown is computed in the browser from the reset instant, so it
+     keeps counting between snapshots instead of freezing at push time. */
+  function renewText(iso) {
+    if (!iso) return '';
+    var at = Date.parse(iso);
+    if (isNaN(at)) return '';
+    var mins = Math.round((at - Date.now()) / 60000);
+    if (mins <= 0) return mins > -2 ? 'renewed' : 'renewal overdue';
+    if (mins < 60) return 'renew in ' + mins + 'm';
+    var h = Math.floor(mins / 60);
+    var m = mins % 60;
+    return 'renew in ' + h + 'h ' + (m < 10 ? '0' + m : m) + 'm';
+  }
+
+  function allowanceCell(row) {
+    var a = row.allowance;
+    if (!a || (!a.text && !a.renewAt)) return '<span class="empty-cell">—</span>';
+    var bits = [];
+    if (a.text && a.text !== '—') bits.push(rawEsc(a.text));
+    var renew = renewText(a.renewAt);
+    if (renew) bits.push('<span class="renew">' + rawEsc(renew) + '</span>');
+    if (a.stale) bits.push('<span class="badge badge-stale">stale</span>');
+    return bits.length ? bits.join(' · ') : '<span class="empty-cell">—</span>';
+  }
+
+  /* One flat row per live resource. The pushed snapshot is authoritative;
+     before the first push arrives, fall back to any per-node heartbeats so a
+     freshly booted gateway is not blank. */
+  function fleetRows() {
+    var snap = state.fleet;
+    if (snap && snap.rows && snap.rows.length) return snap.rows;
+    return (state.terminals || []).map(function (t) {
+      return {
+        location: t.location || '—',
+        tool: '—',
+        model: t.agent || '—',
+        status: t.status || 'idle',
+        task: t.task || '',
+        allowance: { text: '—', renewAt: null },
+        updatedAt: t.updatedAt,
+        source: 'heartbeat',
+      };
+    });
+  }
+
+  function renderFleet() {
+    var tb = document.getElementById('body-fleet');
+    if (!tb) return;
+    var rows = fleetRows();
+    if (!rows.length) {
+      tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#94a3b8">No live fleet data yet</td></tr>';
+      document.getElementById('count-fleet').textContent = '0';
+      renderFleetSummary();
+      return;
+    }
+    tb.innerHTML = rows.map(function (r) {
+      var task = r.task ? rawEsc(r.task) : '<span class="empty-cell">—</span>';
+      var tool = r.tool && r.tool !== '—' ? '<code>' + rawEsc(r.tool) + '</code>' : '<span class="empty-cell">—</span>';
+      var model = r.model && r.model !== '—' ? rawEsc(r.model) : '<span class="empty-cell">—</span>';
+      var title = r.detail ? ' title="' + rawEsc(r.detail) + '"' : '';
+      return '<tr>' +
+        '<td><strong>' + rawEsc(r.location) + '</strong></td>' +
+        '<td class="tool-cell">' + tool + '</td>' +
+        '<td class="model-cell">' + model + '</td>' +
+        '<td>' + renderStatusBadge(r.status) + '</td>' +
+        '<td class="task-cell"' + title + '><div class="task-clamp">' + task + '</div></td>' +
+        '<td>' + allowanceCell(r) + '</td>' +
+        '</tr>';
+    }).join('');
+    document.getElementById('count-fleet').textContent = String(rows.length);
+    renderFleetSummary();
+  }
+
+  function renderFleetSummary() {
+    var el = document.getElementById('fleet-summary');
+    if (!el) return;
+    var snap = state.fleet;
+    if (!snap) {
+      el.innerHTML = 'Waiting for the live fleet snapshot from the reporter…';
+      return;
+    }
+    var q = snap.quota || {};
+    var bits = [];
+    bits.push('<b>' + rawEsc(snap.project || 'Fleet') + '</b>');
+    bits.push(snap.stale
+      ? '<span class="badge badge-stale">snapshot stale</span>'
+      : '<span class="live-dot"></span> live');
+    bits.push(fleetRows().length + ' resource(s)');
+    if (q.remaining_h !== null && q.remaining_h !== undefined) {
+      bits.push('Freebuff <b>' + rawEsc(String(q.remaining_h)) + ' h</b> left');
+    }
+    var renew = renewText(q.resets_at);
+    if (renew) bits.push('<span class="renew">' + rawEsc(renew) + '</span>');
+    if (q.stale) bits.push('<span class="warn">allowance stale</span>');
+    bits.push('snapshot ' + rawEsc(String(snap.ageSec || 0)) + 's old');
+    el.innerHTML = bits.join(' · ');
+  }
+
+  function renderMac() {
+    var snap = state.fleet;
+    var mac = snap && snap.mac ? snap.mac : null;
+    var pill = document.getElementById('mac-switch-pill');
+    var sumEl = document.getElementById('mac-summary');
+    var swBody = document.getElementById('body-mac-switches');
+    var prBody = document.getElementById('body-mac-procs');
+    var countEl = document.getElementById('count-mac');
+
+    var snapStale = !snap || snap.stale || (snap.ageSec && snap.ageSec > 25);
+    var reporterOnline = Boolean(mac && mac.reporterOnline && !snapStale);
+    var switches = (mac && Array.isArray(mac.switches)) ? mac.switches : [];
+    var fleetdSw = null;
+    for (var i = 0; i < switches.length; i++) {
+      if (switches[i].id === 'fleetd') fleetdSw = switches[i];
+    }
+
+    if (pill) {
+      if (!mac) {
+        pill.className = 'switch-pill off';
+        pill.textContent = 'Mac: OFF';
+      } else if (!reporterOnline) {
+        pill.className = 'switch-pill off';
+        pill.textContent = 'Mac Reporter: OFF';
+      } else if (fleetdSw && fleetdSw.on) {
+        pill.className = 'switch-pill on';
+        pill.textContent = 'Mac: ON · Fleetd: ON';
+      } else {
+        pill.className = 'switch-pill partial';
+        pill.textContent = 'Mac: ON · Fleetd: OFF';
+      }
+    }
+
+    if (!mac) {
+      if (countEl) countEl.textContent = 'OFF';
+      if (sumEl) {
+        sumEl.innerHTML = '<b>Mac Reporter is OFF</b> (or no Mac telemetry pushed yet). ' +
+          'To turn on from Mac Terminal: <code>launchctl load ~/Library/LaunchAgents/co.health-tracker.fleet-snapshot.plist</code>';
+      }
+      return;
+    }
+
+    var procs = Array.isArray(mac.processes) ? mac.processes : [];
+    if (countEl) countEl.textContent = reporterOnline ? String(procs.length) : 'OFF';
+
+    // Summary strip
+    if (sumEl) {
+      var sBits = [];
+      sBits.push('<b>' + rawEsc(mac.hostname || 'Mac') + '</b>');
+      sBits.push(reporterOnline
+        ? '<span class="badge badge-working"><span class="badge-dot pulse"></span>Reporter ON</span>'
+        : '<span class="badge badge-offline"><span class="badge-dot"></span>Reporter OFF (' + rawEsc(String(snap ? snap.ageSec : '?')) + 's ago)</span>');
+      if (mac.lastActionResult && mac.lastActionResult.message) {
+        sBits.push('Last action: <code>' + rawEsc(mac.lastActionResult.message) + '</code>');
+      }
+      if (!reporterOnline) {
+        sBits.push('Resume on Mac: <code>launchctl load ~/Library/LaunchAgents/co.health-tracker.fleet-snapshot.plist</code>');
+      }
+      sumEl.innerHTML = sBits.join(' · ');
+    }
+
+    // Resource cards
+    var res = mac.resources || {};
+    var load = Array.isArray(res.loadAvg) ? res.loadAvg : [];
+    var cpuCount = res.cpuCount || 8;
+    var load1 = Number(load[0]) || 0;
+    var cpuPct = Math.min(100, Math.round((load1 / Math.max(1, cpuCount)) * 100));
+    var cpuValEl = document.getElementById('mac-cpu-val');
+    var cpuBarEl = document.getElementById('mac-cpu-bar');
+    var cpuSubEl = document.getElementById('mac-cpu-sub');
+    if (cpuValEl) cpuValEl.textContent = load.length ? load.join(' / ') : '—';
+    if (cpuBarEl) {
+      cpuBarEl.style.width = cpuPct + '%';
+      cpuBarEl.className = 'meter-fill' + (cpuPct > 85 ? ' crit' : (cpuPct > 60 ? ' warn' : ''));
+    }
+    if (cpuSubEl) cpuSubEl.textContent = cpuCount + ' cores · 1m / 5m / 15m load avg';
+
+    var mem = res.memory || {};
+    var memPct = Number(mem.usedPct) || 0;
+    var memValEl = document.getElementById('mac-mem-val');
+    var memBarEl = document.getElementById('mac-mem-bar');
+    var memSubEl = document.getElementById('mac-mem-sub');
+    if (memValEl) memValEl.textContent = (mem.usedGb || 0) + ' / ' + (mem.totalGb || 0) + ' GB (' + memPct + '%)';
+    if (memBarEl) {
+      memBarEl.style.width = Math.min(100, memPct) + '%';
+      memBarEl.className = 'meter-fill' + (memPct > 88 ? ' crit' : (memPct > 75 ? ' warn' : ''));
+    }
+    if (memSubEl) {
+      memSubEl.textContent = 'Wired ' + (mem.wiredGb || 0) + 'G · Compr ' + (mem.compressedGb || 0) +
+        'G · Free ' + (mem.freeGb || 0) + 'G · Swap ' + (mem.swapUsedMb || 0) + 'M';
+    }
+
+    var disk = res.disk || {};
+    var diskPct = Number(disk.usedPct) || 0;
+    var diskValEl = document.getElementById('mac-disk-val');
+    var diskBarEl = document.getElementById('mac-disk-bar');
+    var diskSubEl = document.getElementById('mac-disk-sub');
+    if (diskValEl) diskValEl.textContent = (disk.usedGib || 0) + ' / ' + (disk.totalGib || 0) + ' GiB (' + diskPct + '%)';
+    if (diskBarEl) {
+      diskBarEl.style.width = Math.min(100, diskPct) + '%';
+      diskBarEl.className = 'meter-fill' + (diskPct > 90 ? ' crit' : (diskPct > 75 ? ' warn' : ''));
+    }
+    if (diskSubEl) diskSubEl.textContent = (disk.availGib || 0) + ' GiB free on /dev/disk3s3s1';
+
+    // Switches table
+    if (swBody) {
+      if (!switches.length) {
+        swBody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:18px;color:#94a3b8">No switches reported</td></tr>';
+      } else {
+        swBody.innerHTML = switches.map(function (sw) {
+          var isOn = Boolean(sw.on) && (sw.id !== 'fleet_snapshot' || reporterOnline);
+          var badge = renderStatusBadge(isOn ? 'on' : 'off');
+          var nextState = isOn ? 'off' : 'on';
+          var btnLabel = sw.id === 'http_servers'
+            ? (isOn ? 'Kill Stale Servers' : 'Clean')
+            : (isOn ? 'Turn OFF' : 'Turn ON');
+          var btnClass = 'btn-act ' + (isOn ? 'btn-off' : 'btn-on');
+          var disabled = (!reporterOnline || !sw.toggleable || (sw.id === 'http_servers' && !isOn) || (sw.id === 'fleet_snapshot' && !isOn)) ? ' disabled' : '';
+          return '<tr>' +
+            '<td><strong>' + rawEsc(sw.label) + '</strong></td>' +
+            '<td>' + badge + '</td>' +
+            '<td>' + rawEsc(sw.detail || '—') + '</td>' +
+            '<td><button type="button" class="' + btnClass + '"' + disabled +
+              ' onclick="window._toggleMacSwitch(\'' + rawEsc(sw.id) + '\', \'' + nextState + '\')">' +
+              rawEsc(btnLabel) + '</button></td>' +
+            '</tr>';
+        }).join('');
+      }
+    }
+
+    // Processes table
+    if (prBody) {
+      if (!procs.length) {
+        prBody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:#94a3b8">No process data</td></tr>';
+      } else {
+        prBody.innerHTML = procs.map(function (p) {
+          var killBtn = (p.killable && reporterOnline)
+            ? '<button type="button" class="btn-act btn-off" onclick="window._killMacPid(' + Number(p.pid) + ', \'' + rawEsc(p.name).replace(/'/g, '') + '\')">Kill</button>'
+            : '<span class="empty-cell">protected</span>';
+          return '<tr>' +
+            '<td><strong>' + rawEsc(p.name) + '</strong></td>' +
+            '<td><code>' + rawEsc(String(p.pid)) + '</code></td>' +
+            '<td>' + rawEsc(String(p.cpuPct)) + '%</td>' +
+            '<td>' + rawEsc(String(p.rssMb)) + ' MB</td>' +
+            '<td>' + rawEsc(String(p.memPct)) + '%</td>' +
+            '<td><div class="task-clamp"><code>' + rawEsc(p.command) + '</code></div></td>' +
+            '<td>' + killBtn + '</td>' +
+            '</tr>';
+        }).join('');
+      }
+    }
+  }
+
+  function sendMacAction(payload, btnText) {
+    var sumEl = document.getElementById('mac-summary');
+    if (sumEl) {
+      sumEl.innerHTML = 'Sending to Mac: <b>' + rawEsc(btnText) + '</b> (applies on next 5s heartbeat)…';
+    }
+    fetch('/fleet/api/mac-action' + (location.search || ''), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (sumEl) {
+          sumEl.innerHTML = res.ok
+            ? 'Queued for Mac: <b>' + rawEsc(btnText) + '</b> — waiting for Mac confirmation…'
+            : '<span class="warn">Failed: ' + rawEsc(res.error || 'unknown error') + '</span>';
+        }
+        setTimeout(function () { fetchState(null, true); }, 2500);
+        setTimeout(function () { fetchState(null, true); }, 5500);
+      })
+      .catch(function (err) {
+        if (sumEl) {
+          sumEl.innerHTML = '<span class="warn">Offline — cannot reach gateway to send Mac action.</span>';
+        }
+      });
+  }
+
+  window._toggleMacSwitch = function (target, nextState) {
+    if (target === 'fleet_snapshot' && nextState === 'off') {
+      if (!confirm('Turn OFF the Mac Fleet Snapshot Reporter? You will need to run launchctl load on the Mac to turn it back on.')) return;
+    }
+    sendMacAction({ type: 'toggle_switch', target: target, state: nextState }, target + ' → ' + nextState.toUpperCase());
+  };
+
+  window._killMacPid = function (pid, name) {
+    if (!confirm('Kill Mac process ' + name + ' (PID ' + pid + ')?')) return;
+    sendMacAction({ type: 'kill_pid', pid: Number(pid) }, 'Kill ' + name + ' (PID ' + pid + ')');
+  };
+
+  window._retryOnline = function () {
+    fetchState(null, true);
+  };
+
+  var macPillBtn = document.getElementById('mac-switch-pill');
+  if (macPillBtn) {
+    macPillBtn.addEventListener('click', function () {
+      var r = document.getElementById('btabs-vw-3');
+      if (r) r.checked = true;
+    });
+  }
+
   function renderTickets() {
     var tb = document.getElementById('body-tickets');
     if (!tb) return;
@@ -261,10 +827,6 @@
     }
     var html = state.tickets.map(function (t) {
       var idStr = String(t.id || '').replace(/^#/, '');
-      // A Drive file id in the proof cell means "this is a screenshot": show the
-      // picture, not the link. The gateway streams the bytes (a Drive file is
-      // private, the browser cannot fetch it itself). Everything else — a
-      // folder link, a key, prose — stays the text it always was.
       var proofCell = t.proofFileId
         ? '<a href="' + esc(proofLink(t.proofFileId)) + '" target="_blank" rel="noopener">' +
             '<img src="' + esc(proofSrc(t.proofFileId)) + '" alt="completion proof screenshot" ' +
@@ -290,7 +852,7 @@
   function switchToTicket(ticketId) {
     if (!ticketId) return;
     var norm = String(ticketId).replace(/^#/, '').replace(/^card:/, '');
-    var radio = document.getElementById('btabs-vw-0');
+    var radio = document.getElementById('btabs-vw-1');
     if (radio) radio.checked = true;
     setTimeout(function () {
       var row = document.getElementById('ticket-row-' + norm);
@@ -300,52 +862,6 @@
         row.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }, 50);
-  }
-
-  function formatTimeAgo(isoString) {
-    if (!isoString) return '<span class="empty-cell">—</span>';
-    try {
-      var dt = new Date(isoString);
-      var now = new Date();
-      var diffMs = now - dt;
-      if (isNaN(diffMs) || diffMs < 0) diffMs = 0;
-      var mins = Math.floor(diffMs / 60000);
-      var timeStr = dt.toTimeString().slice(0, 5);
-      if (mins < 1) return timeStr + ' (now)';
-      if (mins < 60) return timeStr + ' (' + mins + 'm)';
-      var hrs = Math.floor(mins / 60);
-      return timeStr + ' (' + hrs + 'h)';
-    } catch (e) {
-      return esc(isoString.slice(11, 19));
-    }
-  }
-
-  function renderTerms() {
-    var tb = document.getElementById('body-terms');
-    if (!tb) return;
-    if (!state.terminals || !state.terminals.length) {
-      tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#94a3b8">No terminals found</td></tr>';
-      return;
-    }
-    var html = state.terminals.map(function (m) {
-      var tKey = m.ticketKey || '';
-      var firstKey = tKey.split(',')[0].trim();
-      var clickAttr = firstKey ? ' class="clickable-row" onclick="window._jumpTicket(\'' + esc(firstKey) + '\')"' : '';
-      var multiBadge = m.multiClaim ? ' <span class="badge-multi" title="Multiple tickets claim this pane">multi-claim</span>' : '';
-      var linkedLink = tKey
-        ? '<a href="javascript:void(0)" onclick="window._jumpTicket(\'' + esc(firstKey) + '\')">' + esc(tKey) + '</a>' + multiBadge
-        : '<span class="empty-cell">—</span>';
-      return '<tr' + clickAttr + '>' +
-        '<td><strong>' + esc(m.location) + '</strong></td>' +
-        '<td>' + esc(m.agent) + '</td>' +
-        '<td>' + renderStatusBadge(m.status) + '</td>' +
-        '<td>' + esc(m.task) + '</td>' +
-        '<td>' + linkedLink + '</td>' +
-        '<td>' + formatTimeAgo(m.updatedAt) + '</td>' +
-        '</tr>';
-    }).join('');
-    tb.innerHTML = html;
-    document.getElementById('count-terms').textContent = state.terminals.length;
   }
 
   function renderBots() {
@@ -373,14 +889,20 @@
 
   window._jumpTicket = switchToTicket;
 
-  function applyState(data) {
+  function applyState(data, fromCache) {
     if (!data) return;
     if (data.tickets) state.tickets = data.tickets;
     if (data.terminals) state.terminals = data.terminals;
     if (data.bots) state.bots = data.bots;
+    if (data.fleet !== undefined) state.fleet = data.fleet;
+    if (!fromCache) {
+      state.cachedAt = data.generatedAt || new Date().toISOString();
+      saveOfflineCache();
+    }
+    renderFleet();
     renderTickets();
-    renderTerms();
     renderBots();
+    renderMac();
   }
 
   function fetchState(cb, isRefresh) {
@@ -390,21 +912,47 @@
     }
     var url = '/fleet/api/state' + query;
     fetch(url, { headers: { 'Accept': 'application/json' } })
-      .then(function (res) { return res.json(); })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
       .then(function (data) {
         if (data.ok) {
-          applyState(data);
+          applyState(data, false);
+          updateOfflineBanner(false);
           var ind = document.getElementById('live-indicator');
-          if (ind) ind.style.background = '#10b981';
+          if (ind) {
+            ind.style.background = '#10b981';
+            ind.title = 'Connected';
+          }
         }
         if (typeof cb === 'function') cb();
       })
-      .catch(function () {
+      .catch(function (err) {
         var ind = document.getElementById('live-indicator');
-        if (ind) ind.style.background = '#ef4444';
+        if (ind) {
+          ind.style.background = '#ef4444';
+          ind.title = 'Offline — using cached snapshot';
+        }
+        updateOfflineBanner(true, navigator.onLine === false ? 'Browser is offline' : 'Gateway unreachable');
+        renderMac();
         if (typeof cb === 'function') cb();
       });
   }
+
+  // Hydrate immediately from localStorage so offline loads are instant
+  if (loadOfflineCache()) {
+    applyState(state, true);
+  }
+
+  window.addEventListener('offline', function () {
+    updateOfflineBanner(true, 'Browser is offline');
+    var ind = document.getElementById('live-indicator');
+    if (ind) ind.style.background = '#ef4444';
+  });
+  window.addEventListener('online', function () {
+    fetchState(null, true);
+  });
 
   // Hook manual refresh button
   var btnRef = document.getElementById('btn-refresh');
@@ -422,9 +970,7 @@
   // Initial fetch
   fetchState();
 
-  // SSE setup. The socket lives only while the page is visible: a hidden
-  // WebView holds no screen to update, and a dead socket that never closes
-  // is how terminals leak. Reconnect on return, then refresh once.
+  // SSE setup.
   var sse = null;
   function connectSse() {
     try { if (sse) sse.close(); } catch (e) {}
@@ -434,7 +980,22 @@
     try {
       sse = new EventSource('/fleet/api/events' + location.search);
       sse.addEventListener('state', function (e) {
-        try { applyState(JSON.parse(e.data)); } catch (err) {}
+        try {
+          applyState(JSON.parse(e.data), false);
+          updateOfflineBanner(false);
+        } catch (err) {}
+      });
+      sse.addEventListener('snapshot', function (e) {
+        try {
+          state.fleet = JSON.parse(e.data);
+          state.cachedAt = new Date().toISOString();
+          saveOfflineCache();
+          updateOfflineBanner(false);
+          renderFleet();
+          renderTickets();
+          renderBots();
+          renderMac();
+        } catch (err) {}
       });
       sse.addEventListener('heartbeat', function (e) {
         try {
@@ -461,7 +1022,7 @@
               updatedAt: beat.updatedAt,
             });
           }
-          renderTerms();
+          if (!state.fleet) renderFleet();
         } catch (err) {}
       });
       sse.onerror = function () {
@@ -480,10 +1041,18 @@
   });
   connectSse();
 
-  // Backup poll every 15s (only when page is visible)
+  // Backup poll every 10s (only when page is visible).
   setInterval(function () {
     if (document.visibilityState === 'visible') fetchState();
-  }, 15000);
+  }, 10000);
+
+  // Keep the renew countdown honest between pushes.
+  setInterval(function () {
+    if (document.visibilityState === 'visible' && state.fleet) {
+      renderFleet();
+      renderMac();
+    }
+  }, 30000);
 })();
 </script>
 <script>(function(){
