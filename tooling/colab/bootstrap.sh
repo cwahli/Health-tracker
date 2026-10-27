@@ -99,17 +99,20 @@ s_node() {
   v=$(node -v 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/')
   [ -n "$v" ] && [ "$v" -ge 20 ] && ok "installed node $(node -v)" || fail "node install failed"
 }
+sage_identity() { # repo-local author = cwah123 (Vercel Hobby blocks deploys of commits authored by anyone else)
+  q git -C "$1" config user.name cwah123; q git -C "$1" config user.email 260443071+cwah123@users.noreply.github.com
+}
 s_sage_clone() {
-  if [ -d "$SAGE_DIR/.git" ]; then ok "present $(git -C "$SAGE_DIR" rev-parse --short HEAD 2>/dev/null)"; return; fi
+  if [ -d "$SAGE_DIR/.git" ]; then sage_identity "$SAGE_DIR"; ok "present $(git -C "$SAGE_DIR" rev-parse --short HEAD 2>/dev/null)"; return; fi
   local url; url=$(sage_url)
   [ -n "$url" ] || { skip "no SAGE_REPO_URL/SAGE_GITHUB_TOKEN and no existing clone to copy the URL from"; return; }
-  q git clone "$url" "$SAGE_DIR" && ok "cloned $(git -C "$SAGE_DIR" rev-parse --short HEAD)" || fail "git clone failed"
+  q git clone "$url" "$SAGE_DIR" && sage_identity "$SAGE_DIR" && ok "cloned $(git -C "$SAGE_DIR" rev-parse --short HEAD)" || fail "git clone failed"
 }
 s_figma_clone() {
-  if [ -d "$FIGMA_DIR/.git" ]; then ok "present"; return; fi
+  if [ -d "$FIGMA_DIR/.git" ]; then sage_identity "$FIGMA_DIR"; ok "present"; return; fi
   local url; url=$(sage_url)
   [ -n "$url" ] || { skip "no SAGE_REPO_URL/SAGE_GITHUB_TOKEN to clone $FIGMA_DIR"; return; }
-  q git clone --filter=blob:none "$url" "$FIGMA_DIR" && ok "cloned" || fail "git clone failed"
+  q git clone --filter=blob:none "$url" "$FIGMA_DIR" && sage_identity "$FIGMA_DIR" && ok "cloned" || fail "git clone failed"
 }
 npm_dir() { # dir -> ensures deps installed
   local d="$1"
