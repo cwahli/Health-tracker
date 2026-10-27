@@ -132,14 +132,64 @@ export function normalizeLiveLanguage(input: unknown): string | undefined {
   return LIVE_LANGUAGE_ALIASES[key];
 }
 
+export type LivePage =
+  | 'signup' | 'login' | 'auth'
+  | 'home' | 'insights' | 'health' | 'food' | 'medical' | 'trends'
+  | 'unknown';
+
+export interface LivePageContext {
+  page: LivePage;
+  authState: 'logged-in' | 'logged-out';
+  authMode?: 'login' | 'signup';
+  profileEmpty: boolean;
+}
+
+const VALID_LIVE_PAGES: readonly string[] = [
+  'signup', 'login', 'auth',
+  'home', 'insights', 'health', 'food', 'medical', 'trends',
+];
+
+export function normalizeLivePageContext(raw: unknown, profile: unknown): LivePageContext {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as any;
+  const page = VALID_LIVE_PAGES.includes(r.page) ? r.page as LivePage : 'unknown';
+  const authMode = r.authMode === 'signup' ? 'signup' : r.authMode === 'login' ? 'login' : undefined;
+  const p = (profile && typeof profile === 'object' ? profile : {}) as any;
+  return {
+    page,
+    authState: profile ? 'logged-in' : 'logged-out',
+    ...(authMode ? { authMode } : {}),
+    profileEmpty: !(p.age || p.gender || p.heightCm || p.weightKg),
+  };
+}
+
 export function buildLiveSystemInstruction(opts: {
   profile?: any;
   language?: string;
   recentMeals?: any[];
+  pageContext?: LivePageContext | null;
 }): string {
   const languageCode = normalizeLiveLanguage(opts.language ?? opts.profile?.language) || 'en-US';
   const languageName =
     LIVE_SUPPORTED_LANGUAGES[languageCode as LiveLanguageCode] || 'English';
+  const pc = opts.pageContext || null;
+  const pageLines: string[] = [];
+  if (pc && (pc.page === 'signup' || pc.page === 'login' || pc.page === 'auth') && pc.authState === 'logged-out') {
+    const mode = pc.authMode === 'login' ? 'LOG IN' : 'SIGN UP';
+    pageLines.push(
+      `SITUATION, HIGHEST PRIORITY: the user is on the AUTH screen (${mode}) and has NO account. They cannot use the app yet. Your ONLY job is the account walkthrough, one question per turn: 1) display name, 2) email, 3) password, then tell them to tap ${mode === 'LOG IN' ? 'Log in' : 'Sign up'}. When they say register / daftar / daftar akun, they mean this login account, NOT health profile data. Ask NOTHING else — no age, height, weight, goals, or labs — until they confirm the account exists.`,
+    );
+  } else {
+    if (pc?.profileEmpty) {
+      pageLines.push(
+        'SITUATION, HIGHEST PRIORITY: their health profile is empty. Help them fill the basics conversationally — nickname, age, gender, height, weight, goal — before anything else. Do not assume any app history exists.',
+      );
+    }
+    if (pc && pc.page !== 'unknown' && pc.page !== 'auth') {
+      pageLines.push(
+        `Situation: they are on the ${pc.page} tab. Tailor help to it: food → meal logging, medical/insights → lab reports and readings, health → coaching plans, trends/home → recaps of logged data.`,
+      );
+    }
+  }
   let profileJson = '{}';
   try {
     profileJson = JSON.stringify(opts.profile || {}).slice(0, 1500);
@@ -149,13 +199,17 @@ export function buildLiveSystemInstruction(opts: {
     const meals = Array.isArray(opts.recentMeals) ? opts.recentMeals.slice(0, 5) : [];
     mealsJson = JSON.stringify(meals).slice(0, 1500);
   } catch { /* keep [] */ }
+  const onAuthScreen = !!pc && (pc.page === 'signup' || pc.page === 'login' || pc.page === 'auth') && pc.authState === 'logged-out';
   return [
     'You are the Health Tracker voice receptionist: a warm, terse spoken assistant.',
+    ...pageLines,
     `RESPOND IN ${languageName}. YOU MUST RESPOND UNMISTAKABLY IN ${languageName} (${languageCode}). HARD BREVITY RULE: every spoken reply is 1-2 short sentences, max ~30 words, no exceptions unless the user explicitly says "tell me more" or "explain". Answer first, omit background, never monologue, never list more than 2 items aloud. Acknowledge briefly, then stop and listen.`,
     'MIRROR THE USER NOW: speak the language the user is speaking in this turn — if they speak Indonesian, answer in Indonesian; if English, answer in English — even when that differs from the profile language above. The profile language is only the starting default for the first turn.',
     'You ONLY speak these 4 languages: English (en-US), Indonesian / Bahasa Indonesia (id-ID), French (fr-FR), Mandarin Chinese (cmn-CN). NEVER reply in Spanish or any other language. If you hear another language, answer in ' + languageName + ' and briefly note you support only those four.',
     'You hear the user via speech recognition — you are accurate on medical biomarkers (HbA1c, ApoB, triglycerides, blood pressure) and food terms with weights (e.g. "150g tempeh").',
-    'Use tools instead of asking twice: update_profile when the user states age, gender, height, weight, or goals; navigate_tab to move them around the app; handoff_specialist to route clinical or meal-analysis work; log_meal to capture a food they report.',
+    ...(onAuthScreen
+      ? ['You have no app tools on this screen — there is no profile, no tabs, and no meals to touch. Do everything in spoken words.']
+      : ['Use tools instead of asking twice: update_profile when the user states age, gender, height, weight, or goals; navigate_tab to move them around the app; handoff_specialist to route clinical or meal-analysis work; log_meal to capture a food they report.']),
     `Known user profile: ${profileJson}`,
     `Recent meals: ${mealsJson}`,
   ].join('\n');
@@ -164,7 +218,16 @@ export function buildLiveSystemInstruction(opts: {
 // Tool declarations the Live model may call mid-stream. The relay forwards
 // toolCall frames to the browser, which executes them against app state
 // (profile update, tab navigation) and returns toolResponse frames.
-export function buildLiveTools(): any[] {
+// Auth screens get NO tools: there is no profile, no tabs, and no meals
+// before login, and their presence primes profile-talk on the signup walk.
+export function buildLiveTools(pageContext?: LivePageContext | null): any[] {
+  if (
+    pageContext &&
+    (pageContext.page === 'signup' || pageContext.page === 'login' || pageContext.page === 'auth') &&
+    pageContext.authState === 'logged-out'
+  ) {
+    return [];
+  }
   return [
     {
       functionDeclarations: [
@@ -232,6 +295,7 @@ async function openLiveSession(args: {
   voice: LiveVoicePersona;
   languageCode?: string;
   systemInstruction: string;
+  pageContext?: LivePageContext | null;
   resumeHandle?: string;
   onmessage: (msg: LiveServerMessage) => void;
   onerror: (err: any) => void;
@@ -245,6 +309,7 @@ async function openLiveSession(args: {
       headers: { 'User-Agent': 'aistudio-build' },
     },
   });
+  const liveTools = buildLiveTools(args.pageContext || null);
   return ai.live.connect({
     model: args.model,
     config: {
@@ -254,7 +319,9 @@ async function openLiveSession(args: {
         ...(args.languageCode ? { languageCode: args.languageCode } : {}),
       },
       systemInstruction: args.systemInstruction,
-      tools: buildLiveTools(),
+      // Auth screens declare no tools (see buildLiveTools): omit the field
+      // entirely rather than sending an empty list.
+      ...(liveTools.length ? { tools: liveTools } : {}),
       // NOTE: inputAudioTranscription.languageCodes is Enterprise-only —
       // Developer API keys reject the session with 1007 when it is set
       // (outage 2026-10-27: every session failed over to BASIC). Transcription
@@ -523,10 +590,15 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
     // unsupported language.
     const languageCode = normalizeLiveLanguage(setup.language ?? setup.profile?.language) || 'en-US';
     liveCtx = { profile: setup.profile, recentMeals: setup.recentMeals };
+    const pageContext = normalizeLivePageContext(
+      { page: (setup as any).page, authMode: (setup as any).authMode },
+      setup.profile,
+    );
     const systemInstruction = buildLiveSystemInstruction({
       profile: setup.profile,
       language: setup.language,
       recentMeals: setup.recentMeals,
+      pageContext,
     });
     // Relay-owned Google session, transparent to the browser: if Google
     // drops mid-session, the relay re-opens with the resumption handle
@@ -547,6 +619,7 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
           voice,
           languageCode,
           systemInstruction,
+          pageContext,
           resumeHandle: opts?.handle,
           onmessage: forwardLiveMessage,
           onopen: () => trace('google-socket-open', { model }),
@@ -653,6 +726,7 @@ async function handleLiveConnection(clientRaw: unknown): Promise<void> {
       setupReceived = true;
       trace('setup', {
         voice: frame.voice, language: frame.language,
+        page: (frame as any).page, authMode: (frame as any).authMode,
         hasProfile: !!frame.profile,
         recentMeals: Array.isArray(frame.recentMeals) ? frame.recentMeals.length : 0,
         hasResumeHandle: typeof frame.resumeHandle === 'string' && frame.resumeHandle.length > 0,

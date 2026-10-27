@@ -35,6 +35,8 @@ export interface VoiceReceptionistFabProps {
   biomarkerHistory?: any[];
   activeTab: string;
   setActiveTab: (tab: any) => void;
+  /** Login vs signup mode of the auth screen (logged-out voice help). */
+  authMode?: 'login' | 'signup';
   onLogMeal?: () => void;
   onCompareMeal?: () => void;
   onOpenMedical?: () => void;
@@ -184,6 +186,7 @@ export default function VoiceReceptionistFab({
   biomarkerHistory = [],
   activeTab,
   setActiveTab,
+  authMode,
   onLogMeal,
   onCompareMeal,
   onOpenMedical,
@@ -1248,6 +1251,9 @@ export default function VoiceReceptionistFab({
         profile,
         language: profile?.language || 'en',
         voice: liveVoice,
+        page: profile ? activeTab : 'auth',
+        authState: profile ? 'logged-in' : 'logged-out',
+        authMode,
         recentMeals: recentMealsSummary,
       });
     } catch (err: any) {
@@ -1371,6 +1377,11 @@ export default function VoiceReceptionistFab({
           engine: 'gemini-3.5-flash-lite',
           existingMemory: memoryRef.current,
           specialistContainers: { activeTab },
+          pageContext: {
+            page: profile ? activeTab : 'auth',
+            authState: profile ? 'logged-in' : 'logged-out',
+            ...(authMode ? { authMode } : {}),
+          },
         }),
       });
 

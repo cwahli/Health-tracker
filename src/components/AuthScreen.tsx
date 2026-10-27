@@ -8,6 +8,8 @@ import { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectRes
 
 interface AuthScreenProps {
   onLogin: (profile: UserProfile) => void;
+  /** Reports login vs signup mode so the voice receptionist can help accordingly. */
+  onAuthModeChange?: (mode: 'login' | 'signup') => void;
 }
 
 const resolveUserDisplayName = (u: any, explicitNick?: string): string => {
@@ -27,7 +29,7 @@ const resolveUserDisplayName = (u: any, explicitNick?: string): string => {
   return chosen;
 };
 
-export default function AuthScreen({ onLogin }: AuthScreenProps) {
+export default function AuthScreen({ onLogin, onAuthModeChange }: AuthScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [nickname, setNickname] = useState('');
@@ -1043,7 +1045,11 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
               <button
                 id="auth-mode-switch-btn"
                 type="button"
-                onClick={() => setIsSignUp(!isSignUp)}
+                onClick={() => {
+                  const next = !isSignUp;
+                  setIsSignUp(next);
+                  try { onAuthModeChange?.(next ? 'signup' : 'login'); } catch {}
+                }}
                 className="text-xs text-theme-text-secondary hover:text-indigo-600 transition-colors"
               >
                 {isSignUp ? t.alreadyHaveAccount : t.dontHaveAccount}

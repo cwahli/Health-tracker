@@ -1243,6 +1243,7 @@ export default function AppModals(p: AppViewProps) {
             ) : null
           }>
             <ErrorBoundary>{isFrontDeskOpen && <LogChat type="front_desk"
+            activeTab={activeTab}
             jobId={activeFrontDeskJobId}
             onJobCreated={setActiveFrontDeskJobId}
             profile={profile}
