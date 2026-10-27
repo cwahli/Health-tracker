@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { enforceReadyHandoffContract, maybePromoteHandoff, synthesizeReadyHandoffPayload, formatReceptionistInput, compactUserMemory, extractDemographicsFromText, normalizeUiFormLanguage } from "./call_agent.js";
+import { enforceReadyHandoffContract, maybePromoteHandoff, synthesizeReadyHandoffPayload, formatReceptionistInput, compactUserMemory, extractDemographicsFromText, normalizeUiFormLanguage, detectTurnLanguage, resolveReplyLanguage, resolveInstructionLanguage } from "./call_agent.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UC02 = JSON.parse(
@@ -436,5 +436,61 @@ describe("FORM_LABEL_EN — model uiForm labels follow the form language", () =>
   it("leaves EN forms untouched", () => {
     const out = normalizeUiFormLanguage(modelForm, "en");
     expect(out.fields[0].label).toBe("Age");
+  });
+});
+
+describe("TURN_MIRROR — reply language follows the user's turn, not just profile", () => {
+  it("detects unmistakable Indonesian markers", () => {
+    expect(detectTurnLanguage("Halo, saya mau tanya tentang gula darah")).toBe("id");
+    expect(detectTurnLanguage("Terima kasih dok")).toBe("id");
+    expect(detectTurnLanguage("Berapa berat badan ideal saya?")).toBe("id");
+  });
+  it("detects French, Chinese script, and English turns", () => {
+    expect(detectTurnLanguage("Bonjour, je veux perdre du poids")).toBe("fr");
+    expect(detectTurnLanguage("你好，我想减肥")).toBe("zh");
+    expect(detectTurnLanguage("Hello, I want to ask about my blood sugar")).toBe("en");
+  });
+  it("Indonesian markers win over English code-switching", () => {
+    expect(detectTurnLanguage("Halo dok, blood sugar saya 150")).toBe("id");
+  });
+  it("stays undefined for ambiguous and empty turns (profile default applies)", () => {
+    expect(detectTurnLanguage("ok")).toBeUndefined();
+    expect(detectTurnLanguage("")).toBeUndefined();
+    expect(detectTurnLanguage(null)).toBeUndefined();
+  });
+  it("resolveInstructionLanguage prefers the turn over the profile", () => {
+    const base: any = { chatHistory: [], existingUserProfile: { language: "en" }, language: "en" };
+    expect(resolveInstructionLanguage({ ...base, currentUserMessage: "Halo, saya Budi" })).toBe("id");
+    expect(resolveInstructionLanguage({ ...base, currentUserMessage: "ok" })).toBe("en");
+    expect(resolveInstructionLanguage({
+      chatHistory: [], existingUserProfile: { language: "id" }, language: "id",
+      currentUserMessage: "Hello, I want to ask about my blood sugar",
+    })).toBe("en");
+  });
+  it("resolveReplyLanguage mirrors an Indonesian turn even on an en profile", () => {
+    expect(resolveReplyLanguage("en", "Halo, saya Budi")).toBe("id");
+    expect(resolveReplyLanguage("en", "Hello there")).toBe("en");
+    expect(resolveReplyLanguage("id", "Hello there")).toBe("id");
+  });
+  it("canned handoff ack follows the turn language, not the profile", () => {
+    const snapshot = {
+      age: 32, gender: "Male", heightCm: 175, weightKg: 78,
+      activityLevel: "lightly_active", language: "en",
+    };
+    const buildRaw = () => ({
+      intent: "general_wellness",
+      targetAgent: "health_coach",
+      status: "needs_info",
+      missingFields: [],
+      handoffPayload: null,
+      userResponse: "",
+      memory: { goalSummary: "energy and sleep vitality", userProfileSnapshot: snapshot },
+    });
+    const repaired = runPostProcessor(buildRaw(), {
+      currentUserMessage: "Halo, saya sudah isi semua datanya, tolong lanjutkan",
+      existingUserProfile: { ...snapshot },
+    });
+    expect(repaired.userResponse).toContain("Terima kasih! Detail Anda sudah lengkap");
+    expect(repaired.userResponse).not.toContain("Thank you! I have all your key details");
   });
 });

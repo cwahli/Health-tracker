@@ -56,7 +56,7 @@ export function agentOutputLanguageBlock(lang: unknown): string {
     'Keep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.',
   ];
   if (locale !== 'en') {
-    lines.push(`Do not reply in English unless the user wrote this turn in English and is clearly asking for English.`);
+    lines.push(`Do not reply in English unless the user wrote this turn in English.`);
   }
   return lines.join('\n');
 }

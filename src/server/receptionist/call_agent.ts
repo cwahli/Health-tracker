@@ -542,6 +542,46 @@ function stayAtFrontDesk(output: any, missing: string[] = [], keepSpecialistTarg
 }
 
 /**
+ * Turn-language mirror for server-canned reply strings. The model-facing
+ * instruction already carries the mirror rule, but these repair paths emit
+ * fixed strings — keying them off profile alone answers an Indonesian turn
+ * in English. Conservative: only override the profile default when the
+ * message carries unmistakable Indonesian markers; otherwise keep profile.
+ */
+const ID_TURN_MARKERS = /\b(saya|aku|kamu|anda|mereka|kami|kita|dia|apa|siapa|bagaimana|gimana|tolong|terima kasih|terimakasih|halo|hallo|pagi|siang|sore|malam|dok|kak|mas|mbak|pak|bu|tidak|nggak|bukan|dengan|untuk|dari|yang|berat|badan|tinggi|gula|darah|minum|makan|mau|bisa|ingin|umur|tahun|lanjut|sudah|belum|lagi|banget|sangat|juga|atau|tapi|kalau|jika|karena|adalah|akan|ini|itu|apakah|berapa|kapan|dimana|kemarin|jantung|tekanan|beratku|dong|deh|sih|kok|nih|tuh|aja)\b/i;
+const FR_TURN_MARKERS = /\b(bonjour|bonsoir|merci|comment|pourquoi|parce que|s'il|je suis|je veux|vous|nous|santé|poids|taille|avec|très|suis|êtes|sont|dans|comment allez)\b/i;
+const ZH_SCRIPT = /[\u4e00-\u9fff]/;
+const EN_TURN_MARKERS = /\b(hello|thanks|thank you|please|what|when|where|which|with|from|about|your|this|that|have|want|need|morning|evening|blood|sugar|pressure|weight|height|goal|plan|diet|health|my)\b/i;
+
+export function detectTurnLanguage(msg: unknown): 'id' | 'fr' | 'zh' | 'en' | undefined {
+  const text = typeof msg === 'string' ? msg : '';
+  if (!text) return undefined;
+  if (ZH_SCRIPT.test(text)) return 'zh';
+  if (ID_TURN_MARKERS.test(text)) return 'id';
+  if (FR_TURN_MARKERS.test(text)) return 'fr';
+  if (EN_TURN_MARKERS.test(text)) return 'en';
+  return undefined;
+}
+
+export function resolveReplyLanguage(profileLang: unknown, msg: unknown): 'id' | 'en' {
+  if (detectTurnLanguage(msg) === 'id') return 'id';
+  return (profileLang as any) === 'id' ? 'id' : 'en';
+}
+
+/**
+ * Instruction locale follows the TURN language deterministically: asking the
+ * model to resolve conflicting language signals fails (profile context wins),
+ * so the whole system prompt — including the USER OUTPUT LANGUAGE block — is
+ * built in the turn's language, falling back to the profile/payload language
+ * when the turn is ambiguous.
+ */
+export function resolveInstructionLanguage(payload: ReceptionistInputPayload): string {
+  const turn = detectTurnLanguage((payload as any)?.currentUserMessage);
+  if (turn) return turn;
+  return (payload as any)?.language || (payload as any)?.existingUserProfile?.language || 'en';
+}
+
+/**
  * Only promote needs_info → ready_for_handoff for a named specialist job
  * (C1b: weight_loss + complete demographics). Never rewrite
  * general_receptionist to health_coach just because the profile is filled.
@@ -550,7 +590,7 @@ export function maybePromoteHandoff(output: any, ctx: HandoffRepairContext): any
   if (!output) return output;
 
   const msgText = String(ctx.currentUserMessage || '');
-  const lang = (ctx.existingUserProfile as any)?.language === 'id' ? 'id' : 'en';
+  const lang = resolveReplyLanguage((ctx.existingUserProfile as any)?.language, msgText);
   const medicalHistory = [
     ...(output.memory?.userProfileSnapshot?.medicalHistory || []),
     ...(ctx.existingUserProfile?.medicalHistory || [])
@@ -694,7 +734,7 @@ export function maybePromoteHandoff(output: any, ctx: HandoffRepairContext): any
     const curHeight = snap.heightCm || existing.heightCm;
     const heightM = curHeight / 100;
     const curBmi = Number((curWeight / (heightM * heightM)).toFixed(1));
-    const lang = existing?.language === 'id' ? 'id' : 'en';
+    const lang = resolveReplyLanguage(existing?.language, ctx.currentUserMessage);
     output.userResponse = lang === 'id'
       ? `Saya siap membantu Anda mencapai berat badan yang ideal! Dengan tinggi ${curHeight} cm dan berat ${curWeight} kg, BMI Anda saat ini adalah ${curBmi} (kategori sehat normal). Apakah Anda memiliki target berat badan tertentu yang ingin dicapai, atau ingin fokus pada rekomposisi tubuh (mengencangkan otot)?`
       : `I'd be glad to help you reach your ideal weight and body composition! At ${curHeight} cm and ${curWeight} kg, your current BMI is approximately ${curBmi}, which is in the healthy normal range (18.5–24.9). Do you have a specific target weight in mind, or would you prefer focusing on healthy body recomposition while maintaining around ${curWeight} kg?`;
@@ -726,7 +766,7 @@ export function enforceReadyHandoffContract(output: any, ctx: HandoffRepairConte
   if (!output || output.status !== 'ready_for_handoff') return output;
   const snap = output.memory?.userProfileSnapshot || {};
   const existing = ctx.existingUserProfile || {};
-  const lang = existing?.language === 'id' ? 'id' : 'en';
+  const lang = resolveReplyLanguage(existing?.language, ctx.currentUserMessage);
 
   if (isUnderspecifiedUtterance(ctx.currentUserMessage) || output.targetAgent === 'general_receptionist') {
     return stayAtFrontDesk(output, []);
@@ -913,8 +953,9 @@ export async function callReceptionistAgent(
   payload: ReceptionistInputPayload,
   modelName = "gemini-3.5-flash-lite"
 ): Promise<{ output: ReceptionistOutput; raw: string; ms: number; systemInstruction: string; userText: string }> {
-  const userText = formatReceptionistInput(payload);
-  const systemInstruction = buildReceptionistInstruction((payload as any).language || (payload.existingUserProfile as any)?.language);
+  const instructionLang = resolveInstructionLanguage(payload);
+  const userText = formatReceptionistInput({ ...payload, language: instructionLang } as ReceptionistInputPayload);
+  const systemInstruction = buildReceptionistInstruction(instructionLang);
 
   const contentParts: any[] = [{ text: userText }];
   if (payload.images && Array.isArray(payload.images) && payload.images.length > 0) {
@@ -1249,9 +1290,7 @@ export async function callReceptionistAgent(
     };
   }
 
-  const replyLang = normalizeLocale(
-     (payload as any).language || payload.existingUserProfile?.language || "en"
-  );
+  const replyLang = normalizeLocale(instructionLang);
   if (output.uiForm) {
     output.uiForm.title = t(replyLang, "recepFormTitle");
     output.uiForm.description = t(replyLang, "recepFormDescription");
