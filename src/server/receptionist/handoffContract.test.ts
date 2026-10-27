@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { enforceReadyHandoffContract, maybePromoteHandoff, synthesizeReadyHandoffPayload, formatReceptionistInput, compactUserMemory, extractDemographicsFromText, normalizeUiFormLanguage, detectTurnLanguage, resolveReplyLanguage, resolveInstructionLanguage } from "./call_agent.js";
+import { enforceReadyHandoffContract, maybePromoteHandoff, synthesizeReadyHandoffPayload, formatReceptionistInput, compactUserMemory, extractDemographicsFromText, normalizeUiFormLanguage, detectTurnLanguage, resolveReplyLanguage, resolveInstructionLanguage, normalizePageContext } from "./call_agent.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UC02 = JSON.parse(
@@ -492,5 +492,32 @@ describe("TURN_MIRROR — reply language follows the user's turn, not just profi
     });
     expect(repaired.userResponse).toContain("Terima kasih! Detail Anda sudah lengkap");
     expect(repaired.userResponse).not.toContain("Thank you! I have all your key details");
+  });
+});
+
+describe("PAGE_CONTEXT — receptionist knows where the user is", () => {
+  it("normalizePageContext sanitizes page, derives auth state and empty profile", () => {
+    expect(normalizePageContext({ page: "signup", authMode: "signup" }, null, null)).toEqual({
+      page: "signup", authState: "logged-out", authMode: "signup", profileEmpty: true,
+    });
+    expect(normalizePageContext({ page: "food" }, "uid-1", { nickname: "Bo" } as any)).toEqual({
+      page: "food", authState: "logged-in", profileEmpty: true,
+    });
+    expect(normalizePageContext({ page: "hacker-tab', DROP" }, "uid-1", { age: 30, gender: "F", heightCm: 160, weightKg: 55 })).toEqual({
+      page: "unknown", authState: "logged-in", profileEmpty: false,
+    });
+    expect(normalizePageContext(null, null, null).page).toBe("unknown");
+  });
+  it("formatReceptionistInput emits the page block only when present", () => {
+    const withCtx = formatReceptionistInput({
+      currentUserMessage: "saya mau daftar", chatHistory: [],
+      pageContext: { page: "signup", authState: "logged-out", authMode: "signup", profileEmpty: true },
+    } as any);
+    expect(withCtx).toContain("<user_page_context>");
+    expect(withCtx).toContain("Page: signup");
+    expect(withCtx).toContain("Auth state: logged-out");
+    expect(withCtx).toContain("Profile empty: yes");
+    const withoutCtx = formatReceptionistInput({ currentUserMessage: "hi", chatHistory: [] } as any);
+    expect(withoutCtx).not.toContain("<user_page_context>");
   });
 });

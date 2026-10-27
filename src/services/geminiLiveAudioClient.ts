@@ -17,6 +17,9 @@ export interface LiveSessionSetup {
   language?: string;
   voice?: LiveVoicePersona;
   recentMeals?: any[];
+  page?: string;
+  authState?: 'logged-in' | 'logged-out';
+  authMode?: 'login' | 'signup';
 }
 
 export interface LiveToolCall {
@@ -308,6 +311,9 @@ export class GeminiLiveAudioClient {
           language: setup.language || setup.profile?.language || 'en',
           voice: setup.voice || 'Aoede',
           recentMeals: setup.recentMeals || [],
+          page: setup.page || 'unknown',
+          authState: setup.authState || (setup.profile ? 'logged-in' : 'logged-out'),
+          ...(setup.authMode ? { authMode: setup.authMode } : {}),
           ...(this.resumeHandle ? { resumeHandle: this.resumeHandle } : {}),
         }));
         for (const m of this.pendingMarks.splice(0)) {

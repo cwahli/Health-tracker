@@ -336,6 +336,16 @@ export function formatReceptionistInput(input: ReceptionistInputPayload): string
   parts.push(`Current Message: ${input.currentUserMessage}`);
   parts.push("</user_turn>");
 
+  if (input.pageContext) {
+    const pc = input.pageContext;
+    parts.push("\n<user_page_context>");
+    parts.push(`Page: ${pc.page}`);
+    parts.push(`Auth state: ${pc.authState}`);
+    if (pc.authMode) parts.push(`Auth mode: ${pc.authMode}`);
+    parts.push(`Profile empty: ${pc.profileEmpty ? 'yes' : 'no'}`);
+    parts.push("</user_page_context>");
+  }
+
   parts.push("\n<chat_history>");
   parts.push(JSON.stringify(input.chatHistory || [], null, 2));
   parts.push("</chat_history>");
@@ -579,6 +589,33 @@ export function resolveInstructionLanguage(payload: ReceptionistInputPayload): s
   const turn = detectTurnLanguage((payload as any)?.currentUserMessage);
   if (turn) return turn;
   return (payload as any)?.language || (payload as any)?.existingUserProfile?.language || 'en';
+}
+
+const VALID_PAGES = [
+  'signup', 'login', 'auth',
+  'home', 'insights', 'health', 'food', 'medical', 'trends',
+] as const;
+
+/**
+ * Sanitize client page context at the route boundary: unknown pages collapse
+ * to 'unknown', auth state derives from the session (never trust the client
+ * alone), and profileEmpty derives from the mapped profile snapshot.
+ */
+export function normalizePageContext(
+  raw: unknown,
+  userId: unknown,
+  profile: { age?: any; gender?: any; heightCm?: any; weightKg?: any } | null | undefined,
+): import('./schema.js').ReceptionistPageContext {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as any;
+  const page = (VALID_PAGES as readonly string[]).includes(r.page) ? r.page : 'unknown';
+  const authMode = r.authMode === 'signup' ? 'signup' : r.authMode === 'login' ? 'login' : undefined;
+  const p = profile || {};
+  return {
+    page,
+    authState: userId || profile ? 'logged-in' : 'logged-out',
+    ...(authMode ? { authMode } : {}),
+    profileEmpty: !(p.age || p.gender || p.heightCm || p.weightKg),
+  };
 }
 
 /**
@@ -1291,6 +1328,13 @@ export async function callReceptionistAgent(
   }
 
   const replyLang = normalizeLocale(instructionLang);
+  // Auth pages have no account yet: a health-profile form is meaningless
+  // there (nothing to attach it to). The model is instructed never to emit
+  // one, and this enforces it deterministically.
+  const __pc = (payload as any)?.pageContext;
+  if (__pc && (__pc.page === 'signup' || __pc.page === 'login' || __pc.page === 'auth') && __pc.authState === 'logged-out') {
+    output.uiForm = null;
+  }
   if (output.uiForm) {
     output.uiForm.title = t(replyLang, "recepFormTitle");
     output.uiForm.description = t(replyLang, "recepFormDescription");
