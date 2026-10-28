@@ -173,6 +173,18 @@ describe('data entry', () => {
     const locked = openPdfBytes('locked.pdf', new TextEncoder().encode('%PDF-1.4\n1 0 obj<</Encrypt 2 0 R>>endobj\n%%EOF'));
     expect(locked.batch.parts[0].door).toBe('locked');
     expect(locked.visionCalls).toBe(0);
+    const twoPages = new TextEncoder().encode(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 2/Kids[3 0 R 4 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 5 0 R>>endobj\n4 0 obj<</Type/Page/Parent 2 0 R/Contents 6 0 R>>endobj\n5 0 obj<</Length 24>>stream\nBT (HDL 50 mg/dL) Tj ET\nendstream\nendobj\n6 0 obj<</Length 24>>stream\nBT (LDL 130 mg/dL) Tj ET\nendstream\nendobj\n%%EOF',
+    );
+    const openedPages = openPdfBytes('two.pdf', twoPages);
+    expect(openedPages.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL', 'LDL 130 mg/dL']);
+    expect(openedPages.batch.parts.map((part) => part.door)).toEqual(['text', 'text']);
+    expect(openedPages.visionCalls).toBe(0);
+    const reversed = new TextEncoder().encode(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 2/Kids[4 0 R 3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 6 0 R>>endobj\n4 0 obj<</Type/Page/Parent 2 0 R/Contents 5 0 R>>endobj\n5 0 obj<</Length 24>>stream\nBT (HDL 50 mg/dL) Tj ET\nendstream\nendobj\n6 0 obj<</Length 24>>stream\nBT (LDL 130 mg/dL) Tj ET\nendstream\nendobj\n%%EOF',
+    );
+    const openedReversed = openPdfBytes('reversed.pdf', reversed);
+    expect(openedReversed.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL', 'LDL 130 mg/dL']);
   });
 
   it('a history cell edit and the agent edit the same observation', () => {

@@ -423,6 +423,8 @@ Ingest **code** for B1–B6 is on GitHub. Ingest **v1 shipped 2026-09-14** — r
 
 **Stop if:** lexer writes observations · G-B4 fails · Parser is sent a high-confidence name.
 
+**Page text:** an uncompressed PDF keeps each page's text on that page (`src/utils/openPdfBytes.ts`), in Kids order. A compressed page stays an OCR door. Do not add pdf.js or Tesseract. The seven stored copies stay separate.
+
 Weight/height stay `droppedByApply` until a product decision.
 
 ### After B6 (do not start to unstick B0–B4)
