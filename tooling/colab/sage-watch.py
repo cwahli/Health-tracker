@@ -179,7 +179,9 @@ def check(seen, host, now):
             sig = [0, 0]
         s = seen.get(jid)
         if not isinstance(s, dict):
-            s = {"sig": sig, "moved": now, "done": False, "dead": False, "idle_at": 0}
+            legacy = s is not None  # pre-existing job from old state format: baseline silently
+            s = {"sig": sig, "moved": now, "done": legacy and is_done(d),
+                 "dead": legacy and sess is not None and "colabjob-" + jid not in sess, "idle_at": 0}
             seen[jid] = s
         if sig != s["sig"]:
             s.update(sig=sig, moved=now, idle_at=0, dead=False)
