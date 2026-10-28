@@ -243,6 +243,25 @@ function paeth(left: number, up: number, upLeft: number): number {
   return upLeft;
 }
 
+/**
+ * TIFF predictor 2 at 8 bits per component. No per-row filter byte.
+ * Each byte is the difference from the same component one sample to the left.
+ * Other bit depths stay compressed and the page remains an OCR door.
+ */
+function undoTiff(data: Buffer, parms: PngParms): Buffer | null {
+  if (parms.predictor !== 2 || parms.bits !== 8 || parms.colors < 1) return null;
+  const rowSize = Math.ceil((parms.columns * parms.colors * parms.bits) / 8);
+  if (rowSize <= 0 || data.length === 0 || data.length % rowSize !== 0) return null;
+  const out = Buffer.alloc(data.length);
+  for (let offset = 0; offset < data.length; offset += rowSize) {
+    for (let column = 0; column < rowSize; column += 1) {
+      const left = column >= parms.colors ? out[offset + column - parms.colors] : 0;
+      out[offset + column] = (data[offset + column] + left) & 255;
+    }
+  }
+  return out;
+}
+
 /** PNG predictors 10–15. Each row starts with a filter byte. */
 function undoPng(data: Buffer, parms: PngParms): Buffer | null {
   if (parms.predictor < 10 || parms.predictor > 15) return null;
@@ -278,8 +297,9 @@ function decodedFlate(dict: string, payload: Buffer, raw: string): string {
   const inflated = inflateFlate(payload);
   if (!inflated) return '';
   const parms = pngParms(dict, raw);
-  if (!parms || parms.predictor < 10) return inflated;
-  const undone = undoPng(Buffer.from(inflated, 'latin1'), parms);
+  if (!parms || parms.predictor === 1) return inflated;
+  const source = Buffer.from(inflated, 'latin1');
+  const undone = parms.predictor === 2 ? undoTiff(source, parms) : parms.predictor >= 10 ? undoPng(source, parms) : null;
   return undone ? undone.toString('latin1') : inflated;
 }
 

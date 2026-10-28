@@ -327,6 +327,24 @@ describe('data entry', () => {
     expect(openedPng.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL']);
     expect(openedPng.batch.parts[0].door).toBe('text');
     expect(openedPng.visionCalls).toBe(0);
+    const tiffPlain = Buffer.from('BT (HDL 50 mg/dL) Tj ET');
+    const tiffEncoded = Buffer.alloc(tiffPlain.length);
+    let tiffLeft = 0;
+    for (let index = 0; index < tiffPlain.length; index += 1) {
+      tiffEncoded[index] = (tiffPlain[index] - tiffLeft) & 255;
+      tiffLeft = tiffPlain[index];
+    }
+    const tiffZ = deflateSync(tiffEncoded);
+    const tiffPage = Buffer.concat([
+      Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R>>endobj\n'),
+      Buffer.from(`4 0 obj<</Filter/FlateDecode/DecodeParms<</Predictor 2/Columns ${tiffPlain.length}>>/Length ${tiffZ.length}>>stream\n`),
+      tiffZ,
+      Buffer.from('\nendstream\nendobj\n%%EOF'),
+    ]);
+    const openedTiff = openPdfBytes('tiff-predictor.pdf', tiffPage);
+    expect(openedTiff.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL']);
+    expect(openedTiff.batch.parts[0].door).toBe('text');
+    expect(openedTiff.visionCalls).toBe(0);
     const filteredImage = new TextEncoder().encode(
       '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R/Resources<</XObject<</Im0 5 0 R>>>>>>endobj\n4 0 obj<</Length 12>>stream\nq /Im0 Do Q\nendstream\nendobj\n5 0 obj<</Filter /FlateDecode/Subtype /Image/Width 20/Height 20/Length 4>>stream\nABCD\nendstream\nendobj\n%%EOF',
     );
