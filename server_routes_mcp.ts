@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { verifySessionToken } from './server_auth.js';
-import { isD1Configured } from './server_d1.js';
+import { isD1Configured, d1Query, safeJsonParse } from './server_d1.js';
 import {
   d1GetProfile,
   d1UpsertProfile,
@@ -12,6 +12,10 @@ import {
 } from './server_db_d1.js';
 import { getBaseUrl, resolveCanonicalUid } from './server_routes_mcp_auth.js';
 import { biomarkerDefinitions } from './src/utils/biomarkers.js';
+import { buildCanonicalRunTree } from './src/utils/debugRunTree.js';
+import { evaluateContracts, classifyDump } from './src/utils/dumpContract.js';
+import { runGeneralizedBiomarkerAudit } from './src/utils/biomarkerAuditEngine.js';
+import { persistAutoFile } from './serverBugAutoFile.js';
 import {
   inMemoryMcpProfiles,
   inMemoryMcpFoods,
@@ -34,6 +38,7 @@ import {
   deleteBiomarkerEntry,
   manageUserActions,
   manageUserHabits,
+  simulateMealCalculation,
   withIdempotency,
   clearIdempotencyStore
 } from './src/server/domain/healthTrackerDomain.js';
@@ -60,16 +65,26 @@ export {
   deleteBiomarkerEntry,
   manageUserActions,
   manageUserHabits,
+  simulateMealCalculation,
   withIdempotency,
   clearIdempotencyStore
 };
+
+// In-memory test store for diagnostic bug tickets
+export const inMemoryBugTickets: any[] = [];
+export function clearInMemoryBugTickets() {
+  inMemoryBugTickets.length = 0;
+}
 
 // Backward-compatible aliases
 export const setInMemoryMcpProfile = setInMemoryProfile;
 export const clearInMemoryMcpProfiles = clearInMemoryProfiles;
 export const setInMemoryMcpFoods = setInMemoryFoods;
 export const setInMemoryMcpBiomarkers = setInMemoryBiomarkers;
-export const clearInMemoryMcpData = clearInMemoryMcpStores;
+export const clearInMemoryMcpData = () => {
+  clearInMemoryMcpStores();
+  clearInMemoryBugTickets();
+};
 
 export const mcpRouter = Router();
 
@@ -587,6 +602,80 @@ const MCP_TOOLS = [
         limit: {
           type: 'number',
           description: 'Maximum number of records to return (default 50)'
+        }
+      },
+      required: ['action']
+    }
+  },
+  {
+    name: 'diagnose_health_data',
+    description: 'Diagnose meal calculations, run contract audits, simulate ingredient edits, evaluate biomarker data integrity, and file capped defect tickets strictly scoped to the user profile.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: [
+            'get_meal_debug_tree',
+            'simulate_calculation',
+            'audit_biomarkers',
+            'diagnose_sync',
+            'file_bug_ticket'
+          ],
+          description: 'Diagnostic action: "get_meal_debug_tree", "simulate_calculation", "audit_biomarkers", "diagnose_sync", "file_bug_ticket".'
+        },
+        meal_id: {
+          type: 'string',
+          description: 'Meal ID for get_meal_debug_tree or file_bug_ticket'
+        },
+        mealId: {
+          type: 'string',
+          description: 'Alias for meal_id'
+        },
+        job_id: {
+          type: 'string',
+          description: 'Job ID for get_meal_debug_tree'
+        },
+        jobId: {
+          type: 'string',
+          description: 'Alias for job_id'
+        },
+        items: {
+          type: 'array',
+          items: { type: 'object' },
+          description: 'Array of meal items for simulate_calculation: [{ name, weightGrams, protein, totalFat, carbohydrates, sodium, saturatedFat }]'
+        },
+        name: {
+          type: 'string',
+          description: 'Meal name for simulate_calculation'
+        },
+        dining_environment: {
+          type: 'string',
+          description: 'Dining environment for simulate_calculation (e.g. home, restaurant)'
+        },
+        title: {
+          type: 'string',
+          description: 'Title for bug ticket in file_bug_ticket'
+        },
+        category: {
+          type: 'string',
+          description: 'Category for bug ticket (e.g. "foodcart", "biomarker", "sync")'
+        },
+        description: {
+          type: 'string',
+          description: 'Detailed description for file_bug_ticket'
+        },
+        oracle_code: {
+          type: 'string',
+          description: 'Oracle failure code (e.g. "FALSE_FRIEND", "DISH_DROP", "STALE_TURN", "ATWATER_MISMATCH")'
+        },
+        oracleCode: {
+          type: 'string',
+          description: 'Alias for oracle_code'
+        },
+        timezone: {
+          type: 'string',
+          description: 'User timezone override (e.g. "Europe/London")'
         }
       },
       required: ['action']
@@ -1796,6 +1885,426 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
               {
                 type: 'text',
                 text: `Unsupported action "${action}" for tool "manage_biomarkers". Available: "list", "get_trends", "log_entries", "delete_values".`
+              }
+            ]
+          }
+        });
+      }
+
+      // ---------------------------------------------------------------------
+      // 4. DIAGNOSE_HEALTH_DATA
+      // ---------------------------------------------------------------------
+      if (toolName === 'diagnose_health_data') {
+        const action = args.action;
+
+        // Security boundary: global catalog mutations remain strictly admin-only
+        if (action === 'quarantineAtwaterFailures' || action === 'upsertFoodAlias' || action === 'mergeFoodCatalogItems') {
+          return res.status(403).json({
+            jsonrpc: '2.0',
+            id,
+            error: {
+              code: -32600,
+              message: `Forbidden: Global catalog mutation action '${action}' is restricted to admin credentials and cannot be executed via MCP user profile token.`
+            }
+          });
+        }
+
+        // Action 1: get_meal_debug_tree
+        if (action === 'get_meal_debug_tree') {
+          const mealId = args.meal_id || args.mealId;
+          const jobId = args.job_id || args.jobId;
+
+          let targetMeal: any = null;
+          if (mealId) {
+            for (const uid of possibleUids) {
+              const memList = inMemoryMcpFoods.get(uid);
+              if (Array.isArray(memList)) {
+                targetMeal = memList.find((m) => m && m.id === mealId);
+                if (targetMeal) break;
+              }
+            }
+            if (!targetMeal && isD1Configured()) {
+              try {
+                targetMeal = await d1GetFullFoodRecord(mealId, possibleUids);
+              } catch (err: any) {
+                console.warn('[MCP] d1GetFullFoodRecord error:', err?.message);
+              }
+            }
+          } else {
+            const allMeals = await getAllUserFoods(possibleUids);
+            targetMeal = allMeals[0] || null;
+          }
+
+          const debugInput: any = {
+            jobId: jobId || targetMeal?.id || 'debug_job',
+            pack: 'food',
+            status: 'succeeded',
+            pendingFoodLog: targetMeal ? {
+              id: targetMeal.id,
+              name: targetMeal.name,
+              weightGrams: targetMeal.weight_grams,
+              nutrients: targetMeal.nutrients || {},
+              items: targetMeal.items_breakdown || []
+            } : undefined,
+            scoutItems: (targetMeal?.items_breakdown || []).map((it: any, i: number) => ({
+              scoutIndex: i,
+              originalName: it.name,
+              estimatedWeightGrams: it.weightGrams,
+              nutrients: it.nutrients || it
+            })),
+            sessionEvents: [
+              { status: 'success', message: 'AnalyzeFinished succeeded' }
+            ],
+            backendLogs: targetMeal ? `[Budget] Finalized ledger for meal ${targetMeal.id}` : '',
+            clientConsoleLogs: [],
+            networkErrors: [],
+            turns: targetMeal?.chat_transcript || []
+          };
+
+          const runTree = buildCanonicalRunTree(debugInput);
+          const contracts = runTree.contract || evaluateContracts(runTree);
+          const oracleFails = classifyDump(runTree);
+
+          const result = {
+            meal_id: targetMeal?.id || mealId || null,
+            job_id: jobId || null,
+            pack: runTree.pack,
+            status: runTree.status,
+            contracts: contracts.map(c => ({
+              law: c.law,
+              layer: c.layer,
+              result: c.result,
+              fault: c.fault,
+              actual: c.actual
+            })),
+            oracle_fails: oracleFails.map(f => ({
+              class: f.class,
+              id: f.id,
+              detail: f.detail,
+              file: f.file
+            })),
+            summary: {
+              total_contracts: contracts.length,
+              passed_contracts: contracts.filter(c => c.result === 'PASS').length,
+              failed_contracts: contracts.filter(c => c.result === 'FAIL').length,
+              oracle_fails_count: oracleFails.length
+            }
+          };
+
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+            }
+          });
+        }
+
+        // Action 2: simulate_calculation
+        if (action === 'simulate_calculation') {
+          const items = Array.isArray(args.items) ? args.items : [];
+          if (items.length === 0) {
+            return res.json({
+              jsonrpc: '2.0',
+              id,
+              result: {
+                isError: true,
+                content: [{ type: 'text', text: 'simulate_calculation requires a non-empty "items" array.' }]
+              }
+            });
+          }
+
+          const normalizedItems: any[] = items.map((it: any) => ({
+            name: it.name || 'Unnamed Item',
+            weightGrams: it.weightGrams ?? it.weightG ?? 100,
+            protein: it.protein,
+            totalFat: it.totalFat ?? it.fat,
+            carbohydrates: it.carbohydrates ?? it.carbs,
+            sodium: it.sodium ?? it.sodiumMg,
+            saturatedFat: it.saturatedFat ?? it.satFat,
+            addedSugar: it.addedSugar,
+            diningEnvironment: it.diningEnvironment || args.dining_environment || args.diningEnvironment,
+            cookingMethod: it.cookingMethod,
+            nutrients: it.nutrients
+          }));
+
+          const simResult = await simulateMealCalculation({
+            name: args.name || 'Simulated Meal',
+            items: normalizedItems,
+            diningEnvironment: args.dining_environment || args.diningEnvironment
+          });
+
+          const responsePayload = {
+            simulated: true,
+            persisted: false,
+            name: simResult.name,
+            weight_grams: simResult.weightGrams,
+            totals: simResult.totals,
+            verdict: simResult.verdict,
+            items: simResult.items.map((it: any) => ({
+              name: it.name,
+              weightGrams: it.weightGrams,
+              calories: it.calories,
+              protein: it.protein,
+              totalFat: it.totalFat,
+              carbohydrates: it.carbohydrates,
+              sodium: it.sodium,
+              saturatedFat: it.saturatedFat,
+              dietaryFiber: it.dietaryFiber
+            }))
+          };
+
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify(responsePayload, null, 2) }]
+            }
+          });
+        }
+
+        // Action 3: audit_biomarkers
+        if (action === 'audit_biomarkers') {
+          const profileData = await loadUserProfile(currentUser.uid);
+          const rawProfile = profileData.profile || profileData || {};
+          const customBiomarkers = rawProfile.customBiomarkers || {};
+          const deletedCustomBiomarkerKeys = rawProfile.deletedCustomBiomarkerKeys || {};
+          const currentBiomarkers = rawProfile.biomarkers || {};
+
+          const biomarkerHistory = await getAllUserBiomarkers(possibleUids);
+
+          const audit = runGeneralizedBiomarkerAudit(
+            customBiomarkers,
+            biomarkerHistory,
+            currentBiomarkers,
+            deletedCustomBiomarkerKeys
+          );
+
+          const report = {
+            timestamp: audit.timestamp || new Date().toISOString(),
+            total_scanned: audit.totalScanned,
+            corrupted_units_count: audit.corruptedUnitsCount,
+            duplicate_candidates_count: audit.duplicateCandidatesCount,
+            missing_ranges_count: audit.missingRangesCount,
+            conflicts_count: audit.conflictsCount,
+            clean_count: audit.cleanCount,
+            duplicate_groups: audit.duplicateGroups || [],
+            issues: (audit.items || [])
+              .filter((it: any) => it.corruptedUnitProposal || it.duplicateCluster || it.conflictInfo || it.missingMetadata?.missingRange)
+              .map((it: any) => ({
+                key: it.key,
+                name: it.name,
+                unit: it.unit,
+                log_count: it.logCount,
+                corrupted_unit_proposal: it.corruptedUnitProposal,
+                duplicate_cluster: it.duplicateCluster,
+                conflict_info: it.conflictInfo,
+                missing_range: it.missingMetadata?.missingRange
+              }))
+          };
+
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify(report, null, 2) }]
+            }
+          });
+        }
+
+        // Action 4: diagnose_sync
+        if (action === 'diagnose_sync') {
+          const allMeals = await getAllUserFoods(possibleUids);
+          const profileData = await loadUserProfile(currentUser.uid);
+          const rawProfile = profileData.profile || profileData || {};
+
+          const orphanPhotoRefs: Array<{ meal_id: string; meal_name: string; photo_ref: string }> = [];
+          for (const meal of allMeals) {
+            const urls = meal.image_urls || [];
+            for (const u of urls) {
+              if (typeof u === 'string') {
+                if (u.startsWith('ref:') || u.startsWith('blob:') || (!u.startsWith('http://') && !u.startsWith('https://'))) {
+                  orphanPhotoRefs.push({
+                    meal_id: meal.id,
+                    meal_name: meal.name,
+                    photo_ref: u
+                  });
+                }
+              }
+            }
+          }
+
+          const targetTimestamps = profileData.targetTimestamps || rawProfile.targetTimestamps || {};
+          const deletedFoodLogIds = rawProfile.deletedFoodLogIds || {};
+          const deletedBiomarkerLogIds = rawProfile.deletedBiomarkerLogIds || {};
+          const deletedCustomBiomarkerKeys = rawProfile.deletedCustomBiomarkerKeys || {};
+
+          const syncReport = {
+            status: orphanPhotoRefs.length > 0 ? 'issues_detected' : 'healthy',
+            total_meals_scanned: allMeals.length,
+            orphan_photo_refs: orphanPhotoRefs,
+            target_ratchet: {
+              tracked_target_keys: Object.keys(targetTimestamps).length,
+              timestamps: targetTimestamps
+            },
+            tombstones: {
+              deleted_meals_count: Object.keys(deletedFoodLogIds).length,
+              deleted_biomarkers_count: Object.keys(deletedBiomarkerLogIds).length,
+              deleted_custom_biomarkers_count: Object.keys(deletedCustomBiomarkerKeys).length
+            },
+            stuck_jobs: []
+          };
+
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify(syncReport, null, 2) }]
+            }
+          });
+        }
+
+        // Action 5: file_bug_ticket
+        if (action === 'file_bug_ticket') {
+          const title = (args.title || args.description || 'Auto-reported diagnostic defect').slice(0, 200);
+          const mealId = args.meal_id || args.mealId;
+          const oracleCode = args.oracle_code || args.oracleCode;
+          const category = args.category || 'foodcart';
+          const description = args.description || '';
+
+          // Strict Cap: check if open ticket exists for mealId + oracleCode or same title
+          if (mealId && oracleCode) {
+            const existingMemory = inMemoryBugTickets.find(
+              t => (t.mealId === mealId && t.oracleCode === oracleCode) || t.title === title
+            );
+            if (existingMemory) {
+              return res.json({
+                jsonrpc: '2.0',
+                id,
+                result: {
+                  content: [
+                    {
+                      type: 'text',
+                      text: JSON.stringify({
+                        ok: true,
+                        action: 'existing_open_ticket',
+                        tag_id: existingMemory.tag_id || existingMemory.id,
+                        public_n: existingMemory.public_n,
+                        capped: true,
+                        message: `Ticket already open for meal "${mealId}" with oracle code "${oracleCode}".`
+                      }, null, 2)
+                    }
+                  ]
+                }
+              });
+            }
+
+            if (isD1Configured()) {
+              try {
+                const existingTagsRes = await d1Query<any>(
+                  `SELECT * FROM issue_tags WHERE status IN ('to_fix', 'in_progress') ORDER BY updated_at DESC LIMIT 200`
+                );
+                if (existingTagsRes.success && Array.isArray(existingTagsRes.results)) {
+                  const match = existingTagsRes.results.find((t: any) => {
+                    const wi = typeof t.work_item === 'string' ? safeJsonParse(t.work_item, null) : t.work_item;
+                    return (wi?.mealId === mealId && wi?.oracleCode === oracleCode) || t.title === title;
+                  });
+                  if (match) {
+                    return res.json({
+                      jsonrpc: '2.0',
+                      id,
+                      result: {
+                        content: [
+                          {
+                            type: 'text',
+                            text: JSON.stringify({
+                              ok: true,
+                              action: 'existing_open_ticket',
+                              tag_id: match.id,
+                              public_n: match.public_n,
+                              capped: true,
+                              message: `Ticket already open in D1 for meal "${mealId}" with oracle code "${oracleCode}".`
+                            }, null, 2)
+                          }
+                        ]
+                      }
+                    });
+                  }
+                }
+              } catch (err: any) {
+                console.warn('[diagnose_health_data] Check open tags error:', err?.message);
+              }
+            }
+          }
+
+          let ticketResult: any;
+          if (isD1Configured()) {
+            try {
+              const candidate: any = {
+                source: 'mcp_diagnostics',
+                bug: title,
+                category,
+                query: description || title,
+                status: 'to_fix',
+                mealId,
+                oracleCode,
+                details: args.details
+              };
+              const autoFileRes = await persistAutoFile(candidate);
+              ticketResult = {
+                ok: autoFileRes.ok,
+                action: autoFileRes.action,
+                tag_id: autoFileRes.tag_id,
+                public_n: autoFileRes.public_n,
+                capped: false
+              };
+            } catch (err: any) {
+              console.warn('[diagnose_health_data] persistAutoFile failed:', err?.message);
+            }
+          }
+
+          if (!ticketResult || !ticketResult.ok) {
+            const newTagId = `tag_mcp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+            const newPublicN = inMemoryBugTickets.length + 1;
+            const memoryTicket = {
+              id: newTagId,
+              tag_id: newTagId,
+              public_n: newPublicN,
+              title,
+              category,
+              mealId,
+              oracleCode,
+              status: 'to_fix',
+              created_at: new Date().toISOString()
+            };
+            inMemoryBugTickets.push(memoryTicket);
+            ticketResult = {
+              ok: true,
+              action: 'created_memory',
+              tag_id: newTagId,
+              public_n: newPublicN,
+              capped: false
+            };
+          }
+
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify(ticketResult, null, 2) }]
+            }
+          });
+        }
+
+        return res.json({
+          jsonrpc: '2.0',
+          id,
+          result: {
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text: `Unsupported action "${action}" for tool "diagnose_health_data". Available: "get_meal_debug_tree", "simulate_calculation", "audit_biomarkers", "diagnose_sync", "file_bug_ticket".`
               }
             ]
           }

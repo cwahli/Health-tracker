@@ -369,6 +369,67 @@ export async function finalizeAndCreateMeal(opts: CreateMealOptions): Promise<an
   };
 }
 
+export interface SimulateMealOptions {
+  name?: string;
+  items: CreateMealItemInput[];
+  diningEnvironment?: string;
+}
+
+export async function simulateMealCalculation(opts: SimulateMealOptions): Promise<{
+  name: string;
+  items: any[];
+  totals: any;
+  weightGrams: number;
+  verdict: any;
+}> {
+  const ledgers: any[] = [];
+  for (let idx = 0; idx < (opts.items || []).length; idx++) {
+    const it = opts.items[idx];
+    const weight = Number(it.weightGrams || 100) || 100;
+    const sItem: any = {
+      scoutIndex: idx,
+      keyword: it.name,
+      originalName: it.name,
+      estimatedWeightGrams: weight,
+      weightGrams: weight,
+      diningEnvironment: it.diningEnvironment || opts.diningEnvironment,
+      cookingMethod: it.cookingMethod,
+      nutrients: {
+        protein: it.protein ?? it.nutrients?.protein ?? 0,
+        totalFat: it.totalFat ?? it.nutrients?.totalFat ?? 0,
+        carbohydrates: it.carbohydrates ?? it.nutrients?.carbohydrates ?? 0,
+        sodium: it.sodium ?? it.nutrients?.sodium ?? 0,
+        saturatedFat: it.saturatedFat ?? it.nutrients?.saturatedFat ?? 0,
+        addedSugar: it.addedSugar ?? it.nutrients?.addedSugar ?? 0,
+        ...(it.nutrients || {})
+      }
+    };
+    const ledger = await finalizeDishLedger({
+      item: sItem,
+      nutrientBasisWeight: weight,
+      consumedWeight: weight,
+      diningEnvironment: it.diningEnvironment || opts.diningEnvironment
+    });
+    ledgers.push(ledger);
+  }
+
+  const mealBook = buildMealFromFinalizeLedgers(ledgers, {
+    mealName: opts.name || (ledgers.length > 0 ? ledgers[0].originalName : 'Simulated Meal'),
+    diningEnvironment: opts.items[0]?.diningEnvironment || opts.diningEnvironment
+  });
+
+  const totals = sumItemNutrients(mealBook.items);
+  const verdict = resolveMealVerdict({ ...mealBook, nutrients: totals });
+
+  return {
+    name: opts.name || mealBook.name || 'Simulated Meal',
+    items: mealBook.items,
+    totals,
+    weightGrams: mealBook.weightGrams,
+    verdict
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Domain Service 2: Meal Editing via server_meal_edit (applyMealEdits)
 // ---------------------------------------------------------------------------
