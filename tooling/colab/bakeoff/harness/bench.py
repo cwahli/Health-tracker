@@ -107,7 +107,7 @@ def persist(note):
     """copy artefacts into the ht clone, commit as cwah123, push branch only. Never raises."""
     try:
         os.makedirs(DEST, exist_ok=True)
-        for src, dst in [(RES, 'results.jsonl'), (f'{B}/RESULTS.md', 'RESULTS.md'), (f'{B}/PRIOR.md', 'PRIOR.md')]:
+        for src, dst in [(RES, 'results.jsonl'), (f'{B}/RESULTS.md', 'RESULTS.md'), (f'{B}/PRIOR.md', 'PRIOR.md'), (f'{B}/realwork.jsonl', 'realwork.jsonl'), (f'{B}/REALWORK.md', 'REALWORK.md'), (f'{B}/RESUME.md', 'RESUME.md')]:
             if os.path.exists(src): shutil.copy(src, f'{DEST}/{dst}')
         for d in ['suite', 'modelfiles', 'harness', 'runs']:
             if os.path.isdir(f'{B}/{d}'):

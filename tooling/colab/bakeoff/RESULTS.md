@@ -204,3 +204,20 @@ The original qwen3.8 hit an Ollama renderer 500 ("no user query found") on paral
 | qwen3.8-fixed | 4 | 3 | PASS | pass | 704.5 | 7 | 8 | 0 | 17197 |  |
 | qwen3.8-fixed | 5 | 3 | PASS | pass | 133.8 | 10 | 10 | 0 | 2578 |  |
 | bench-qwen38r | 11 | 1 | FAIL | timeout | 1803.0 | 48 | 71 | 0 | 37436 | fs1280: panel is a box (1232px wide) |
+
+<!-- REALWORK:BEGIN -->
+## Real-work scoreboard (continuous)
+
+Source: `/content/bakeoff/realwork.jsonl` (one row per real Colab coding job; format in `REALWORK.md`). Updated: 2026-10-28T20:05:57+0000.
+Ranked by verified success rate (a job counts as a success only if the real check or live verification passed). Time is used only to break ties. A job with no verification yet is listed under Unverified and not counted in the rate.
+
+**Easy jobs**
+
+_no jobs logged yet_
+
+**Hard jobs (multi-file, layout/Figma, or test-preserving)**
+
+_no jobs logged yet_
+
+Key: numbers like "3 of 4" are verified passes out of verified jobs, higher is better. Fakes = the model said it was done but the check failed. Retries = extra attempts. "-" means no passing job to time.
+<!-- REALWORK:END -->

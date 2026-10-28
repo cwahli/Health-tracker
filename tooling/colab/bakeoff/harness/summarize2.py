@@ -44,3 +44,7 @@ out+=['','Note: MiMo (reference) has 1 run per task so far (1/1 each on T1-T5, 0
 '| MiMo (reference) | opencode/mimo-v2.6-flash-free | hosted free tier |','| DeepSeek (fallback) | opencode/deepseek-v4.1-flash-free | hosted; used only if MiMo is rate-limited |','']
 open(f'{B}/RESULTS.md','w').write('\n'.join(out)+'\n'+tail)
 print('\n'.join(out))
+
+try:
+    import sys; sys.path.insert(0,"/content/bakeoff/harness"); import realwork; realwork.summary()
+except Exception as e: print('realwork block skipped:',e)
