@@ -1,10 +1,10 @@
 {
   "slug": "biomarker-flexible-log",
   "node": "planner",
-  "at": "2026-10-28T08:41:10.103Z",
+  "at": "2026-10-28T09:07:22.700Z",
   "git": {
-    "head": "696eee17223a4487b86da994e601e4743867222b",
-    "stashCommit": "754256d5cb288b6146f1209624492a0613e0f325"
+    "head": "71e8856b296620cc309265a5d6fdf871af1ccde3",
+    "stashCommit": "2cca16d7a7659243406fbb7cbc92a53eff91987e"
   },
   "files": [
     "docs/agent/standing.json",
