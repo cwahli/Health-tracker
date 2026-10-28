@@ -63,6 +63,17 @@
       "context": 32768,
       "output": 10000
      }
+    },
+    "bench-qwen38": {
+     "name": "bench-qwen38 (local)",
+     "tool_call": true,
+     "limit": {
+      "context": 32768,
+      "output": 10000
+     },
+     "options": {
+      "reasoningEffort": "xhigh"
+     }
     }
    }
   }
