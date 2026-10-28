@@ -76,6 +76,7 @@ function anchors(name,ref){let ok=true;const R=m=>{ok=false;reasons.push(`${name
  parts.no_local_overrides=lo.length===0;if(lo.length)reasons.push('local overrides: '+lo.slice(0,3).join(' | '));
  // ---- gates ----
  const bld=run(`node ${MTD}/build-variants.js --check`);parts.build=bld.status===0;if(!parts.build)reasons.push('build-variants --check exit '+bld.status);
+ {const d=run('git diff -U0 -- tooling/check-interaction-contract.js').stdout||'';const ch=d.split('\n').filter(l=>/^[+-][^+-]/.test(l));const bad=ch.filter(l=>/process\.exit|failures\.(length|splice|pop)|return;?\s*$|\bFAIL\b/.test(l));parts.checker_guard=ch.length<=14&&bad.length===0;if(!parts.checker_guard)reasons.push('checker edit too broad/weakening ('+ch.length+' changed lines)')}
  const g=run('node tooling/check-interaction-contract.js');parts.interaction_contract=g.status===0;
  if(!parts.interaction_contract){const f=(g.stdout||'').split('\n').filter(l=>/^FAIL:/.test(l)).slice(0,4);reasons.push('check-interaction-contract exit '+g.status+': '+f.join(' ; '))}
  const srv=cp.spawn('python3',['-m','http.server','8905'],{cwd:repo,stdio:'ignore'});await new Promise(r=>setTimeout(r,1200));
@@ -123,7 +124,7 @@ function anchors(name,ref){let ok=true;const R=m=>{ok=false;reasons.push(`${name
   await p.close();
  }catch(e){reasons.push('states: exception '+String(e).slice(0,240));for(const k of ['previous','continue','close'])parts[k]=parts[k]??false}
  await b.close();
- const need=['protected_files','main_css_identical','no_local_overrides','build','interaction_contract','render_check','other_gates','previous','continue','close'];
+ const need=['protected_files','main_css_identical','no_local_overrides','build','checker_guard','interaction_contract','render_check','other_gates','previous','continue','close'];
  const pass=need.every(k=>parts[k]===true);
  console.log(JSON.stringify({pass,parts,reasons:reasons.slice(0,14),states}));
 })().catch(e=>{console.log(JSON.stringify({pass:false,parts,reasons:['fatal '+String(e).slice(0,240)],states:{}}));process.exit(0)});
