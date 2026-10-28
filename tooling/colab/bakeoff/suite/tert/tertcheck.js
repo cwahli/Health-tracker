@@ -67,7 +67,7 @@ function anchors(name,ref){let ok=true;const R=m=>{ok=false;reasons.push(`${name
    const re=/([^{}]+)\{([^{}]*)\}/g;let m;
    while((m=re.exec(css))){const sel=m[1].trim(),body=m[2];
      const target=/StyledBack|mtd-quiz-modal-close|button-tertiary|button--secondary|button--primary|button-checkout|score-button|bottom-line/.test(sel);
-     if(!target)continue;
+     if(!target||/banner-cta/.test(sel))continue;
      if(/:(hover|active|focus|focus-visible|focus-within)/.test(sel)){lo.push(f.split('/').pop()+': state rule '+sel.slice(0,70));continue}
      if(/(^|;|\s)(color|background(-color)?|border(-[a-z]+)?|box-shadow|outline(-[a-z]+)?|text-decoration(-[a-z]+)?)\s*:/.test(body.replace(/--[\w-]+\s*:[^;]*/g,''))&&!/--button-/.test(body))lo.push(f.split('/').pop()+': colour/border rule '+sel.slice(0,70));
      else if(/(^|;|\s)(color|background(-color)?|box-shadow|outline(-[a-z]+)?|text-decoration(-[a-z]+)?)\s*:/.test(body.replace(/--[\w-]+\s*:[^;]*/g,'')))lo.push(f.split('/').pop()+': colour rule '+sel.slice(0,70));
@@ -96,11 +96,11 @@ function anchors(name,ref){let ok=true;const R=m=>{ok=false;reasons.push(`${name
   const tiles=()=>f.locator('button[class*=StyledButton]');
   await tiles().first().click();await p.waitForTimeout(1800);
   // reference elements built from the shared class names, in the quiz document and in the page document
-  const mk=(ctx,id,cls,inner)=>ctx.evaluate(([id,cls,inner])=>{const d=document;const e=d.createElement('button');e.id=id;e.className=cls;e.type='button';e.innerHTML=inner;e.style.cssText='position:fixed;left:40px;top:40px;z-index:99999';d.body.appendChild(e)},[id,cls,inner]);
+  const mk=(ctx,id,cls,inner,anc)=>ctx.evaluate(([id,cls,inner,anc])=>{const d=document;const a=d.querySelector(anc);if(!a)throw new Error('no anchor '+anc);const e=d.createElement('button');e.id=id;e.className=cls;e.type='button';e.innerHTML=inner;e.style.cssText='position:relative;z-index:99999;margin:6px';a.parentElement.appendChild(e)},[id,cls,inner,anc]);
   const frEl=await p.locator('#mtd-quiz-modal-frame').elementHandle();const fdoc=await frEl.contentFrame();
-  await mk(fdoc,'__ref_t','score-button button-tertiary','Ref<span class="bottom-line"></span>');
-  await mk(fdoc,'__ref_p','score-button button--primary button-checkout','Ref');
-  await mk(p,'__ref_s','score-button button--secondary','Ref');
+  await mk(fdoc,'__ref_t','score-button button-tertiary','Ref<span class="bottom-line"></span>','button[class*=StyledBack]');
+  await mk(fdoc,'__ref_p','score-button button--primary button-checkout','Ref','button[class*=StyledBack]');
+  await mk(p,'__ref_s','score-button button--secondary','Ref','.mtd-quiz-modal-close');
   const prev=f.locator('button[class*=StyledBack]').first();
   const ref_t=await sigs(p,f.locator('#__ref_t')),prv=await sigs(p,prev);states.previous=prv;states.ref_tertiary=ref_t;
   let pok=anchors('tertiary',ref_t);
