@@ -61,25 +61,43 @@ export function pageReadFromModelText(page: number, raw: string): PageRead {
         if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) kept = Number(trimmed);
         else if (trimmed) kept = trimmed;
       }
+      const printedRange = row?.printedRange == null || row.printedRange === '' ? null : String(row.printedRange);
       return {
         printed: String(row?.printed ?? ''),
         value: kept,
         unit: row?.unit == null || row.unit === '' ? null : String(row.unit),
         when: row?.when || row?.date || null,
+        printedRange,
       };
     }),
-  };
+  } as PageRead;
 }
 
-function asIntake(id: string, printed: string, value: number | string | null, unit: string | null, when: string | null): IntakeRow | null {
+type RowWithRange = PageRead['rows'][number] & { printedRange?: string | null };
+
+/** The PDF opener joins every text operator with spaces. Put each lab tuple on its own line. */
+export function splitJoinedLabText(text: string): string {
+  return text.replace(/(\d(?:\.\d+)?(?:\s+[A-Za-z/%µμ.]+)?)\s+(?=[A-Za-z][A-Za-z0-9/+-]*\s+-?\d)/g, '$1\n');
+}
+
+function asIntake(
+  id: string,
+  printed: string,
+  value: number | string | null,
+  unit: string | null,
+  when: string | null,
+  printedRange?: string | null,
+): IntakeRow | null {
   if (!printed || typeof value !== 'number' || !Number.isFinite(value)) return null;
-  return {
+  const row: IntakeRow = {
     id,
     printed,
     value,
     unit: unit || '',
     date: when || '',
   };
+  if (printedRange) row.printedRange = printedRange;
+  return row;
 }
 
 function dedupe(rows: IntakeRow[]): IntakeRow[] {
@@ -159,7 +177,7 @@ export async function extractLabAttachments(
         pageSeq += 1;
         const door = routePdfPage(page).door;
         if (door === 'text' || door === 'both') {
-          const entered = enterTextDoors({ prose: page.text });
+          const entered = enterTextDoors({ prose: splitJoinedLabText(page.text) });
           if (entered.gridOk) {
             entered.rows.forEach((row, index) => {
               const intake = asIntake(`${fileId}-p${page.page}-${index}`, row.printed, row.numericValue, row.unit, row.when);
@@ -193,7 +211,15 @@ export async function extractLabAttachments(
     const agreed = agreedRows(page);
     if (!agreed) continue;
     agreed.rows.forEach((row, index) => {
-      const intake = asIntake(`photo-p${page.page}-${index}`, row.printed, row.value, row.unit, row.when);
+      const withRange = row as RowWithRange;
+      const intake = asIntake(
+        `photo-p${page.page}-${index}`,
+        withRange.printed,
+        withRange.value,
+        withRange.unit,
+        withRange.when,
+        withRange.printedRange,
+      );
       if (intake) photoRows.push(intake);
     });
   }

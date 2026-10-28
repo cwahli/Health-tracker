@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { PHOTO_PROMPT_A, PHOTO_PROMPT_B, READ_MODEL, TIE_BREAK_MODEL } from '../../utils/dataEntry';
 import type { PageRead } from '../../utils/healthRecord';
-import { extractLabAttachments, pageReadFromModelText, type PageReadJob } from './photoBatch';
+import { extractLabAttachments, pageReadFromModelText, splitJoinedLabText, type PageReadJob } from './photoBatch';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
 
@@ -111,6 +111,29 @@ describe('lab photo and pdf doors', () => {
     }));
     expect(read.rows.map((row) => row.value)).toEqual(['Positive', 130, '<0.1']);
     expect(JSON.stringify(read)).not.toContain('passed');
+  });
+
+  it('splits several lab tuples that the pdf opener joined onto one line', async () => {
+    const pdf = Buffer.from(
+      '%PDF-1.4\n1 0 obj<</Type/Page/Contents 2 0 R>>endobj\n2 0 obj<</Length 80>>stream\nBT (Total cholesterol 200 mg/dL) Tj (HDL 50 mg/dL) Tj (LDL 130 mg/dL) Tj ET\nendstream\nendobj\n%%EOF',
+    ).toString('base64');
+    const result = await extractLabAttachments([`data:application/pdf;base64,${pdf}`], async (job) => agree(job));
+    expect(result.visionCalls).toBe(0);
+    expect(result.rows.map((row) => [row.printed, row.value, row.unit])).toEqual([
+      ['Total cholesterol', 200, 'mg/dL'],
+      ['HDL', 50, 'mg/dL'],
+      ['LDL', 130, 'mg/dL'],
+    ]);
+    expect(splitJoinedLabText('HDL 50 mg/dL LDL 130')).toBe('HDL 50 mg/dL\nLDL 130');
+    expect(splitJoinedLabText('Total cholesterol 200 mg/dL')).toBe('Total cholesterol 200 mg/dL');
+  });
+
+  it('keeps a printed range from the page read', async () => {
+    const result = await extractLabAttachments(['data:image/jpeg;base64,QQ=='], async (job) => ({
+      page: job.page,
+      rows: [{ printed: 'HDL', value: 50, unit: 'mg/dL', when: '2020-01-01', printedRange: '40-60' }],
+    }));
+    expect(result.rows[0].printedRange).toBe('40-60');
   });
 
   it('drops a disagreed page and does not coerce text to zero', async () => {

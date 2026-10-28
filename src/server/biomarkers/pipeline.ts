@@ -17,6 +17,7 @@ const pageReadSchema = {
           value: { type: Type.STRING },
           unit: { type: Type.STRING },
           when: { type: Type.STRING },
+          printedRange: { type: Type.STRING },
         },
         required: ["printed"],
       },
