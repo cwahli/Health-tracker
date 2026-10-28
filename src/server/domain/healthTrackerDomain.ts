@@ -898,3 +898,25 @@ export async function manageUserHabits(opts: ManageHabitsOptions): Promise<any> 
 
   return { success: true, dailyBenefits: habits };
 }
+
+export async function saveProjectedBiomarkerRows(opts: {
+  uid: string;
+  possibleUids: string[];
+  rows: D1BiomarkerRow[];
+  deletedIds?: string[];
+}): Promise<D1BiomarkerRow[]> {
+  const rows = opts.rows.map((row) => ({
+    ...row,
+    firebase_uid: row.firebase_uid || opts.uid,
+    updated_at: row.updated_at || new Date().toISOString(),
+  }));
+  if (isD1Configured()) {
+    if (rows.length > 0) await d1UpsertBiomarkers(rows);
+    if (opts.deletedIds && opts.deletedIds.length > 0) await d1DeleteBiomarkers(opts.deletedIds);
+  }
+  for (const uid of opts.possibleUids) {
+    if (uid === opts.uid) inMemoryMcpBiomarkers.set(uid, rows);
+  }
+  if (!opts.possibleUids.includes(opts.uid)) inMemoryMcpBiomarkers.set(opts.uid, rows);
+  return rows;
+}

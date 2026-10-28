@@ -1610,6 +1610,7 @@ export const id = {
   "top": "Top",
   "topNutrientTargets": "Top Nutrient Targets",
   "topTargets": "Top Targets",
+  "recordStrip": "Catatan terkonfirmasi",
   "topWeeklyNutrientTargets": "Top Weekly Nutrient Targets",
   "totalCalories": "Total Calories",
   "totalDurationStr": "Total Duration Str",

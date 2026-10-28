@@ -12,6 +12,7 @@ import {
 } from './server_db_d1.js';
 import { getBaseUrl, resolveCanonicalUid } from './server_routes_mcp_auth.js';
 import { biomarkerDefinitions } from './src/utils/biomarkers.js';
+import { applyRecordAction, projectRead, publicBiomarkerMap, userMarkerKeys } from './src/utils/recordProjection.js';
 import { buildCanonicalRunTree } from './src/utils/debugRunTree.js';
 import { evaluateContracts, classifyDump } from './src/utils/dumpContract.js';
 import { runGeneralizedBiomarkerAudit } from './src/utils/biomarkerAuditEngine.js';
@@ -40,7 +41,8 @@ import {
   manageUserHabits,
   simulateMealCalculation,
   withIdempotency,
-  clearIdempotencyStore
+  clearIdempotencyStore,
+  saveProjectedBiomarkerRows
 } from './src/server/domain/healthTrackerDomain.js';
 
 export {
@@ -547,8 +549,8 @@ const MCP_TOOLS = [
       properties: {
         action: {
           type: 'string',
-          enum: ['list', 'get_trends', 'log_entries', 'delete_values'],
-          description: 'Action: "list" to browse historical biomarker records, "get_trends" for trend deltas, "log_entries" to record lab values, "delete_values" to delete a specific marker or record.'
+          enum: ['list', 'get_trends', 'log_entries', 'delete_values', 'log', 'edit', 'delete', 'confirm_source', 'confirm_cleanup'],
+          description: 'Action: "list" and "get_trends" read the numeric map. "log", "edit", "delete", "confirm_source", and "confirm_cleanup" use the record projection. "log_entries" and "delete_values" remain the step 4 date-map tools.'
         },
         keys: {
           type: 'array',
@@ -783,7 +785,8 @@ export function generateHealthTrackerCatalog(profile: any) {
       custom_count: customBiomarkers.length,
       items: [...standardBiomarkers, ...customBiomarkers]
     },
-    tools
+    tools,
+    user_markers: userMarkerKeys(profile)
   };
 }
 
@@ -1684,9 +1687,10 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
 
           const limit = typeof args.limit === 'number' && args.limit > 0 ? args.limit : 50;
           const paged = filtered.slice(0, limit);
+          const readModel = projectRead(filtered);
 
           const formatted = paged.map((b) => {
-            let biomarkersMap = b.biomarkers || {};
+            let biomarkersMap = publicBiomarkerMap(b.biomarkers || {});
             if (requestedKeys.length > 0) {
               const sub: Record<string, any> = {};
               for (const k of requestedKeys) {
@@ -1723,7 +1727,10 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
                       timezone: userTz,
                       total: filtered.length,
                       count: formatted.length,
-                      biomarker_logs: formatted
+                      biomarker_logs: formatted,
+                      symptomEvents: readModel.symptomEvents,
+                      tracked: readModel.tracked,
+                      logEntries: readModel.logEntries
                     },
                     null,
                     2
@@ -1744,7 +1751,7 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
 
           for (const b of allBios) {
             const dateStr = toYYYYMMDD(b.date, userTz);
-            const bios = b.biomarkers || {};
+            const bios = publicBiomarkerMap(b.biomarkers || {});
             for (const [k, val] of Object.entries(bios)) {
               if (requestedKeys.length > 0 && !requestedKeys.includes(k)) continue;
               const numVal = parseNumericTarget(val, NaN);
@@ -1844,6 +1851,29 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
           });
         }
 
+        if (action === 'log' || action === 'edit' || action === 'delete' || action === 'confirm_source' || action === 'confirm_cleanup') {
+          const date = args.date ? toYYYYMMDD(args.date, userTz) : toYYYYMMDD('today', userTz);
+          const outcome = applyRecordAction(allBios, { ...args, action, date });
+          const saved = await withIdempotency(args.idempotency_key, () =>
+            saveProjectedBiomarkerRows({
+              uid: currentUser.uid,
+              possibleUids,
+              rows: (outcome.rows as any[]) || [],
+              deletedIds: (outcome.deletedIds as string[]) || []
+            })
+          );
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({ ...outcome, rows: saved, sqlWriter: 'd1UpsertBiomarkers' }, null, 2)
+              }]
+            }
+          });
+        }
+
         if (action === 'delete_values') {
           const deleteResult = await withIdempotency(args.idempotency_key, () =>
             deleteBiomarkerEntry({
@@ -1884,7 +1914,7 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
             content: [
               {
                 type: 'text',
-                text: `Unsupported action "${action}" for tool "manage_biomarkers". Available: "list", "get_trends", "log_entries", "delete_values".`
+                text: `Unsupported action "${action}" for tool "manage_biomarkers". Available: "list", "get_trends", "log_entries", "delete_values", "log", "edit", "delete", "confirm_source", "confirm_cleanup".`
               }
             ]
           }

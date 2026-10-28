@@ -1,0 +1,16 @@
+{
+  "slug": "biomarker-flexible-log",
+  "node": "planner",
+  "at": "2026-10-28T09:07:22.700Z",
+  "git": {
+    "head": "71e8856b296620cc309265a5d6fdf871af1ccde3",
+    "stashCommit": "2cca16d7a7659243406fbb7cbc92a53eff91987e"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/biomarker-flexible-log.md"
+  ]
+}

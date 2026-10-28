@@ -1598,6 +1598,7 @@ export const fr = {
   "top": "Haut",
   "topNutrientTargets": "Principaux objectifs nutritionnels",
   "topTargets": "Principaux objectifs",
+  "recordStrip": "Dossier confirmé",
   "topWeeklyNutrientTargets": "Principaux objectifs nutritionnels hebdomadaires",
   "totalCalories": "Calories totales",
   "totalDurationStr": "Durée totale",

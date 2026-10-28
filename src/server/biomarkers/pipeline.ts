@@ -67,12 +67,15 @@ export async function runBiomarkerPipeline(
       }
   }
 
-  const classified = classifyRows(rows, history || {}, profile);
-  
-  const hits = classified.filter((r: any) => r.writeTarget === "observation");
-  const misses = classified.filter((r: any) => r.writeTarget === "pending");
-  
-  if (onProgress) onProgress(`Classified: ${hits.length} catalog hits, ${misses.length} misses.`);
+  const classified = classifyRows(rows, history || {}, profile).map((row: any) => ({
+    ...row,
+    writeTarget: "observation" as const,
+  }));
+
+  const hits = classified;
+  const misses: any[] = [];
+
+  if (onProgress) onProgress(`Staged ${classified.length} rows. No catalog split.`);
 
   const insightBatches = batchRows(hits, 20);
   const draftBatches = batchRows(misses, 12);

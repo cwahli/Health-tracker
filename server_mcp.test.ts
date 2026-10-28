@@ -2262,6 +2262,70 @@ describe('MCP OAuth 2.1 & Streamable HTTP Handshake Spike', () => {
     });
   });
 
+  describe('record projection tools', () => {
+    const uid = 'user_record_projection';
+    let accessToken: string;
+
+    beforeEach(() => {
+      accessToken = signSessionToken({ uid, email: 'record@example.com' });
+    });
+
+    it('logs, lists, confirms, and deletes through the projection', async () => {
+      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` };
+      const call = async (id: string, arguments_: Record<string, unknown>) => {
+        const res = await fetch(`${baseUrl}/api/mcp`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'manage_biomarkers', arguments: arguments_ } }),
+        });
+        expect(res.status).toBe(200);
+        return JSON.parse((await res.json()).result.content[0].text);
+      };
+
+      const logged = await call('rec-log', {
+        action: 'log',
+        date: '2024-06-01',
+        text: 'I slept badly',
+        readings: { HDL: 50, CRP: 0 },
+        photoCount: 10,
+        diary: { id: 'bowel', columns: [{ id: 'col-1', label: 'pain', retiredAt: null }], events: [] },
+        diaryEvent: {
+          diaryId: 'bowel',
+          observedAt: '2024-06-01',
+          movementNumber: 1,
+          clientKey: 'k',
+          cells: [{ columnId: 'col-1', value: 1 }],
+        },
+      });
+      expect(logged.labs[0].biomarkers.hdl).toBe(50);
+      expect(logged.labs[0].biomarkers.crp).toBe(0);
+      expect(logged.symptomEvents).toHaveLength(1);
+      expect(logged.photos.id).toBe('photo-batch');
+      expect(logged.photos.parts).toHaveLength(10);
+      expect(logged.diary.events[0].cells[0].columnId).toBe('col-1');
+      expect(logged.sqlWriter).toBe('d1UpsertBiomarkers');
+
+      const listed = await call('rec-list', { action: 'list', date_from: '2024-06-01', date_to: '2024-06-01' });
+      expect(listed.biomarker_logs[0].biomarkers.hdl).toBe(50);
+      expect(listed.biomarker_logs[0].biomarkers.__observations).toBeUndefined();
+      expect(listed.symptomEvents).toHaveLength(1);
+      expect(listed.tracked).toBe(2);
+
+      const observationId = logged.rows[0].biomarkers.__observations[0].id;
+      const edited = await call('rec-edit', { action: 'edit', observation_id: observationId, value: 1.293 });
+      expect(edited.rows[0].biomarkers.__observations[0].rawValue).toBe(50);
+      expect(edited.labs[0].biomarkers.hdl).toBe(1.293);
+
+      const source = await call('rec-source', { action: 'confirm_source', userConfirm: 'confirmed', everyPartPassed: false });
+      expect(source.deleteSource).toBe(false);
+
+      const removed = await call('rec-del', { action: 'delete', observation_id: observationId });
+      expect(removed.labs[0].biomarkers.hdl).toBeUndefined();
+      expect(removed.labs[0].biomarkers.crp).toBe(0);
+      expect(removed.symptomEvents).toHaveLength(1);
+    });
+  });
+
   describe('Step 6: Diagnostic & Reliability Tools (diagnose_health_data)', () => {
     let accessToken: string;
     const testUid = 'user_test_step6';
