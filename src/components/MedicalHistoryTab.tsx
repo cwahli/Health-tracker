@@ -11,6 +11,7 @@ import { biomarkerDefinitions, getBiomarkerStatus, getBiomarkerColor, getBiomark
 import { getAgentCalibration, getAllAgentCalibrationRecords, formatOptimalTargetValue } from '../utils/agentCalibration';
 import { getDuplicateAliasGroups } from '../utils/biomarkerAuditEngine';
 import { handleUnitChange } from '../utils/biomarkerLifecycle';
+import { acceptedRiskLabel, projectHistoryScreen, skipsLaboratoryRatio, type Diary } from '../utils/healthRecord';
 
 const getBiomarkerDef = (key: string) => biomarkerDefinitions.find(d => d.key === key);
 
@@ -391,7 +392,9 @@ export default function MedicalHistoryTab({
       return {
         ...def,
         needsApproval,
-        riskCategories: meta.riskCategories,
+        riskCategories: (meta.riskCategories || [])
+          .map((label: string) => acceptedRiskLabel(label))
+          .filter((label: string | null): label is string => label !== null),
         standardMedicalGrouping: meta.standardMedicalGrouping,
         potentialMedicalConditions: meta.potentialMedicalConditions
       };
@@ -609,9 +612,21 @@ export default function MedicalHistoryTab({
     document.body.removeChild(link);
   };
 
-  const totalUniqueBiomarkers = useMemo(() => {
-    return allDefinitions.length;
-  }, [allDefinitions]);
+  const historyScreen = useMemo(() => {
+    const notUsed = [
+      ...Object.keys(profile?.notUsedBiomarkers || {}),
+      ...Object.keys(profile?.notUsedInMedicalHistory || {}),
+    ];
+    return projectHistoryScreen({
+      current: biomarkers,
+      history: activeHistory,
+      notUsed,
+      hiddenAliases: [...aliasKeysToHide],
+      diaries: (profile.symptomDiaries || []) as Diary[],
+    });
+  }, [biomarkers, activeHistory, profile?.notUsedBiomarkers, profile?.notUsedInMedicalHistory, profile.symptomDiaries, aliasKeysToHide]);
+
+  const totalUniqueBiomarkers = historyScreen.tracked;
 
   // PERF: compute the flagged-telemetry key set exactly ONCE per render.
   // isBiomarkerNeedingReview() is called once per biomarker at multiple
@@ -623,7 +638,7 @@ export default function MedicalHistoryTab({
   }, [biomarkers, profile, activeHistory, allDefinitions]);
 
   const flaggedTelemetryKeys = useMemo(() => {
-    return new Set(flaggedTelemetryList.map(f => f.key));
+    return new Set(flaggedTelemetryList.map(f => f.key).filter(key => !skipsLaboratoryRatio(key)));
   }, [flaggedTelemetryList]);
 
   // PERF: parse `batch_analysis_results` from localStorage exactly ONCE per
@@ -1242,6 +1257,19 @@ export default function MedicalHistoryTab({
         }))}
       </div>
 
+      {historyScreen.symptomRows.length > 0 && (
+        <div id="symptom-diary-list" className="mt-6 border-t border-theme-border/80">
+          {historyScreen.symptomRows.map((row) => (
+            <div key={row.id} className="px-4 py-3">
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{row.observedAt}</span>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                {row.cells.map((cell) => `${cell.label}: ${cell.value}`).join(' · ')}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="mt-8 pt-6 border-t border-theme-border/80 flex flex-col sm:flex-row items-center justify-between gap-4 px-4">
         <div className="flex flex-wrap items-center gap-6 text-xs text-theme-text-secondary font-medium">
           <div className="flex items-center gap-2">
@@ -1250,7 +1278,7 @@ export default function MedicalHistoryTab({
           </div>
           <div className="flex items-center gap-2">
             <BrainCircuit className="w-4 h-4 text-indigo-500" />
-            <span id="download-logs-csv-btn" onClick={exportLogEntriesToCSV} className="cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors" title={t.downloadAsCsv}>{t.totalLogEntries}: <strong className="text-slate-800 dark:text-slate-200 font-bold">{activeHistory.reduce((sum, h) => sum + Object.keys(h.biomarkers).length, 0)}</strong></span>
+            <span id="download-logs-csv-btn" onClick={exportLogEntriesToCSV} className="cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors" title={t.downloadAsCsv}>{t.totalLogEntries}: <strong className="text-slate-800 dark:text-slate-200 font-bold">{historyScreen.logEntries}</strong></span>
           </div>
         </div>
       </div>

@@ -798,3 +798,84 @@ export function applyCleanup(
 export function countableObservations(observations: Observation[]): Observation[] {
   return observations.filter((item) => item.confirmed);
 }
+
+/** Labels already used on catalog definitions. Milestone 1 does not invent a second set. */
+export const EXISTING_RISK_LABELS = [
+  'Cardiovascular',
+  'Metabolic',
+  'Kidney',
+  'Hematology',
+  'Hepatic',
+  'Liver',
+  'Gastrointestinal',
+  'Bone & Mineral',
+  'Musculoskeletal',
+  'Wellness',
+  'Screenings & Wellness',
+] as const;
+
+export function acceptedRiskLabel(label: string | null | undefined): string | null {
+  if (!label) return null;
+  return (EXISTING_RISK_LABELS as readonly string[]).includes(label) ? label : null;
+}
+
+export function skipsLaboratoryRatio(key: string, kind?: 'biomarker' | 'symptom'): boolean {
+  if (kind === 'symptom') return true;
+  const lower = key.toLowerCase();
+  return lower === 'sleep_duration' || lower.endsWith('_symptom_score');
+}
+
+/** Same calendar day keeps every lab value. Nothing here computes a mean. */
+export function sameDayLabsStay<T extends { numericValue: number }>(rows: T[]): T[] {
+  return rows.slice();
+}
+
+export interface HistorySymptomCell {
+  columnId: string;
+  label: string;
+  value: string | number | null;
+}
+
+export interface HistorySymptomRow {
+  id: string;
+  kind: 'symptom';
+  observedAt: string;
+  cells: HistorySymptomCell[];
+}
+
+export interface HistoryScreenInput extends CountInput {
+  diaries?: Diary[];
+  riskLabel?: string | null;
+}
+
+export function projectHistoryScreen(input: HistoryScreenInput): {
+  tracked: number;
+  logEntries: number;
+  symptomRows: HistorySymptomRow[];
+  riskLabel: string | null;
+} {
+  const diaries = input.diaries || [];
+  const fromDiaries = diaries.flatMap((diary) =>
+    diary.events.map((event) => ({ cells: event.cells, confirmed: true as const })),
+  );
+  const symptomEvents = [...(input.symptomEvents || []), ...fromDiaries];
+  const symptomRows = diaries.flatMap((diary) => {
+    const labels = new Map(diary.columns.map((column) => [column.id, column.label]));
+    return diary.events.map((event) => ({
+      id: eventIdentity(event),
+      kind: 'symptom' as const,
+      observedAt: event.observedAt,
+      cells: event.cells.map((cell) => ({
+        columnId: cell.columnId,
+        label: labels.get(cell.columnId) || cell.columnId,
+        value: cell.value,
+      })),
+    }));
+  });
+  return {
+    tracked: trackedMarkerCount(input),
+    logEntries: totalLogEntryCount({ ...input, symptomEvents }),
+    symptomRows,
+    riskLabel: acceptedRiskLabel(input.riskLabel),
+  };
+}

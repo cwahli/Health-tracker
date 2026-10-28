@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  acceptedRiskLabel,
   addColumn,
   appendEvent,
   applyCleanup,
@@ -12,9 +13,12 @@ import {
   openPageBatch,
   parseFlatResultXml,
   parseProse,
+  projectHistoryScreen,
   proposeCleanup,
   retireColumn,
   routePdfPage,
+  sameDayLabsStay,
+  skipsLaboratoryRatio,
   stageGrid,
   totalLogEntryCount,
   trackedMarkerCount,
@@ -548,5 +552,122 @@ describe('health record milestone 0', () => {
     expect(batch.parts).toHaveLength(5);
     expect(batch.inFlight).toHaveLength(4);
     expect(batch.waiting).toHaveLength(1);
+  });
+});
+
+describe('history screen', () => {
+  const diary = JSON.parse(fixture('symptom-diary.json')) as Diary;
+  const history = [
+    { biomarkers: { hdl: 50, weight: 80 } },
+    { biomarkers: { trig: 125, hidden: 1 } },
+  ];
+
+  it('counters match the milestone 0 functions on the same fixture', () => {
+    const screen = projectHistoryScreen({
+      current: { ldl: 1, empty: '' },
+      history,
+      notUsed: ['hidden'],
+      diaries: [diary],
+    });
+    expect(screen.tracked).toBe(trackedMarkerCount({
+      current: { ldl: 1, empty: '' },
+      history,
+      notUsed: ['hidden'],
+    }));
+    expect(screen.logEntries).toBe(totalLogEntryCount({
+      history,
+      symptomEvents: [{ cells: diary.events[0].cells, confirmed: true }],
+    }));
+    expect(screen.symptomRows[0].kind).toBe('symptom');
+    expect(screen.symptomRows[0].cells.map((cell) => cell.columnId)).toEqual(['col-9', 'col-10']);
+  });
+
+  it('first event stays after a column is removed and after one is added', () => {
+    const retired = retireColumn(diary, 'col-3', '2024-06-02');
+    const widened = addColumn(retired, 'Sitz bath');
+    const screen = projectHistoryScreen({ diaries: [widened] });
+    expect(screen.symptomRows[0].observedAt).toBe('2024-06-01T08:00:00');
+    expect(screen.symptomRows[0].cells.map((cell) => cell.columnId)).toEqual(['col-9', 'col-10']);
+    expect(widened.columns.some((column) => column.id === 'col-3' && column.retiredAt)).toBe(true);
+    expect(widened.columns.at(-1)?.id).toBe('col-18');
+  });
+
+  it('a later log with headers in another order keeps the same ids', () => {
+    const ingested = ingestDiaryRow(diary, {
+      observedAt: '2024-06-08T08:00:00',
+      movementNumber: 1,
+      clientKey: null,
+      headers: [
+        { label: 'Abdominal pain', value: 1 },
+        { label: 'Anal pain', value: 2 },
+      ],
+    });
+    const screen = projectHistoryScreen({ diaries: [ingested.diary] });
+    const later = screen.symptomRows.find((row) => row.observedAt.startsWith('2024-06-08'));
+    expect(later?.cells.map((cell) => cell.columnId)).toEqual(['col-10', 'col-9']);
+  });
+
+  it('re-importing the same movement does not add a log entry', () => {
+    const once = ingestDiaryRow(diary, {
+      observedAt: '2024-06-08T08:00:00',
+      movementNumber: 1,
+      clientKey: 'm',
+      headers: [{ label: 'Anal pain', value: 2 }],
+    });
+    const twice = ingestDiaryRow(once.diary, {
+      observedAt: '2024-06-08T08:00:00',
+      movementNumber: 1,
+      clientKey: 'm',
+      headers: [{ label: 'Anal pain', value: 4 }],
+    });
+    const before = projectHistoryScreen({ history, diaries: [diary] }).logEntries;
+    const after = projectHistoryScreen({ history, diaries: [twice.diary] }).logEntries;
+    expect(after - before).toBe(1);
+    expect(twice.diary.events.filter((event) => event.clientKey === 'm')).toHaveLength(1);
+  });
+
+  it('an unknown header is proposed and the known cells are saved', () => {
+    const ingested = ingestDiaryRow(diary, {
+      observedAt: '2024-06-08T08:00:00',
+      movementNumber: 2,
+      clientKey: null,
+      headers: [
+        { label: 'Anal pain', value: 1 },
+        { label: 'Brand new column', value: 9 },
+      ],
+    });
+    expect(ingested.proposed).toEqual(['Brand new column']);
+    const screen = projectHistoryScreen({ diaries: [ingested.diary] });
+    const later = screen.symptomRows.find((row) => row.observedAt.startsWith('2024-06-08'));
+    expect(later?.cells).toEqual([{ columnId: 'col-9', label: 'Anal pain', value: 1 }]);
+  });
+
+  it('drops a risk label that is not already on the catalog', () => {
+    expect(acceptedRiskLabel('Kidney')).toBe('Kidney');
+    expect(acceptedRiskLabel('Renal')).toBeNull();
+    expect(projectHistoryScreen({ riskLabel: 'Sleep & Recovery' }).riskLabel).toBeNull();
+  });
+
+  it('does not average two labs on the same day', () => {
+    const kept = sameDayLabsStay([
+      { analyteKey: 'hdl', when: '2024-06-01', numericValue: 50 },
+      { analyteKey: 'hdl', when: '2024-06-01', numericValue: 55 },
+    ]);
+    expect(kept.map((row) => row.numericValue)).toEqual([50, 55]);
+  });
+
+  it('skips laboratory ratio checks for sleep and symptom scores', () => {
+    expect(skipsLaboratoryRatio('sleep_duration')).toBe(true);
+    expect(skipsLaboratoryRatio('hemorrhoidal_symptom_score')).toBe(true);
+    expect(skipsLaboratoryRatio('hdl')).toBe(false);
+  });
+
+  it('the history tab renders the milestone 0 counters', () => {
+    const src = readFileSync(path.resolve(root, 'src/components/MedicalHistoryTab.tsx'), 'utf8');
+    expect(src).toContain('projectHistoryScreen');
+    expect(src).toContain('historyScreen.tracked');
+    expect(src).toContain('historyScreen.logEntries');
+    expect(src).toContain('skipsLaboratoryRatio');
+    expect(src).not.toContain('Object.keys(h.biomarkers).length');
   });
 });
