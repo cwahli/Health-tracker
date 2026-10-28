@@ -1,0 +1,13 @@
+diff --git a/tooling/lib/args.js b/tooling/lib/args.js
+new file mode 100644
+index 00000000..f735ba45
+--- /dev/null
++++ b/tooling/lib/args.js
+@@ -0,0 +1,7 @@
++'use strict';
++
++const argv = process.argv.slice(2);
++const has = f => argv.includes(f);
++const val = (f, d) => { const i = argv.indexOf(f); return i === -1 ? d : argv[i + 1]; };
++
++module.exports = { argv, has, val };
