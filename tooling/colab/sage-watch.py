@@ -118,7 +118,14 @@ def post(payload):
     auth = os.environ.get("SAGE_WATCHER_WEBHOOK_AUTH", "")
     if auth:
         name, sep, val = auth.partition(": ")
-  REALERT = int(os.environ.get("SAGE_REALERT_SECS", "3600"))
+        hdr.update({name: val} if sep else {"Authorization": auth})
+    try:
+        urllib.request.urlopen(urllib.request.Request(url, json.dumps(payload).encode(), hdr), timeout=15).read()
+    except Exception as e:  # never log the URL/headers
+        print("webhook post failed:", type(e).__name__, flush=True)
+
+
+REALERT = int(os.environ.get("SAGE_REALERT_SECS", "3600"))
 SECRET_RE = re.compile(r"(ghp_|gho_|ghs_|github_pat_|figd_)[A-Za-z0-9_\-]+|(?<=://)[^/\s@]+@")
 
 
