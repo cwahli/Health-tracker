@@ -1961,4 +1961,304 @@ describe('MCP OAuth 2.1 & Streamable HTTP Handshake Spike', () => {
       expect(matchingMeals).toHaveLength(1);
     });
   });
+
+  describe('Step 5 - Dynamic Schema Resource & Prompts Library', () => {
+    let accessToken: string;
+
+    beforeEach(() => {
+      accessToken = signSessionToken({
+        uid: 'test-user-step5',
+        email: 'user-step5@example.com'
+      });
+    });
+
+    it('advertises resources and prompts capabilities in initialize response', async () => {
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'init-5',
+          method: 'initialize',
+          params: {}
+        })
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.result.capabilities.resources).toBeDefined();
+      expect(data.result.capabilities.resources.listChanged).toBe(false);
+      expect(data.result.capabilities.prompts).toBeDefined();
+      expect(data.result.capabilities.prompts.listChanged).toBe(false);
+      expect(data.result.capabilities.tools).toBeDefined();
+      expect(data.result.serverInfo.version).toBe('1.2.0');
+    });
+
+    it('lists the dynamic schema catalog resource via resources/list', async () => {
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'res-list-5',
+          method: 'resources/list',
+          params: {}
+        })
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.result.resources).toHaveLength(1);
+      const catalogRes = data.result.resources[0];
+      expect(catalogRes.uri).toBe('schema://health-tracker/catalog');
+      expect(catalogRes.name).toBe('Health-tracker Clinical & Nutritional Catalog');
+      expect(catalogRes.mimeType).toBe('application/json');
+    });
+
+    it('reads the dynamic schema catalog resource with 31 nutrients, standard and custom biomarkers', async () => {
+      // Set a profile with custom biomarker and customized targets
+      setInMemoryMcpProfile('test-user-step5', {
+        uid: 'test-user-step5',
+        email: 'user-step5@example.com',
+        timezone: 'America/New_York',
+        language: 'en',
+        dailyNutrientTargets: {
+          calories: '1600 kcal',
+          saturatedFat: '12 g'
+        },
+        customBiomarkers: [
+          {
+            key: 'omega3_index',
+            name: 'Omega-3 Index',
+            unit: '%',
+            normalRange: '8.0 - 12.0',
+            category: 'fatty_acids'
+          }
+        ]
+      });
+
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'res-read-5',
+          method: 'resources/read',
+          params: { uri: 'schema://health-tracker/catalog' }
+        })
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.result.contents).toHaveLength(1);
+      const content = data.result.contents[0];
+      expect(content.uri).toBe('schema://health-tracker/catalog');
+      expect(content.mimeType).toBe('application/json');
+
+      const catalog = JSON.parse(content.text);
+      expect(catalog.version).toBe('1.0.0');
+      expect(catalog.user.timezone).toBe('America/New_York');
+
+      // Nutrients: 31 active keys
+      expect(catalog.nutrients.count).toBe(31);
+      expect(catalog.nutrients.items).toHaveLength(31);
+      const calNutrient = catalog.nutrients.items.find((n: any) => n.key === 'calories');
+      expect(calNutrient).toBeDefined();
+      expect(calNutrient.unit).toBe('kcal');
+      expect(calNutrient.polarity).toBe('limit');
+      expect(calNutrient.user_target).toBe('1600 kcal');
+
+      const proteinNutrient = catalog.nutrients.items.find((n: any) => n.key === 'protein');
+      expect(proteinNutrient.unit).toBe('g');
+      expect(proteinNutrient.polarity).toBe('goal');
+
+      const stepsNutrient = catalog.nutrients.items.find((n: any) => n.key === 'steps');
+      expect(stepsNutrient.unit).toBe('steps');
+      expect(stepsNutrient.polarity).toBe('goal');
+
+      // Biomarkers: standard + custom
+      expect(catalog.biomarkers.standard_count).toBeGreaterThanOrEqual(60);
+      expect(catalog.biomarkers.custom_count).toBe(1);
+      const hba1cDef = catalog.biomarkers.items.find((b: any) => b.key === 'hba1c');
+      expect(hba1cDef).toBeDefined();
+      expect(hba1cDef.name).toBe('HbA1c');
+      expect(hba1cDef.unit).toBe('mmol/mol');
+
+      const customDef = catalog.biomarkers.items.find((b: any) => b.key === 'omega3_index');
+      expect(customDef).toBeDefined();
+      expect(customDef.name).toBe('Omega-3 Index');
+      expect(customDef.is_custom).toBe(true);
+
+      // Tools listed in catalog
+      expect(catalog.tools.length).toBeGreaterThanOrEqual(3);
+      expect(catalog.tools.map((t: any) => t.name)).toContain('manage_meals');
+    });
+
+    it('returns error when reading an unknown resource uri', async () => {
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'res-err-5',
+          method: 'resources/read',
+          params: { uri: 'schema://health-tracker/unknown-resource' }
+        })
+      });
+
+      expect(res.status).toBe(404);
+      const data = await res.json();
+      expect(data.error.code).toBe(-32602);
+      expect(data.error.message).toContain('Resource not found');
+    });
+
+    it('lists all 4 native clinical prompts via prompts/list', async () => {
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'prompt-list-5',
+          method: 'prompts/list',
+          params: {}
+        })
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.result.prompts).toHaveLength(4);
+      const names = data.result.prompts.map((p: any) => p.name);
+      expect(names).toContain('audit_meal_accuracy');
+      expect(names).toContain('daily_nutrition_debrief');
+      expect(names).toContain('biomarker_diet_correlation');
+      expect(names).toContain('triage_and_fix_latest_issue');
+    });
+
+    it('gets audit_meal_accuracy prompt with and without meal_id argument', async () => {
+      // 1. Without meal_id (audits most recent)
+      const res1 = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'prompt-audit-1',
+          method: 'prompts/get',
+          params: { name: 'audit_meal_accuracy', arguments: {} }
+        })
+      });
+      const data1 = await res1.json();
+      expect(data1.result.messages[0].content.text).toContain('most recent logged meal');
+      expect(data1.result.messages[0].content.text).toContain('Atwater calculation');
+
+      // 2. With specific meal_id
+      const res2 = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'prompt-audit-2',
+          method: 'prompts/get',
+          params: { name: 'audit_meal_accuracy', arguments: { meal_id: 'meal-target-123' } }
+        })
+      });
+      const data2 = await res2.json();
+      expect(data2.result.messages[0].content.text).toContain('meal ID "meal-target-123"');
+    });
+
+    it('gets daily_nutrition_debrief prompt with date argument', async () => {
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'prompt-debrief',
+          method: 'prompts/get',
+          params: { name: 'daily_nutrition_debrief', arguments: { date: 'yesterday' } }
+        })
+      });
+      const data = await res.json();
+      expect(data.result.messages[0].content.text).toContain('daily nutrition debrief for "yesterday"');
+      expect(data.result.messages[0].content.text).toContain('manage_home(action: "get_allowance_progress"');
+    });
+
+    it('gets biomarker_diet_correlation and triage_and_fix_latest_issue prompts', async () => {
+      // 1. biomarker_diet_correlation
+      const bioRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'prompt-bio',
+          method: 'prompts/get',
+          params: { name: 'biomarker_diet_correlation', arguments: { biomarker_key: 'ldl' } }
+        })
+      });
+      const bioData = await bioRes.json();
+      expect(bioData.result.messages[0].content.text).toContain('biomarker "ldl"');
+      expect(bioData.result.messages[0].content.text).toContain('manage_biomarkers(action: "list"');
+
+      // 2. triage_and_fix_latest_issue
+      const triageRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'prompt-triage',
+          method: 'prompts/get',
+          params: { name: 'triage_and_fix_latest_issue' }
+        })
+      });
+      const triageData = await triageRes.json();
+      expect(triageData.result.messages[0].content.text).toContain('diagnostic health data triage');
+
+      // 3. Unknown prompt name
+      const errRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'prompt-err',
+          method: 'prompts/get',
+          params: { name: 'nonexistent_prompt' }
+        })
+      });
+      expect(errRes.status).toBe(404);
+      const errData = await errRes.json();
+      expect(errData.error.code).toBe(-32602);
+      expect(errData.error.message).toContain('Prompt not found');
+    });
+  });
 });

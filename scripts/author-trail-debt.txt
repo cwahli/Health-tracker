@@ -102,3 +102,4 @@ c033348d  no Author/Agent trailer on main: colab restart sage-watch by PID; auth
 84f4c8d1  no Author/Agent trailer on main: colab bounded/idempotent setup_environment; authored 2026-10-28; recorded 2026-10-28
 12451f54  no Author/Agent trailer on main: colab bootstrap adds node to PATH; authored 2026-10-28; recorded 2026-10-28
 ba3cecb6  no Author/Agent trailer on main: fix(grokq) default queue port; authored 2026-10-28; recorded 2026-10-28
+1edd5e15  no Author/Agent trailer on main: fix(colab) normalise webhook Authorization header; authored 2026-10-28; recorded 2026-10-28
