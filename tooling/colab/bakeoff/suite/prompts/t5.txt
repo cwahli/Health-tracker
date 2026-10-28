@@ -1,0 +1,9 @@
+Implement this written design spec (from Figma) as a new stylesheet: components/mtd-callout/callout.css. Create only that file.
+
+Callout card, class `.mtd-callout`: block element, box-sizing border-box, width 100%, max-width 560px, padding 24px 32px, background-color #F2F5F6, border-radius 16px, left border 4px solid #00D639 (no other borders), font-family "Sage UI" with Arial, sans-serif fallback.
+- `.mtd-callout__title`: margin 0, font-size 20px, line-height 28px, font-weight 600, colour #000000.
+- `.mtd-callout__body`: margin 8px 0 0, font-size 16px, line-height 24px, font-weight 400, colour rgba(0, 0, 0, 0.65).
+- `.mtd-callout__cta` (a link that also carries the shared `.button--secondary` class, so it must have layout only): margin-top 16px, display inline-flex, min-height 44px, padding 0 24px. It must NOT define any :hover, :focus, :focus-visible or :active rule (see AGENTS.md "One look per button class").
+- At viewport width 767px and below: `.mtd-callout` padding becomes 16px 20px and the title becomes font-size 18px, line-height 24px. Everything else is unchanged.
+
+Run `node tooling/check-interaction-contract.js --static-only` when done. Reply with one short summary.

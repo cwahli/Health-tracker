@@ -1,0 +1,1 @@
+In components/mtd-pricing/fallback.css, the light-theme footnote paragraph rule (`.theme-light [data-pattern-id='PS01'] .content-spot--footnotes p`) sets its colour to rgba(255, 255, 255, 0.65). Change the alpha from 0.65 to 0.72. Change nothing else in the repo. When finished, reply with one sentence saying what you changed.

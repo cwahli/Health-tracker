@@ -1,0 +1,13 @@
+diff --git a/components/mtd-pricing/fallback.css b/components/mtd-pricing/fallback.css
+index b9e28c0d..670e8c82 100644
+--- a/components/mtd-pricing/fallback.css
++++ b/components/mtd-pricing/fallback.css
+@@ -44,7 +44,7 @@
+  * modes — docs/TOKENS.md.
+  */
+ .theme-light [data-pattern-id='PS01'] .content-spot--footnotes p {
+-  color: rgba(255, 255, 255, 0.65);
++  color: rgba(255, 255, 255, 0.72);
+ }
+ 
+ .theme-light [data-pattern-id='PS01'] .content-spot--footnotes a {

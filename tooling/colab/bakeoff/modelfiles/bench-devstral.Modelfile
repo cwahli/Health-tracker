@@ -1,0 +1,2 @@
+FROM devstral-small-2
+PARAMETER temperature 0.15

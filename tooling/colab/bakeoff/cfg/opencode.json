@@ -1,0 +1,70 @@
+{
+ "$schema": "https://opencode.ai/config.json",
+ "permission": {
+  "external_directory": "allow",
+  "edit": "allow",
+  "bash": "allow"
+ },
+ "provider": {
+  "ollama": {
+   "npm": "@ai-sdk/openai-compatible",
+   "name": "Ollama (Colab GPU)",
+   "options": {
+    "baseURL": "http://localhost:11434/v1"
+   },
+   "models": {
+    "bench-devstral": {
+     "name": "bench-devstral (local)",
+     "tool_call": true,
+     "limit": {
+      "context": 32768,
+      "output": 10000
+     }
+    },
+    "bench-glm": {
+     "name": "bench-glm (local)",
+     "tool_call": true,
+     "limit": {
+      "context": 32768,
+      "output": 10000
+     }
+    },
+    "bench-qwen3-coder": {
+     "name": "bench-qwen3-coder (local)",
+     "tool_call": true,
+     "limit": {
+      "context": 32768,
+      "output": 10000
+     }
+    },
+    "bench-qwen36": {
+     "name": "bench-qwen36 (local)",
+     "tool_call": true,
+     "limit": {
+      "context": 32768,
+      "output": 10000
+     }
+    },
+    "bench-gemma4": {
+     "name": "bench-gemma4 (local)",
+     "tool_call": true,
+     "limit": {
+      "context": 32768,
+      "output": 10000
+     },
+     "options": {
+      "reasoningEffort": "none"
+     }
+    },
+    "bench-qwen35-9b": {
+     "name": "bench-qwen35-9b (local)",
+     "tool_call": true,
+     "limit": {
+      "context": 32768,
+      "output": 10000
+     }
+    }
+   }
+  }
+ }
+}
