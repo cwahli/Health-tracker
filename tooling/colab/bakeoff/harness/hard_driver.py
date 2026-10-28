@@ -40,6 +40,35 @@ def wait_easy():
         n += 1
         time.sleep(60)
 
+DEEP = 'opencode/deepseek-v4.1-flash-free'
+
+def real_keys(model):
+    return {(r['model'], r['task'], r['run']) for r in rows() if r['model'] == model and r.get('failure_class') != 'unavailable'}
+
+def run_ref(ref, t):
+    for run in (1, 2, 3):
+        if (ref, t, run) in real_keys(ref): continue
+        log('RUN (ceiling)', ref, 't%d' % t, 'r%d' % run)
+        row = hardbench.run_hard(ref, t, run, 1800)
+        open(RES, 'a').write(json.dumps(row) + '\n')
+        log('  ->', 'PASS' if row['pass_'] else row['failure_class'].upper(), f"{row['wall_s']}s", row['reasons'][:2])
+        persist(f"{ref} t{t} r{run} {row['failure_class']} (ceiling)")
+    return sum(1 for k in real_keys(ref) if k[1] == t)
+
+def ceiling_ref(t):
+    """mimo first; rate-limit/quota/provider errors are recorded as 'unavailable' (not fail) and retried later; if mimo stays
+    unavailable (2 sweeps, 20 min apart) fall back to DeepSeek via opencode and note the switch."""
+    for sweep in range(2):
+        if run_ref(REF, t) >= 3: return REF
+        log('mimo unavailable (provider/rate limit); waiting 20 min before retry', sweep + 1)
+        time.sleep(1200)
+    if run_ref(REF, t) >= 3: return REF
+    note = f'task t{t}: mimo stayed unavailable (rate limit/quota/provider error) -> using {DEEP} as the ceiling reference'
+    log('CEILING SWITCH', note)
+    open('/content/bakeoff/ceiling_switch.txt', 'a').write(time.strftime('%F %T ') + note + '\n')
+    run_ref(DEEP, t)
+    return DEEP
+
 def pick_qwen38():
     """Ollama's qwen3.8 renderer 500s ('no user query found') on parallel-tool-call continuations. If the probe shows that and the
     same weights with RENDERER qwen3.5 work, use bench-qwen38r for the hard tasks (documented in the report)."""
@@ -75,20 +104,14 @@ def main():
         done_rounds.append(t)
         tr = [r for r in rows() if r['task'] == t and r['model'] in MODELS]
         if tr and not any(r['pass_'] for r in tr):
-            # chiwah rule: every open-weight model failed -> run mimo (ceiling) x3
-            for run in (1, 2, 3):
-                if (REF, t, run) in done_keys(): continue
-                log('RUN (ceiling)', REF, 't%d' % t, 'r%d' % run)
-                row = hardbench.run_hard(REF, t, run, 1800)
-                open(RES, 'a').write(json.dumps(row) + '\n')
-                log('  ->', 'PASS' if row['pass_'] else 'FAIL', row['failure_class'], f"{row['wall_s']}s", row['reasons'][:2])
-                persist(f"{REF} t{t} r{run} {row['failure_class']} (ceiling)")
-            mp = sum(1 for r in rows() if r['task'] == t and r['model'] == REF and r['pass_'])
+            # chiwah rule: every open-weight model failed -> run the ceiling reference x3 (mimo; DeepSeek if mimo stays unavailable)
+            ref = ceiling_ref(t)
+            mp = sum(1 for r in rows() if r['task'] == t and r['model'] == ref and r['pass_'])
             if mp >= 1:
                 gap = json.load(open('/content/bakeoff/capgap_tasks.json')) if os.path.exists('/content/bakeoff/capgap_tasks.json') else []
                 if t not in gap: gap.append(t)
                 json.dump(gap, open('/content/bakeoff/capgap_tasks.json', 'w'))
-                log('CAPABILITY GAP t%d: open-weight 0 passes, mimo %d/3 -> task valid' % (t, mp))
+                log('CAPABILITY GAP t%d: open-weight 0 passes, %s %d/3 -> task valid' % (t, ref, mp))
             else:
                 sus = json.load(open('/content/bakeoff/suspect_tasks.json')) if os.path.exists('/content/bakeoff/suspect_tasks.json') else []
                 if t not in sus: sus.append(t)

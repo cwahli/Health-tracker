@@ -82,14 +82,24 @@ def main():
 if __name__ == '__main__': main()
 
 
+import re as _re
+UNAVAIL_RE = _re.compile(r'rate.?limit|429|quota|overload|unavailable|503|502|insufficient|credit|free usage|too many requests|ProviderError|ECONN|fetch failed|timed? ?out waiting', _re.I)
+
 def run_hard(model, task, run, timeout=1800):
     """Retry (max 2x) only on Ollama's qwen3.8 renderer HTTP 500 'no user query found in messages' (infra error, not a model failure)."""
-    n = 0
+    n = 0; u = 0
     while True:
         row = _run_hard_once(model, task, run, timeout)
         if 'no user query found' in (row.get('err') or '') and n < 2:
             n += 1
             log('infra error (renderer 500), retry', n)
             continue
+        if model.startswith('opencode/') and UNAVAIL_RE.search(row.get('err') or '') and (row.get('steps') or 0) <= 2:
+            if u < 2:
+                u += 1
+                log('provider unavailable (', (row.get('err') or '')[:80], ') retry in 5 min', u)
+                time.sleep(300)
+                continue
+            row['failure_class'] = 'unavailable'; row['pass_'] = False; row['fake_success'] = False
         row['infra_retries'] = n
         return row
