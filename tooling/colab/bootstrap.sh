@@ -214,9 +214,12 @@ watch_env_hash() { [ -f /content/.sage-watch.env ] && sha256sum /content/.sage-w
 s_sage_watch() { # restart (by PID) when the webhook env differs from what the running watcher started with
   write_watch_env
   local h old pid; h=$(watch_env_hash); old=$(cat /content/.sage-watch.envhash 2>/dev/null || echo unknown)
-  if tmux has-session -t sage-watch 2>/dev/null && { [ "$h" != "$old" ] || [ "${JOB_SCRIPTS_CHANGED:-0}" = 1 ]; }; then
-    log "sage-watch: webhook env or script changed -> restarting by PID"
-    for pid in $(pgrep -f "python3 $BIN/sage-watch.py"); do kill "$pid" 2>/dev/null; done
+  # sage-watch re-reads /content/.sage-watch.env every poll, so only a changed script needs a restart.
+  # Anchored pattern: an unanchored one also matches the tmux SERVER cmdline (which carries the
+  # sage-watch command) and would kill every tmux session, including the colabjob-* runs.
+  if tmux has-session -t sage-watch 2>/dev/null && [ "${JOB_SCRIPTS_CHANGED:-0}" = 1 ]; then
+    log "sage-watch: script changed -> restarting by PID"
+    for pid in $(pgrep -f "^python3 $BIN/sage-watch\\.py"); do kill "$pid" 2>/dev/null; done
     sleep 2; tmux has-session -t sage-watch 2>/dev/null && for pid in $(tmux list-panes -t sage-watch -F '#{pane_pid}'); do kill "$pid" 2>/dev/null; done
     sleep 1
   fi

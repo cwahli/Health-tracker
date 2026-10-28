@@ -18,6 +18,7 @@ import os
 import sys
 import time
 import json
+import shutil
 import subprocess
 import requests
 
@@ -91,12 +92,26 @@ def format_repo_url(url):
         return url.replace("https://", f"https://{GITHUB_TOKEN}@")
     return url
 
+def _run_bounded(cmd, timeout):
+    """Run a shell command with no stdin and a hard timeout; never block, never raise."""
+    try:
+        subprocess.run(cmd, shell=True, stdin=subprocess.DEVNULL, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"  (timed out after {timeout}s: {cmd[:60]})")
+    except Exception as e:
+        print(f"  ({type(e).__name__}: {cmd[:60]})")
+
 def setup_environment():
+    """Idempotent and non-blocking: skip installs when OpenCode is already present."""
     print("Checking development tools...")
-    subprocess.run("curl -fsSL https://opencode.ai/install | bash || true", shell=True)
-    subprocess.run("npm install -g opencode-ai 2>/dev/null || true", shell=True)
-    subprocess.run("git config --global user.name cwahli", shell=True)
-    subprocess.run("git config --global user.email cwahli@users.noreply.github.com", shell=True)
+    os.environ["PATH"] = os.environ.get("PATH", "") + ":/tools/node/bin:/root/.opencode/bin"
+    if shutil.which("opencode"):
+        print("  OpenCode CLI present, skipping install.")
+    else:
+        _run_bounded("curl -fsSL --max-time 90 https://opencode.ai/install | bash", 180)
+        if not shutil.which("opencode"):
+            _run_bounded("npm install -g opencode-ai 2>/dev/null", 240)
+    _run_bounded("git config --global user.name cwahli && git config --global user.email cwahli@users.noreply.github.com", 15)
     print("Environment ready.")
 
 def run_git_sync(repo_url=DEFAULT_REPO):
