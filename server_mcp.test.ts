@@ -2693,3 +2693,162 @@ describe('MCP OAuth 2.1 & Streamable HTTP Handshake Spike', () => {
     });
   });
 });
+
+describe('MCP settings credentials', () => {
+  function sessionFor(uid: string, email: string) {
+    return signSessionToken({ uid, email, nickname: uid, userType: 'Standard' });
+  }
+
+  async function connectClient(token: string, clientId: string, clientSecret: string) {
+    const pkce = generatePkcePair();
+    const redirectUri = 'https://gemini.google.com/oauth/callback';
+    const authRes = await fetch(`${baseUrl}/oauth/authorize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        auth_token: token,
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code_challenge: pkce.challenge,
+        code_challenge_method: 'S256',
+      }),
+      redirect: 'manual',
+    });
+    expect(authRes.status).toBe(302);
+    const code = new URL(authRes.headers.get('location') || '').searchParams.get('code');
+    expect(code).toBeTruthy();
+    const tokenRes = await fetch(`${baseUrl}/api/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+        code_verifier: pkce.verifier,
+        client_id: clientId,
+        client_secret: clientSecret,
+      }),
+    });
+    expect(tokenRes.status).toBe(200);
+    return tokenRes.json();
+  }
+
+  it('refuses the settings routes without a session', async () => {
+    const res = await fetch(`${baseUrl}/api/mcp/settings`);
+    expect(res.status).toBe(401);
+    const created = await fetch(`${baseUrl}/api/mcp/settings/client`, { method: 'POST' });
+    expect(created.status).toBe(401);
+  });
+
+  it('issues a one-time secret, hides it on read, and revoke does not cross users', async () => {
+    const tokenA = sessionFor('settings_user_a', 'settings.a@example.com');
+    const tokenB = sessionFor('settings_user_b', 'settings.b@example.com');
+    const issued = await fetch(`${baseUrl}/api/mcp/settings/client`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenA}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    expect(issued.status).toBe(201);
+    const body = await issued.json();
+    expect(body.client_id).toMatch(/^mcp_client_/);
+    expect(body.client_secret).toMatch(/^mcp_sec_/);
+    expect(body.mcp_url).toMatch(/\/api\/mcp$/);
+    expect(body.redirect_uris).toEqual([
+      'https://gemini.google.com/oauth/callback',
+      'https://vertexaisearch.cloud.google.com/oauth-redirect',
+    ]);
+
+    const pkce = generatePkcePair();
+    const wrong = await fetch(`${baseUrl}/oauth/authorize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        auth_token: tokenA,
+        client_id: body.client_id,
+        redirect_uri: 'https://gemini.google.com/oauth/callback',
+        code_challenge: pkce.challenge,
+        code_challenge_method: 'S256',
+      }),
+      redirect: 'manual',
+    });
+    const wrongCode = new URL(wrong.headers.get('location') || '').searchParams.get('code');
+    const rejected = await fetch(`${baseUrl}/api/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'authorization_code',
+        code: wrongCode,
+        redirect_uri: 'https://gemini.google.com/oauth/callback',
+        code_verifier: pkce.verifier,
+        client_id: body.client_id,
+        client_secret: 'not-the-secret',
+      }),
+    });
+    expect(rejected.status).toBe(401);
+
+    const tokensA = await connectClient(tokenA, body.client_id, body.client_secret);
+    const listed = await fetch(`${baseUrl}/api/mcp/settings`, { headers: { Authorization: `Bearer ${tokenA}` } });
+    const list = await listed.json();
+    expect(JSON.stringify(list)).not.toContain(body.client_secret);
+    expect(list.clients.some((row: { client_id: string; revoked: boolean }) => row.client_id === body.client_id && !row.revoked)).toBe(true);
+    expect(list.active_sessions).toBe(1);
+
+    const issuedB = await fetch(`${baseUrl}/api/mcp/settings/client`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenB}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const bodyB = await issuedB.json();
+    const tokensB = await connectClient(tokenB, bodyB.client_id, bodyB.client_secret);
+    const otherList = await fetch(`${baseUrl}/api/mcp/settings`, { headers: { Authorization: `Bearer ${tokenB}` } });
+    const other = await otherList.json();
+    expect(other.clients.some((row: { client_id: string }) => row.client_id === body.client_id)).toBe(false);
+
+    const revoke = await fetch(`${baseUrl}/api/mcp/settings/revoke`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenA}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    expect(revoke.status).toBe(200);
+    const revokeBody = await revoke.json();
+    expect(revokeBody.revoked_sessions).toBe(1);
+    expect(revokeBody.revoked_clients).toBe(1);
+
+    const refreshA = await fetch(`${baseUrl}/api/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'refresh_token',
+        refresh_token: tokensA.refresh_token,
+        client_id: body.client_id,
+        client_secret: body.client_secret,
+      }),
+    });
+    expect(refreshA.status).toBe(400);
+
+    const refreshB = await fetch(`${baseUrl}/api/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'refresh_token',
+        refresh_token: tokensB.refresh_token,
+        client_id: bodyB.client_id,
+        client_secret: bodyB.client_secret,
+      }),
+    });
+    expect(refreshB.status).toBe(200);
+
+    const blocked = await fetch(`${baseUrl}/oauth/authorize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        auth_token: tokenA,
+        client_id: body.client_id,
+        redirect_uri: 'https://gemini.google.com/oauth/callback',
+        code_challenge: pkce.challenge,
+        code_challenge_method: 'S256',
+      }),
+    });
+    expect(blocked.status).toBe(400);
+  });
+});

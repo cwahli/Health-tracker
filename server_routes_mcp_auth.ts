@@ -54,7 +54,15 @@ export interface StoredMcpClient {
   client_name: string;
   redirect_uris: string[];
   created_at: string;
+  owner_uid?: string | null;
+  revoked_at?: number | null;
 }
+
+/** Static client redirects for Gemini consumer and Gemini Enterprise. */
+export const GEMINI_STATIC_REDIRECT_URIS = [
+  'https://gemini.google.com/oauth/callback',
+  'https://vertexaisearch.cloud.google.com/oauth-redirect',
+];
 
 export interface StoredMcpAuthCode {
   code: string;
@@ -198,6 +206,8 @@ async function findMcpClient(clientId: string): Promise<StoredMcpClient | null> 
         redirect_uris: uris,
         created_at: row.created_at
       };
+      client.owner_uid = row.owner_uid || null;
+      client.revoked_at = row.revoked_at || null;
       inMemoryMcpClients.set(clientId, client);
       return client;
     }
@@ -205,6 +215,179 @@ async function findMcpClient(clientId: string): Promise<StoredMcpClient | null> 
 
   return null;
 }
+
+async function saveMcpClient(record: StoredMcpClient): Promise<void> {
+  inMemoryMcpClients.set(record.client_id, record);
+  if (!isD1Configured()) return;
+  const uris = JSON.stringify(record.redirect_uris);
+  try {
+    await d1Query(
+      `INSERT INTO mcp_oauth_clients (client_id, client_secret_hash, client_name, redirect_uris, created_at, owner_uid, revoked_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [record.client_id, record.client_secret_hash || null, record.client_name, uris, record.created_at, record.owner_uid || null, record.revoked_at || null]
+    );
+  } catch {
+    await d1Query(
+      `INSERT INTO mcp_oauth_clients (client_id, client_secret_hash, client_name, redirect_uris, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [record.client_id, record.client_secret_hash || null, record.client_name, uris, record.created_at]
+    );
+  }
+}
+
+function presentedClientSecret(req: Request): string {
+  const bodySecret = req.body?.client_secret;
+  if (typeof bodySecret === 'string' && bodySecret) return bodySecret;
+  const header = String(req.headers.authorization || '');
+  if (!header.startsWith('Basic ')) return '';
+  try {
+    const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
+    const idx = decoded.indexOf(':');
+    return idx >= 0 ? decoded.slice(idx + 1) : '';
+  } catch {
+    return '';
+  }
+}
+
+function secretMatches(client: StoredMcpClient, req: Request): boolean {
+  if (!client.client_secret_hash) return true;
+  const presented = presentedClientSecret(req);
+  if (!presented) return false;
+  const hash = crypto.createHash('sha256').update(presented).digest('hex');
+  const a = Buffer.from(hash);
+  const b = Buffer.from(client.client_secret_hash);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+async function rejectIfClientUnusable(clientId: string | undefined, req: Request, res: Response): Promise<boolean> {
+  if (!clientId) return false;
+  const client = await findMcpClient(clientId);
+  if (!client) return false;
+  if (client.revoked_at) {
+    res.status(400).json({ error: 'invalid_grant', error_description: 'Client has been revoked' });
+    return true;
+  }
+  if (client.client_secret_hash && !secretMatches(client, req)) {
+    res.status(401).json({ error: 'invalid_client', error_description: 'Client secret is missing or wrong' });
+    return true;
+  }
+  return false;
+}
+
+async function sessionFromRequest(req: Request): Promise<{ uid: string; email?: string } | null> {
+  const header = String(req.headers.authorization || '');
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  if (!token) return null;
+  const session = verifySessionToken(token);
+  if (session?.uid) return { uid: session.uid, email: session.email };
+  return verifyFirebaseTokenHelper(token);
+}
+
+function ownedClients(ownerUid: string): StoredMcpClient[] {
+  return [...inMemoryMcpClients.values()].filter((client) => client.owner_uid === ownerUid);
+}
+
+function countActiveSessions(ownerUid: string): number {
+  let count = 0;
+  for (const token of inMemoryMcpRefreshTokens.values()) {
+    if (token.firebase_uid === ownerUid && !token.revoked_at && Date.now() <= token.expires_at) count += 1;
+  }
+  return count;
+}
+
+function publicClient(client: StoredMcpClient) {
+  return {
+    client_id: client.client_id,
+    client_name: client.client_name,
+    created_at: client.created_at,
+    redirect_uris: client.redirect_uris,
+    revoked: Boolean(client.revoked_at),
+  };
+}
+
+async function issueOwnedMcpClient(ownerUid: string): Promise<{ client_id: string; client_secret: string; redirect_uris: string[] }> {
+  const now = Date.now();
+  for (const previous of ownedClients(ownerUid)) {
+    if (previous.revoked_at) continue;
+    previous.revoked_at = now;
+    for (const token of inMemoryMcpRefreshTokens.values()) {
+      if (token.client_id === previous.client_id && !token.revoked_at) token.revoked_at = now;
+    }
+  }
+  const clientSecret = `mcp_sec_${crypto.randomBytes(24).toString('base64url')}`;
+  const record: StoredMcpClient = {
+    client_id: `mcp_client_${crypto.randomBytes(12).toString('hex')}`,
+    client_secret_hash: crypto.createHash('sha256').update(clientSecret).digest('hex'),
+    client_name: 'Gemini MCP (settings)',
+    redirect_uris: [...GEMINI_STATIC_REDIRECT_URIS],
+    created_at: new Date().toISOString(),
+    owner_uid: ownerUid,
+    revoked_at: null,
+  };
+  await saveMcpClient(record);
+  return { client_id: record.client_id, client_secret: clientSecret, redirect_uris: record.redirect_uris };
+}
+
+function revokeOwnerAccess(ownerUid: string): { revoked_sessions: number; revoked_clients: number } {
+  const now = Date.now();
+  let revoked_sessions = 0;
+  let revoked_clients = 0;
+  for (const token of inMemoryMcpRefreshTokens.values()) {
+    if (token.firebase_uid === ownerUid && !token.revoked_at) {
+      token.revoked_at = now;
+      revoked_sessions += 1;
+    }
+  }
+  for (const client of ownedClients(ownerUid)) {
+    if (!client.revoked_at) {
+      client.revoked_at = now;
+      revoked_clients += 1;
+    }
+  }
+  if (isD1Configured()) {
+    void d1Query('UPDATE mcp_refresh_tokens SET revoked_at = ? WHERE firebase_uid = ? AND revoked_at IS NULL', [now, ownerUid]).catch(() => {});
+    void d1Query('UPDATE mcp_oauth_clients SET revoked_at = ? WHERE owner_uid = ? AND revoked_at IS NULL', [now, ownerUid]).catch(() => {});
+  }
+  return { revoked_sessions, revoked_clients };
+}
+
+mcpAuthRouter.get('/api/mcp/settings', async (req: Request, res: Response) => {
+  const session = await sessionFromRequest(req);
+  if (!session) return res.status(401).json({ error: 'unauthorized' });
+  const uid = resolveCanonicalUid(session.uid, session.email);
+  const baseUrl = getBaseUrl(req);
+  res.json({
+    mcp_url: `${baseUrl}/api/mcp`,
+    authorization_endpoint: `${baseUrl}/oauth/authorize`,
+    token_endpoint: `${baseUrl}/api/oauth/token`,
+    redirect_uris: GEMINI_STATIC_REDIRECT_URIS,
+    active_sessions: countActiveSessions(uid),
+    clients: ownedClients(uid).map(publicClient),
+  });
+});
+
+mcpAuthRouter.post('/api/mcp/settings/client', async (req: Request, res: Response) => {
+  const session = await sessionFromRequest(req);
+  if (!session) return res.status(401).json({ error: 'unauthorized' });
+  const uid = resolveCanonicalUid(session.uid, session.email);
+  const issued = await issueOwnedMcpClient(uid);
+  const baseUrl = getBaseUrl(req);
+  res.status(201).json({
+    mcp_url: `${baseUrl}/api/mcp`,
+    client_id: issued.client_id,
+    client_secret: issued.client_secret,
+    redirect_uris: issued.redirect_uris,
+    secret_shown_once: true,
+  });
+});
+
+mcpAuthRouter.post('/api/mcp/settings/revoke', async (req: Request, res: Response) => {
+  const session = await sessionFromRequest(req);
+  if (!session) return res.status(401).json({ error: 'unauthorized' });
+  const uid = resolveCanonicalUid(session.uid, session.email);
+  res.json(revokeOwnerAccess(uid));
+});
 
 // ---------------------------------------------------------------------------
 // HTML Consent & Authorization Page
@@ -518,6 +701,9 @@ mcpAuthRouter.get('/oauth/authorize', async (req: Request, res: Response) => {
 
   // Validate or register fallback client
   let client = await findMcpClient(client_id);
+  if (client?.revoked_at) {
+    return res.status(400).send('invalid_client: client has been revoked');
+  }
   const clientName = client?.client_name || 'Gemini MCP';
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -552,6 +738,11 @@ mcpAuthRouter.post('/oauth/authorize', async (req: Request, res: Response) => {
 
   if (!code_challenge || code_challenge_method !== 'S256') {
     return res.status(400).json({ error: 'invalid_request', error_description: 'S256 code_challenge required' });
+  }
+
+  const registeredClient = client_id ? await findMcpClient(String(client_id)) : null;
+  if (registeredClient?.revoked_at) {
+    return res.status(400).json({ error: 'invalid_client', error_description: 'Client has been revoked' });
   }
 
   // Authenticate user credentials
@@ -701,6 +892,8 @@ mcpAuthRouter.post('/api/oauth/token', async (req: Request, res: Response) => {
         });
       }
 
+      if (await rejectIfClientUnusable(storedCode.client_id, req, res)) return;
+
       // Mark code as used
       storedCode.used_at = Date.now();
       inMemoryMcpAuthCodes.set(code, storedCode);
@@ -767,6 +960,8 @@ mcpAuthRouter.post('/api/oauth/token', async (req: Request, res: Response) => {
           error_description: 'Refresh token invalid, expired, or revoked'
         });
       }
+
+      if (await rejectIfClientUnusable(storedRt.client_id, req, res)) return;
 
       const newAccessToken = signSessionToken({
         uid: storedRt.firebase_uid,
