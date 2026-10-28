@@ -1,0 +1,1 @@
+{"pass": false, "reasons": ["static contract fails: FAIL: components/mtd-pricing/fallback.css: button state selector outside the shared definition: .button--secondary:hover | FAIL: components/mtd-pricing/fallback.css: button state selector outside the shared definition: .button--secondary:focus-visible"], "changed": []}
