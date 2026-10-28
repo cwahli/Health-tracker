@@ -1,0 +1,12 @@
+diff --git a/tooling/lib/args.js b/tooling/lib/args.js
+new file mode 100644
+index 00000000..d02a81ed
+--- /dev/null
++++ b/tooling/lib/args.js
+@@ -0,0 +1,5 @@
++const argv = process.argv.slice(2);
++const has = f => argv.includes(f);
++const val = (f, d) => { const i = argv.indexOf(f); return i === -1 ? d : argv[i + 1]; };
++
++module.exports = { argv, has, val };
+\ No newline at end of file
