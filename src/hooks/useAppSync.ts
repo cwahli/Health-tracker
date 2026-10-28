@@ -9,7 +9,7 @@
  * A localStorage-only stub that sets syncState='synced' and returns is a
  * failed milestone (a14abea / 7d94def).
  */
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type {
   BiomarkerLog,
@@ -33,6 +33,7 @@ import {
   setDoc,
   writeBatch,
 } from 'firebase/firestore';
+import { bindFocusPull } from '../utils/focusPull';
 import { sanitizeForFirestore, checkQuotaFlag } from '../utils/firestoreUtils';
 import { get, getAggregatedAppData, getStorageKey, safeSaveToLocalStorage } from '../utils/storageUtils';
 import { sanitizeProfile, isDeepEqual, maybeRecalibrateDemographicOverlays } from '../utils/appProfileUtils';
@@ -1979,6 +1980,13 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
 
   checkForDbChangesRef.current = checkForDbChanges;
   saveAndSyncRef.current = saveAndSync;
+
+  // Incremental pull only. checkForDbChanges already debounces non-force calls for 5s.
+  useEffect(() => {
+    return bindFocusPull(document, window, () => {
+      checkForDbChangesRef.current?.(undefined, false);
+    });
+  }, []);
 
   // lastSyncTime is the pull watermark (parsedLocal.lastSyncedAt) used inside
   // checkForDbChanges; exposed so App.tsx keeps the standing identifier.
