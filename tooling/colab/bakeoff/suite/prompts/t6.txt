@@ -1,0 +1,6 @@
+This is the sage-prototypes tooling repo. `node tooling/check-component-contracts.js --selftest` currently fails with:
+
+  SELFTEST FAIL normCopy folds typography
+
+Find and fix the root cause so the selftest passes. Do not edit or weaken the existing proofs. Also add one new regression proof to that selftest that covers a case the existing proofs miss and would have caught the root cause. Then run the selftest and the full `node tooling/check-component-contracts.js` to confirm both are clean.
+Keep the change minimal, do not touch unrelated files, leave no debug code, and do not commit. Reply with one short summary.
