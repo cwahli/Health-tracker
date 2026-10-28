@@ -11,6 +11,64 @@ import {
   d1QueryBiomarkers
 } from './server_db_d1.js';
 import { getBaseUrl, resolveCanonicalUid } from './server_routes_mcp_auth.js';
+import {
+  inMemoryMcpProfiles,
+  inMemoryMcpFoods,
+  inMemoryMcpBiomarkers,
+  setInMemoryProfile,
+  clearInMemoryProfiles,
+  setInMemoryFoods,
+  setInMemoryBiomarkers,
+  clearInMemoryMcpStores,
+  getCurrentDateInTimezone,
+  getYesterdayYYYYMMDD,
+  getYesterdayInTimezone,
+  formatTimeInTimezone,
+  toYYYYMMDD,
+  loadUserProfile,
+  finalizeAndCreateMeal,
+  editMealWithPatch,
+  deleteMealLog,
+  upsertBiomarkerEntry,
+  deleteBiomarkerEntry,
+  manageUserActions,
+  manageUserHabits,
+  withIdempotency,
+  clearIdempotencyStore
+} from './src/server/domain/healthTrackerDomain.js';
+
+export {
+  inMemoryMcpProfiles,
+  inMemoryMcpFoods,
+  inMemoryMcpBiomarkers,
+  setInMemoryProfile,
+  clearInMemoryProfiles,
+  setInMemoryFoods,
+  setInMemoryBiomarkers,
+  clearInMemoryMcpStores,
+  getCurrentDateInTimezone,
+  getYesterdayYYYYMMDD,
+  getYesterdayInTimezone,
+  formatTimeInTimezone,
+  toYYYYMMDD,
+  loadUserProfile,
+  finalizeAndCreateMeal,
+  editMealWithPatch,
+  deleteMealLog,
+  upsertBiomarkerEntry,
+  deleteBiomarkerEntry,
+  manageUserActions,
+  manageUserHabits,
+  withIdempotency,
+  clearIdempotencyStore
+};
+
+// Backward-compatible aliases
+export const setInMemoryMcpProfile = setInMemoryProfile;
+export const clearInMemoryMcpProfiles = clearInMemoryProfiles;
+export const setInMemoryMcpFoods = setInMemoryFoods;
+export const setInMemoryMcpBiomarkers = setInMemoryBiomarkers;
+export const clearInMemoryMcpData = clearInMemoryMcpStores;
 
 export const mcpRouter = Router();
 
@@ -25,36 +83,6 @@ declare global {
       mcpUser?: McpUserContext;
     }
   }
-}
-
-// ---------------------------------------------------------------------------
-// Multi-Tenant UID & In-Memory Stores (for testing / offline fallback)
-// ---------------------------------------------------------------------------
-
-export const inMemoryMcpProfiles = new Map<string, any>();
-export const inMemoryMcpFoods = new Map<string, any[]>();
-export const inMemoryMcpBiomarkers = new Map<string, any[]>();
-
-export function setInMemoryMcpProfile(uid: string, data: any): void {
-  inMemoryMcpProfiles.set(uid, data);
-}
-
-export function clearInMemoryMcpProfiles(): void {
-  inMemoryMcpProfiles.clear();
-}
-
-export function setInMemoryMcpFoods(uid: string, foods: any[]): void {
-  inMemoryMcpFoods.set(uid, foods);
-}
-
-export function setInMemoryMcpBiomarkers(uid: string, biomarkers: any[]): void {
-  inMemoryMcpBiomarkers.set(uid, biomarkers);
-}
-
-export function clearInMemoryMcpData(): void {
-  inMemoryMcpProfiles.clear();
-  inMemoryMcpFoods.clear();
-  inMemoryMcpBiomarkers.clear();
 }
 
 export function resolvePossibleUids(uid?: string, email?: string): string[] {
@@ -74,109 +102,6 @@ export function resolvePossibleUids(uid?: string, email?: string): string[] {
     isCwah ? 'admin_cwah_liu_gmail_com' : null,
     isCwah ? 'admin_chiwah_liu_gmail_com' : null
   ].filter(Boolean) as string[]));
-}
-
-export function getCurrentDateInTimezone(timezone?: string): string {
-  const tz = timezone || 'Europe/London';
-  try {
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    });
-    return formatter.format(new Date());
-  } catch (err) {
-    return new Date().toISOString().split('T')[0];
-  }
-}
-
-export function getYesterdayYYYYMMDD(referenceDate?: string, timezone?: string): string {
-  const ref = referenceDate ? toYYYYMMDD(referenceDate, timezone) : getCurrentDateInTimezone(timezone);
-  const parts = ref.split('-');
-  const d = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().split('T')[0];
-}
-
-export function getYesterdayInTimezone(timezone?: string): string {
-  return getYesterdayYYYYMMDD(undefined, timezone);
-}
-
-export function formatTimeInTimezone(dateVal: any, timezone?: string): string {
-  const tz = timezone || 'Europe/London';
-  try {
-    const d = dateVal ? new Date(dateVal) : new Date();
-    if (isNaN(d.getTime())) return '';
-    return new Intl.DateTimeFormat('en-GB', {
-      timeZone: tz,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    }).format(d);
-  } catch {
-    return '';
-  }
-}
-
-export function toYYYYMMDD(val: any, timezone?: string): string {
-  if (!val) return getCurrentDateInTimezone(timezone);
-  const str = String(val).trim();
-  if (!str) return getCurrentDateInTimezone(timezone);
-
-  const lower = str.toLowerCase();
-  if (lower === 'today') {
-    return getCurrentDateInTimezone(timezone);
-  }
-  if (lower === 'yesterday') {
-    return getYesterdayInTimezone(timezone);
-  }
-
-  const ymdMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (ymdMatch) {
-    return `${ymdMatch[1]}-${ymdMatch[2].padStart(2, '0')}-${ymdMatch[3].padStart(2, '0')}`;
-  }
-
-  const dmyMatch = str.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-  if (dmyMatch) {
-    return `${dmyMatch[3]}-${dmyMatch[2].padStart(2, '0')}-${dmyMatch[1].padStart(2, '0')}`;
-  }
-
-  const dMmmYMatch = str.match(/^(\d{1,2})-([A-Za-z]+)-(\d{4})/);
-  if (dMmmYMatch) {
-    const monthMap: Record<string, string> = {
-      jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
-      jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
-      january: '01', february: '02', march: '03', april: '04', june: '06',
-      july: '07', august: '08', september: '09', october: '10', november: '11', december: '12'
-    };
-    const mm = monthMap[dMmmYMatch[2].toLowerCase()] || '01';
-    return `${dMmmYMatch[3]}-${mm}-${dMmmYMatch[1].padStart(2, '0')}`;
-  }
-
-  try {
-    const d = new Date(str);
-    if (!isNaN(d.getTime())) {
-      const tz = timezone || 'Europe/London';
-      try {
-        const formatter = new Intl.DateTimeFormat('en-CA', {
-          timeZone: tz,
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit'
-        });
-        return formatter.format(d);
-      } catch {
-        const yyyy = d.getUTCFullYear();
-        const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-        const dd = String(d.getUTCDate()).padStart(2, '0');
-        return `${yyyy}-${mm}-${dd}`;
-      }
-    }
-  } catch {}
-
-  return str;
 }
 
 export function formatPhotoUrls(imageUrls: any): string[] {
@@ -279,48 +204,6 @@ mcpRouter.use(MCP_PATHS, (req: Request, res: Response, next) => {
 // ---------------------------------------------------------------------------
 // Data Fetchers & Aggregators
 // ---------------------------------------------------------------------------
-
-async function loadUserProfile(canonicalUid: string): Promise<any> {
-  if (inMemoryMcpProfiles.has(canonicalUid)) {
-    return inMemoryMcpProfiles.get(canonicalUid);
-  }
-
-  if (isD1Configured()) {
-    try {
-      const profRow = await d1GetProfile(canonicalUid);
-      if (profRow?.data) {
-        return profRow.data;
-      }
-    } catch (err: any) {
-      console.warn('[MCP] d1GetProfile error:', err?.message);
-    }
-  }
-
-  try {
-    const syncFilePath = path.join(process.cwd(), 'data', 'sync', `${canonicalUid}_profile.json`);
-    if (fs.existsSync(syncFilePath)) {
-      const raw = fs.readFileSync(syncFilePath, 'utf-8');
-      return JSON.parse(raw);
-    }
-  } catch (err: any) {
-    console.warn('[MCP] Local sync file read error:', err?.message);
-  }
-
-  return {
-    profile: {
-      id: canonicalUid,
-      email: `${canonicalUid}@health-tracker.co.uk`,
-      targets: {
-        calories: 1651
-      }
-    },
-    report: {
-      dailyNutrientTargets: {
-        calories: "1,651 kcal"
-      }
-    }
-  };
-}
 
 async function getAllUserFoods(possibleUids: string[]): Promise<any[]> {
   const foodsMap = new Map<string, any>();
@@ -476,14 +359,22 @@ function computeDayAllowance(targetDate: string, allMeals: any[], targets: any, 
 const MCP_TOOLS = [
   {
     name: 'manage_home',
-    description: 'Manage user profile, homepage targets, goals, daily allowance progress, and dashboard summary.',
+    description: 'Manage user profile, homepage targets, goals, daily allowance progress, health actions, daily habits, and dashboard summary.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['get_profile', 'get_allowance_progress', 'get_dashboard', 'set_targets', 'update_profile'],
-          description: 'The home action to perform. Use get_allowance_progress to see consumed vs target kcal and macros for today and yesterday.'
+          enum: [
+            'get_profile',
+            'get_allowance_progress',
+            'get_dashboard',
+            'set_targets',
+            'update_profile',
+            'manage_actions',
+            'manage_habits'
+          ],
+          description: 'The home action to perform: "get_profile", "get_allowance_progress", "get_dashboard", "set_targets", "update_profile", "manage_actions", "manage_habits".'
         },
         date: {
           type: 'string',
@@ -508,6 +399,39 @@ const MCP_TOOLS = [
         payload: {
           type: 'object',
           description: 'Optional payload for the action (alias for targets or profile updates)'
+        },
+        sub_action: {
+          type: 'string',
+          enum: ['add', 'update', 'toggle', 'delete', 'list'],
+          description: 'Sub-action for manage_actions or manage_habits ("add", "update", "toggle", "delete", "list")'
+        },
+        item: {
+          type: 'object',
+          description: 'HealthAction item for manage_actions add/update ({ task, explanation, priority, type })'
+        },
+        itemId: {
+          type: 'string',
+          description: 'HealthAction ID for toggle, update, or delete'
+        },
+        item_id: {
+          type: 'string',
+          description: 'Alias for itemId'
+        },
+        habit: {
+          type: 'object',
+          description: 'DailyBenefit habit item for manage_habits add/update ({ activity, target })'
+        },
+        habitId: {
+          type: 'string',
+          description: 'DailyBenefit ID for toggle, update, or delete'
+        },
+        habit_id: {
+          type: 'string',
+          description: 'Alias for habitId'
+        },
+        idempotency_key: {
+          type: 'string',
+          description: 'Optional unique token/UUID preventing duplicate execution on retry'
         }
       },
       required: ['action']
@@ -515,18 +439,18 @@ const MCP_TOOLS = [
   },
   {
     name: 'manage_meals',
-    description: 'Browse, query, and inspect logged meals and food records across dates, keywords, and nutritional details.',
+    description: 'Browse, query, log, edit, and delete meals. Calculates calories through single mathematical ledger (finalizeDishLedger).',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['list', 'get_detail'],
-          description: 'Action to perform: "list" to search and browse meals; "get_detail" to view a specific meal by ID.'
+          enum: ['list', 'get_detail', 'log_structured', 'edit', 'delete'],
+          description: 'Action to perform: "list" to search and browse meals; "get_detail" to view meal by ID; "log_structured" to log a meal with known items/weights; "edit" to patch an existing meal; "delete" to remove a meal with tombstone.'
         },
         date: {
           type: 'string',
-          description: 'Filter meals for a single date (YYYY-MM-DD, "today", or "yesterday")'
+          description: 'Meal date (YYYY-MM-DD, "today", or "yesterday")'
         },
         date_from: {
           type: 'string',
@@ -546,11 +470,46 @@ const MCP_TOOLS = [
         },
         meal_id: {
           type: 'string',
-          description: 'Meal ID to fetch detail for (required for get_detail)'
+          description: 'Meal ID for get_detail, edit, or delete'
         },
         mealId: {
           type: 'string',
           description: 'Alias for meal_id'
+        },
+        name: {
+          type: 'string',
+          description: 'Optional custom meal title/label (e.g. "Breakfast Oatmeal & Blueberries")'
+        },
+        composition: {
+          type: 'string',
+          description: 'Optional summary of ingredients/composition'
+        },
+        items: {
+          type: 'array',
+          items: { type: 'object' },
+          description: 'Array of meal items for log_structured: [{ name, weightGrams, protein, totalFat, carbohydrates, sodium, saturatedFat }]'
+        },
+        commands: {
+          type: 'array',
+          items: { type: 'object' },
+          description: 'Structured edit commands for edit action: [{ action: "set_weight"|"replace_identity"|"add_item"|"remove_item", itemName, newWeightGrams }]'
+        },
+        message: {
+          type: 'string',
+          description: 'Natural language modification request for edit action (e.g. "change chicken to 200g and remove rice")'
+        },
+        user_message: {
+          type: 'string',
+          description: 'Alias for message'
+        },
+        image_urls: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Array of photo URLs attached to the meal'
+        },
+        idempotency_key: {
+          type: 'string',
+          description: 'Optional unique token/UUID preventing duplicate execution on retry'
         },
         limit: {
           type: 'number',
@@ -566,23 +525,27 @@ const MCP_TOOLS = [
   },
   {
     name: 'manage_biomarkers',
-    description: 'Browse and analyze biomarker records, blood tests, vitals history, and longitudinal trends.',
+    description: 'Browse, analyze trends, log entries, and delete biomarker records with same-day merging and clinical range checks.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['list', 'get_trends'],
-          description: 'Action: "list" to browse historical biomarker records, "get_trends" to compute min/max/delta trends.'
+          enum: ['list', 'get_trends', 'log_entries', 'delete_values'],
+          description: 'Action: "list" to browse historical biomarker records, "get_trends" for trend deltas, "log_entries" to record lab values, "delete_values" to delete a specific marker or record.'
         },
         keys: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Biomarker keys to filter or trend (e.g. ["cholesterol", "hba1c", "vitaminD", "bloodPressure"])'
+          description: 'Biomarker keys to filter or trend (e.g. ["ldl_cholesterol", "hba1c", "fasting_glucose", "blood_pressure"])'
         },
         key: {
           type: 'string',
-          description: 'Single biomarker key (alias for keys)'
+          description: 'Single biomarker key for filter, trends, or deletion'
+        },
+        date: {
+          type: 'string',
+          description: 'Target test date for log_entries or delete_values (YYYY-MM-DD, "today", or "yesterday")'
         },
         date_from: {
           type: 'string',
@@ -595,6 +558,30 @@ const MCP_TOOLS = [
         timezone: {
           type: 'string',
           description: 'Optional IANA timezone override (e.g. "Europe/London")'
+        },
+        readings: {
+          type: 'object',
+          description: 'Map of biomarker key/name to value for log_entries (e.g. { "ldl_cholesterol": 3.2, "hba1c": 5.4, "blood_pressure": "120/80" })'
+        },
+        note: {
+          type: 'string',
+          description: 'Optional notes for log_entries'
+        },
+        summary: {
+          type: 'string',
+          description: 'Optional panel summary for log_entries'
+        },
+        record_id: {
+          type: 'string',
+          description: 'Optional record ID for delete_values'
+        },
+        recordId: {
+          type: 'string',
+          description: 'Alias for record_id'
+        },
+        idempotency_key: {
+          type: 'string',
+          description: 'Optional unique token/UUID preventing duplicate execution on retry'
         },
         limit: {
           type: 'number',
@@ -897,6 +884,44 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
           });
         }
 
+        if (action === 'manage_actions') {
+          const subAction = (args.sub_action || args.action_type || 'list') as any;
+          const result = await withIdempotency(args.idempotency_key, () =>
+            manageUserActions({
+              uid: currentUser.uid,
+              action: subAction,
+              item: args.item || args.payload,
+              itemId: args.itemId || args.item_id || args.id
+            })
+          );
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+            }
+          });
+        }
+
+        if (action === 'manage_habits') {
+          const subAction = (args.sub_action || args.action_type || 'list') as any;
+          const result = await withIdempotency(args.idempotency_key, () =>
+            manageUserHabits({
+              uid: currentUser.uid,
+              action: subAction,
+              habit: args.habit || args.payload,
+              habitId: args.habitId || args.habit_id || args.id
+            })
+          );
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+            }
+          });
+        }
+
         return res.json({
           jsonrpc: '2.0',
           id,
@@ -905,7 +930,7 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
             content: [
               {
                 type: 'text',
-                text: `Unsupported action "${action}" for tool "manage_home". Available: "get_profile", "get_allowance_progress", "get_dashboard", "set_targets", "update_profile".`
+                text: `Unsupported action "${action}" for tool "manage_home". Available: "get_profile", "get_allowance_progress", "get_dashboard", "set_targets", "update_profile", "manage_actions", "manage_habits".`
               }
             ]
           }
@@ -1073,6 +1098,115 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
           });
         }
 
+        if (action === 'log_structured') {
+          const mealItems = Array.isArray(args.items) ? args.items : [];
+          if (mealItems.length === 0) {
+            return res.json({
+              jsonrpc: '2.0',
+              id,
+              result: {
+                isError: true,
+                content: [{ type: 'text', text: 'Missing required argument "items" with at least one food item' }]
+              }
+            });
+          }
+
+          const createdMeal = await withIdempotency(args.idempotency_key, () =>
+            finalizeAndCreateMeal({
+              uid: currentUser.uid,
+              date: args.date,
+              timezone: userTz,
+              name: args.name,
+              composition: args.composition,
+              items: mealItems,
+              imageUrls: args.image_urls || args.imageUrls || [],
+              chatTranscript: args.chat_transcript || args.chatTranscript || []
+            })
+          );
+
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify(createdMeal, null, 2) }]
+            }
+          });
+        }
+
+        if (action === 'edit') {
+          const mealId = args.meal_id || args.mealId || args.id;
+          if (!mealId) {
+            return res.json({
+              jsonrpc: '2.0',
+              id,
+              result: {
+                isError: true,
+                content: [{ type: 'text', text: 'Missing required argument "meal_id"' }]
+              }
+            });
+          }
+
+          const editResult = await withIdempotency(args.idempotency_key, () =>
+            editMealWithPatch({
+              uid: currentUser.uid,
+              mealId,
+              possibleUids,
+              timezone: userTz,
+              commands: args.commands,
+              userMessage: args.message || args.user_message || args.userMessage
+            })
+          );
+
+          if (!editResult.success) {
+            return res.json({
+              jsonrpc: '2.0',
+              id,
+              result: {
+                isError: true,
+                content: [{ type: 'text', text: editResult.error || 'Failed to edit meal' }]
+              }
+            });
+          }
+
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify(editResult, null, 2) }]
+            }
+          });
+        }
+
+        if (action === 'delete') {
+          const mealId = args.meal_id || args.mealId || args.id;
+          if (!mealId) {
+            return res.json({
+              jsonrpc: '2.0',
+              id,
+              result: {
+                isError: true,
+                content: [{ type: 'text', text: 'Missing required argument "meal_id"' }]
+              }
+            });
+          }
+
+          const deleteResult = await withIdempotency(args.idempotency_key, () =>
+            deleteMealLog({
+              uid: currentUser.uid,
+              mealId,
+              possibleUids
+            })
+          );
+
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify(deleteResult, null, 2) }]
+            }
+          });
+        }
+
         return res.json({
           jsonrpc: '2.0',
           id,
@@ -1081,7 +1215,7 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
             content: [
               {
                 type: 'text',
-                text: `Unsupported action "${action}" for tool "manage_meals". Available: "list", "get_detail".`
+                text: `Unsupported action "${action}" for tool "manage_meals". Available: "list", "get_detail", "log_structured", "edit", "delete".`
               }
             ]
           }
@@ -1242,6 +1376,72 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
           });
         }
 
+        if (action === 'log_entries') {
+          const readings = args.readings || args.biomarkers || args.values;
+          if (!readings || typeof readings !== 'object' || Object.keys(readings).length === 0) {
+            return res.json({
+              jsonrpc: '2.0',
+              id,
+              result: {
+                isError: true,
+                content: [{ type: 'text', text: 'Missing required argument "readings" object with biomarker key-value pairs' }]
+              }
+            });
+          }
+
+          const logResult = await withIdempotency(args.idempotency_key, () =>
+            upsertBiomarkerEntry({
+              uid: currentUser.uid,
+              possibleUids,
+              date: args.date,
+              timezone: userTz,
+              readings,
+              note: args.note,
+              summary: args.summary
+            })
+          );
+
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify(logResult, null, 2) }]
+            }
+          });
+        }
+
+        if (action === 'delete_values') {
+          const deleteResult = await withIdempotency(args.idempotency_key, () =>
+            deleteBiomarkerEntry({
+              uid: currentUser.uid,
+              possibleUids,
+              date: args.date,
+              recordId: args.record_id || args.recordId || args.id,
+              key: args.key,
+              timezone: userTz
+            })
+          );
+
+          if (!deleteResult.success) {
+            return res.json({
+              jsonrpc: '2.0',
+              id,
+              result: {
+                isError: true,
+                content: [{ type: 'text', text: deleteResult.error || 'Failed to delete biomarker entry' }]
+              }
+            });
+          }
+
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify(deleteResult, null, 2) }]
+            }
+          });
+        }
+
         return res.json({
           jsonrpc: '2.0',
           id,
@@ -1250,7 +1450,7 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
             content: [
               {
                 type: 'text',
-                text: `Unsupported action "${action}" for tool "manage_biomarkers". Available: "list", "get_trends".`
+                text: `Unsupported action "${action}" for tool "manage_biomarkers". Available: "list", "get_trends", "log_entries", "delete_values".`
               }
             ]
           }

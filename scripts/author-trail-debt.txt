@@ -101,3 +101,4 @@ c4b39f97  no Author/Agent trailer on main: sage-watch alert on done/idle/dead; a
 c033348d  no Author/Agent trailer on main: colab restart sage-watch by PID; authored 2026-10-28; recorded 2026-10-28
 84f4c8d1  no Author/Agent trailer on main: colab bounded/idempotent setup_environment; authored 2026-10-28; recorded 2026-10-28
 12451f54  no Author/Agent trailer on main: colab bootstrap adds node to PATH; authored 2026-10-28; recorded 2026-10-28
+ba3cecb6  no Author/Agent trailer on main: fix(grokq) default queue port; authored 2026-10-28; recorded 2026-10-28
