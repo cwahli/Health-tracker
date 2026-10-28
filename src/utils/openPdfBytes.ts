@@ -165,6 +165,23 @@ function inflateFlate(data: Buffer): string {
   }
 }
 
+/** The integer stored in `N gen obj`. A length object is that integer, not the object number. */
+function objectInteger(raw: string, id: number, gen: number): number | null {
+  const re = new RegExp(`(?:^|[^\\d])${id}\\s+${gen}\\s+obj\\s*(\\d+)`, 'g');
+  let last: number | null = null;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(raw))) last = Number(match[1]);
+  return last;
+}
+
+/** Direct `/Length 24`, or `/Length 8 0 R` resolved to object 8. Never the object id itself. */
+function declaredLength(dict: string, raw: string): number | null {
+  const indirect = /\/Length\s+(\d+)\s+(\d+)\s+R/.exec(dict);
+  if (indirect) return objectInteger(raw, Number(indirect[1]), Number(indirect[2]));
+  const direct = /\/Length\s+(\d+)(?!\s+\d)/.exec(dict);
+  return direct ? Number(direct[1]) : null;
+}
+
 /** Inflate one FlateDecode content stream. Uses /Length so a trailing byte is not stripped. */
 function flatePayload(bytes: Uint8Array, id: number): string {
   // latin1 here is byte-preserving. TextDecoder('latin1') is windows-1252 and corrupts zlib bytes.
@@ -172,9 +189,9 @@ function flatePayload(bytes: Uint8Array, id: number): string {
   const header = new RegExp(`${id}\\s+\\d+\\s+obj((?:(?!endobj)[\\s\\S])*?)stream\\r?\\n`).exec(raw);
   if (!header || !/FlateDecode/.test(header[1])) return '';
   const start = header.index + header[0].length;
-  const length = header[1].match(/\/Length\s+(\d+)/);
-  const end = length ? start + Number(length[1]) : raw.indexOf('endstream', start);
-  if (end <= start) return '';
+  const length = declaredLength(header[1], raw);
+  const end = length != null ? start + length : raw.indexOf('endstream', start);
+  if (end <= start || end > bytes.length) return '';
   return inflateFlate(Buffer.from(bytes.subarray(start, end)));
 }
 
