@@ -14,13 +14,17 @@ Usage:  sage-watch.py            loop forever, post state changes to the webhook
 Env (or /content/.sage-watch.env as KEY=VALUE lines, re-read every poll):
   SAGE_WATCHER_WEBHOOK_URL   POST target; unset -> nothing is posted
   SAGE_WATCHER_WEBHOOK_AUTH  "Name: value" header, or just a value for Authorization
-  SAGE_JOBS_DIR (/content/jobs)  SAGE_STALL_SECS (600)  SAGE_WATCH_INTERVAL (10)
+  SAGE_JOBS_DIR (/content/jobs)  SAGE_STALL_SECS (600)  SAGE_WATCH_INTERVAL (60)
+  SAGE_REALERT_SECS (3600)
+Alerts (state in .watch-state.json): 'done' once when DONE appears; 'idle' when run.log
+has not grown/changed for SAGE_STALL_SECS (re-alert <= hourly, reset when log moves);
+'dead' once when tmux colabjob-<id> is gone without DONE. Payload has last 30 scrubbed log lines.
 """
-import json, os, shlex, socket, sys, time, urllib.request
+import json, os, re, subprocess, shlex, socket, sys, time, urllib.request
 
 JOBS = os.environ.get("SAGE_JOBS_DIR", "/content/jobs")
 STALL = int(os.environ.get("SAGE_STALL_SECS", "600"))
-EVERY = int(os.environ.get("SAGE_WATCH_INTERVAL", "10"))
+EVERY = int(os.environ.get("SAGE_WATCH_INTERVAL", "60"))
 STATE_FILE = os.path.join(JOBS, ".watch-state.json")
 ENV_FILE = "/content/.sage-watch.env"
 DONE_WORDS = {"ok", "done", "success", "finished", "complete", "completed"}
@@ -114,11 +118,76 @@ def post(payload):
     auth = os.environ.get("SAGE_WATCHER_WEBHOOK_AUTH", "")
     if auth:
         name, sep, val = auth.partition(": ")
-        hdr.update({name: val} if sep else {"Authorization": auth})
+  REALERT = int(os.environ.get("SAGE_REALERT_SECS", "3600"))
+SECRET_RE = re.compile(r"(ghp_|gho_|ghs_|github_pat_|figd_)[A-Za-z0-9_\-]+|(?<=://)[^/\s@]+@")
+
+
+def scrub(text):
+    return SECRET_RE.sub(lambda m: "[REDACTED]@" if m.group(0).endswith("@") else m.group(1) + "[REDACTED]", text)
+
+
+def tail(path, n=30):
     try:
-        urllib.request.urlopen(urllib.request.Request(url, json.dumps(payload).encode(), hdr), timeout=15).read()
-    except Exception as e:  # never log the URL/headers
-        print("webhook post failed:", type(e).__name__, flush=True)
+        with open(path, "rb") as f:
+            f.seek(0, 2); f.seek(max(0, f.tell() - 65536))
+            return scrub("\n".join(f.read().decode("utf-8", "replace").splitlines()[-n:]))
+    except OSError:
+        return ""
+
+
+def tmux_sessions():
+    try:
+        out = subprocess.run(["tmux", "ls", "-F", "#{session_name}"], capture_output=True, text=True, timeout=10).stdout
+        return set(out.split())
+    except Exception:
+        return None
+
+
+def is_done(d):
+    return any(os.path.exists(os.path.join(d, n)) for n in ("DONE", "done", ".done"))
+
+
+def alert(jid, event, log, host, extra=None):
+    payload = {"job": jid, "event": event, "host": host, "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+               "log_tail": tail(log)}
+    payload.update(extra or {})
+    print(time.strftime("%F %T"), "ALERT", event, jid, flush=True)
+    post(payload)
+
+
+def check(seen, host, now):
+    sess = tmux_sessions()
+    try:
+        ids = sorted(n for n in os.listdir(JOBS) if os.path.isdir(os.path.join(JOBS, n)) and not n.startswith("."))
+    except OSError:
+        ids = []
+    for jid in ids:
+        d = os.path.join(JOBS, jid)
+        log = os.path.join(d, "run.log")
+        if not os.path.exists(log):
+            log = log_of(d)
+        try:
+            st = os.stat(log); sig = [st.st_size, st.st_mtime]
+        except OSError:
+            sig = [0, 0]
+        s = seen.get(jid)
+        if not isinstance(s, dict):
+            s = {"sig": sig, "moved": now, "done": False, "dead": False, "idle_at": 0}
+            seen[jid] = s
+        if sig != s["sig"]:
+            s.update(sig=sig, moved=now, idle_at=0, dead=False)
+        if is_done(d):
+            if not s["done"]:
+                s["done"] = True; alert(jid, "done", log, host)
+            continue
+        s["done"] = False
+        if sess is not None and "colabjob-" + jid not in sess:
+            if not s["dead"]:
+                s["dead"] = True; alert(jid, "dead", log, host)
+            continue
+        quiet = now - s["moved"]
+        if quiet >= STALL and now - s["idle_at"] >= REALERT:
+            s["idle_at"] = now; alert(jid, "idle", log, host, {"idle_s": int(quiet)})
 
 
 def main():
@@ -131,20 +200,19 @@ def main():
     except (OSError, ValueError):
         seen = {}
     host = socket.gethostname()
-    print("sage-watch: watching", JOBS, "every", EVERY, "s", flush=True)
+    print("sage-watch: watching", JOBS, "every", EVERY, "s; idle after", STALL, "s", flush=True)
     while True:
         try:
             load_env()
-            for jid, st, age, _ in scan():
-                prev = seen.get(jid)
-                if prev == st:
-                    continue
-                seen[jid] = st
-                if prev is None and age > 120:  # old job on first sight: silent baseline
-                    continue
-                print(time.strftime("%F %T"), jid, prev, "->", st, flush=True)
-                post({"event": "job_state", "job": jid, "from": prev, "to": st, "idle_s": age,
-                      "host": host, "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
+            check(seen, host, time.time())
+            tmp = STATE_FILE + ".tmp"
+            json.dump(seen, open(tmp, "w")); os.replace(tmp, STATE_FILE)
+        except Exception as e:
+            print("watch loop error:", type(e).__name__, flush=True)
+        time.sleep(EVERY)
+
+
+              "host": host, "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
             tmp = STATE_FILE + ".tmp"
             json.dump(seen, open(tmp, "w")); os.replace(tmp, STATE_FILE)
         except Exception as e:
