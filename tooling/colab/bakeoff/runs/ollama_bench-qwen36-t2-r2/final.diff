@@ -1,0 +1,35 @@
+diff --git a/components/mtd-pricing/fallback.css b/components/mtd-pricing/fallback.css
+index 91f169f9..640d72c3 100644
+--- a/components/mtd-pricing/fallback.css
++++ b/components/mtd-pricing/fallback.css
+@@ -51,29 +51,12 @@
+   color: rgba(255, 255, 255, 0.9);
+ }
+ 
+-/* CTA row: layout for the pricing buttons. */
++/* CTA row: layout-only rules for the pricing buttons. */
+ .mtd-pricing-cta.button--secondary {
+   min-height: 48px;
+   padding: 0 24px;
+ }
+ 
+-.button--secondary:hover {
+-  background-color: #0a5c36;
+-  color: #fff;
+-}
+-
+-.button--secondary:focus-visible {
+-  outline: 3px solid #f00;
+-}
+-
+-.product-card-cta-tertiary-alt:active {
+-  transform: scale(0.97);
+-}
+-
+-.button-tertiary:hover {
+-  text-decoration: underline;
+-}
+-
+ .button-tertiary {
+   min-height: 44px;
+ }
