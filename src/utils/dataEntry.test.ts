@@ -242,6 +242,14 @@ describe('data entry', () => {
     expect(openedNoContents.pages[0].text).toBe('HDL 50 mg/dL');
     expect(openedNoContents.batch.parts[0].door).toBe('text');
     expect(openedNoContents.visionCalls).toBe(0);
+    const reused = new TextEncoder().encode(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Thumb 5 0 R>>endobj\n4 0 obj<</Length 24>>stream\nBT (HDL 50 mg/dL) Tj ET\nendstream\nendobj\n5 0 obj<</Subtype /Image/Width 8/Height 8/Filter /DCTDecode/Length 4>>stream\nABCD\nendstream\nendobj\n5 1 obj<</Subtype /Image/Width 20/Height 20>>endobj\n%%EOF',
+    );
+    const openedReused = openPdfBytes('reused-number.pdf', reused);
+    expect(openedReused.pages[0].text).toBe('HDL 50 mg/dL');
+    expect(openedReused.pages[0].imageCount).toBe(1);
+    expect(openedReused.batch.parts[0].door).toBe('both');
+    expect(openedReused.visionCalls).toBe(2);
   });
 
   it('a history cell edit and the agent edit the same observation', () => {

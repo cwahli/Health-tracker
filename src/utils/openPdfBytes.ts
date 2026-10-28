@@ -156,27 +156,22 @@ function compressedStreamIds(raw: string): Set<number> {
   return ids;
 }
 
-function thumbIds(raw: string): Set<number> {
-  const ids = new Set<number>();
-  for (const item of raw.matchAll(/\/Thumb\s+(\d+)\s+\d+\s+R/g)) ids.add(Number(item[1]));
-  return ids;
+function thumbRefs(raw: string): Set<string> {
+  const refs = new Set<string>();
+  for (const item of raw.matchAll(/\/Thumb\s+(\d+)\s+(\d+)\s+R/g)) refs.add(`${item[1]} ${item[2]}`);
+  return refs;
 }
 
-function withoutThumbSubtypes(visible: string, thumbs: Set<number>): string {
+function withoutThumbSubtypes(visible: string, thumbs: Set<string>): string {
   if (thumbs.size === 0) return visible;
-  return visible.replace(/(\d+)\s+\d+\s+obj[\s\S]*?endobj/g, (block, id: string) => (
-    thumbs.has(Number(id)) ? block.replace(/\/Subtype\s*\/Image/g, '') : block
+  return visible.replace(/(\d+)\s+(\d+)\s+obj[\s\S]*?endobj/g, (block, id: string, gen: string) => (
+    thumbs.has(`${id} ${gen}`) ? block.replace(/\/Subtype\s*\/Image/g, '') : block
   ));
 }
 
-function looseImageCount(visible: string, objects: Map<number, string>, thumbs: Set<number>): number {
-  if (thumbs.size === 0) return (visible.match(/\/Subtype\s*\/Image/g) || []).length;
-  let count = 0;
-  for (const [id, body] of objects) {
-    if (thumbs.has(id)) continue;
-    count += (body.match(/\/Subtype\s*\/Image/g) || []).length;
-  }
-  return count;
+function looseImageCount(visible: string, thumbs: Set<string>): number {
+  const body = thumbs.size === 0 ? visible : withoutThumbSubtypes(visible, thumbs);
+  return (body.match(/\/Subtype\s*\/Image/g) || []).length;
 }
 
 function pagesFromContents(fileId: string, visible: string, raw: string): PdfPageDescriptor[] | null {
@@ -193,7 +188,7 @@ function pagesFromContents(fileId: string, visible: string, raw: string): PdfPag
     return { text, imageCount };
   });
   if (!pages.some((page) => page.imageCount > 0)) {
-    pages[0].imageCount = looseImageCount(visible, objects, thumbIds(raw));
+    pages[0].imageCount = looseImageCount(visible, thumbRefs(raw));
   }
   return pages.map((page, index) => ({
     fileId,
@@ -226,7 +221,7 @@ export function describePdfBytes(fileId: string, bytes: Uint8Array): PdfPageDesc
     while ((part = inner.exec(match[1]))) texts.push(pdfLiteral(part[1]));
   }
   const text = texts.join(' ').replace(/\s+/g, ' ').trim();
-  const thumbs = thumbIds(raw);
+  const thumbs = thumbRefs(raw);
   if (thumbs.size > 0) {
     const imageCount = (withoutThumbSubtypes(visible, thumbs).match(/\/Subtype\s*\/Image/g) || []).length;
     const imageAreaRatio = imageCount === 0 ? 0 : text ? 0.25 : 1;
