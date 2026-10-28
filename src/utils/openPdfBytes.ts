@@ -162,6 +162,13 @@ function thumbIds(raw: string): Set<number> {
   return ids;
 }
 
+function withoutThumbSubtypes(visible: string, thumbs: Set<number>): string {
+  if (thumbs.size === 0) return visible;
+  return visible.replace(/(\d+)\s+\d+\s+obj[\s\S]*?endobj/g, (block, id: string) => (
+    thumbs.has(Number(id)) ? block.replace(/\/Subtype\s*\/Image/g, '') : block
+  ));
+}
+
 function looseImageCount(visible: string, objects: Map<number, string>, thumbs: Set<number>): number {
   if (thumbs.size === 0) return (visible.match(/\/Subtype\s*\/Image/g) || []).length;
   let count = 0;
@@ -219,6 +226,19 @@ export function describePdfBytes(fileId: string, bytes: Uint8Array): PdfPageDesc
     while ((part = inner.exec(match[1]))) texts.push(pdfLiteral(part[1]));
   }
   const text = texts.join(' ').replace(/\s+/g, ' ').trim();
+  const thumbs = thumbIds(raw);
+  if (thumbs.size > 0) {
+    const imageCount = (withoutThumbSubtypes(visible, thumbs).match(/\/Subtype\s*\/Image/g) || []).length;
+    const imageAreaRatio = imageCount === 0 ? 0 : text ? 0.25 : 1;
+    const pageCount = (visible.match(/\/Type\s*\/Page(?!s)/g) || []).length || 1;
+    return Array.from({ length: pageCount }, (_unused, index) => ({
+      fileId,
+      page: index + 1,
+      text: index === 0 ? text : '',
+      imageCount: index === 0 ? imageCount : 0,
+      imageAreaRatio: index === 0 ? imageAreaRatio : 0,
+    }));
+  }
   const imageCount = (visible.match(/\/Subtype\s*\/Image/g) || []).length;
   const imageAreaRatio = imageCount === 0 ? 0 : text ? 0.25 : 1;
   const pageCount = (visible.match(/\/Type\s*\/Page(?!s)/g) || []).length || 1;
