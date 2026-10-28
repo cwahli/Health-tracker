@@ -1,0 +1,48 @@
+diff --git a/tooling/bot-dispatch.js b/tooling/bot-dispatch.js
+index 69ccec7d..57cde2e2 100644
+--- a/tooling/bot-dispatch.js
++++ b/tooling/bot-dispatch.js
+@@ -61,10 +61,7 @@ const { spawnSync } = require('child_process');
+ const { pathToFileURL } = require('url');
+ 
+ const ROOT = path.join(__dirname, '..');
+-
+-const argv = process.argv.slice(2);
+-const has = f => argv.includes(f);
+-const val = (f, d) => { const i = argv.indexOf(f); return i === -1 ? d : argv[i + 1]; };
++const { argv, has, val } = require('./lib/args.js');
+ 
+ const DEFAULT_PAGE = 'customer-payment-services';
+ 
+diff --git a/tooling/check-contrast.js b/tooling/check-contrast.js
+index 3d53fd4a..b3e0b0cd 100644
+--- a/tooling/check-contrast.js
++++ b/tooling/check-contrast.js
+@@ -25,9 +25,7 @@ const fs = require('fs');
+ const path = require('path');
+ 
+ const ROOT = path.join(__dirname, '..');
+-const argv = process.argv.slice(2);
+-const has = f => argv.includes(f);
+-const val = (f, d) => { const i = argv.indexOf(f); return i === -1 ? d : argv[i + 1]; };
++const { argv, has, val } = require('./lib/args.js');
+ 
+ // ------------------------------------------------------------- pure core ---
+ function parseColor(s) {
+diff --git a/tooling/lib/args.js b/tooling/lib/args.js
+new file mode 100644
+index 00000000..ba515f3a
+--- /dev/null
++++ b/tooling/lib/args.js
+@@ -0,0 +1,10 @@
++'use strict';
++const argv = process.argv.slice(2);
++const has = f => argv.includes(f);
++const val = (f, d) => { const i = argv.indexOf(f); return i === -1 ? d : argv[i + 1]; };
++
++module.exports = {
++  argv,
++  has,
++  val
++};
+\ No newline at end of file
