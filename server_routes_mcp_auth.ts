@@ -18,6 +18,9 @@ export function getBaseUrl(req: Request): string {
   const forwardedProto = req.headers['x-forwarded-proto'];
   const proto = (typeof forwardedProto === 'string' ? forwardedProto.split(',')[0].trim() : req.protocol) || 'https';
   const host = req.get('host') || 'health-tracker.co.uk';
+  if (host.includes('health-tracker.co.uk') || host.includes('duckdns.org')) {
+    return `https://${host}`;
+  }
   return `${proto}://${host}`;
 }
 
