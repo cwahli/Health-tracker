@@ -3,7 +3,16 @@ import express from 'express';
 import type { Server } from 'http';
 import crypto from 'crypto';
 import { mcpAuthRouter, resetMcpAuthStore, resolveCanonicalUid } from './server_routes_mcp_auth.js';
-import { mcpRouter, setInMemoryMcpProfile, clearInMemoryMcpProfiles } from './server_routes_mcp.js';
+import {
+  mcpRouter,
+  setInMemoryMcpProfile,
+  clearInMemoryMcpProfiles,
+  setInMemoryMcpFoods,
+  setInMemoryMcpBiomarkers,
+  clearInMemoryMcpData,
+  toYYYYMMDD,
+  getYesterdayYYYYMMDD
+} from './server_routes_mcp.js';
 import { ADMIN_CREDENTIALS, registerUser, signSessionToken } from './server_auth.js';
 
 let app: express.Express;
@@ -17,7 +26,7 @@ beforeEach(async () => {
   delete process.env.CLOUDFLARE_D1_API_TOKEN;
 
   resetMcpAuthStore();
-  clearInMemoryMcpProfiles();
+  clearInMemoryMcpData();
 
   if (!app) {
     app = express();
@@ -644,6 +653,424 @@ describe('MCP OAuth 2.1 & Streamable HTTP Handshake Spike', () => {
       expect(res.status).toBe(404);
       const json = await res.json();
       expect(json.error.code).toBe(-32601);
+    });
+  });
+
+  describe('Step 2: Domain Query Tools & Allowance Progress (manage_home, manage_meals, manage_biomarkers)', () => {
+    let accessToken: string;
+    const testUid = 'user_test_step2';
+    const testEmail = 'step2_tester@health-tracker.co.uk';
+
+    beforeEach(async () => {
+      // Create test user and obtain Bearer token via registration + token exchange
+      const regRes = await fetch(`${baseUrl}/api/oauth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_name: 'Gemini Step2 Test',
+          redirect_uris: ['https://gemini.google.com/oauth/callback']
+        })
+      });
+      const client = await regRes.json();
+      const { verifier, challenge } = generatePkcePair();
+      const existingToken = signSessionToken({
+        uid: testUid,
+        email: testEmail,
+        nickname: 'Chiwah'
+      });
+
+      const authRes = await fetch(`${baseUrl}/oauth/authorize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          auth_token: existingToken,
+          client_id: client.client_id,
+          redirect_uri: 'https://gemini.google.com/oauth/callback',
+          code_challenge: challenge,
+          code_challenge_method: 'S256'
+        }).toString(),
+        redirect: 'manual'
+      });
+      const code = new URL(authRes.headers.get('location')!).searchParams.get('code')!;
+
+      const tokenRes = await fetch(`${baseUrl}/api/oauth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'authorization_code',
+          code,
+          client_id: client.client_id,
+          redirect_uri: 'https://gemini.google.com/oauth/callback',
+          code_verifier: verifier
+        })
+      });
+      const tokenData = await tokenRes.json();
+      accessToken = tokenData.access_token;
+    });
+
+    it('lists all Step 2 tools in tools/list', async () => {
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      const toolNames = data.result.tools.map((t: any) => t.name);
+      expect(toolNames).toContain('manage_home');
+      expect(toolNames).toContain('manage_meals');
+      expect(toolNames).toContain('manage_biomarkers');
+    });
+
+    it('calculates exact allowance progress for today and yesterday (answering allowance query)', async () => {
+      const today = toYYYYMMDD(new Date());
+      const yesterday = getYesterdayYYYYMMDD(today);
+
+      setInMemoryMcpProfile(testUid, {
+        profile: {
+          id: testUid,
+          nickname: 'Chiwah',
+          targets: {
+            calories: 1651,
+            saturatedFat: '15 g',
+            totalFibre: '30 g',
+            sodium: '1500 mg'
+          }
+        },
+        report: {
+          dailyNutrientTargets: {
+            calories: '1,651 kcal'
+          }
+        }
+      });
+
+      // Seed meals for today: 600 kcal lunch + 350 kcal snack = 950 kcal
+      // Seed meals for yesterday: 750 kcal + 670 kcal = 1420 kcal
+      const mockFoods = [
+        {
+          id: 'meal-today-1',
+          firebase_uid: testUid,
+          date: today,
+          name: 'Grilled Chicken Bowl',
+          composition: 'Chicken breast, brown rice, broccoli',
+          calories: 600,
+          saturated_fat: 4,
+          sodium: 600,
+          nutrients: { calories: 600, protein: 45, carbohydrates: 50, totalFat: 20, saturatedFat: 4, totalFibre: 10, sodium: 600 },
+          image_urls: ['chicken.jpg']
+        },
+        {
+          id: 'meal-today-2',
+          firebase_uid: testUid,
+          date: today,
+          name: 'Greek Yogurt & Berries',
+          composition: 'Greek yogurt, blueberries, chia seeds',
+          calories: 350,
+          saturated_fat: 2,
+          sodium: 100,
+          nutrients: { calories: 350, protein: 20, carbohydrates: 40, totalFat: 5, saturatedFat: 2, totalFibre: 6, sodium: 100 },
+          image_urls: ['/photos/yogurt.jpg']
+        },
+        {
+          id: 'meal-yest-1',
+          firebase_uid: testUid,
+          date: yesterday,
+          name: 'Salmon Salad',
+          composition: 'Wild salmon, avocado, mixed greens',
+          calories: 750,
+          saturated_fat: 6,
+          sodium: 500,
+          nutrients: { calories: 750, protein: 50, carbohydrates: 20, totalFat: 35, saturatedFat: 6, totalFibre: 8, sodium: 500 }
+        },
+        {
+          id: 'meal-yest-2',
+          firebase_uid: testUid,
+          date: yesterday,
+          name: 'Steak and Veggies',
+          composition: 'Sirloin steak, asparagus, sweet potato',
+          calories: 670,
+          saturated_fat: 10,
+          sodium: 700,
+          nutrients: { calories: 670, protein: 55, carbohydrates: 15, totalFat: 30, saturatedFat: 10, totalFibre: 7, sodium: 700 }
+        }
+      ];
+      setInMemoryMcpFoods(testUid, mockFoods);
+
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'allowance-check',
+          method: 'tools/call',
+          params: {
+            name: 'manage_home',
+            arguments: { action: 'get_allowance_progress' }
+          }
+        })
+      });
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.result.isError).toBeFalsy();
+      const progress = JSON.parse(json.result.content[0].text);
+
+      expect(progress.baseline_daily_allowance_kcal).toBe(1651);
+
+      // Verify Today: 950 consumed, 701 remaining (58%)
+      expect(progress.today.date).toBe(today);
+      expect(progress.today.target_allowance_kcal).toBe(1651);
+      expect(progress.today.consumed_kcal).toBe(950);
+      expect(progress.today.remaining_kcal).toBe(701);
+      expect(progress.today.percentage_reached).toBe(58);
+      expect(progress.today.status).toBe('within_allowance');
+      expect(progress.today.meal_count).toBe(2);
+      expect(progress.today.nutrients.saturated_fat.ceiling_exceeded).toBe(false);
+      expect(progress.today.meals[0].photos[0]).toBe('https://health-tracker.co.uk/photos/chicken.jpg');
+
+      // Verify Yesterday: 1420 consumed, 231 remaining (86%)
+      expect(progress.yesterday.date).toBe(yesterday);
+      expect(progress.yesterday.target_allowance_kcal).toBe(1651);
+      expect(progress.yesterday.consumed_kcal).toBe(1420);
+      expect(progress.yesterday.remaining_kcal).toBe(231);
+      expect(progress.yesterday.percentage_reached).toBe(86);
+      expect(progress.yesterday.status).toBe('within_allowance');
+      expect(progress.yesterday.meal_count).toBe(2);
+      expect(progress.yesterday.nutrients.saturated_fat.ceiling_exceeded).toBe(true); // 16g > 15g
+    });
+
+    it('updates nutrient targets via set_targets and reflects immediately', async () => {
+      setInMemoryMcpProfile(testUid, {
+        profile: { id: testUid, targets: { calories: 1651 } }
+      });
+
+      const updateRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'set-targets-1',
+          method: 'tools/call',
+          params: {
+            name: 'manage_home',
+            arguments: {
+              action: 'set_targets',
+              targets: { calories: 1750, saturatedFat: '14 g', totalFibre: '32 g' }
+            }
+          }
+        })
+      });
+
+      expect(updateRes.status).toBe(200);
+      const updateJson = await updateRes.json();
+      const updateData = JSON.parse(updateJson.result.content[0].text);
+      expect(updateData.success).toBe(true);
+      expect(updateData.updated_targets.calories).toBe(1750);
+
+      // Verify get_profile reflects the updated targets
+      const getProfRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'get-prof-after-set',
+          method: 'tools/call',
+          params: {
+            name: 'manage_home',
+            arguments: { action: 'get_profile' }
+          }
+        })
+      });
+      const profJson = await getProfRes.json();
+      const profData = JSON.parse(profJson.result.content[0].text);
+      expect(profData.targets.calories).toBe(1750);
+      expect(profData.targets.saturatedFat).toBe('14 g');
+    });
+
+    it('filters meals by date, date range, search keyword and converts photo URLs', async () => {
+      const today = toYYYYMMDD(new Date());
+      const yesterday = getYesterdayYYYYMMDD(today);
+
+      const foods = [
+        {
+          id: 'meal-m1',
+          firebase_uid: testUid,
+          date: today,
+          name: 'Pacific Salmon & Asparagus',
+          composition: 'Wild salmon, olive oil, lemon',
+          calories: 550,
+          image_urls: ['173000_salmon.jpg'],
+          items_breakdown: [{ name: 'Wild salmon fillet', weight_grams: 200, calories: 400 }]
+        },
+        {
+          id: 'meal-m2',
+          firebase_uid: testUid,
+          date: yesterday,
+          name: 'Quinoa Veggie Salad',
+          composition: 'Quinoa, cucumber, bell pepper, feta',
+          calories: 420,
+          image_urls: ['https://cdn.example.com/custom.png'],
+          items_breakdown: [{ name: 'Quinoa', weight_grams: 150, calories: 250 }]
+        }
+      ];
+      setInMemoryMcpFoods(testUid, foods);
+
+      // 1. Filter by date: today
+      const todayRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'list-today',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: { action: 'list', date: today }
+          }
+        })
+      });
+      const todayData = JSON.parse((await todayRes.json()).result.content[0].text);
+      expect(todayData.meals.length).toBe(1);
+      expect(todayData.meals[0].name).toBe('Pacific Salmon & Asparagus');
+      expect(todayData.meals[0].image_urls[0]).toBe('https://health-tracker.co.uk/photos/173000_salmon.jpg');
+
+      // 2. Search keyword: 'quinoa'
+      const searchRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'search-quinoa',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: { action: 'list', search: 'quinoa' }
+          }
+        })
+      });
+      const searchData = JSON.parse((await searchRes.json()).result.content[0].text);
+      expect(searchData.meals.length).toBe(1);
+      expect(searchData.meals[0].id).toBe('meal-m2');
+      expect(searchData.meals[0].image_urls[0]).toBe('https://cdn.example.com/custom.png');
+
+      // 3. Get Detail
+      const detailRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'meal-detail',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: { action: 'get_detail', meal_id: 'meal-m1' }
+          }
+        })
+      });
+      const detailData = JSON.parse((await detailRes.json()).result.content[0].text);
+      expect(detailData.id).toBe('meal-m1');
+      expect(detailData.items_breakdown[0].name).toBe('Wild salmon fillet');
+      expect(detailData.image_urls[0]).toBe('https://health-tracker.co.uk/photos/173000_salmon.jpg');
+    });
+
+    it('lists biomarker records and computes longitudinal trends', async () => {
+      const bioLogs = [
+        {
+          id: 'bio-1',
+          firebase_uid: testUid,
+          date: '2026-08-01',
+          biomarkers: { cholesterol: '5.8 mmol/L', hba1c: '5.4 %', vitaminD: '40 nmol/L' }
+        },
+        {
+          id: 'bio-2',
+          firebase_uid: testUid,
+          date: '2026-09-01',
+          biomarkers: { cholesterol: '5.2 mmol/L', hba1c: '5.3 %', vitaminD: '50 nmol/L' }
+        },
+        {
+          id: 'bio-3',
+          firebase_uid: testUid,
+          date: '2026-10-01',
+          biomarkers: { cholesterol: '4.9 mmol/L', hba1c: '5.1 %', vitaminD: '62 nmol/L' }
+        }
+      ];
+      setInMemoryMcpBiomarkers(testUid, bioLogs);
+
+      // 1. List with key filtering
+      const listRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'bio-list',
+          method: 'tools/call',
+          params: {
+            name: 'manage_biomarkers',
+            arguments: { action: 'list', keys: ['cholesterol'] }
+          }
+        })
+      });
+      const listData = JSON.parse((await listRes.json()).result.content[0].text);
+      expect(listData.biomarker_logs.length).toBe(3);
+      expect(listData.biomarker_logs[0].biomarkers.cholesterol).toBeDefined();
+      expect(listData.biomarker_logs[0].biomarkers.vitaminD).toBeUndefined();
+
+      // 2. Get Trends
+      const trendRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'bio-trends',
+          method: 'tools/call',
+          params: {
+            name: 'manage_biomarkers',
+            arguments: { action: 'get_trends', keys: ['cholesterol', 'vitaminD'] }
+          }
+        })
+      });
+      const trendData = JSON.parse((await trendRes.json()).result.content[0].text);
+      const chTrend = trendData.trends.cholesterol;
+      expect(chTrend.readings_count).toBe(3);
+      expect(chTrend.latest.value).toBe(4.9);
+      expect(chTrend.previous.value).toBe(5.2);
+      expect(chTrend.min.value).toBe(4.9);
+      expect(chTrend.max.value).toBe(5.8);
+      expect(chTrend.delta).toBe(-0.3);
+      expect(chTrend.trend).toBe('decreasing');
+
+      const vitTrend = trendData.trends.vitaminD;
+      expect(vitTrend.readings_count).toBe(3);
+      expect(vitTrend.latest.value).toBe(62);
+      expect(vitTrend.delta).toBe(12);
+      expect(vitTrend.trend).toBe('increasing');
     });
   });
 });
