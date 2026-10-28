@@ -47,10 +47,24 @@ function contentIds(dict: string): number[] {
   return one ? [Number(one[1])] : [];
 }
 
-function referencedImageCount(dict: string, objects: Map<number, string>): number {
+function rawDicts(raw: string): Map<number, string> {
+  const dicts = new Map<number, string>();
+  const re = /(\d+)\s+\d+\s+obj([\s\S]*?)(?:stream|endobj)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(raw))) dicts.set(Number(match[1]), match[2]);
+  return dicts;
+}
+
+function referencedImageCount(dict: string, objects: Map<number, string>, rawDicts: Map<number, string>): number {
   const ids = [...dict.matchAll(/(\d+)\s+\d+\s+R/g)].map((item) => Number(item[1]));
-  const bodies = [dict, ...ids.map((id) => objects.get(id) || '')];
-  return bodies.reduce((sum, body) => sum + (body.match(/\/Subtype\s*\/Image/g) || []).length, 0);
+  const seen = new Set<number>();
+  for (const id of ids) {
+    const visible = objects.get(id) || '';
+    const rawDict = rawDicts.get(id) || '';
+    // The Flate strip deletes /Subtype when it sits after /Filter. The raw dict still has it.
+    if (/\/Subtype\s*\/Image/.test(visible) || /\/Subtype\s*\/Image/.test(rawDict)) seen.add(id);
+  }
+  return (dict.match(/\/Subtype\s*\/Image/g) || []).length + seen.size;
 }
 
 function isPageDict(body: string): boolean {
@@ -105,11 +119,12 @@ function pagesFromContents(fileId: string, visible: string, raw: string): PdfPag
   const objects = pdfObjects(visible);
   const pageDicts = orderedPageBodies(objects);
   const compressed = compressedStreamIds(raw);
+  const dicts = rawDicts(raw);
   if (!pageDicts.some((dict) => contentIds(dict).length > 0)) return null;
   const pages = pageDicts.map((dict) => {
     const ids = contentIds(dict);
     const text = ids.map((id) => textOperators(objects.get(id) || '')).join(' ').replace(/\s+/g, ' ').trim();
-    let imageCount = referencedImageCount(dict, objects);
+    let imageCount = referencedImageCount(dict, objects, dicts);
     if (ids.some((id) => compressed.has(id))) imageCount = Math.max(imageCount, 1);
     return { text, imageCount };
   });
