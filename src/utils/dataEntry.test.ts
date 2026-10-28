@@ -205,6 +205,18 @@ describe('data entry', () => {
     expect(openedImage.pages[0].text).toBe('');
     expect(openedImage.batch.parts[0].door).toBe('ocr');
     expect(openedImage.visionCalls).toBe(2);
+    const indirectImage = new TextEncoder().encode(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R/Resources 6 0 R>>endobj\n4 0 obj<</Length 12>>stream\nq /Im0 Do Q\nendstream\nendobj\n5 0 obj<</Filter /FlateDecode/Subtype /Image/Width 20/Height 20/Length 4>>stream\nABCD\nendstream\nendobj\n6 0 obj<</XObject<</Im0 5 0 R>>>>endobj\n%%EOF',
+    );
+    const openedIndirect = openPdfBytes('indirect-image.pdf', indirectImage);
+    expect(openedIndirect.pages[0].text).toBe('');
+    expect(openedIndirect.batch.parts[0].door).toBe('ocr');
+    expect(openedIndirect.visionCalls).toBe(2);
+    const sibling = new TextEncoder().encode(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 2/Kids[3 0 R 4 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 5 0 R>>endobj\n4 0 obj<</Type/Page/Parent 2 0 R/Contents 7 0 R/Resources 8 0 R>>endobj\n5 0 obj<</Length 24>>stream\nBT (HDL 50 mg/dL) Tj ET\nendstream\nendobj\n6 0 obj<</Filter /FlateDecode/Subtype /Image/Width 20/Height 20/Length 4>>stream\nABCD\nendstream\nendobj\n7 0 obj<</Length 12>>stream\nq /Im0 Do Q\nendstream\nendobj\n8 0 obj<</XObject<</Im0 6 0 R>>>>endobj\n%%EOF',
+    );
+    const openedSibling = openPdfBytes('sibling.pdf', sibling);
+    expect(openedSibling.batch.parts.map((part) => part.door)).toEqual(['text', 'ocr']);
   });
 
   it('a history cell edit and the agent edit the same observation', () => {

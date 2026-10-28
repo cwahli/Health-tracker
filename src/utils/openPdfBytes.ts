@@ -56,15 +56,28 @@ function rawDicts(raw: string): Map<number, string> {
 }
 
 function referencedImageCount(dict: string, objects: Map<number, string>, rawDicts: Map<number, string>): number {
-  const ids = [...dict.matchAll(/(\d+)\s+\d+\s+R/g)].map((item) => Number(item[1]));
-  const seen = new Set<number>();
-  for (const id of ids) {
+  const refsOf = (body: string) => [...body.matchAll(/(\d+)\s+\d+\s+R/g)].map((item) => Number(item[1]));
+  const isImage = (id: number) => {
     const visible = objects.get(id) || '';
     const rawDict = rawDicts.get(id) || '';
     // The Flate strip deletes /Subtype when it sits after /Filter. The raw dict still has it.
-    if (/\/Subtype\s*\/Image/.test(visible) || /\/Subtype\s*\/Image/.test(rawDict)) seen.add(id);
+    return /\/Subtype\s*\/Image/.test(visible) || /\/Subtype\s*\/Image/.test(rawDict);
+  };
+  const seen = new Set<number>();
+  const images = new Set<number>();
+  // One extra hop: a page often names /Resources, and that dictionary names the image.
+  let queue = refsOf(dict);
+  for (let hop = 0; hop < 2 && queue.length > 0; hop += 1) {
+    const next: number[] = [];
+    for (const id of queue) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (isImage(id)) images.add(id);
+      next.push(...refsOf(rawDicts.get(id) || ''));
+    }
+    queue = next;
   }
-  return (dict.match(/\/Subtype\s*\/Image/g) || []).length + seen.size;
+  return (dict.match(/\/Subtype\s*\/Image/g) || []).length + images.size;
 }
 
 function isPageDict(body: string): boolean {
