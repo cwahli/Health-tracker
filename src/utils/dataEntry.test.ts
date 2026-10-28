@@ -283,17 +283,33 @@ describe('data entry', () => {
     expect(openedObjectStream.visionCalls).toBe(0);
     const plain = Buffer.from('BT (HDL 50 mg/dL) Tj ET ');
     const columns = 8;
+    const paeth = (left: number, up: number, upLeft: number) => {
+      const score = left + up - upLeft;
+      const fromLeft = Math.abs(score - left);
+      const fromUp = Math.abs(score - up);
+      const fromUpLeft = Math.abs(score - upLeft);
+      if (fromLeft <= fromUp && fromLeft <= fromUpLeft) return left;
+      if (fromUp <= fromUpLeft) return up;
+      return upLeft;
+    };
     const predictedRows: Buffer[] = [];
+    let prior = Buffer.alloc(columns);
+    let rowIndex = 0;
     for (let offset = 0; offset < plain.length; offset += columns) {
       const row = plain.subarray(offset, offset + columns);
+      const filter = [1, 2, 4][rowIndex];
+      rowIndex += 1;
       const encoded = Buffer.alloc(1 + row.length);
-      encoded[0] = 1;
-      let left = 0;
+      encoded[0] = filter;
       for (let column = 0; column < row.length; column += 1) {
-        encoded[1 + column] = (row[column] - left) & 255;
-        left = row[column];
+        const left = column > 0 ? row[column - 1] : 0;
+        const up = prior[column];
+        const upLeft = column > 0 ? prior[column - 1] : 0;
+        const guess = filter === 2 ? up : filter === 4 ? paeth(left, up, upLeft) : left;
+        encoded[1 + column] = (row[column] - guess) & 255;
       }
       predictedRows.push(encoded);
+      prior = Buffer.from(row);
     }
     const predicted = deflateSync(Buffer.concat(predictedRows));
     const pngPage = Buffer.concat([
