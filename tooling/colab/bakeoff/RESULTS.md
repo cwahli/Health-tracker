@@ -1,4 +1,4 @@
-# Local model bake-off (Colab L4 23 GB) — PARTIAL, updated 2026-10-28 16:17 (Europe/London)
+# Local model bake-off (Colab L4 23 GB) — PARTIAL, updated 2026-10-28 20:31 (Europe/London)
 
 ## How to read this
 
@@ -12,12 +12,12 @@
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | qwen3-coder | 3/3 | 2/3 | 1/3 | 2/3 | 3/3 | - | - | - | - | 3 | 16 |
 | devstral | 2/3 | 3/3 | 1/3 | 3/3 | 3/3 | - | - | - | - | 3 | 38 |
-| glm | 3/3 | 3/3 | 2/3 | 2/3 | 3/3 | 0/2 (partial) | - | - | - | 1 | 41 |
+| glm | 3/3 | 3/3 | 2/3 | 2/3 | 3/3 | - | - | - | - | 1 | 41 |
 | qwen36 | 3/3 | 3/3 | 2/3 | 2/3 | 3/3 | - | - | - | - | 0 | 90 |
 | gemma4 | 3/3 | 0/3 | 0/3 | 1/3 | 3/3 | - | - | - | - | 0 | 16 |
 | qwen35-9b | 0/3 | 3/3 | 0/3 | 2/3 | 2/3 | - | - | - | - | 4 | 281 |
-| mimo-v2.6-flash-free | 1/1 (partial) | 1/1 (partial) | 1/1 (partial) | 1/1 (partial) | 1/1 (partial) | 0/1 (partial) | - | - | - | 0 | 67 |
-| qwen3.8 (original, buggy renderer) | 3/3 | 3/3 | 0/3 | 2/3 | 1/3 | 0/3 | - | - | - | 0 | 214 |
+| mimo-v2.6-flash-free | 1/1 (partial) | 1/1 (partial) | 1/1 (partial) | 1/1 (partial) | 1/1 (partial) | - | - | - | - | 0 | 67 |
+| qwen3.8 (original, buggy renderer) | 3/3 | 3/3 | 0/3 | 2/3 | 1/3 | - | - | - | - | 0 | 214 |
 | qwen3.8 (fixed renderer, easy rerun) | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | - | - | - | - | 0 | 162 |
 | qwen3.8 (fixed renderer, hard) | - | - | - | - | - | 0/1 (partial) | - | - | - | 0 | - |
 
@@ -45,12 +45,12 @@ The original qwen3.8 hit an Ollama renderer 500 ("no user query found") on paral
 
 - **bench-qwen3-coder**: pass 11, fake_success 3, no_edit 1
 - **bench-devstral**: pass 12, fake_success 3
-- **bench-glm**: pass 13, garbage_edit 1, fake_success 1, no_edit_tool_errors 1, no_edit 1
+- **bench-glm**: pass 13, garbage_edit 1, fake_success 1
 - **bench-qwen36**: pass 13, garbage_edit 2
 - **bench-gemma4**: pass 7, no_edit 4, garbage_edit 2, no_edit_tool_errors 1, wrong_args 1
 - **bench-qwen35-9b**: pass 7, garbage_edit 4, fake_success 4
-- **mimo-v2.6-flash-free**: pass 5, timeout 1
-- **bench-qwen38**: pass 9, no_edit 4, timeout 4, no_edit_tool_errors 1
+- **mimo-v2.6-flash-free**: pass 5
+- **bench-qwen38**: pass 9, no_edit 4, timeout 1, no_edit_tool_errors 1
 - **qwen3.8-fixed**: pass 15
 - **bench-qwen38r**: timeout 1
 
@@ -176,18 +176,12 @@ The original qwen3.8 hit an Ollama renderer 500 ("no user query found") on paral
 | bench-qwen38 | 2 | 2 | PASS | pass | 66.0 | 5 | 5 | 0 | 1053 |  |
 | bench-qwen38 | 3 | 2 | FAIL | no_edit | 110.2 | 1 | 3 | 0 | 129 | tooling/lib/args.js missing |
 | bench-qwen38 | 4 | 2 | PASS | pass | 214.0 | 4 | 4 | 0 | 4469 |  |
-| mimo-v2.6-flash-free | 11 | 1 | FAIL | timeout | 1803.0 | 51 | 67 | 0 | 36718 | fs1280: panel is a box (1232px wide) |
 | bench-qwen38 | 5 | 2 | PASS | pass | 529.3 | 16 | 19 | 0 | 10334 |  |
 | bench-qwen38 | 1 | 3 | PASS | pass | 84.1 | 4 | 3 | 0 | 1556 |  |
 | bench-qwen38 | 2 | 3 | PASS | pass | 532.6 | 9 | 10 | 0 | 2551 |  |
 | bench-qwen38 | 3 | 3 | FAIL | no_edit | 97.0 | 1 | 3 | 0 | 126 | tooling/lib/args.js missing |
 | bench-qwen38 | 4 | 3 | PASS | pass | 278.9 | 5 | 4 | 0 | 6338 |  |
 | bench-qwen38 | 5 | 3 | FAIL | no_edit | 145.1 | 2 | 8 | 0 | 690 | callout.css missing |
-| bench-qwen38 | 11 | 1 | FAIL | timeout | 1803.0 | 24 | 37 | 1 | 30776 | fs1280: panel is a box (1232px wide) |
-| bench-qwen38 | 11 | 2 | FAIL | timeout | 1803.0 | 23 | 46 | 0 | 38327 | fs1280: panel is a box (1232px wide) |
-| bench-qwen38 | 11 | 3 | FAIL | timeout | 1803.0 | 22 | 40 | 0 | 35006 | fs1280: panel is a box (1232px wide) |
-| bench-glm | 11 | 1 | FAIL | no_edit_tool_errors | 510.1 | 47 | 62 | 2 | 14906 | fs1280: panel is a box (1232px wide) |
-| bench-glm | 11 | 2 | FAIL | no_edit | 33.3 | 2 | 4 | 0 | 655 | fs1280: panel is a box (1232px wide) |
 | qwen3.8-fixed | 1 | 1 | PASS | pass | 37.1 | 4 | 3 | 0 | 364 |  |
 | qwen3.8-fixed | 2 | 1 | PASS | pass | 51.8 | 4 | 4 | 0 | 705 |  |
 | qwen3.8-fixed | 3 | 1 | PASS | pass | 67.7 | 7 | 11 | 0 | 1361 |  |
@@ -203,12 +197,12 @@ The original qwen3.8 hit an Ollama renderer 500 ("no user query found") on paral
 | qwen3.8-fixed | 3 | 3 | PASS | pass | 200.8 | 15 | 22 | 0 | 3649 |  |
 | qwen3.8-fixed | 4 | 3 | PASS | pass | 704.5 | 7 | 8 | 0 | 17197 |  |
 | qwen3.8-fixed | 5 | 3 | PASS | pass | 133.8 | 10 | 10 | 0 | 2578 |  |
-| bench-qwen38r | 11 | 1 | FAIL | timeout | 1803.0 | 48 | 71 | 0 | 37436 | fs1280: panel is a box (1232px wide) |
+| bench-qwen38r | 11 | 1 | FAIL | timeout | 1803.0 | 13 | 17 | 1 | 20608 | fs1280: panel must have 40px radius and NO border (40px/1px) |
 
 <!-- REALWORK:BEGIN -->
 ## Real-work scoreboard (continuous)
 
-Source: `/content/bakeoff/realwork.jsonl` (one row per real Colab coding job; format in `REALWORK.md`). Updated: 2026-10-28T20:05:57+0000.
+Source: `/content/bakeoff/realwork.jsonl` (one row per real Colab coding job; format in `REALWORK.md`). Updated: 2026-10-28T20:31:37+0000.
 Ranked by verified success rate (a job counts as a success only if the real check or live verification passed). Time is used only to break ties. A job with no verification yet is listed under Unverified and not counted in the rate.
 
 **Easy jobs**
