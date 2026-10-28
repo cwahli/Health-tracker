@@ -2325,4 +2325,371 @@ describe('MCP OAuth 2.1 & Streamable HTTP Handshake Spike', () => {
       expect(removed.symptomEvents).toHaveLength(1);
     });
   });
+
+  describe('Step 6: Diagnostic & Reliability Tools (diagnose_health_data)', () => {
+    let accessToken: string;
+    const testUid = 'user_test_step6';
+    const testEmail = 'step6_tester@health-tracker.co.uk';
+
+    beforeEach(async () => {
+      const regRes = await fetch(`${baseUrl}/api/oauth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_name: 'Gemini Step6 Diagnostics Test',
+          redirect_uris: ['https://gemini.google.com/oauth/callback']
+        })
+      });
+      const client = await regRes.json();
+      const { verifier, challenge } = generatePkcePair();
+      const existingToken = signSessionToken({
+        uid: testUid,
+        email: testEmail,
+        nickname: 'DiagnosticTester'
+      });
+
+      const authRes = await fetch(`${baseUrl}/oauth/authorize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          auth_token: existingToken,
+          client_id: client.client_id,
+          redirect_uri: 'https://gemini.google.com/oauth/callback',
+          code_challenge: challenge,
+          code_challenge_method: 'S256'
+        }).toString(),
+        redirect: 'manual'
+      });
+      const code = new URL(authRes.headers.get('location')!).searchParams.get('code')!;
+
+      const tokenRes = await fetch(`${baseUrl}/api/oauth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'authorization_code',
+          code,
+          client_id: client.client_id,
+          redirect_uri: 'https://gemini.google.com/oauth/callback',
+          code_verifier: verifier
+        })
+      });
+      const tokenData = await tokenRes.json();
+      accessToken = tokenData.access_token;
+    });
+
+    it('lists diagnose_health_data in tools/list with all 5 diagnostic actions', async () => {
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 'diag-tools', method: 'tools/list' })
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      const diagTool = data.result.tools.find((t: any) => t.name === 'diagnose_health_data');
+      expect(diagTool).toBeDefined();
+      expect(diagTool.inputSchema.properties.action.enum).toContain('get_meal_debug_tree');
+      expect(diagTool.inputSchema.properties.action.enum).toContain('simulate_calculation');
+      expect(diagTool.inputSchema.properties.action.enum).toContain('audit_biomarkers');
+      expect(diagTool.inputSchema.properties.action.enum).toContain('diagnose_sync');
+      expect(diagTool.inputSchema.properties.action.enum).toContain('file_bug_ticket');
+    });
+
+    it('evaluates contracts and classifies oracle failures via get_meal_debug_tree', async () => {
+      const mealId = 'meal_debug_target_123';
+      setInMemoryMcpFoods(testUid, [
+        {
+          id: mealId,
+          firebase_uid: testUid,
+          date: '2026-10-28T12:00:00.000Z',
+          name: 'Chicken Rice Bowl',
+          composition: 'Steamed rice, poached chicken breast, cucumber',
+          weight_grams: 350,
+          calories: 520,
+          saturated_fat: 3,
+          sodium: 450,
+          added_sugar: 0,
+          items_breakdown: [
+            { name: 'Poached Chicken', weightGrams: 150, protein: 45, totalFat: 4, carbohydrates: 0 },
+            { name: 'Steamed Rice', weightGrams: 200, protein: 5, totalFat: 1, carbohydrates: 56 }
+          ],
+          image_urls: ['https://health-tracker.co.uk/photos/chicken_rice.jpg'],
+          chat_transcript: [{ role: 'user', content: 'Lunch bowl' }]
+        }
+      ]);
+
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'diag-tree-1',
+          method: 'tools/call',
+          params: {
+            name: 'diagnose_health_data',
+            arguments: {
+              action: 'get_meal_debug_tree',
+              meal_id: mealId
+            }
+          }
+        })
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.result).toBeDefined();
+      const payload = JSON.parse(data.result.content[0].text);
+      expect(payload.meal_id).toBe(mealId);
+      expect(payload.pack).toBe('food');
+      expect(Array.isArray(payload.contracts)).toBe(true);
+      expect(payload.summary.total_contracts).toBeGreaterThan(0);
+      expect(typeof payload.summary.passed_contracts).toBe('number');
+    });
+
+    it('runs in-memory dry-run calculation simulation via simulate_calculation without mutating D1 or profile', async () => {
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'sim-1',
+          method: 'tools/call',
+          params: {
+            name: 'diagnose_health_data',
+            arguments: {
+              action: 'simulate_calculation',
+              name: 'Lean Protein Snack',
+              items: [
+                { name: 'Grilled Chicken Breast', weightGrams: 200, protein: 62, totalFat: 7, carbohydrates: 0, sodium: 180, saturatedFat: 1.8 }
+              ]
+            }
+          }
+        })
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      const payload = JSON.parse(data.result.content[0].text);
+      expect(payload.simulated).toBe(true);
+      expect(payload.persisted).toBe(false);
+      expect(payload.name).toBe('Lean Protein Snack');
+      expect(payload.weight_grams).toBe(200);
+      // Atwater verification: 4*62 + 9*7 + 4*0 = 248 + 63 = 311 kcal
+      expect(payload.totals.calories).toBe(311);
+      expect(payload.totals.protein).toBe(62);
+      expect(payload.totals.totalFat).toBe(7);
+      expect(payload.verdict).toBeDefined();
+
+      // Verify no meal was created in stored foods
+      const listRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'check-no-foods',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: { action: 'list' }
+          }
+        })
+      });
+      const listData = await listRes.json();
+      const listPayload = JSON.parse(listData.result.content[0].text);
+      expect(listPayload.total).toBe(0);
+      expect(listPayload.meals.length).toBe(0);
+    });
+
+    it('audits biomarker health data integrity detecting alias clusters via audit_biomarkers', async () => {
+      setInMemoryMcpProfile(testUid, {
+        profile: {
+          id: testUid,
+          customBiomarkers: {
+            ldl_cholesterol: {
+              key: 'ldl_cholesterol',
+              name: 'LDL Cholesterol',
+              unit: 'mmol/L',
+              normalRange: '< 3.0'
+            },
+            ldl: {
+              key: 'ldl',
+              name: 'LDL',
+              unit: 'mmol/L',
+              normalRange: '< 3.0'
+            }
+          }
+        }
+      });
+
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'audit-bio-1',
+          method: 'tools/call',
+          params: {
+            name: 'diagnose_health_data',
+            arguments: { action: 'audit_biomarkers' }
+          }
+        })
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      const payload = JSON.parse(data.result.content[0].text);
+      expect(payload.total_scanned).toBeGreaterThan(0);
+      expect(typeof payload.clean_count).toBe('number');
+      expect(Array.isArray(payload.duplicate_groups)).toBe(true);
+      expect(payload.duplicate_candidates_count + payload.duplicate_groups.length).toBeGreaterThan(0);
+    });
+
+    it('diagnoses sync health detecting orphan photo references via diagnose_sync', async () => {
+      setInMemoryMcpFoods(testUid, [
+        {
+          id: 'meal_orphan_ref',
+          firebase_uid: testUid,
+          date: '2026-10-28T10:00:00.000Z',
+          name: 'Draft Breakfast',
+          calories: 300,
+          image_urls: ['ref:local_draft_blob_789']
+        }
+      ]);
+
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'diag-sync-1',
+          method: 'tools/call',
+          params: {
+            name: 'diagnose_health_data',
+            arguments: { action: 'diagnose_sync' }
+          }
+        })
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      const payload = JSON.parse(data.result.content[0].text);
+      expect(payload.status).toBe('issues_detected');
+      expect(payload.orphan_photo_refs.length).toBe(1);
+      expect(payload.orphan_photo_refs[0].photo_ref).toBe('ref:local_draft_blob_789');
+      expect(payload.orphan_photo_refs[0].meal_id).toBe('meal_orphan_ref');
+    });
+
+    it('files structured bug ticket with strict 1-open-ticket cap via file_bug_ticket', async () => {
+      const mealId = 'meal_test_bug_456';
+      const oracleCode = 'FALSE_FRIEND';
+
+      // 1. Initial file
+      const res1 = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'file-bug-1',
+          method: 'tools/call',
+          params: {
+            name: 'diagnose_health_data',
+            arguments: {
+              action: 'file_bug_ticket',
+              meal_id: mealId,
+              oracle_code: oracleCode,
+              title: 'Misclassified tofu as chicken breast in meal 456',
+              category: 'foodcart'
+            }
+          }
+        })
+      });
+
+      expect(res1.status).toBe(200);
+      const data1 = await res1.json();
+      const payload1 = JSON.parse(data1.result.content[0].text);
+      expect(payload1.ok).toBe(true);
+      expect(payload1.capped).toBe(false);
+      expect(payload1.tag_id).toBeDefined();
+      const originalTagId = payload1.tag_id;
+
+      // 2. Duplicate attempt for same mealId & oracleCode — MUST be capped
+      const res2 = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'file-bug-2',
+          method: 'tools/call',
+          params: {
+            name: 'diagnose_health_data',
+            arguments: {
+              action: 'file_bug_ticket',
+              meal_id: mealId,
+              oracle_code: oracleCode,
+              title: 'Different title for same meal 456 failure'
+            }
+          }
+        })
+      });
+
+      expect(res2.status).toBe(200);
+      const data2 = await res2.json();
+      const payload2 = JSON.parse(data2.result.content[0].text);
+      expect(payload2.ok).toBe(true);
+      expect(payload2.capped).toBe(true);
+      expect(payload2.action).toBe('existing_open_ticket');
+      expect(payload2.tag_id).toBe(originalTagId);
+    });
+
+    it('strictly blocks global catalog mutation actions with HTTP 403 Forbidden', async () => {
+      const bannedActions = ['quarantineAtwaterFailures', 'upsertFoodAlias', 'mergeFoodCatalogItems'];
+      for (const banned of bannedActions) {
+        const res = await fetch(`${baseUrl}/api/mcp`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: `banned-${banned}`,
+            method: 'tools/call',
+            params: {
+              name: 'diagnose_health_data',
+              arguments: { action: banned }
+            }
+          })
+        });
+
+        expect(res.status).toBe(403);
+        const data = await res.json();
+        expect(data.error.code).toBe(-32600);
+        expect(data.error.message).toContain('Forbidden');
+        expect(data.error.message).toContain('restricted to admin credentials');
+      }
+    });
+  });
 });
