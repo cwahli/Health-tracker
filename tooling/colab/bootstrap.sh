@@ -17,6 +17,8 @@
 # Usage: bash bootstrap.sh            (run in background from the notebook)
 set -u
 export DEBIAN_FRONTEND=noninteractive
+# Colab ships node in /tools/node/bin (on the notebook PATH, not on ssh/tmux PATH); without this s_node would apt-install a second node.
+for _d in /tools/node/bin /root/.opencode/bin; do [ -d "$_d" ] && case ":$PATH:" in *":$_d:"*) ;; *) PATH="$PATH:$_d";; esac; done; export PATH
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG="${BOOTSTRAP_LOG:-/content/bootstrap.log}"
 STATUS="${BOOTSTRAP_STATUS:-/content/bootstrap.status}"
