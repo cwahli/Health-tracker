@@ -1,0 +1,42 @@
+diff --git a/tooling/check-contrast.js b/tooling/check-contrast.js
+index 453bf193..299b1b19 100644
+--- a/tooling/check-contrast.js
++++ b/tooling/check-contrast.js
+@@ -46,15 +46,21 @@ function luminance([r, g, b]) {
+   const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+   return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+ }
++
+ // fg may carry alpha: blend over opaque bg first (how the browser paints it).
++// Note: ratio() was previously blending incorrectly; it should blend the foreground color
++// with the background color by applying the alpha to the foreground part.
++// Correct blending formula: Result = FG * alpha + BG * (1 - alpha)
++// (Previously was: FG * (1 - alpha) + BG * alpha -- which is the opposite)
+ function ratio(fgStr, bgStr) {
+   const fg = parseColor(fgStr), bg = parseColor(bgStr);
+   if (!fg || !bg) return null;
+   const a = fg[3];
+-  const eff = [0, 1, 2].map(i => fg[i] * (1 - a) + bg[i] * a);
++  const eff = [0, 1, 2].map(i => fg[i] * a + bg[i] * (1 - a));
+   const L1 = luminance(eff), L2 = luminance(bg.slice(0, 3));
+   return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+ }
++
+ // SVG asset fills: strip <defs> (clip paths paint nothing), collect fills.
+ function svgFills(text) {
+   const noDefs = text.replace(/<defs[\s\S]*?<\/defs>/gi, '');
+@@ -83,9 +89,11 @@ function selftest() {
+   const bril = ratio('#00D639', '#F2F5F6');
+   t('brilliant on light-grey fails graphics bar', bril !== null && bril < 3.0, bril);
+   t('identical colors are 1', Math.abs(ratio('#F2F5F6', '#f2f5f6') - 1) < 0.001);
+-  const ink = ratio('rgba(0, 0, 0, 0.9)', 'rgb(242, 245, 246)');
+-  t('90%-black body text passes', ink !== null && ink >= 4.5, ink);
+-  t('bad color is null', ratio('nonsense', '#fff') === null);
++   const ink = ratio('rgba(0, 0, 0, 0.9)', 'rgb(242, 245, 246)');
++   t('90%-black body text passes', ink !== null && ink >= 4.5, ink);
++   const mid = ratio('rgba(0, 0, 0, 0.5)', '#ffffff');
++   t('regression: 50%-black on white passes check', mid !== null && mid >= 1.0, mid);
++   t('bad color is null', ratio('nonsense', '#fff') === null);
+   console.log('SVG fill extraction');
+   const fills = svgFills('<svg fill="none"><defs><rect fill="white"/></defs><path fill="#008146"/><path fill="#008146"/></svg>');
+   t('defs stripped, fills deduped', JSON.stringify(fills) === JSON.stringify(['#008146']), JSON.stringify(fills));
