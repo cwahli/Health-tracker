@@ -6,7 +6,10 @@ edit_mode: patch
 allowed_files:
   - src/utils/healthRecord.ts
   - src/utils/healthRecord.test.ts
-  - tests/fixtures/health-record/evergreen-anon.xml
+  - tests/fixtures/health-record/grid.csv
+  - tests/fixtures/health-record/prose.txt
+  - tests/fixtures/health-record/nested-panel.xml
+  - tests/fixtures/health-record/pages-10.json
   - tests/fixtures/health-record/symptom-diary.json
   - tests/fixtures/health-record/README.md
 frozen_files:
@@ -35,6 +38,7 @@ frozen_files:
   - scripts/journey-guard.mjs
 gate:
   - npx vitest run src/utils/healthRecord.test.ts
+  - npx tsc --noEmit
   - node scripts/journey-guard.mjs biomarker-flexible-log
 ---
 
@@ -48,11 +52,14 @@ Agent fills this. Human replies: go | stop | one comment.
 
 Biomarkers, symptom diaries, and simple spoken notes become one user-owned record. The website and Gemini MCP both read and write that record. A data-entry agent adds, edits, removes, and consolidates. The health coach also plans tests. Literature stays its own on-demand agent. The receptionist can call any of them, and they can call each other. Nothing runs as a required pipeline.
 
-Milestone 0 proves the record and the checker on the two real shapes the user supplied, with no model and no UI change. Later milestones may remove the dictionary and the clinical pipeline only after these cases pass.
+Milestone 0 proves a format-agnostic record and checker. A lab file may be a document, a sheet, XML, or any other layout. A photo entry may be one image or a batch of 10. A symptom diary keeps accepting logs as columns are added or removed. No model call and no UI change in this go. Later milestones may remove the dictionary and the clinical pipeline only after these cases pass.
 
 ## Findings (do not redo)
 
-- Base is `origin/main` at the worktree create. The shared checkout `agent/mcp-gemini` is dirty and is not this packet’s tree. MCP steps 1–2 are already on main. `manage_biomarkers` is still a later MCP step. Do not edit MCP files from this packet.
+- Base of this worktree is `origin/main` at `c033348d`. Do not edit MCP files from this packet.
+- MCP on `origin/main` already serves `manage_home` (`get_profile`, `get_allowance_progress`, `get_dashboard`, `set_targets`), `manage_meals` (`list`, `get_detail`), and `manage_biomarkers` (`list`, `get_trends`). Biomarker reads assume one D1 row per date whose `biomarkers` field is a key-to-value map. `get_trends` skips non-numeric values and guesses the unit with a regex.
+- Branch `agent/mcp-gemini` at `144f9153` (2026-10-28, clean, matching its remote) adds `update_profile`, timezone on the read tools, and a server upsert guard `WHERE excluded.updated_at >= coalesce(stored, '')` on food and biomarker rows in `server_db_d1.ts`. `useAppSync.ts` on that branch still has no `visibilitychange` pull. That branch is not on main. Main still assigns `updated_at = excluded.updated_at` with no newer-than check.
+- There is no MCP action that logs, edits, or deletes a biomarker. `parseLabImages` sends every image in one model call. A 10-photo entry must not use that call.
 - “Tracked biomarkers” and “Total log entries” are the two counters at the bottom of `MedicalHistoryTab.tsx`, not a Google Sheet. Tracked = `allDefinitions.length`: markers that have a non-empty value in the current map or in history, excluding `weight`, `height`, `age`, alias keys hidden by combine, and keys in `notUsedInMedicalHistory`. Total log entries = the sum of `Object.keys(historyRow.biomarkers).length` across active history rows. A new store is acceptable only when a fixture profile reproduces both numbers.
 - Today the same facts live in several places: D1 `biomarker_logs` (one JSON map per date), `profiles.data.customBiomarkers`, `pendingObservations`, `biomarkerDefinitions`, not-used maps, tombstone maps, and agent-analysis blobs. `d1UpsertBiomarkers` replaces the whole date row.
 - The dictionary is still the live product. `MedicalHistoryTab` opens `BiomarkerDictionaryModal`. Filters are risk, medical condition (`potentialMedicalConditions`), and medical practice (`standardMedicalGrouping`). Risk is already the default `viewType`.
@@ -65,8 +72,9 @@ Milestone 0 proves the record and the checker on the two real shapes the user su
 - Job telemetry strings in `serverJobs.ts` (`extract`, `classified`, `running agent`) are a standing row. Later pipeline removal must not delete those hooks while other jobs still emit them.
 - Burned hypothesis `specs/rejected/b0-apply-smoke.json`: do not prove a front-desk medical job by server-polling `job_frontdesk_*`. Those jobs are client-only. Do not assert `observationMeta` on the extract path.
 - G-B1 convert locks stay `1.293` / `1.411` / `3.362` / `79.56` / `13.68`. Milestone 0 does not convert units.
-- The private Drive file `Evergreen Life Record Download - Results.xml` (id `1XwdWhqsL9NaS_YorJkAmxHp3FtZFOmrV`, 50,659 bytes, read 2026-10-28) is the complex fixture. It is personal data. Do not commit it, copy it into chat, or put the name or date of birth in the repo. Commit an anonymized structural clone only.
-- Measured shape of that file: 77 `<result>` elements, nested so they contain 183 `<name>`, 182 `<date>`, 153 `<value>` (152 numeric, 1 non-numeric), 150 `<units>`, 43 `<comment>`, 85 distinct printed names, 25 distinct unit strings, 15 calendar dates from 2020-11-04 through 2026-10-19. Panel headers (full blood count, serum lipids, renal profile) sit above child results. Some printed names are already truncated by the export. Codes are present. Questionnaire scores use units such as `/4` and `/12`. A regex that keeps only the first name inside each `<result>` drops the children. A model schema that requires a numeric `value` drops comments, panel headers, and the one text value.
+- The private Drive file `Evergreen Life Record Download - Results.xml` (id `1XwdWhqsL9NaS_YorJkAmxHp3FtZFOmrV`, read 2026-10-28) is one example of a nested lab export, not the product schema. It is personal data. Do not commit it. A nested panel inside it is the reason `nested-panel.xml` exists: a parser that keeps only the first name in a wrapper drops the children. The checker must also pass a CSV grid, a prose note, and a 10-page photo batch whose columns and labels are different from that file.
+- The symptom sheet “Daily Health Symptom Tracker” (id `1aB-Jm0wyNSdOnKAAOxdrqFUEllI-HYoVWh3fyZlhz4Q`, tab `Feuille 1`) is one event with 17 columns, plus a note that mentions poor sleep. That sheet is one diary shape. A later log may arrive with fewer columns, more columns, or a different header order. Cells are stored by column id, never by position.
+- 2026-10-28 correction: milestone 0 must not lock the checker to XML tag counts. Exact tag counts are valid only for a format whose parser sees every cell. A doc or a photo has no tag count. For those, pass means two independent reads returned the same multiset of rows and every row cites a page or a cell. A model’s own “100%” is not a pass.
 - The symptom sheet “Daily Health Symptom Tracker” (id `1aB-Jm0wyNSdOnKAAOxdrqFUEllI-HYoVWh3fyZlhz4Q`, tab `Feuille 1`, gid 0) has one header row and one event row. Columns: Date & Time (with Timezone), Movement # of Day, Stool Volume, Stool Form / Bristol Scale, Stool Color, Bleeding Amount, Bleeding Color, Bleeding Timing & Clots, Anal Pain (0-10), Abdominal Pain (0-10), Straining Level, Local Sensations, Systemic Symptoms, Hydration, Diet & Fiber, Medications & Supplements, Clinical Notes / Action Items. The note also mentions poor sleep. That is a second symptom series, not a 17th hidden column of the bowel event, unless the user adds that column.
 - `gws` is not on this Mac. The reads used `scripts/lib/google-store.mjs` after `loadHostEnv`.
 - Voice already has an active packet, `VOICE-LIVE-1` (`gemini-3.8-live` on `/api/gemini/live-ws`). Onboarding voice waits for that packet. Do not add a second speech stack.
@@ -86,46 +94,61 @@ Milestone 0 proves the record and the checker on the two real shapes the user su
 
 ## Plan
 
-### Milestone 0 — this go. Record, checker, counts. No model. No UI.
+### Milestone 0 — this go. One record, any layout, ongoing diary. No model. No UI.
 
 1. Add `src/utils/healthRecord.ts` with plain types and pure functions. No imports from `biomarkers.ts`, the dictionary, or the pipeline. Done when: the module compiles alone.
-   - `Marker`: id, printed name, kind (`lab` | `biometric` | `score` | `symptom` | `panel`), unit, risk tags, symptom flag, optional column definitions.
-   - `Observation`: id, marker id, observed date `YYYY-MM-DD`, optional time and timezone, numeric value or text value, unit, printed min, printed max, comment, source id, source path, kind.
-   - `SymptomEvent`: id, marker id, observed instant with timezone, ordered cells `{ columnId, value }`. A cell may be text. `0` is kept.
-   - `SourceFile`: id, sha256, mime, byte length, verify status (`unchecked` | `failed` | `passed`), user confirm (`pending` | `confirmed`).
-   - Counts: `trackedMarkerCount` and `totalLogEntryCount`. A lab or score observation counts as one log entry. A symptom event counts as one log entry no matter how many columns it has. Panel nodes with no value do not count as log entries and do not count as tracked markers. `weight`, `height`, and `age` do not count as tracked. Unconfirmed or failed-verify rows do not count.
-2. Parse the anonymized Evergreen-shaped XML in that module with a real XML walk, not a first-tag regex. Done when: every `<name>` becomes a node, nested children stay attached to their panel, and a panel with a comment and no value is `kind: 'panel'`.
-   - Pitfall: 77 wrappers and 183 names. A flat split on `</result>` that reads the first `<name>` silently drops the blood-count children.
-   - Pitfall: do not rename truncated printed names and do not map them through `getMappedBiomarkerKey`.
-   - Pitfall: do not invent a number for a comment-only node.
-3. Add `verifySource(sourceText, stagedRows)` that returns pass or a list of misses. Done when: the function never reads a model score.
-   - Every numeric `<value>` has one staged observation with the same number, unit, and calendar date.
-   - Every staged numeric observation’s number occurs in the source on that date.
-   - Name count, date count, and value count match the source.
-   - A short staged set fails. A set with an extra invented number fails.
-   - `user confirm` is a separate flag. `deleteSourceAllowed` is true only when verify is `passed` and confirm is `confirmed`.
-4. Add the symptom-diary fixture as JSON with the 17 column ids and two events on the same calendar day, plus a separate one-cell symptom `{ name: 'sleep', text: 'poor sleep' }`. Done when: both bowel events survive, the sleep row is its own marker with `symptomFlag: true`, and total log entries is 3.
-5. Add a small profile fixture in the test that mirrors today’s counters: three lab keys across two dates, one empty custom, one not-used key, and `weight`. Done when: `trackedMarkerCount` is 3 and `totalLogEntryCount` equals the sum of keys on the history rows, using the same exclusions as `MedicalHistoryTab` (`weight` / `height` / `age`, not-used, empty).
-6. Write `tests/fixtures/health-record/README.md` stating the Drive file stays on Drive and the committed XML is synthetic. Done when: a search of the fixture finds no personal name and no date of birth.
-7. Do not wire this module into the app, D1, MCP, or an agent. Done when: `git diff --name-only` against the worktree base is only the allowed list.
+   - `StagedRow`: printed label, numeric value or text value (either may be null), unit or null, when or null, cite `{ fileId, page?, cell?, quote }`. A missing field stays null. Nothing invents a required analyte.
+   - `Marker`, `Observation`, `SourceBatch`: a batch has one id and one or more parts (a file, a sheet tab, or a page). Verify status and user confirm are separate.
+   - `Diary`: id, `columns: { id, label, retiredAt? }[]`, `events: SymptomEvent[]`. A cell is `{ columnId, value }`. `0` is kept. Position is not stored.
+   - Counts: `trackedMarkerCount` and `totalLogEntryCount`, same exclusions as `MedicalHistoryTab`. A symptom event counts as one log entry however many cells it has. Unconfirmed or failed parts do not count.
+2. Add three ingest doors that all emit `StagedRow[]`. Done when: each door has a fixture and none of them shares the other’s pass rule.
+   - **Grid.** `grid.csv` is a sheet whose first row is titles and whose columns are not a lab panel (for example time, a score, a free-text note, a blank cell). `verifyGrid` passes only when every non-empty data cell is a header, a staged row whose cite text contains the value, or an explicit ignore. A staged number that is not in its cell fails. Dropping one data cell fails.
+   - **Prose.** `prose.txt` is a short note with two results and one sentence that is not a result (“slept badly”). The checker accepts rows whose quotes are substrings of the note. A row whose number is not in the note fails. The sleep sentence can be a symptom row. It is not forced into a numeric lab.
+   - **Nested panel.** `nested-panel.xml` is a small synthetic wrapper with a header that has a comment and no value, plus two child results. A walk that keeps every name passes. A first-name-only walk fails `verify` because a child value is missing. This fixture is one layout, not the schema.
+   - Pitfall: do not mark a field required in a way that makes a model invent it. Pitfall: do not rename printed labels. Pitfall: do not call `getMappedBiomarkerKey`.
+3. Add `verifyAgreement(readA, readB)` for pages. Done when: the function compares the multiset of `(printed, value, unit, when, page)` and ignores any model score. `pages-10.json` has 10 pages. Pages 1–6 and 8–10 agree. Page 7 disagrees by one dropped value. Agreed pages can be confirmed on their own. Page 7 stays staged. The batch id is the same for all 10. In-flight cap of 4 is a runner detail inside the test as a queue length, not a product limit of 4 photos.
+4. Diary functions, still pure:
+   - `appendEvent` adds a log. Earlier events stay. Identity is `(diaryId, observedAt, movementNumber | clientKey)`. The same key twice updates that event and does not create a second one.
+   - `addColumn` issues a new column id. Old events keep their old cells. New events may use the new id.
+   - `retireColumn` sets `retiredAt`. A later event that omits that id does not shift the other cells. The old event still has the retired cell.
+   - An event that arrives with an unknown header stores the known cells and returns the unknown header as a proposed column. It does not publish the new column until `addColumn` is called.
+   - Two events on one calendar day both remain. A later day appends a third.
+5. `deleteSourceAllowed` is true only when every part of the batch is `passed` and the user confirm is `confirmed`. A batch with page 7 still failed cannot be deleted.
+6. Profile-count fixture: three lab keys across two dates, one empty custom, one not-used key, and `weight`. Done when: tracked count is 3 and total log entries equals the sum of keys on the history rows.
+7. README: Drive files stay on Drive. Fixtures are synthetic. Done when: a search of `tests/fixtures/health-record` finds no personal name and no date of birth.
+8. Do not wire this module into the app, D1, MCP, or an agent. Done when: `git diff --name-only` against the worktree base is only the allowed list.
 
 ### Milestone 1 — next packet, after milestone 0 is green. Still no live model.
 
-Symptom columns on the same history surface as labs. Adjustable columns append. They do not shift old cells. Risk tags only: stop writing `standardMedicalGrouping` and `potentialMedicalConditions` on new rows. Same-day labs still do not average. Same-day symptom events still both remain. `sleep_duration` and symptom scores still skip `isBiomarkerValueImprobable` ratio checks.
+The history screen uses the same diary and observation functions. Risk tags only on new rows. Same-day labs do not average. `sleep_duration` and symptom scores skip laboratory ratio checks.
 
-Pass before milestone 2: the 17-column event round-trips; a new column leaves old cells on their ids; a second movement the same day is a second entry; “poor sleep” does not become a lab and does not raise a telemetry flag; tracked and total-log counts follow the milestone 0 rules.
+Pass before milestone 2: a diary that started at 17 columns still shows the first event after a column is removed and after a column is added; a log that arrives a week later with the columns in a different order lands on the same ids; a re-import of the same movement does not double the total-log count; a brand-new header is proposed and the rest of that log is still saved.
 
-### Milestone 2 — data-entry agent on fixtures. No live Gemini in the unit gate.
+### Milestone 2 — data-entry agent. Any file, and a batch of 10 photos. No live Gemini in the unit gate.
 
-One agent id, `data_entry`. It is the only writer of markers and observations. It receives the user’s existing marker list and returns `attach` or `create`. Exact normalized printed name attaches. A near name is staged for the user. A new name creates a marker. No dictionary lookup.
+One agent id, `data_entry`, is the only writer. It sees the user’s existing markers. Exact normalized printed name attaches. A near name is staged. A new name creates a marker.
 
-Complex file path: store the bytes (R2, content-addressed, same idea as meal photos), run the milestone 0 lexer for XML and for tables `lexTable` already parses, run `verifySource`, and publish into the counted record only after verify passes and the user confirms. Re-running the same sha256 upserts by `(source id, source path)`.
+Store original bytes on R2, one object per part, one batch id. Grid and nested-markup doors run with no model. A PDF or doc with a recovered table uses the grid door. Prose and photos use two `gemini-3.5-flash-lite` reads per page. At most four pages run at once. A batch of 10 queues. Publish a page only when `verifyAgreement` passes. A heavier Gemini model sees only disagreed pages. Muse Spark is not an extractor. The model cannot set `verify: passed`.
 
-Screenshot and prose path: one `gemini-3.5-flash-lite` pass per page or per date cluster, at most four in flight. A second flash-lite pass lists only the numbers and dates it can see. Publish only where the two lists match and `verifySource` passes against that agreed list. Send a heavier Gemini model only the disagreed pages. Do not send the file to Muse Spark. The model cannot set `verify: passed`.
+`parseLabImages` is not the photo path. It puts every image in one call.
 
-Receptionist handoff for “add this result” or “I slept badly” targets `data_entry` only. Simple one-value utterances may still be captured by the receptionist and then committed through the same `data_entry` functions.
+Receptionist handoff for a file, a 10-photo batch, or “I slept badly” targets `data_entry`.
 
-Pass before milestone 3: XML fixture verifies with zero model calls; a fixture where the model drops one nested child stays staged and uncounted; a near-name HDL does not auto-merge; an exact printed name does; delete-source stays false until both bits are set; receptionist contract test routes the lab sentence and the sleep sentence to `data_entry`.
+Pass before milestone 3: the grid, the prose note, and the nested panel pass with zero model calls; page 7 of the 10-page fixture stays uncounted while the other nine can be confirmed; a near-name does not auto-merge; the source batch cannot be deleted while any page is failed; the receptionist contract routes the file and the sleep sentence to `data_entry`.
+
+### Ordering against MCP
+
+Do this in parallel with the MCP branch, and do not add biomarker write tools first.
+
+| Lane | When | Why |
+|---|---|---|
+| MCP step 3 (`agent/mcp-gemini`, `144f9153`) | Finish and land on its own branch. Focus pull is still missing. | Server upserts on that branch already refuse an older `updated_at`. Main does not. Writes from anywhere are unsafe on main until this lands. This packet does not touch those files. |
+| This packet, milestones 0–1 | In parallel, starting now. | New files only. No dependency on MCP. |
+| Milestone 2 | After 0–1. Still no MCP edits. | The photo batch and the any-format doors have to exist before a tool exposes them. |
+| MCP read adapter | After milestone 2, small packet on the MCP branch. | `list` and `get_trends` keep working. They read a compatibility view: numeric labs stay a map so current Gemini sessions still parse; symptom events are a separate list so `get_trends` stops dropping text diaries. |
+| MCP write actions `log`, `edit`, `delete`, `confirm_source` | After the read adapter and after step 3 is on main. | A write tool built on today’s date map would teach Gemini the shape this plan is replacing. |
+
+Building the flexible record after all remaining MCP steps would freeze write tools on the date map. Building it before step 3 by editing `server_routes_mcp.ts` would collide with `144f9153`. Parallel, with writes last, is the dependency order.
 
 ### Milestone 3 — remove the dictionary and the clinical pipeline. Own packet. Domain law update in that packet.
 
@@ -137,21 +160,21 @@ Pass before milestone 4: no control opens `BiomarkerDictionaryModal`; Insights d
 
 ### Milestone 4 — home strip and food context. Own packet.
 
-Under the Home “Top targets” block, show the latest confirmed labs and confirmed symptom flags (hemorrhoid diary, poor sleep). Staged and failed-verify rows stay off that strip and off the meal prompt. The coach reads the strip when it recommends allowances and tests. The meal agent receives the strip as read-only context. It does not write the record and it does not write calories.
+Under the Home “Top targets” block, show the latest confirmed labs and confirmed symptom flags (hemorrhoid diary, poor sleep). Staged pages and failed parts stay off that strip and off the meal prompt. The coach reads the strip when it recommends allowances and tests. The meal agent receives the strip as read-only context. It does not write the record and it does not write calories.
 
-Pass before milestone 5: a confirmed hemorrhoid event and a confirmed sleep note render under Top targets; an unconfirmed XML import does not; the meal debug payload contains those two facts and no staged lab number.
+Pass before milestone 5: a confirmed hemorrhoid event and a confirmed sleep note render under Top targets; an unconfirmed page from a 10-photo batch does not; the meal debug payload contains those two facts and no staged lab number.
 
 ### Milestone 5 — empty-profile onboarding. Own packet. Voice waits on VOICE-LIVE-1.
 
-Receptionist state `onboarding_gather_info` on an empty profile offers three doors: paste a number, attach a file or screenshot, or say a symptom. Each door commits through `data_entry`. The dictionary and the clinical chain are not on this path. Voice uses the live receptionist socket from `VOICE-LIVE-1`. If that packet is not landed, milestone 5 stops at typed onboarding and says so.
+Receptionist state `onboarding_gather_info` on an empty profile offers three doors: paste a number, attach a file or up to 10 photos, or say a symptom. Each door commits through `data_entry`. The dictionary and the clinical chain are not on this path. Voice uses the live receptionist socket from `VOICE-LIVE-1`. If that packet is not landed, milestone 5 stops at typed onboarding and says so.
 
 Pass before milestone 6: a blank profile can log one number and one sleep sentence and see both in history; the dictionary route is absent; a voice proof is a screenshot of the live socket only after `VOICE-LIVE-1` is on the build under test.
 
-### Milestone 6 — MCP uses the same functions. Own packet, after MCP step 3’s sync ratchet.
+### Milestone 6 — MCP writes. Own packet. See Ordering.
 
-`manage_biomarkers` actions: list, log, edit, delete, confirm source. No dictionary action. The schema resource lists the user’s markers, not `biomarkerDefinitions`. Writes go through the milestone 0 functions, with the sync ratchet (per-cell `updated_at`, tombstone wins, `possibleUids` on read, `canonicalUid` on write). An open website tab picks the change up on focus via the incremental pull MCP step 3 adds.
+`manage_biomarkers` gains `log`, `edit`, `delete`, and `confirm_source`. No dictionary action. A `log` call may carry text, a grid, or up to 10 image parts. The schema resource lists the user’s markers, not `biomarkerDefinitions`. Writes call the milestone 0 functions. They ship only after `agent/mcp-gemini`’s upsert guard is on main and the focus pull exists, so an open website tab cannot resurrect a deleted event.
 
-Pass: the milestone 0 and milestone 1 cases succeed through the MCP tool and through the website function, and a delete stays deleted after a website sync.
+Pass: a 10-photo batch and a diary append succeed through the MCP tool and through the website function; removing a column does not shift old logs; a delete stays deleted after a website sync.
 
 ## Test plan
 
@@ -165,30 +188,38 @@ node scripts/journey-guard.mjs biomarker-flexible-log
 
 `healthRecord.test.ts` must contain these cases by name. A case that is skipped does not count.
 
-- `xml keeps every nested name`
+- `grid drops a cell and fails`
+- `grid rejects a number that is not in the cell`
+- `prose rejects an invented number`
+- `prose keeps a non-numeric symptom sentence`
+- `nested panel keeps every child`
 - `panel without a value is not a number`
-- `truncated printed name is stored as printed`
-- `same analyte on four dates stays four observations`
-- `verify fails when a child value is missing`
-- `verify fails when a number was invented`
+- `ten pages share one batch`
+- `disagreed page stays uncounted`
+- `agreed pages can confirm while one page failed`
 - `model score cannot mark verify passed`
-- `source delete needs verify and user confirm`
+- `source delete needs every part passed and user confirm`
+- `append keeps earlier diary logs`
+- `same movement key does not double`
+- `added column does not shift old cells`
+- `retired column stays on old logs and is absent from new logs`
+- `unknown header is proposed and known cells still save`
+- `fewer columns do not shift the rest`
 - `two symptom events on one day both remain`
 - `zero pain is stored`
-- `sleep is its own symptom marker`
 - `tracked count matches the history sheet rules`
 - `total log entries count events not columns`
-- `fixture xml has no personal name`
+- `fixtures have no personal name`
 
-Do not run `npm test`. Do not call Gemini. Do not commit the Drive XML.
+Do not run `npm test`. Do not call Gemini. Do not commit the Drive file or the symptom sheet.
 
 Later milestones add their own named tests in their own packets. Live Gemini, when a milestone finally needs it, is a separate proof with a screenshot, and the author of the extractor does not score that live run (`builder_ne_tier3_ab_scorer`).
 
 ## Audit plan
 
 1. Scope vs ROADMAP. This does not reopen R-14.1, R-15, R-16, TUI, V-17b, D-10, or F-13.2. It does not take over MCP-GEMINI steps 3–7. It does not mark Track B rows done.
-2. One frozen example for milestone 0: the anonymized XML plus the 17-column diary JSON. Personal Drive file stays out of git.
-3. Residual, named: the live app still uses the dictionary and the clinical pipeline until milestone 3. Sync can still resurrect deletes until MCP step 3. Voice onboarding does not exist until `VOICE-LIVE-1` and milestone 5. Screenshot “100%” means two independent reads agreed and the checker passed. It does not mean a human compared every pixel.
+2. Frozen examples for milestone 0: the grid, the prose note, the nested panel, the 10-page batch, and the diary JSON. Personal Drive files stay out of git.
+3. Residual, named: the live app still uses the dictionary and the clinical pipeline until milestone 3. Main can still overwrite a newer biomarker row until `144f9153` lands. The focus pull is still absent. Voice onboarding does not exist until `VOICE-LIVE-1` and milestone 5. For a photo, “passed” means two reads agreed and the user confirmed. It does not mean a human compared every pixel. A document that states no row count has no exact completeness number beyond that agreement.
 
 ## Blast radius
 
