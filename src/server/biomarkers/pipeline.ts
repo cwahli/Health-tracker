@@ -1,8 +1,48 @@
 import { classifyRows, batchRows } from "./backoffice.js";
-import { parseLabImages } from "./vision_parser.js";
 import { fillBatch } from "./call_agent.js";
+import { extractLabAttachments, pageReadFromModelText } from "./photoBatch.js";
 import type { ProfileFixture, FillRow } from "./schema.js";
+import type { PageRead } from "../../utils/healthRecord.js";
 import { GoogleGenAI, Type } from "@google/genai";
+
+const pageReadSchema = {
+  type: Type.OBJECT,
+  properties: {
+    rows: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          printed: { type: Type.STRING },
+          value: { type: Type.STRING },
+          unit: { type: Type.STRING },
+          when: { type: Type.STRING },
+        },
+        required: ["printed"],
+      },
+    },
+  },
+  required: ["rows"],
+};
+
+async function readPageWithGemini(
+  ai: GoogleGenAI,
+  job: { page: number; prompt: string; model: string; mime: string; data: string },
+): Promise<PageRead> {
+  const response = await ai.models.generateContent({
+    model: job.model,
+    contents: [
+      job.prompt,
+      { inlineData: { data: job.data, mimeType: job.mime } },
+    ],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: pageReadSchema as any,
+      temperature: 0.1,
+    },
+  });
+  return pageReadFromModelText(job.page, response.text || "");
+}
 
 export async function runBiomarkerPipeline(
   ai: GoogleGenAI,
@@ -16,9 +56,9 @@ export async function runBiomarkerPipeline(
   let rows: any[] = [];
   
   if (imagesBase64 && imagesBase64.length > 0) {
-    if (onProgress) onProgress(`Extracting from ${imagesBase64.length} images...`);
-    const ocrRows = await parseLabImages(ai, imagesBase64);
-    rows = ocrRows;
+    if (onProgress) onProgress(`Reading ${imagesBase64.length} files, four pages at a time...`);
+    const extracted = await extractLabAttachments(imagesBase64, (job) => readPageWithGemini(ai, job));
+    rows = extracted.rows;
   }
   
   // NOTE: In the prototype, if there are no images, caseFile.rows was used. 
