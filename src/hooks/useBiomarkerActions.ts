@@ -3,6 +3,7 @@ import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
 import { biomarkerDefinitions, isAsianEthnicity, isValEmpty, getMappedBiomarkerKey, selfHealCustomBiomarkerDefinitions } from '../utils/biomarkers';
 import { attachObservationMeta, enrichReviewModificationCommands, routeExtractedObservations, type ModificationCommand } from '../utils/biomarkerLifecycle';
 import { mergeDeleteMaps } from '../utils/syncUtils';
+import { withoutPracticeTags } from '../utils/healthRecord';
 
 export const logBmiIfProfileWeightHeightChanged = (
     prev: UserProfile | null,
@@ -1548,15 +1549,12 @@ export function useBiomarkerActions(params: UseBiomarkerActionsParams) {
         } else {
           // If source equals target, the user is approving the marker as its own standard definition
           if (!updatedCustomBiomarkers[srcKey]) {
-            updatedCustomBiomarkers[srcKey] = {
+            updatedCustomBiomarkers[srcKey] = withoutPracticeTags({
               name: srcKey.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
               unit: '',
               normalRange: '',
               description: '',
-              standardMedicalGrouping: 'By Medical Practice' // Giving it a grouping marks it as approved
-            } as any;
-          } else if (!updatedCustomBiomarkers[srcKey].standardMedicalGrouping) {
-            updatedCustomBiomarkers[srcKey].standardMedicalGrouping = 'By Medical Practice';
+            }) as any;
           }
         }
       }

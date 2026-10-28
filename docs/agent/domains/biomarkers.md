@@ -14,6 +14,10 @@
 
 **2026-08-14 consolidation (product change):** target is catalog / pending / overlay / observations. **Code still implements the blended model** in §8. Follow **laws** on every change; move toward the target; do not invent a third pipeline.
 
+### Record doors (2026-10-28)
+
+The dictionary modal is not a control. Insights offers add-health-data, the health coach, and literature. Lab parser, range calibrator, and a separate test planner are not offered steps. Test planning is a field on the health-coach reply. Category tags that a new row may store are risk labels already in the product. A new row does not write `standardMedicalGrouping` or `potentialMedicalConditions`. Photo and PDF entry do not go through `parseLabImages` or a catalog hit/miss split. The seven stored copies stay until the single D1 projection. `confirm_cleanup` is still an MCP write and is not in this change.
+
 ### Before → after (this edit)
 
 | Before | After |

@@ -25,6 +25,7 @@ import {
   mergeLiveTranscript,
 } from '../services/geminiLiveAudioClient';
 import type { LiveToolCall, LiveVoicePersona } from '../services/geminiLiveAudioClient';
+import { resolveSpokenHandoff } from '../utils/specialistMesh';
 
 export interface VoiceReceptionistFabProps {
   profile: UserProfile | null;
@@ -1112,9 +1113,10 @@ export default function VoiceReceptionistFab({
         }
         answer({ ok: true, tab: target });
       } else if (name === 'handoff_specialist') {
-        const detail = `Handoff to ${a.specialist || 'specialist'}${a.context ? `: ${a.context}` : ''}`;
+        const target = resolveSpokenHandoff(String(a.specialist || ''), String(a.context || ''));
+        const detail = `Handoff to ${target}${a.context ? `: ${a.context}` : ''}`;
         liveActionRef.current = { type: 'agent_handoff', details: detail };
-        answer({ ok: true });
+        answer({ ok: true, specialist: target, tool: 'handoff_specialist' });
       } else if (name === 'log_meal') {
         const desc =
           a.description ||

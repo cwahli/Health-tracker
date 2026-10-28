@@ -1,0 +1,34 @@
+{
+  "id": "bowel",
+  "columns": [
+    {"id": "col-1", "label": "Date and time", "retiredAt": null},
+    {"id": "col-2", "label": "Movement", "retiredAt": null},
+    {"id": "col-3", "label": "Stool volume", "retiredAt": null},
+    {"id": "col-4", "label": "Bristol", "retiredAt": null},
+    {"id": "col-5", "label": "Stool color", "retiredAt": null},
+    {"id": "col-6", "label": "Bleeding amount", "retiredAt": null},
+    {"id": "col-7", "label": "Bleeding color", "retiredAt": null},
+    {"id": "col-8", "label": "Bleeding timing", "retiredAt": null},
+    {"id": "col-9", "label": "Anal pain", "retiredAt": null},
+    {"id": "col-10", "label": "Abdominal pain", "retiredAt": null},
+    {"id": "col-11", "label": "Straining", "retiredAt": null},
+    {"id": "col-12", "label": "Local sensations", "retiredAt": null},
+    {"id": "col-13", "label": "Systemic", "retiredAt": null},
+    {"id": "col-14", "label": "Hydration", "retiredAt": null},
+    {"id": "col-15", "label": "Diet", "retiredAt": null},
+    {"id": "col-16", "label": "Medications", "retiredAt": null},
+    {"id": "col-17", "label": "Notes", "retiredAt": null}
+  ],
+  "events": [
+    {
+      "diaryId": "bowel",
+      "observedAt": "2024-06-01T08:00:00",
+      "movementNumber": 1,
+      "clientKey": null,
+      "cells": [
+        {"columnId": "col-9", "value": 0},
+        {"columnId": "col-10", "value": 0}
+      ]
+    }
+  ]
+}
