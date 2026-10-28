@@ -25,6 +25,15 @@ export function handoff(fromAgent: MeshAgent, toAgent: MeshAgent, reason: string
   return { fromAgent, toAgent, reason, payload, returnToCaller: true };
 }
 
+/** A spoken lab or symptom on the existing handoff tool lands in data entry. */
+export function resolveSpokenHandoff(specialist: string, context: string): string {
+  const blob = `${specialist} ${context}`;
+  if (/slept badly|symptom|lab result|hdl|ldl|biomarker|pdf|photo/i.test(blob)) return 'data_entry';
+  const aliased = aliasStoredAgent(specialist);
+  if (!specialist || aliased === 'medical') return 'data_entry';
+  return aliased;
+}
+
 export function coachReply(allowanceKcal: number, tests: string[]): {
   allowanceKcal: number;
   activity: string[];

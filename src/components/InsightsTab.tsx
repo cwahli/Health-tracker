@@ -1382,7 +1382,7 @@ export default function InsightsTab({
       id: 'health_baseline',
       title: t.healthCoach,
       agentType: 'health_baseline',
-      description: t.stepHealthCoachDesc,
+      description: `${t.stepHealthCoachDesc} ${t.stepTestPlannerDesc}`,
       valueProposition: t.stepHealthCoachValue
     },
     {
@@ -1399,7 +1399,7 @@ export default function InsightsTab({
       description: t.stepLiteratureDesc,
       valueProposition: t.stepLiteratureValue
     }
-  ];
+  ].filter((step) => step.id === 'add_health_data' || step.id === 'health_baseline' || step.id === 'agent7');
 
   const getStepStatus = (index: number): 'Not ready' | 'To do' | 'To review' | 'Done' => {
     const step = steps[index];
@@ -1428,8 +1428,9 @@ export default function InsightsTab({
 
     // Gating check: previous required steps must be Done
     const isProjectOrInsight = step.agentType === 'agent4' || step.agentType === 'agent7';
+    const onDemand = step.id === 'health_baseline' || step.id === 'agent7';
 
-    if (!isAdminMode || !isProjectOrInsight) {
+    if (!onDemand && (!isAdminMode || !isProjectOrInsight)) {
       for (let j = 0; j < index; j++) {
         if (j === 0) {
           // Demographics are optional for gating subsequent analytical agents

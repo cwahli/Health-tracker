@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aliasStoredAgent, coachReply, handoff } from './specialistMesh';
+import { aliasStoredAgent, coachReply, handoff, resolveSpokenHandoff } from './specialistMesh';
 
 describe('specialist mesh', () => {
   it('data_entry can name the coach, and the coach can name data_entry or literature', () => {
@@ -13,6 +13,12 @@ describe('specialist mesh', () => {
     expect(aliasStoredAgent('medical')).toBe('data_entry');
     expect(aliasStoredAgent('agent4')).toBe('health_baseline');
     expect(aliasStoredAgent('agent5')).toBe('agent7');
+  });
+
+  it('a spoken lab or symptom resolves to data_entry', () => {
+    expect(resolveSpokenHandoff('medical', 'HDL 50')).toBe('data_entry');
+    expect(resolveSpokenHandoff('', 'I slept badly')).toBe('data_entry');
+    expect(resolveSpokenHandoff('agent7', 'check the paper')).toBe('agent7');
   });
 
   it('a coach reply has an allowance and a test plan', () => {

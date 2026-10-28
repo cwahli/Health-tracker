@@ -13,6 +13,7 @@ import {
   proposeCleanup,
   routePdfPage,
   skipsLaboratoryRatio,
+  editObservation,
   stageGrid,
   trackedMarkerCount,
   verifyAgreement,
@@ -22,6 +23,7 @@ import {
   type Marker,
   type PageRead,
   type PdfPageDescriptor,
+  type Observation,
   type SourceBatch,
   type StagedRow,
 } from './healthRecord';
@@ -150,4 +152,12 @@ export function flagsSleepAsLabError(key: string): boolean {
 
 export function sourceCanBeDeleted(batch: SourceBatch): boolean {
   return deleteSourceAllowed(batch);
+}
+
+export function agentEditsObservation(observations: Observation[], id: string, value: number | string): Observation[] {
+  return editObservation(observations, id, value);
+}
+
+export function historyEditsObservation(observations: Observation[], id: string, value: number | string): Observation[] {
+  return editObservation(observations, id, value);
 }

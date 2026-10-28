@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { previewOnboardingHistory } from './onboardingPreview';
 import { commitOnboarding, onboardingDoors } from './onboardingRecord';
 
 describe('onboarding record', () => {
@@ -19,5 +20,13 @@ describe('onboarding record', () => {
     expect(sleep.socket).toBe('/api/gemini/live-ws');
     expect(number.text).toBe('HDL 50');
     expect(sleep.text).toBe('I slept badly');
+  });
+
+  it('a blank profile can preview one number and one sleep sentence', () => {
+    const screen = previewOnboardingHistory('HDL 50', 'I slept badly');
+    expect(screen.showsNumber).toBe(true);
+    expect(screen.showsSleep).toBe(true);
+    expect(screen.tracked).toBe(1);
+    expect(screen.logEntries).toBe(1);
   });
 });

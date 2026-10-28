@@ -377,6 +377,23 @@ export function deleteSourceAllowed(batch: SourceBatch): boolean {
   return batch.userConfirm === 'confirmed' && batch.parts.every((part) => part.status === 'passed');
 }
 
+/** History and data entry change one observation. The value moves. The raw value stays. */
+export function editObservation(observations: Observation[], id: string, value: number | string): Observation[] {
+  return observations.map((item) => {
+    if (item.id !== id) return item;
+    if (typeof value === 'number') return { ...item, numericValue: value };
+    return { ...item, textValue: value };
+  });
+}
+
+/** New marker rows do not store a practice group or a condition list. */
+export function withoutPracticeTags<T extends Record<string, unknown>>(row: T): T {
+  const next = { ...row };
+  delete next.standardMedicalGrouping;
+  delete next.potentialMedicalConditions;
+  return next;
+}
+
 export function routePdfPage(page: PdfPageDescriptor): { door: PdfDoor } {
   if (page.locked) return { door: 'locked' };
   const hasText = /[A-Za-z0-9]/.test(page.text || '');

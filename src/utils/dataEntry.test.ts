@@ -2,10 +2,12 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  agentEditsObservation,
   cleanupEntry,
   enterDescribedPdfs,
   enterPhotos,
   enterTextDoors,
+  historyEditsObservation,
   flagsSleepAsLabError,
   promptsDiffer,
   READ_MODEL,
@@ -14,7 +16,9 @@ import {
   TIE_BREAK_MODEL,
 } from './dataEntry';
 import { routeIncomingRecord } from './frontDeskRouting';
-import type { Marker, PageRead, PdfPageDescriptor, StagedRow } from './healthRecord';
+import type { Marker, Observation, PageRead, PdfPageDescriptor, StagedRow } from './healthRecord';
+import { openPdfBytes } from './openPdfBytes';
+import { withoutPracticeTags } from './healthRecord';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
 const fixture = (name: string) => readFileSync(path.join(root, 'tests/fixtures/health-record', name), 'utf8');
@@ -147,5 +151,61 @@ describe('data entry', () => {
     const src = readFileSync(path.join(root, 'src/utils/dataEntry.ts'), 'utf8');
     expect(src).not.toContain('parseLabImages');
     expect(src).not.toContain('biomarker_logs');
+    const opener = readFileSync(path.join(root, 'src/utils/openPdfBytes.ts'), 'utf8');
+    expect(opener).not.toContain('pdfjs');
+    expect(opener).not.toContain('tesseract');
+  });
+
+  it('opens a text-layer pdf without a model and keeps a locked file locked', () => {
+    const textPdf = new TextEncoder().encode(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R>>endobj\n4 0 obj<</Length 24>>stream\nBT (HDL 50 mg/dL) Tj ET\nendstream\nendobj\n%%EOF',
+    );
+    const opened = openPdfBytes('lab.pdf', textPdf);
+    expect(opened.pages[0].text).toContain('HDL 50');
+    expect(opened.batch.parts[0].door).toBe('text');
+    expect(opened.visionCalls).toBe(0);
+    const bothPdf = new TextEncoder().encode(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R/Resources<</XObject<</Im0 5 0 R>>>>>>endobj\n4 0 obj<</Length 16>>stream\nBT (HDL 50) Tj ET\nendstream\nendobj\n5 0 obj<</Type/XObject/Subtype/Image/Width 20/Height 20>>endobj\n%%EOF',
+    );
+    const both = openPdfBytes('scan.pdf', bothPdf);
+    expect(both.batch.parts[0].door).toBe('both');
+    expect(both.visionCalls).toBe(2);
+    const locked = openPdfBytes('locked.pdf', new TextEncoder().encode('%PDF-1.4\n1 0 obj<</Encrypt 2 0 R>>endobj\n%%EOF'));
+    expect(locked.batch.parts[0].door).toBe('locked');
+    expect(locked.visionCalls).toBe(0);
+  });
+
+  it('a history cell edit and the agent edit the same observation', () => {
+    const start: Observation[] = [{
+      id: 'obs-1',
+      markerId: 'hdl',
+      printed: 'HDL',
+      numericValue: 50,
+      textValue: null,
+      unit: 'mg/dL',
+      rawValue: 50,
+      rawUnit: 'mg/dL',
+      when: null,
+      instant: null,
+      kind: 'biomarker',
+      cites: [],
+      confirmed: true,
+      comparator: null,
+      analyteKey: 'hdl',
+    }];
+    const fromHistory = historyEditsObservation(start, 'obs-1', 1.293);
+    const fromAgent = agentEditsObservation(start, 'obs-1', 1.293);
+    expect(fromHistory).toEqual(fromAgent);
+    expect(fromHistory[0].numericValue).toBe(1.293);
+    expect(fromHistory[0].rawValue).toBe(50);
+  });
+
+  it('a new marker row drops practice and condition tags', () => {
+    const rowTags = withoutPracticeTags({
+      name: 'HDL',
+      standardMedicalGrouping: 'By Medical Practice',
+      potentialMedicalConditions: ['x'],
+    });
+    expect(rowTags).toEqual({ name: 'HDL' });
   });
 });
