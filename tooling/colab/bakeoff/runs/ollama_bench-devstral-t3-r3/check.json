@@ -1,0 +1,1 @@
+{"pass": false, "reasons": ["lib/args.js exports/behaviour wrong", "check-contrast still defines helpers", "check-contrast does not require ./lib/args"], "changed": ["tooling/add-pair.js", "tooling/bot-dispatch.js", "tooling/lib/args.js"]}
