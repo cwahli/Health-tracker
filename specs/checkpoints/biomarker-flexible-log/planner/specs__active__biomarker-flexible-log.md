@@ -52,7 +52,7 @@ Agent fills this. Human replies: go | stop | one comment.
 
 Biomarkers, symptom diaries, and simple spoken notes become one user-owned record. The website and Gemini MCP both read and write that record. A data-entry agent adds, edits, removes, and consolidates. The health coach also plans tests. Literature stays its own on-demand agent. The receptionist can call any of them, and they can call each other. Nothing runs as a required pipeline.
 
-Milestone 0 proves a format-agnostic record and checker. A lab file may be a document, a sheet, XML, or any other layout. A photo entry may be one image or a batch of 10. A symptom diary keeps accepting logs as columns are added or removed. No model call and no UI change in this go. Later milestones may remove the dictionary and the clinical pipeline only after these cases pass.
+Milestone 0 proves a format-agnostic record and checker. A lab file may be a document, a sheet, XML, or any other layout. A photo entry may be one image or a batch of 10. A symptom diary keeps accepting logs as columns are added or removed. The same milestone proposes cleanup for dirty values, absurd numbers, mixed units, and the same analyte under two names. Nothing in that list rewrites a stored number or merges two markers until a person confirms. No model call and no UI change in this go. Later milestones may remove the dictionary and the clinical pipeline only after these cases pass.
 
 ## Findings (do not redo)
 
@@ -64,7 +64,8 @@ Milestone 0 proves a format-agnostic record and checker. A lab file may be a doc
 - Today the same facts live in several places: D1 `biomarker_logs` (one JSON map per date), `profiles.data.customBiomarkers`, `pendingObservations`, `biomarkerDefinitions`, not-used maps, tombstone maps, and agent-analysis blobs. `d1UpsertBiomarkers` replaces the whole date row.
 - The dictionary is still the live product. `MedicalHistoryTab` opens `BiomarkerDictionaryModal`. Filters are risk, medical condition (`potentialMedicalConditions`), and medical practice (`standardMedicalGrouping`). Risk is already the default `viewType`.
 - The clinical multi-agent path is still live: Insights steps `agent1`–`agent5`, `data_review`, `health_baseline`, `agent7`, plus `src/server/biomarkers/pipeline.ts` (`runBiomarkerPipeline`). That pipeline classifies rows as catalog hit vs pending miss, then calls a fill agent. `docs/agent/domains/biomarkers.md` still says the dictionary owns keys and forbids deleting instruction packs. Those laws stay frozen until a later packet whose only job is the law change. Do not invent a third pipeline beside them in milestone 0.
-- `getMappedBiomarkerKey` already collapses distinct symptoms onto one score (`hemorrhoids` and `blood_in_stool` → `hemorrhoidal_symptom_score`). That is the opposite of adjustable symptom columns. Milestone 0 does not call it.
+- `getMappedBiomarkerKey` already collapses distinct symptoms onto one score (`hemorrhoids` and `blood_in_stool` → `hemorrhoidal_symptom_score`). `getDuplicateAliasGroups` in `src/utils/biomarkerAuditEngine.ts` builds the same kind of group from the dictionary, stems, and synonyms. Milestone 0 does not call either. A second name is a confirm card.
+- Unit changes already have one table, `convertViaTable` / `ANALYTE_CONVERSIONS`. Unknown pairs refuse. `computeBiomarkerTelemetryMultiplier` only returns a factor from that table. The domain law is relabel or convert, never both, and history is not rewritten on load. Cleanup cards follow that law. The raw value stays.
 - `BiomarkerLog` is one number-map per calendar day. A symptom diary with two events on the same day, or 17 columns on one event, does not fit. Labs keep “same calendar day, same marker, do not average.” Symptom events keep their own timestamp.
 - Standing `biomarker_lifestyle_exclusion`: `steps`, `weight`, `sleep_duration`, and the other device keys must not be judged with laboratory ratio checks. Sleep and symptom scores stay outside that check.
 - `isValEmpty` must keep treating `0` as a real value (anal pain 0, abdominal pain 0).
@@ -114,6 +115,15 @@ Milestone 0 proves a format-agnostic record and checker. A lab file may be a doc
    - An event that arrives with an unknown header stores the known cells and returns the unknown header as a proposed column. It does not publish the new column until `addColumn` is called.
    - Two events on one calendar day both remain. A later day appends a third.
 5. `deleteSourceAllowed` is true only when every part of the batch is `passed` and the user confirm is `confirmed`. A batch with page 7 still failed cannot be deleted.
+5b. Add `proposeCleanup` in the same module. It returns proposal cards. It does not write. Done when: the cases in the test plan under “cleanup” pass.
+   - **Exact duplicate.** Same normalized label, same unit, same instant, same value. The card says `auto`. Applying it keeps one observation and a second cite. The number does not change. A second copy with a different value is not a duplicate. It is a conflict. Do not average.
+   - **Two names.** Compare the new label to markers this user already has. A proposal fires when the normalized labels match, or a source code matches a code already stored on a marker, or the agent later marks them as the same analyte. Until the card is `confirmed`, the row stays staged and does not increase the tracked count. Rejecting the card creates a separate marker. Accepting it stores the extra label as an alias on the survivor and tombstones the duplicate marker id.
+   - **Mixed units on one marker.** A series may hold `mg/dL` and `mmol/L`. Display uses the profile unit preference. The raw value and raw unit stay on the row. A convert card is offered only when `convertViaTable` in `src/utils/biomarkerLifecycle.ts` has a factor for that analyte. Locked factors stay the G-B1 set: HDL 50 → 1.293, triglycerides 125 → 1.411, LDL 130 → 3.362, creatinine 0.9 → 79.56, bilirubin 0.8 → 13.68. HbA1c keeps the IFCC formula already in that function (`mmol/mol = 10.93×% − 23.5`). An unknown pair returns `ok: false` and the card says “no conversion”, with actions relabel or leave. Relabel changes the unit text and does not change the number. Convert changes the number by the named factor and keeps the raw. A card cannot contain both.
+   - **Absurd value.** If the source printed a range and the number sits far outside it, or `isBiomarkerValueImprobable` would flag it, the card offers relabel, convert via the table, or leave. `computeBiomarkerTelemetryMultiplier` may explain a table factor. It may not invent a generic ×10 or ÷100. `steps`, `sleep_duration`, `weight`, and the other `isExcludedDeviceMetric` keys do not get this card.
+   - **Dirty text.** `5.2 H`, `<0.1`, `Positive`, and `see comment` stay text. They are not coerced to 0 or 0.1. A text value landing in an otherwise numeric series is its own card. `0` remains a real numeric value.
+   - **Same calendar day, two standards.** If converting one onto the other’s unit matches within the table’s rounding, one observation with two cites is proposed. If it does not match, both stay and the card is a conflict.
+   - Pitfall: `getDuplicateAliasGroups` and `getMappedBiomarkerKey` group by the old dictionary, including distinct symptoms onto one score. `proposeCleanup` must not call them. A synonym hit can be mentioned on the card. It cannot merge by itself.
+   - Pitfall: applying a card rewrites history only through this function, after `confirmed`. The raw number remains on the observation.
 6. Profile-count fixture: three lab keys across two dates, one empty custom, one not-used key, and `weight`. Done when: tracked count is 3 and total log entries equals the sum of keys on the history rows.
 7. README: Drive files stay on Drive. Fixtures are synthetic. Done when: a search of `tests/fixtures/health-record` finds no personal name and no date of birth.
 8. Do not wire this module into the app, D1, MCP, or an agent. Done when: `git diff --name-only` against the worktree base is only the allowed list.
@@ -126,7 +136,7 @@ Pass before milestone 2: a diary that started at 17 columns still shows the firs
 
 ### Milestone 2 — data-entry agent. Any file, and a batch of 10 photos. No live Gemini in the unit gate.
 
-One agent id, `data_entry`, is the only writer. It sees the user’s existing markers. Exact normalized printed name attaches. A near name is staged. A new name creates a marker.
+One agent id, `data_entry`, is the only writer. It sees the user’s existing markers. After a batch verifies, it runs `proposeCleanup` and shows the cards in the user’s language. Exact duplicates apply as `auto` and stay reversible. Every card that merges two names, converts a number, or relabels a unit waits for a confirm. The user can uncheck one row inside a batch. The agent does not set `confirmed`. A near name stays staged until that confirm. Rejecting it creates a new marker.
 
 Store original bytes on R2, one object per part, one batch id. Grid and nested-markup doors run with no model. A PDF or doc with a recovered table uses the grid door. Prose and photos use two `gemini-3.5-flash-lite` reads per page. At most four pages run at once. A batch of 10 queues. Publish a page only when `verifyAgreement` passes. A heavier Gemini model sees only disagreed pages. Muse Spark is not an extractor. The model cannot set `verify: passed`.
 
@@ -134,7 +144,9 @@ Store original bytes on R2, one object per part, one batch id. Grid and nested-m
 
 Receptionist handoff for a file, a 10-photo batch, or “I slept badly” targets `data_entry`.
 
-Pass before milestone 3: the grid, the prose note, and the nested panel pass with zero model calls; page 7 of the 10-page fixture stays uncounted while the other nine can be confirmed; a near-name does not auto-merge; the source batch cannot be deleted while any page is failed; the receptionist contract routes the file and the sleep sentence to `data_entry`.
+The same agent can be asked to clean the record that is already stored. That run uses `proposeCleanup` on the whole history, not a second pipeline.
+
+Pass before milestone 3: the grid, the prose note, and the nested panel pass with zero model calls; page 7 of the 10-page fixture stays uncounted while the other nine can be confirmed; a second name does not become a second tracked marker while its card is open; HDL in mg/dL converts only after confirm and the raw 50 is still stored; an unknown unit pair does not change the number; sleep is not flagged as a lab error; the source batch cannot be deleted while any page is failed; the receptionist contract routes the file and the sleep sentence to `data_entry`.
 
 ### Ordering against MCP
 
@@ -146,7 +158,7 @@ Do this in parallel with the MCP branch, and do not add biomarker write tools fi
 | This packet, milestones 0–1 | In parallel, starting now. | New files only. No dependency on MCP. |
 | Milestone 2 | After 0–1. Still no MCP edits. | The photo batch and the any-format doors have to exist before a tool exposes them. |
 | MCP read adapter | After milestone 2, small packet on the MCP branch. | `list` and `get_trends` keep working. They read a compatibility view: numeric labs stay a map so current Gemini sessions still parse; symptom events are a separate list so `get_trends` stops dropping text diaries. |
-| MCP write actions `log`, `edit`, `delete`, `confirm_source` | After the read adapter and after step 3 is on main. | A write tool built on today’s date map would teach Gemini the shape this plan is replacing. |
+| MCP write actions `log`, `edit`, `delete`, `confirm_source`, `confirm_cleanup` | After the read adapter and after step 3 is on main. | A write tool built on today’s date map would teach Gemini the shape this plan is replacing. `confirm_cleanup` is the only way a Gemini session applies a merge or a unit convert. |
 
 Building the flexible record after all remaining MCP steps would freeze write tools on the date map. Building it before step 3 by editing `server_routes_mcp.ts` would collide with `144f9153`. Parallel, with writes last, is the dependency order.
 
@@ -172,7 +184,7 @@ Pass before milestone 6: a blank profile can log one number and one sleep senten
 
 ### Milestone 6 — MCP writes. Own packet. See Ordering.
 
-`manage_biomarkers` gains `log`, `edit`, `delete`, and `confirm_source`. No dictionary action. A `log` call may carry text, a grid, or up to 10 image parts. The schema resource lists the user’s markers, not `biomarkerDefinitions`. Writes call the milestone 0 functions. They ship only after `agent/mcp-gemini`’s upsert guard is on main and the focus pull exists, so an open website tab cannot resurrect a deleted event.
+`manage_biomarkers` gains `log`, `edit`, `delete`, `confirm_source`, and `confirm_cleanup`. No dictionary action. A merge or a unit convert from Gemini applies only through `confirm_cleanup`. A `log` call may carry text, a grid, or up to 10 image parts. The schema resource lists the user’s markers, not `biomarkerDefinitions`. Writes call the milestone 0 functions. They ship only after `agent/mcp-gemini`’s upsert guard is on main and the focus pull exists, so an open website tab cannot resurrect a deleted event.
 
 Pass: a 10-photo batch and a diary append succeed through the MCP tool and through the website function; removing a column does not shift old logs; a delete stays deleted after a website sync.
 
@@ -210,6 +222,20 @@ node scripts/journey-guard.mjs biomarker-flexible-log
 - `tracked count matches the history sheet rules`
 - `total log entries count events not columns`
 - `fixtures have no personal name`
+- `exact duplicate keeps one value and two cites`
+- `same instant with a different value is a conflict`
+- `second name stays untracked until confirm`
+- `rejected name becomes its own marker`
+- `hdl mg/dl converts only after confirm and keeps raw 50`
+- `unknown unit pair does not change the number`
+- `relabel does not change the number`
+- `convert and relabel are not on the same card`
+- `printed range outlier proposes and does not write`
+- `sleep duration is not an absurd lab`
+- `inequality and positive stay text`
+- `zero stays a number`
+- `same day units that convert to one value propose one observation`
+- `same day units that do not match stay two observations`
 
 Do not run `npm test`. Do not call Gemini. Do not commit the Drive file or the symptom sheet.
 
