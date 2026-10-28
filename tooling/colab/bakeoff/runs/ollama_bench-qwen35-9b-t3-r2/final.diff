@@ -1,0 +1,10 @@
+diff --git a/tooling/lib/args.js b/tooling/lib/args.js
+new file mode 100644
+index 00000000..39eb0f91
+--- /dev/null
++++ b/tooling/lib/args.js
+@@ -0,0 +1,4 @@
++const argv = function() { return process.argv.slice(2); }
++const has = function(f) { return argv().includes(f); }
++const val = function(f, d) { const i = argv().indexOf(f); return i === -1 ? d : argv()[i + 1]; }
++module.exports = { argv, has, val }
