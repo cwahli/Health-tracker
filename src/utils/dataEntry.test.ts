@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { deflateSync } from 'node:zlib';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -198,6 +199,21 @@ describe('data entry', () => {
     const openedOnly = openPdfBytes('only-flate.pdf', onlyFlate);
     expect(openedOnly.batch.parts[0].door).toBe('ocr');
     expect(openedOnly.visionCalls).toBe(2);
+    const hdl = deflateSync(Buffer.from('BT (HDL 50 mg/dL) Tj ET'));
+    const ldl = deflateSync(Buffer.from('BT (LDL 130 mg/dL) Tj ET'));
+    const inflated = Buffer.concat([
+      Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 2/Kids[3 0 R 4 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 5 0 R>>endobj\n4 0 obj<</Type/Page/Parent 2 0 R/Contents 6 0 R>>endobj\n'),
+      Buffer.from(`5 0 obj<</Filter /FlateDecode/Length ${hdl.length}>>stream\n`),
+      hdl,
+      Buffer.from('\nendstream\nendobj\n'),
+      Buffer.from(`6 0 obj<</Filter /FlateDecode/Length ${ldl.length}>>stream\n`),
+      ldl,
+      Buffer.from('\nendstream\nendobj\n%%EOF'),
+    ]);
+    const openedInflated = openPdfBytes('inflated.pdf', inflated);
+    expect(openedInflated.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL', 'LDL 130 mg/dL']);
+    expect(openedInflated.batch.parts.map((part) => part.door)).toEqual(['text', 'text']);
+    expect(openedInflated.visionCalls).toBe(0);
     const filteredImage = new TextEncoder().encode(
       '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R/Resources<</XObject<</Im0 5 0 R>>>>>>endobj\n4 0 obj<</Length 12>>stream\nq /Im0 Do Q\nendstream\nendobj\n5 0 obj<</Filter /FlateDecode/Subtype /Image/Width 20/Height 20/Length 4>>stream\nABCD\nendstream\nendobj\n%%EOF',
     );

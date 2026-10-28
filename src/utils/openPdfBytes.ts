@@ -2,6 +2,7 @@
  * Uncompressed PDF text-layer opener. No pdf.js, no Tesseract, no model call.
  * A locked file stays locked. A scan with no text operators stays an OCR door.
  */
+import { inflateRawSync, inflateSync } from 'node:zlib';
 import { enterDescribedPdfs } from './dataEntry';
 import type { PdfPageDescriptor, SourceBatch } from './healthRecord';
 
@@ -146,6 +147,32 @@ function orderedPageBodies(objects: Map<number, string>): string[] {
 }
 
 /** Object ids whose stream dict carries a /Filter. Those bytes are not text we can read. */
+function inflateFlate(data: Buffer): string {
+  const opts = { maxOutputLength: 1_000_000 };
+  try {
+    return inflateSync(data, opts).toString('latin1');
+  } catch {
+    try {
+      return inflateRawSync(data, opts).toString('latin1');
+    } catch {
+      return '';
+    }
+  }
+}
+
+/** Inflate one FlateDecode content stream. Uses /Length so a trailing byte is not stripped. */
+function flatePayload(bytes: Uint8Array, id: number): string {
+  // latin1 here is byte-preserving. TextDecoder('latin1') is windows-1252 and corrupts zlib bytes.
+  const raw = Buffer.from(bytes).toString('latin1');
+  const header = new RegExp(`${id}\\s+\\d+\\s+obj((?:(?!endobj)[\\s\\S])*?)stream\\r?\\n`).exec(raw);
+  if (!header || !/FlateDecode/.test(header[1])) return '';
+  const start = header.index + header[0].length;
+  const length = header[1].match(/\/Length\s+(\d+)/);
+  const end = length ? start + Number(length[1]) : raw.indexOf('endstream', start);
+  if (end <= start) return '';
+  return inflateFlate(Buffer.from(bytes.subarray(start, end)));
+}
+
 function compressedStreamIds(raw: string): Set<number> {
   const ids = new Set<number>();
   const re = /(\d+)\s+\d+\s+obj([\s\S]*?)(?:stream|endobj)/g;
@@ -174,7 +201,7 @@ function looseImageCount(visible: string, thumbs: Set<string>): number {
   return (body.match(/\/Subtype\s*\/Image/g) || []).length;
 }
 
-function pagesFromContents(fileId: string, visible: string, raw: string): PdfPageDescriptor[] | null {
+function pagesFromContents(fileId: string, visible: string, raw: string, bytes: Uint8Array): PdfPageDescriptor[] | null {
   const objects = pdfObjects(visible);
   const pageDicts = orderedPageBodies(objects);
   const compressed = compressedStreamIds(raw);
@@ -182,9 +209,22 @@ function pagesFromContents(fileId: string, visible: string, raw: string): PdfPag
   if (!pageDicts.some((dict) => contentIds(dict).length > 0)) return null;
   const pages = pageDicts.map((dict) => {
     const ids = contentIds(dict);
-    const text = ids.map((id) => textOperators(objects.get(id) || '')).join(' ').replace(/\s+/g, ' ').trim();
+    const pieces: string[] = [];
+    let unreadable = false;
+    for (const id of ids) {
+      const plain = textOperators(objects.get(id) || '');
+      if (plain) {
+        pieces.push(plain);
+        continue;
+      }
+      if (!compressed.has(id)) continue;
+      const inflated = textOperators(flatePayload(bytes, id));
+      if (inflated) pieces.push(inflated);
+      else unreadable = true;
+    }
+    const text = pieces.join(' ').replace(/\s+/g, ' ').trim();
     let imageCount = referencedImageCount(dict, objects, dicts);
-    if (ids.some((id) => compressed.has(id))) imageCount = Math.max(imageCount, 1);
+    if (unreadable) imageCount = Math.max(imageCount, 1);
     return { text, imageCount };
   });
   if (!pages.some((page) => page.imageCount > 0)) {
@@ -208,7 +248,7 @@ export function describePdfBytes(fileId: string, bytes: Uint8Array): PdfPageDesc
     return [{ fileId, page: 1, text: '', imageCount: 0, imageAreaRatio: 0, locked: true }];
   }
   const visible = raw.replace(/\/Filter\s*\/FlateDecode[\s\S]*?endstream/g, '');
-  const perPage = pagesFromContents(fileId, visible, raw);
+  const perPage = pagesFromContents(fileId, visible, raw, bytes);
   if (perPage) return perPage;
   const texts: string[] = [];
   const tj = /\(((?:\\.|[^\\)])*)\)\s*Tj/g;
