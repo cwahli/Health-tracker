@@ -281,6 +281,31 @@ describe('data entry', () => {
     expect(openedObjectStream.pages.map((page) => page.text)).toEqual(['LDL 130 mg/dL', 'HDL 50 mg/dL']);
     expect(openedObjectStream.batch.parts.map((part) => part.door)).toEqual(['text', 'text']);
     expect(openedObjectStream.visionCalls).toBe(0);
+    const plain = Buffer.from('BT (HDL 50 mg/dL) Tj ET ');
+    const columns = 8;
+    const predictedRows: Buffer[] = [];
+    for (let offset = 0; offset < plain.length; offset += columns) {
+      const row = plain.subarray(offset, offset + columns);
+      const encoded = Buffer.alloc(1 + row.length);
+      encoded[0] = 1;
+      let left = 0;
+      for (let column = 0; column < row.length; column += 1) {
+        encoded[1 + column] = (row[column] - left) & 255;
+        left = row[column];
+      }
+      predictedRows.push(encoded);
+    }
+    const predicted = deflateSync(Buffer.concat(predictedRows));
+    const pngPage = Buffer.concat([
+      Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R>>endobj\n'),
+      Buffer.from(`4 0 obj<</Filter/FlateDecode/DecodeParms<</Predictor 15/Columns ${columns}>>/Length ${predicted.length}>>stream\n`),
+      predicted,
+      Buffer.from('\nendstream\nendobj\n%%EOF'),
+    ]);
+    const openedPng = openPdfBytes('png-predictor.pdf', pngPage);
+    expect(openedPng.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL']);
+    expect(openedPng.batch.parts[0].door).toBe('text');
+    expect(openedPng.visionCalls).toBe(0);
     const filteredImage = new TextEncoder().encode(
       '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R/Resources<</XObject<</Im0 5 0 R>>>>>>endobj\n4 0 obj<</Length 12>>stream\nq /Im0 Do Q\nendstream\nendobj\n5 0 obj<</Filter /FlateDecode/Subtype /Image/Width 20/Height 20/Length 4>>stream\nABCD\nendstream\nendobj\n%%EOF',
     );

@@ -207,6 +207,82 @@ function declaredLength(dict: string, raw: string): number | null {
   return direct ? Number(direct[1]) : null;
 }
 
+type PngParms = { predictor: number; columns: number; colors: number; bits: number };
+
+function parmBody(dict: string, raw: string): string {
+  const inline = /\/DecodeParms\s*<<([\s\S]*?)>>/.exec(dict);
+  if (inline) return inline[1];
+  const ref = /\/DecodeParms\s+(\d+)\s+\d+\s+R/.exec(dict);
+  if (!ref) return '';
+  const target = streamObjects(raw).find((item) => item.id === Number(ref[1]));
+  return target ? target.dict : '';
+}
+
+function pngParms(dict: string, raw: string): PngParms | null {
+  const body = parmBody(dict, raw);
+  if (!/\/Predictor\b/.test(body)) return null;
+  const num = (name: string, fallback: number) => {
+    const hit = new RegExp(`\\/${name}\\s+(\\d+)`).exec(body);
+    return hit ? Number(hit[1]) : fallback;
+  };
+  return {
+    predictor: num('Predictor', 1),
+    columns: num('Columns', 1),
+    colors: num('Colors', 1),
+    bits: num('BitsPerComponent', 8),
+  };
+}
+
+function paeth(left: number, up: number, upLeft: number): number {
+  const score = left + up - upLeft;
+  const fromLeft = Math.abs(score - left);
+  const fromUp = Math.abs(score - up);
+  const fromUpLeft = Math.abs(score - upLeft);
+  if (fromLeft <= fromUp && fromLeft <= fromUpLeft) return left;
+  if (fromUp <= fromUpLeft) return up;
+  return upLeft;
+}
+
+/** PNG predictors 10–15. Each row starts with a filter byte. */
+function undoPng(data: Buffer, parms: PngParms): Buffer | null {
+  if (parms.predictor < 10 || parms.predictor > 15) return null;
+  const rowSize = Math.ceil((parms.columns * parms.colors * parms.bits) / 8);
+  const stride = rowSize + 1;
+  if (rowSize <= 0 || data.length === 0 || data.length % stride !== 0) return null;
+  const pixel = Math.max(1, Math.ceil((parms.colors * parms.bits) / 8));
+  const rows = data.length / stride;
+  const out = Buffer.alloc(rows * rowSize);
+  let prev = Buffer.alloc(rowSize);
+  for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
+    const filter = data[rowIndex * stride];
+    const source = data.subarray(rowIndex * stride + 1, rowIndex * stride + stride);
+    const row = Buffer.alloc(rowSize);
+    for (let column = 0; column < rowSize; column += 1) {
+      const left = column >= pixel ? row[column - pixel] : 0;
+      const up = prev[column];
+      const upLeft = column >= pixel ? prev[column - pixel] : 0;
+      const byte = source[column];
+      if (filter === 1) row[column] = (byte + left) & 255;
+      else if (filter === 2) row[column] = (byte + up) & 255;
+      else if (filter === 3) row[column] = (byte + Math.floor((left + up) / 2)) & 255;
+      else if (filter === 4) row[column] = (byte + paeth(left, up, upLeft)) & 255;
+      else row[column] = byte;
+    }
+    row.copy(out, rowIndex * rowSize);
+    prev = row;
+  }
+  return out;
+}
+
+function decodedFlate(dict: string, payload: Buffer, raw: string): string {
+  const inflated = inflateFlate(payload);
+  if (!inflated) return '';
+  const parms = pngParms(dict, raw);
+  if (!parms || parms.predictor < 10) return inflated;
+  const undone = undoPng(Buffer.from(inflated, 'latin1'), parms);
+  return undone ? undone.toString('latin1') : inflated;
+}
+
 /** Inflate one FlateDecode content stream. Uses /Length so a trailing byte is not stripped. */
 function flatePayload(bytes: Uint8Array, id: number): string {
   // latin1 here is byte-preserving. TextDecoder('latin1') is windows-1252 and corrupts zlib bytes.
@@ -218,7 +294,7 @@ function flatePayload(bytes: Uint8Array, id: number): string {
   const end = length != null ? start + length : raw.indexOf('endstream', start);
   const capped = Math.min(end, bytes.length);
   if (capped <= start) return '';
-  return inflateFlate(Buffer.from(bytes.subarray(start, capped)));
+  return decodedFlate(header[1], Buffer.from(bytes.subarray(start, capped)), raw);
 }
 
 function compressedStreamIds(raw: string): Set<number> {
@@ -354,7 +430,7 @@ function expandObjectStreams(bytes: Uint8Array): Uint8Array {
     const streamEnd = length != null ? Math.min(item.streamStart + length, item.streamEnd) : item.streamEnd;
     if (streamEnd <= item.streamStart) continue;
     const payload = Buffer.from(bytes.subarray(item.streamStart, streamEnd));
-    const decoded = /FlateDecode/.test(item.dict) ? inflateFlate(payload) : payload.toString('latin1');
+    const decoded = /FlateDecode/.test(item.dict) ? decodedFlate(item.dict, payload, raw) : payload.toString('latin1');
     if (!decoded) continue;
     for (const entry of objectsInStream(decoded, count, first)) {
       if (!entry.value || classic.has(entry.id)) continue;
