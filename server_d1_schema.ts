@@ -441,6 +441,12 @@ export async function ensureD1Schema(): Promise<{ success: boolean; error?: stri
     try {
       await d1Query('ALTER TABLE brand_menu_items ADD COLUMN image_url TEXT');
     } catch (_) {}
+    try {
+      await d1Query('ALTER TABLE mcp_oauth_clients ADD COLUMN owner_uid TEXT');
+    } catch (_) {}
+    try {
+      await d1Query('ALTER TABLE mcp_oauth_clients ADD COLUMN revoked_at INTEGER');
+    } catch (_) {}
     // Saved-meal lineage pointer (duplicate/restage parent id).
     try {
       await d1Query('ALTER TABLE food_logs ADD COLUMN source_meal_id TEXT DEFAULT \'\'');
