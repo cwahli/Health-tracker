@@ -219,13 +219,5 @@ def main():
         time.sleep(EVERY)
 
 
-              "host": host, "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
-            tmp = STATE_FILE + ".tmp"
-            json.dump(seen, open(tmp, "w")); os.replace(tmp, STATE_FILE)
-        except Exception as e:
-            print("watch loop error:", type(e).__name__, e, flush=True)
-        time.sleep(EVERY)
-
-
 if __name__ == "__main__":
     main()
