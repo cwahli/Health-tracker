@@ -11,6 +11,7 @@ import {
   d1QueryBiomarkers
 } from './server_db_d1.js';
 import { getBaseUrl, resolveCanonicalUid } from './server_routes_mcp_auth.js';
+import { biomarkerDefinitions } from './src/utils/biomarkers.js';
 import {
   inMemoryMcpProfiles,
   inMemoryMcpFoods,
@@ -594,6 +595,266 @@ const MCP_TOOLS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Dynamic Schema Resource & Clinical Prompts
+// ---------------------------------------------------------------------------
+
+export interface NutrientMetricCatalogItem {
+  key: string;
+  label: string;
+  default_target: string;
+  unit: string;
+  polarity: 'limit' | 'goal';
+}
+
+export const DEFAULT_NUTRIENT_METRICS: NutrientMetricCatalogItem[] = [
+  { key: 'calories', label: 'Calories', default_target: '1800 kcal', unit: 'kcal', polarity: 'limit' },
+  { key: 'protein', label: 'Protein', default_target: '70 g', unit: 'g', polarity: 'goal' },
+  { key: 'carbohydrates', label: 'Carbohydrates', default_target: '200 g', unit: 'g', polarity: 'limit' },
+  { key: 'totalFat', label: 'Total Fat', default_target: '60 g', unit: 'g', polarity: 'limit' },
+  { key: 'saturatedFat', label: 'Saturated Fat', default_target: '20 g', unit: 'g', polarity: 'limit' },
+  { key: 'unsaturatedFat', label: 'Unsaturated Fat', default_target: '40 g', unit: 'g', polarity: 'goal' },
+  { key: 'omega3', label: 'Omega-3 Fatty Acids', default_target: '1.1 g', unit: 'g', polarity: 'goal' },
+  { key: 'addedSugar', label: 'Added Sugar', default_target: '25 g', unit: 'g', polarity: 'limit' },
+  { key: 'totalFibre', label: 'Total Dietary Fibre', default_target: '25 g', unit: 'g', polarity: 'goal' },
+  { key: 'solubleFibre', label: 'Soluble Fibre', default_target: '5 g', unit: 'g', polarity: 'goal' },
+  { key: 'sodium', label: 'Sodium', default_target: '1500 mg', unit: 'mg', polarity: 'limit' },
+  { key: 'potassium', label: 'Potassium', default_target: '3500 mg', unit: 'mg', polarity: 'goal' },
+  { key: 'magnesium', label: 'Magnesium', default_target: '310 mg', unit: 'mg', polarity: 'goal' },
+  { key: 'calcium', label: 'Calcium', default_target: '1000 mg', unit: 'mg', polarity: 'goal' },
+  { key: 'iron', label: 'Iron', default_target: '18 mg', unit: 'mg', polarity: 'goal' },
+  { key: 'zinc', label: 'Zinc', default_target: '8 mg', unit: 'mg', polarity: 'goal' },
+  { key: 'selenium', label: 'Selenium', default_target: '55 mcg', unit: 'mcg', polarity: 'goal' },
+  { key: 'iodine', label: 'Iodine', default_target: '150 mcg', unit: 'mcg', polarity: 'goal' },
+  { key: 'phosphorus', label: 'Phosphorus', default_target: '700 mg', unit: 'mg', polarity: 'goal' },
+  { key: 'vitaminD', label: 'Vitamin D', default_target: '600 IU', unit: 'IU', polarity: 'goal' },
+  { key: 'vitaminB12', label: 'Vitamin B12', default_target: '2.4 mcg', unit: 'mcg', polarity: 'goal' },
+  { key: 'folate', label: 'Folate', default_target: '400 mcg', unit: 'mcg', polarity: 'goal' },
+  { key: 'vitaminC', label: 'Vitamin C', default_target: '75 mg', unit: 'mg', polarity: 'goal' },
+  { key: 'vitaminE', label: 'Vitamin E', default_target: '15 mg', unit: 'mg', polarity: 'goal' },
+  { key: 'vitaminK', label: 'Vitamin K', default_target: '90 mcg', unit: 'mcg', polarity: 'goal' },
+  { key: 'vitaminA', label: 'Vitamin A', default_target: '700 mcg', unit: 'mcg', polarity: 'goal' },
+  { key: 'vitaminB6', label: 'Vitamin B6', default_target: '1.3 mg', unit: 'mg', polarity: 'goal' },
+  { key: 'thiamine', label: 'Thiamine (Vitamin B1)', default_target: '1.1 mg', unit: 'mg', polarity: 'goal' },
+  { key: 'riboflavin', label: 'Riboflavin (Vitamin B2)', default_target: '1.1 mg', unit: 'mg', polarity: 'goal' },
+  { key: 'niacin', label: 'Niacin (Vitamin B3)', default_target: '14 mg', unit: 'mg', polarity: 'goal' },
+  { key: 'steps', label: 'Daily Steps', default_target: '3000 steps', unit: 'steps', polarity: 'goal' }
+];
+
+export function generateHealthTrackerCatalog(profile: any) {
+  const userTargets = profile?.dailyNutrientTargets || profile?.nutritionTargets || profile?.targets || {};
+
+  const nutrients = DEFAULT_NUTRIENT_METRICS.map((m) => ({
+    key: m.key,
+    label: m.label,
+    default_target: m.default_target,
+    unit: m.unit,
+    polarity: m.polarity,
+    user_target: userTargets[m.key] || m.default_target
+  }));
+
+  const standardBiomarkers = biomarkerDefinitions.map((def) => ({
+    key: def.key,
+    name: def.name,
+    category: def.category,
+    unit: def.unit,
+    normal_range: def.normalRange,
+    descriptions: def.descriptions,
+    aliases: def.aliases || []
+  }));
+
+  const customBiomarkers = (profile?.customBiomarkers || []).map((cb: any) => ({
+    key: cb.key,
+    name: cb.name || cb.label || cb.key,
+    category: cb.category || 'custom',
+    unit: cb.unit || '',
+    normal_range: cb.normalRange || cb.rangeText || '',
+    is_custom: true
+  }));
+
+  const tools = MCP_TOOLS.map((t) => ({
+    name: t.name,
+    description: t.description,
+    actions: ((t.inputSchema.properties?.action as any)?.enum || []) as string[]
+  }));
+
+  return {
+    version: '1.0.0',
+    generated_at: new Date().toISOString(),
+    user: {
+      timezone: profile?.timezone || 'Europe/London',
+      language: profile?.language || 'en'
+    },
+    nutrients: {
+      count: nutrients.length,
+      items: nutrients
+    },
+    biomarkers: {
+      count: standardBiomarkers.length + customBiomarkers.length,
+      standard_count: standardBiomarkers.length,
+      custom_count: customBiomarkers.length,
+      items: [...standardBiomarkers, ...customBiomarkers]
+    },
+    tools
+  };
+}
+
+export interface McpPromptDefinition {
+  name: string;
+  description: string;
+  arguments?: Array<{
+    name: string;
+    description: string;
+    required?: boolean;
+  }>;
+}
+
+export const MCP_PROMPTS: McpPromptDefinition[] = [
+  {
+    name: 'audit_meal_accuracy',
+    description: 'Forensic nutritional review of a logged meal comparing dishes, portion weights, Atwater math (4*P + 4*C + 9*F), and meal photo against logged totals, proposing precise edits via manage_meals(action: "edit").',
+    arguments: [
+      {
+        name: 'meal_id',
+        description: 'The unique ID of the meal to audit. If omitted, the audit inspects the user\'s most recent meal log.',
+        required: false
+      }
+    ]
+  },
+  {
+    name: 'daily_nutrition_debrief',
+    description: 'End-of-day nutritional review evaluating consumed calories, macronutrients, and micronutrients against the user\'s daily allowance targets, highlighting deficits or overages with concrete advice.',
+    arguments: [
+      {
+        name: 'date',
+        description: 'Target date to debrief (YYYY-MM-DD, "today", or "yesterday"). Defaults to "today".',
+        required: false
+      }
+    ]
+  },
+  {
+    name: 'biomarker_diet_correlation',
+    description: 'Clinical analysis cross-correlating out-of-range or trending biomarker readings with 30–90 day rolling dietary intake (e.g. saturated fat vs LDL, sodium vs blood pressure, dietary fiber vs fasting glucose/HbA1c).',
+    arguments: [
+      {
+        name: 'biomarker_key',
+        description: 'Specific biomarker key to evaluate (e.g. "ldl", "hba1c", "bloodPressure", "total_cholesterol"). If omitted, assesses all out-of-range biomarkers.',
+        required: false
+      }
+    ]
+  },
+  {
+    name: 'triage_and_fix_latest_issue',
+    description: 'Diagnostic triage inspecting recent meal breakdowns, sync integrity, and biomarker records to detect oracle discrepancies or anomalies, proposing direct user-scoped data repairs.',
+    arguments: []
+  }
+];
+
+export function getMcpPromptMessage(name: string, args: Record<string, any> = {}) {
+  switch (name) {
+    case 'audit_meal_accuracy': {
+      const mealId = args.meal_id;
+      return {
+        description: 'Forensic audit of meal accuracy, Atwater calculation, and dish portion consistency.',
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: [
+                `Please perform a rigorous nutritional forensic audit of ${mealId ? `meal ID "${mealId}"` : 'the most recent logged meal'}.`,
+                '',
+                'Follow this protocol:',
+                `1. Fetch meal details using manage_meals(action: "${mealId ? 'get_detail' : 'list'}"${mealId ? `, meal_id: "${mealId}"` : ', limit: 1'}).`,
+                '2. Inspect each dish in items for realistic portion sizes and macronutrients.',
+                '3. Verify the Atwater calculation for each dish (calories = 4*protein + 4*carbohydrates + 9*fat) and verify that dish components sum up to the overall meal totals.',
+                '4. If a photo URL is present, verify that the recognized items and portion estimates match the visual evidence.',
+                '5. If you find any discrepancies (e.g. missing items, inaccurate portions, Atwater mismatch), state them clearly and propose the exact patch commands using manage_meals(action: "edit", meal_id: "...", commands: [...]).'
+              ].join('\n')
+            }
+          }
+        ]
+      };
+    }
+
+    case 'daily_nutrition_debrief': {
+      const dateToken = args.date || 'today';
+      return {
+        description: 'End-of-day nutritional review evaluating intake against daily allowance targets.',
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: [
+                `Please provide a comprehensive daily nutrition debrief for "${dateToken}".`,
+                '',
+                'Follow this protocol:',
+                `1. Fetch the day's allowance progress and targets using manage_home(action: "get_allowance_progress", date: "${dateToken}").`,
+                `2. Fetch all meals logged for that calendar day using manage_meals(action: "list", date: "${dateToken}").`,
+                '3. Calculate the total consumed calories, protein, carbohydrates, total fat, saturated fat, sodium, and dietary fiber in the user\'s local timezone.',
+                '4. Assess performance against target thresholds: compare limit metrics (calories, saturated fat, sodium, added sugar) against their ceilings, and goal metrics (protein, fiber, potassium, micronutrients) against their floors.',
+                '5. Conclude with encouraging, evidence-based feedback and practical recommendations for evening intake or tomorrow\'s meals.'
+              ].join('\n')
+            }
+          }
+        ]
+      };
+    }
+
+    case 'biomarker_diet_correlation': {
+      const biomarkerKey = args.biomarker_key;
+      return {
+        description: 'Clinical analysis cross-correlating out-of-range biomarkers with rolling dietary intake.',
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: [
+                `Please analyze the clinical correlation between ${biomarkerKey ? `biomarker "${biomarkerKey}"` : 'out-of-range biomarkers'} and longitudinal dietary patterns.`,
+                '',
+                'Follow this protocol:',
+                `1. Query biomarker logs using manage_biomarkers(action: "list"${biomarkerKey ? `, keys: ["${biomarkerKey}"]` : ''}) to check current readings and reference ranges.`,
+                `2. Check trends using manage_biomarkers(action: "get_trends"${biomarkerKey ? `, keys: ["${biomarkerKey}"]` : ''}) to observe historical trajectories.`,
+                '3. Query recent dietary intake over the past 30 days using manage_meals(action: "list", limit: 30).',
+                '4. Evaluate established clinical diet-biomarker relationships (e.g. saturated fat intake vs LDL cholesterol, sodium-to-potassium ratio vs systolic/diastolic blood pressure, dietary fiber and added sugar vs glycemic markers).',
+                '5. Present clinical findings with practical, patient-friendly dietary guidance.'
+              ].join('\n')
+            }
+          }
+        ]
+      };
+    }
+
+    case 'triage_and_fix_latest_issue': {
+      return {
+        description: 'Diagnostic triage checking recent meals, biomarker entries, and sync state.',
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: [
+                'Please perform a diagnostic health data triage on recent user records.',
+                '',
+                'Follow this protocol:',
+                '1. Query the latest meal log using manage_meals(action: "list", limit: 1) and inspect its dish breakdown.',
+                '2. Query the latest biomarker records using manage_biomarkers(action: "list", limit: 3).',
+                '3. Check for anomalies such as duplicate same-day entries, improbable values, or missing macronutrient fields.',
+                '4. Summarize the system health status and offer direct data repairs using manage_meals(action: "edit") or manage_biomarkers(action: "delete_values" | "log_entries") if issues are discovered.'
+              ].join('\n')
+            }
+          }
+        ]
+      };
+    }
+
+    default:
+      return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Protocol Endpoints: GET & POST /api/mcp and /mcp
 // ---------------------------------------------------------------------------
 
@@ -637,11 +898,13 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
         result: {
           protocolVersion: '2024-11-05',
           capabilities: {
-            tools: { listChanged: false }
+            tools: { listChanged: false },
+            resources: { listChanged: false, subscribe: false },
+            prompts: { listChanged: false }
           },
           serverInfo: {
             name: 'health-tracker-mcp',
-            version: '1.1.0'
+            version: '1.2.0'
           }
         }
       });
@@ -656,6 +919,88 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
         jsonrpc: '2.0',
         id,
         result: {}
+      });
+    }
+
+    case 'resources/list': {
+      return res.json({
+        jsonrpc: '2.0',
+        id,
+        result: {
+          resources: [
+            {
+              uri: 'schema://health-tracker/catalog',
+              name: 'Health-tracker Clinical & Nutritional Catalog',
+              mimeType: 'application/json',
+              description: 'Dynamically serialized schema of active nutrient targets (31 daily metrics with units, polarities, and defaults), standard and profile-specific custom biomarker definitions, reference ranges, and domain tool actions.'
+            }
+          ]
+        }
+      });
+    }
+
+    case 'resources/read': {
+      const uri = params?.uri;
+      if (uri !== 'schema://health-tracker/catalog') {
+        return res.status(404).json({
+          jsonrpc: '2.0',
+          id,
+          error: {
+            code: -32602,
+            message: `Resource not found: "${uri}". Available: "schema://health-tracker/catalog"`
+          }
+        });
+      }
+
+      const profileData = await loadUserProfile(currentUser.uid);
+      const rawProfile = profileData.profile || profileData || {};
+      const catalog = generateHealthTrackerCatalog(rawProfile);
+
+      return res.json({
+        jsonrpc: '2.0',
+        id,
+        result: {
+          contents: [
+            {
+              uri: 'schema://health-tracker/catalog',
+              mimeType: 'application/json',
+              text: JSON.stringify(catalog, null, 2)
+            }
+          ]
+        }
+      });
+    }
+
+    case 'prompts/list': {
+      return res.json({
+        jsonrpc: '2.0',
+        id,
+        result: {
+          prompts: MCP_PROMPTS
+        }
+      });
+    }
+
+    case 'prompts/get': {
+      const promptName = params?.name;
+      const promptArgs = params?.arguments || {};
+      const prompt = getMcpPromptMessage(promptName, promptArgs);
+
+      if (!prompt) {
+        return res.status(404).json({
+          jsonrpc: '2.0',
+          id,
+          error: {
+            code: -32602,
+            message: `Prompt not found: "${promptName}". Available: "audit_meal_accuracy", "daily_nutrition_debrief", "biomarker_diet_correlation", "triage_and_fix_latest_issue"`
+          }
+        });
+      }
+
+      return res.json({
+        jsonrpc: '2.0',
+        id,
+        result: prompt
       });
     }
 
