@@ -5,8 +5,10 @@ for _k in ("SAGE_REPO_URL", "SAGE_GITHUB_TOKEN", "SAGE_WATCHER_WEBHOOK_URL", "SA
     if not os.environ.get(_k):
         try:
             from google.colab import userdata
-            os.environ[_k] = userdata.get(_k)
-        except Exception:
+            _v = userdata.get(_k)
+            if _v:
+                os.environ[_k] = _v
+        except Exception:  # missing secret / not in Colab: ignore, never print
             pass
 _here = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.path.join(os.environ.get("REPO_DIR", "/content/Health-tracker"), "tooling/colab")
 subprocess.Popen(["bash", os.path.join(_here, "bootstrap.sh")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, start_new_session=True)

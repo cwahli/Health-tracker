@@ -210,11 +210,20 @@ ensure_tmux() { # name cmd
   if tmux has-session -t "$n" 2>/dev/null && [ "${JOB_SCRIPTS_CHANGED:-0}" = 0 ]; then return 0; fi
   tmux kill-session -t "$n" 2>/dev/null; tmux new-session -d -s "$n" "$*" 8>&-
 }
-s_sage_watch() {
+watch_env_hash() { [ -f /content/.sage-watch.env ] && sha256sum /content/.sage-watch.env | cut -c1-64 || echo none; }
+s_sage_watch() { # restart (by PID) when the webhook env differs from what the running watcher started with
   write_watch_env
-  ensure_tmux sage-watch "python3 $BIN/sage-watch.py 2>&1 | tee -a /content/sage-watch.log"; sleep 1
+  local h old pid; h=$(watch_env_hash); old=$(cat /content/.sage-watch.envhash 2>/dev/null || echo unknown)
+  if tmux has-session -t sage-watch 2>/dev/null && { [ "$h" != "$old" ] || [ "${JOB_SCRIPTS_CHANGED:-0}" = 1 ]; }; then
+    log "sage-watch: webhook env or script changed -> restarting by PID"
+    for pid in $(pgrep -f "python3 $BIN/sage-watch.py"); do kill "$pid" 2>/dev/null; done
+    sleep 2; tmux has-session -t sage-watch 2>/dev/null && for pid in $(tmux list-panes -t sage-watch -F '#{pane_pid}'); do kill "$pid" 2>/dev/null; done
+    sleep 1
+  fi
+  tmux has-session -t sage-watch 2>/dev/null || tmux new-session -d -s sage-watch "python3 $BIN/sage-watch.py 2>&1 | tee -a /content/sage-watch.log" 8>&-
+  echo "$h" >/content/.sage-watch.envhash; sleep 1
   tmux has-session -t sage-watch 2>/dev/null || { fail "tmux sage-watch not running"; return 1; }
-  ok "tmux sage-watch$([ -z "${SAGE_WATCHER_WEBHOOK_URL:-}" ] && [ ! -f /content/.sage-watch.env ] && echo ' (webhook unset: no posts)')"
+  ok "tmux sage-watch$([ -f /content/.sage-watch.env ] && echo ' (webhook set)' || echo ' (webhook unset: no posts)')"
 }
 s_jobs_dash() {
   ensure_tmux colab-jobs "bash $BIN/jobs-dash.sh"; sleep 1
