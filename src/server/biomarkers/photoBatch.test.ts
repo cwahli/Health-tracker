@@ -123,6 +123,20 @@ describe('lab photo and pdf doors', () => {
     ]));
   });
 
+  it('copies a resource inherited from the parent pages node onto the OCR page', async () => {
+    const pdf = Buffer.from(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 2/Kids[3 0 R 5 0 R]/Resources<</XObject<</Im 8 0 R>>>>>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R/PieceInfo<</ONLYPAGE1 1>>>>endobj\n4 0 obj<</Length 24>>stream\nBT (HDL 50 mg/dL) Tj ET\nendstream\nendobj\n5 0 obj<</Type/Page/Parent 2 0 R/Contents 6 0 R/PieceInfo<</PAGE2SCAN 1>>>>endobj\n6 0 obj<</Length 8/Filter/FlateDecode>>stream\nABCDEFGH\nendstream\nendobj\n8 0 obj<</Subtype/Image/Width 1/Height 1/ColorSpace/DeviceGray/BitsPerComponent 8/Length 1/PieceInfo<</ONLYINHERIT 1>>>>stream\nX\nendstream\nendobj\n%%EOF',
+    );
+    const payloads: string[] = [];
+    await extractLabAttachments([`data:application/pdf;base64,${pdf.toString('base64')}`], async (job) => {
+      payloads.push(Buffer.from(job.data, 'base64').toString('latin1'));
+      return agree(job);
+    });
+    expect(payloads[0]).toContain('ONLYINHERIT');
+    expect(payloads[0]).toContain('PAGE2SCAN');
+    expect(payloads[0]).not.toContain('ONLYPAGE1');
+  });
+
   it('keeps a model verify flag from deciding the row', () => {
     const read = pageReadFromModelText(3, JSON.stringify({
       passed: true,

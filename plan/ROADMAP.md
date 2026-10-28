@@ -423,7 +423,7 @@ Ingest **code** for B1–B6 is on GitHub. Ingest **v1 shipped 2026-09-14** — r
 
 **Stop if:** lexer writes observations · G-B4 fails · Parser is sent a high-confidence name.
 
-**Page text:** an uncompressed PDF keeps each page's text on that page (`src/utils/openPdfBytes.ts`), in Kids order. A FlateDecode content stream is inflated with Node zlib and the text stays on that page. A stream that does not inflate stays an OCR door. That OCR page is copied into its own one-page PDF before vision sees it, when the copy still opens the same door. Do not add pdf.js or Tesseract. The seven stored copies stay separate.
+**Page text:** an uncompressed PDF keeps each page's text on that page (`src/utils/openPdfBytes.ts`), in Kids order. A FlateDecode content stream is inflated with Node zlib and the text stays on that page. A stream that does not inflate stays an OCR door. That OCR page is copied into its own one-page PDF before vision sees it, when the copy still opens the same door. Resources and boxes inherited from the parent pages node are copied onto that page. Do not add pdf.js or Tesseract. The seven stored copies stay separate.
 
 Weight/height stay `droppedByApply` until a product decision.
 

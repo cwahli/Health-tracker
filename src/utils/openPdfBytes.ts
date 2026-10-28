@@ -367,10 +367,71 @@ function streamSlice(raw: string, bytes: Uint8Array, slice: ObjSlice): Buffer | 
   return Buffer.from(bytes.subarray(slice.streamStart, end));
 }
 
+const INHERITED_PAGE_KEYS = ['Resources', 'MediaBox', 'CropBox', 'Rotate', 'BleedBox', 'TrimBox', 'ArtBox'];
+
+function dictHasKey(dict: string, key: string): boolean {
+  return new RegExp(`\\/${key}(?![A-Za-z0-9])`).test(dict);
+}
+
+function valueText(dict: string, key: string): string | null {
+  const rest = valueAfter(dict, key);
+  if (rest == null) return null;
+  const ref = /^(\d+)\s+\d+\s+R/.exec(rest);
+  if (ref) return ref[0];
+  if (rest.startsWith('<<')) {
+    const parsed = readPdfValue(rest);
+    return parsed && parsed.kind === 'dict' ? parsed.body : null;
+  }
+  if (!rest.startsWith('[')) {
+    const name = /^\/[A-Za-z0-9]+/.exec(rest);
+    if (name) return name[0];
+    const num = /^-?\d+(?:\.\d+)?/.exec(rest);
+    return num ? num[0] : null;
+  }
+  let depth = 0;
+  for (let i = 0; i < rest.length; i += 1) {
+    if (rest[i] === '[') depth += 1;
+    else if (rest[i] === ']') {
+      depth -= 1;
+      if (depth === 0) return rest.slice(0, i + 1);
+    }
+  }
+  return null;
+}
+
+function parentObjectId(dict: string): number | null {
+  const match = /\/Parent\s+(\d+)\s+\d+\s+R/.exec(dict);
+  return match ? Number(match[1]) : null;
+}
+
+/** Page attributes that PDF stores on a parent /Pages node. Copied onto this page only. */
+function withInherited(pageDict: string, slices: Map<number, ObjSlice>, raw: string): string {
+  const extras: string[] = [];
+  const seen = new Set<number>();
+  let current = parentObjectId(pageDict);
+  while (current != null && slices.has(current) && !seen.has(current)) {
+    seen.add(current);
+    const slice = slices.get(current);
+    if (!slice) break;
+    const dict = raw.slice(slice.dictStart, slice.dictEnd);
+    if (!/\/Type\s*\/Pages\b/.test(dict)) break;
+    for (const key of INHERITED_PAGE_KEYS) {
+      if (dictHasKey(pageDict, key) || extras.some((item) => item.startsWith(`/${key} `))) continue;
+      const value = valueText(dict, key);
+      if (value) extras.push(`/${key} ${value}`);
+    }
+    current = parentObjectId(dict);
+  }
+  if (extras.length === 0) return pageDict;
+  const at = pageDict.indexOf('<<');
+  if (at < 0) return pageDict;
+  return `${pageDict.slice(0, at + 2)} ${extras.join(' ')}${pageDict.slice(at + 2)}`;
+}
+
 function rewriteDict(dict: string, idMap: Map<number, number>, parentId: number | null): string {
   let next = skipTreeRefs(dict).replace(/(\d+)\s+\d+\s+R/g, (_full, id: string) => {
     const mapped = idMap.get(Number(id));
-    return mapped ? `${mapped} 0 R` : '0 0 R';
+    return mapped ? `${mapped} 0 R` : 'null';
   });
   if (parentId != null) {
     const at = next.indexOf('<<');
@@ -408,7 +469,8 @@ function buildPdf(parts: Buffer[]): Buffer {
 
 /**
  * One page as its own PDF, for the vision door. Copies the page object and the
- * objects it references. Does not render, and does not follow the page tree or a thumbnail.
+ * objects it references, including Resources and boxes inherited from a parent Pages node.
+ * Does not render, and does not follow Kids or a thumbnail.
  * Returns null when the copy would not open the same door as the source page.
  */
 export function pdfPageBytes(bytes: Uint8Array, pageNumber: number): Uint8Array | null {
@@ -417,7 +479,9 @@ export function pdfPageBytes(bytes: Uint8Array, pageNumber: number): Uint8Array 
   const visible = raw.replace(/\/Filter\s*\/FlateDecode[\s\S]*?endstream/g, '');
   const pageId = orderedPageIds(pdfObjects(visible))[pageNumber - 1];
   const slices = indexObjects(bytes);
-  if (!pageId || !slices.has(pageId)) return null;
+  const pageSlice = pageId ? slices.get(pageId) : undefined;
+  if (!pageId || !pageSlice) return null;
+  const pageDict = withInherited(raw.slice(pageSlice.dictStart, pageSlice.dictEnd), slices, raw);
   const keepOrder: number[] = [];
   const keep = new Set<number>();
   const queue = [pageId];
@@ -428,7 +492,7 @@ export function pdfPageBytes(bytes: Uint8Array, pageNumber: number): Uint8Array 
     if (!slice) continue;
     keep.add(id);
     keepOrder.push(id);
-    const dict = raw.slice(slice.dictStart, slice.dictEnd);
+    const dict = id === pageId ? pageDict : raw.slice(slice.dictStart, slice.dictEnd);
     for (const ref of followRefs(dict, slices, raw)) if (!keep.has(ref)) queue.push(ref);
   }
   const idMap = new Map<number, number>();
@@ -442,7 +506,7 @@ export function pdfPageBytes(bytes: Uint8Array, pageNumber: number): Uint8Array 
   for (const old of keepOrder) {
     const slice = slices.get(old);
     if (!slice) return null;
-    const dict = raw.slice(slice.dictStart, slice.dictEnd);
+    const dict = old === pageId ? pageDict : raw.slice(slice.dictStart, slice.dictEnd);
     parts.push(emitObject(idMap.get(old) || 0, rewriteDict(dict, idMap, old === pageId ? 2 : null), streamSlice(raw, bytes, slice)));
   }
   const out = buildPdf(parts);
