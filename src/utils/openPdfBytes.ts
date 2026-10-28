@@ -55,29 +55,57 @@ function rawDicts(raw: string): Map<number, string> {
   return dicts;
 }
 
+function valueAfter(body: string, key: string): string | null {
+  const match = new RegExp(`\\/${key}(?![A-Za-z0-9])\\s*`).exec(body);
+  return match ? body.slice(match.index + match[0].length) : null;
+}
+
+function readPdfValue(rest: string): { kind: 'ref'; id: number } | { kind: 'dict'; body: string } | null {
+  const ref = /^(\d+)\s+\d+\s+R/.exec(rest);
+  if (ref) return { kind: 'ref', id: Number(ref[1]) };
+  if (!rest.startsWith('<<')) return null;
+  let depth = 0;
+  for (let i = 0; i < rest.length - 1; i += 1) {
+    if (rest[i] === '<' && rest[i + 1] === '<') {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+    if (rest[i] === '>' && rest[i + 1] === '>') {
+      depth -= 1;
+      i += 1;
+      if (depth === 0) return { kind: 'dict', body: rest.slice(0, i + 1) };
+    }
+  }
+  return null;
+}
+
+function resolveKey(body: string, key: string, rawDicts: Map<number, string>, objects: Map<number, string>): string | null {
+  const rest = valueAfter(body, key);
+  if (rest == null) return null;
+  const value = readPdfValue(rest);
+  if (!value) return null;
+  if (value.kind === 'dict') return value.body;
+  return rawDicts.get(value.id) || objects.get(value.id) || null;
+}
+
 function referencedImageCount(dict: string, objects: Map<number, string>, rawDicts: Map<number, string>): number {
-  const refsOf = (body: string) => [...body.matchAll(/(\d+)\s+\d+\s+R/g)].map((item) => Number(item[1]));
+  const resources = resolveKey(dict, 'Resources', rawDicts, objects);
+  if (!resources) return 0;
+  const xobjects = resolveKey(resources, 'XObject', rawDicts, objects);
+  if (!xobjects) return 0;
   const isImage = (id: number) => {
     const visible = objects.get(id) || '';
     const rawDict = rawDicts.get(id) || '';
     // The Flate strip deletes /Subtype when it sits after /Filter. The raw dict still has it.
     return /\/Subtype\s*\/Image/.test(visible) || /\/Subtype\s*\/Image/.test(rawDict);
   };
-  const seen = new Set<number>();
   const images = new Set<number>();
-  // One extra hop: a page often names /Resources, and that dictionary names the image.
-  let queue = refsOf(dict);
-  for (let hop = 0; hop < 2 && queue.length > 0; hop += 1) {
-    const next: number[] = [];
-    for (const id of queue) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-      if (isImage(id)) images.add(id);
-      next.push(...refsOf(rawDicts.get(id) || ''));
-    }
-    queue = next;
+  for (const item of xobjects.matchAll(/(\d+)\s+\d+\s+R/g)) {
+    const id = Number(item[1]);
+    if (isImage(id)) images.add(id);
   }
-  return (dict.match(/\/Subtype\s*\/Image/g) || []).length + images.size;
+  return (xobjects.match(/\/Subtype\s*\/Image/g) || []).length + images.size;
 }
 
 function isPageDict(body: string): boolean {
