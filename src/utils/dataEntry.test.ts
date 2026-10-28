@@ -252,6 +252,35 @@ describe('data entry', () => {
     expect(openedOversize.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL']);
     expect(openedOversize.batch.parts[0].door).toBe('text');
     expect(openedOversize.visionCalls).toBe(0);
+    const stmBodyParts: string[] = [];
+    const stmPairs: string[] = [];
+    for (const entry of [
+      { id: 1, value: '<</Type/Catalog/Pages 2 0 R>>' },
+      { id: 2, value: '<</Type/Pages/Count 2/Kids[4 0 R 3 0 R]>>' },
+      { id: 4, value: '<</Type/Page/Parent 2 0 R/Contents 7 0 R>>' },
+      { id: 3, value: '<</Type/Page/Parent 2 0 R/Contents 6 0 R>>' },
+    ]) {
+      stmPairs.push(`${entry.id} ${Buffer.byteLength(stmBodyParts.join(''))}`);
+      stmBodyParts.push(`${entry.value}\n`);
+    }
+    const stmHeader = `${stmPairs.join(' ')} \n`;
+    const stmPlain = Buffer.concat([Buffer.from(stmHeader), Buffer.from(stmBodyParts.join(''))]);
+    const stmZ = deflateSync(stmPlain);
+    const objectStream = Buffer.concat([
+      Buffer.from(`%PDF-1.4\n8 0 obj<</Type/ObjStm/N 4/First ${Buffer.byteLength(stmHeader)}/Filter/FlateDecode/Length ${stmZ.length}>>stream\n`),
+      stmZ,
+      Buffer.from('\nendstream\nendobj\n'),
+      Buffer.from(`6 0 obj<</Filter/FlateDecode/Length ${hdl.length}>>stream\n`),
+      hdl,
+      Buffer.from('\nendstream\nendobj\n'),
+      Buffer.from(`7 0 obj<</Filter/FlateDecode/Length ${ldl.length}>>stream\n`),
+      ldl,
+      Buffer.from('\nendstream\nendobj\n%%EOF'),
+    ]);
+    const openedObjectStream = openPdfBytes('objstm.pdf', objectStream);
+    expect(openedObjectStream.pages.map((page) => page.text)).toEqual(['LDL 130 mg/dL', 'HDL 50 mg/dL']);
+    expect(openedObjectStream.batch.parts.map((part) => part.door)).toEqual(['text', 'text']);
+    expect(openedObjectStream.visionCalls).toBe(0);
     const filteredImage = new TextEncoder().encode(
       '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R/Resources<</XObject<</Im0 5 0 R>>>>>>endobj\n4 0 obj<</Length 12>>stream\nq /Im0 Do Q\nendstream\nendobj\n5 0 obj<</Filter /FlateDecode/Subtype /Image/Width 20/Height 20/Length 4>>stream\nABCD\nendstream\nendobj\n%%EOF',
     );

@@ -287,7 +287,87 @@ function pagesFromContents(fileId: string, visible: string, raw: string, bytes: 
   }));
 }
 
+type StreamObject = { id: number; dict: string; streamStart: number; streamEnd: number };
+
+/** Classic objects only. A match inside a stream is not an object. */
+function streamObjects(raw: string): StreamObject[] {
+  const found: StreamObject[] = [];
+  const re = /(\d+)\s+(\d+)\s+obj/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(raw))) {
+    const after = match.index + match[0].length;
+    const endobj = raw.indexOf('endobj', after);
+    if (endobj < 0) break;
+    let bodyEnd = endobj;
+    let stop = endobj + 'endobj'.length;
+    let streamStart = -1;
+    let streamEnd = -1;
+    const streamAt = raw.indexOf('stream', after);
+    if (streamAt >= 0 && streamAt < endobj) {
+      const endstream = raw.indexOf('endstream', streamAt);
+      if (endstream >= 0) {
+        const realEnd = raw.indexOf('endobj', endstream);
+        if (realEnd >= 0) {
+          bodyEnd = streamAt;
+          stop = realEnd + 'endobj'.length;
+          streamStart = streamAt + 'stream'.length;
+          if (raw[streamStart] === '\r' && raw[streamStart + 1] === '\n') streamStart += 2;
+          else if (raw[streamStart] === '\n') streamStart += 1;
+          streamEnd = endstream;
+        }
+      }
+    }
+    found.push({ id: Number(match[1]), dict: raw.slice(after, bodyEnd), streamStart, streamEnd });
+    re.lastIndex = stop;
+  }
+  return found;
+}
+
+function objectsInStream(decoded: string, count: number, first: number): Array<{ id: number; value: string }> {
+  const nums = decoded.slice(0, first).match(/\d+/g);
+  if (!nums || nums.length < count * 2) return [];
+  const pairs: Array<{ id: number; offset: number }> = [];
+  for (let i = 0; i < count; i += 1) pairs.push({ id: Number(nums[i * 2]), offset: Number(nums[i * 2 + 1]) });
+  const ordered = [...pairs].sort((a, b) => a.offset - b.offset);
+  return ordered.map((pair, index) => {
+    const start = first + pair.offset;
+    const end = index + 1 < ordered.length ? first + ordered[index + 1].offset : decoded.length;
+    return { id: pair.id, value: decoded.slice(start, end).trim() };
+  });
+}
+
+/**
+ * PDF 1.5 stores page dictionaries inside a FlateDecode /ObjStm.
+ * Append those objects in classic form. A second call finds them already written and stops.
+ */
+function expandObjectStreams(bytes: Uint8Array): Uint8Array {
+  const raw = Buffer.from(bytes).toString('latin1');
+  const objects = streamObjects(raw);
+  const classic = new Set(objects.filter((item) => !/\/Type\s*\/ObjStm\b/.test(item.dict)).map((item) => item.id));
+  const extras: Buffer[] = [];
+  for (const item of objects) {
+    if (!/\/Type\s*\/ObjStm\b/.test(item.dict) || item.streamStart < 0) continue;
+    const count = Number((/\/N\s+(\d+)/.exec(item.dict) || [])[1]);
+    const first = Number((/\/First\s+(\d+)/.exec(item.dict) || [])[1]);
+    if (!count || !Number.isFinite(first)) continue;
+    const length = declaredLength(item.dict, raw);
+    const streamEnd = length != null ? Math.min(item.streamStart + length, item.streamEnd) : item.streamEnd;
+    if (streamEnd <= item.streamStart) continue;
+    const payload = Buffer.from(bytes.subarray(item.streamStart, streamEnd));
+    const decoded = /FlateDecode/.test(item.dict) ? inflateFlate(payload) : payload.toString('latin1');
+    if (!decoded) continue;
+    for (const entry of objectsInStream(decoded, count, first)) {
+      if (!entry.value || classic.has(entry.id)) continue;
+      classic.add(entry.id);
+      extras.push(Buffer.from(`${entry.id} 0 obj\n${entry.value}\nendobj\n`, 'latin1'));
+    }
+  }
+  if (extras.length === 0) return bytes;
+  return Buffer.concat([Buffer.from(bytes), Buffer.from('\n'), ...extras]);
+}
+
 export function describePdfBytes(fileId: string, bytes: Uint8Array): PdfPageDescriptor[] {
+  bytes = expandObjectStreams(bytes);
   const raw = new TextDecoder('latin1').decode(bytes);
   if (!raw.includes('%PDF')) {
     return [{ fileId, page: 1, text: '', imageCount: 0, imageAreaRatio: 0 }];
@@ -518,6 +598,7 @@ function buildPdf(parts: Buffer[]): Buffer {
  */
 export function pdfPageBytes(bytes: Uint8Array, pageNumber: number): Uint8Array | null {
   if (pageNumber < 1) return null;
+  bytes = expandObjectStreams(bytes);
   const raw = Buffer.from(bytes).toString('latin1');
   const visible = raw.replace(/\/Filter\s*\/FlateDecode[\s\S]*?endstream/g, '');
   const pageId = orderedPageIds(pdfObjects(visible))[pageNumber - 1];
