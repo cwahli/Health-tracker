@@ -35,7 +35,9 @@ def eliminations(tasks_done):
 
 def wait_easy():
     n = 0
-    while sh('tmux ls 2>/dev/null | grep -c "^colabjob-qwen38easy"').stdout.strip() not in ('0', ''):
+    # the queue keeps a 'tail -F' viewer session alive after a job ends, so wait on the job log instead of tmux
+    f = '/content/jobs/qwen38easy/out.log'
+    while not (os.path.exists(f) and 'ALL DONE' in open(f, errors='replace').read()):
         if n % 5 == 0: log('waiting for qwen38easy to finish (heartbeat)')
         n += 1
         time.sleep(60)
