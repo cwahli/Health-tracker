@@ -1,11 +1,12 @@
 ---
 id: biomarker-flexible-log
-status: draft
+status: locked
 skill: biomarkers
 edit_mode: patch
 allowed_files:
   - src/utils/healthRecord.ts
   - src/utils/healthRecord.test.ts
+  - src/utils/biomarkerLifecycle.ts
   - tests/fixtures/health-record/grid.csv
   - tests/fixtures/health-record/prose.txt
   - tests/fixtures/health-record/nested-panel.xml

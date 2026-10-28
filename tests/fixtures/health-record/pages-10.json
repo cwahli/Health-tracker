@@ -1,0 +1,14 @@
+{
+  "pages": [
+    {"page": 1, "modelScore": 100, "rows": [{"printed": "Alpha", "value": 1, "unit": "u", "when": "2024-01-01"}]},
+    {"page": 2, "modelScore": 100, "rows": [{"printed": "Alpha", "value": 1, "unit": "u", "when": "2024-01-01"}]},
+    {"page": 3, "modelScore": 40, "rows": [{"printed": "Alpha", "value": 1, "unit": "u", "when": "2024-01-01"}]},
+    {"page": 4, "modelScore": 100, "rows": [{"printed": "Alpha", "value": 1, "unit": "u", "when": "2024-01-01"}]},
+    {"page": 5, "modelScore": 100, "rows": [{"printed": "Alpha", "value": 1, "unit": "u", "when": "2024-01-01"}]},
+    {"page": 6, "modelScore": 100, "rows": [{"printed": "Alpha", "value": 1, "unit": "u", "when": "2024-01-01"}]},
+    {"page": 7, "modelScore": 100, "rows": [{"printed": "Alpha", "value": 1, "unit": "u", "when": "2024-01-01"}, {"printed": "Beta", "value": 2, "unit": "u", "when": "2024-01-01"}], "dropped": {"printed": "Beta", "value": 2, "unit": "u", "when": "2024-01-01"}},
+    {"page": 8, "modelScore": 100, "rows": [{"printed": "Alpha", "value": 1, "unit": "u", "when": "2024-01-01"}]},
+    {"page": 9, "modelScore": 100, "rows": [{"printed": "Alpha", "value": 1, "unit": "u", "when": "2024-01-01"}]},
+    {"page": 10, "modelScore": 100, "rows": [{"printed": "Alpha", "value": 1, "unit": "u", "when": "2024-01-01"}]}
+  ]
+}

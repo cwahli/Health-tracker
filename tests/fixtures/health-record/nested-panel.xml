@@ -1,0 +1,8 @@
+<results>
+  <result>
+    <date>2024-01-02</date><name>Panel header</name><code>PANEL</code><comment>Panel comment</comment>
+    <date>2024-01-02</date><name>Alpha</name><code>ALP</code><comment>Alpha comment</comment><value>1.4</value><units>ratio</units><value_minimum>0.8</value_minimum><value_maximum>2.0</value_maximum>
+    <date>2024-01-02</date><name>Beta</name><code>BET</code><value>0</value><units>score</units><value_minimum>0</value_minimum><value_maximum>10</value_maximum>
+    <date>2024-01-02</date><name>Gamma</name><code>GAM</code><value>1.4</value><value_minimum>0.8</value_minimum><value_maximum>2.0</value_maximum>
+  </result>
+</results>

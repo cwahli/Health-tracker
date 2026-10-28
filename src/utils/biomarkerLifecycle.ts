@@ -543,27 +543,27 @@ export function convertViaTable(
   toUnit: string
 ): { ok: true; value: number } | { ok: false; reason: string } {
   const mapped = getMappedBiomarkerKey(key) || key;
+  const from = normUnit(fromUnit);
+  const to = normUnit(toUnit);
+  if (mapped === 'hba1c') {
+    // IFCC: mmol/mol = 10.93*% − 23.5. This analyte has no multiply row.
+    if ((from === '%' || from === 'percent') && (to === 'mmol/mol' || to === 'mmolmol')) {
+      return { ok: true, value: Math.round(10.93 * value - 23.5) };
+    }
+    if ((from === 'mmol/mol' || from === 'mmolmol') && (to === '%' || to === 'percent')) {
+      return { ok: true, value: Number(((value + 23.5) / 10.93).toFixed(1)) };
+    }
+  }
   const spec = ANALYTE_CONVERSIONS[mapped] || ANALYTE_CONVERSIONS[key];
   if (!spec) {
     return { ok: false, reason: `No conversion table for ${mapped}` };
   }
-  const from = normUnit(fromUnit);
-  const to = normUnit(toUnit);
   if (from === to) return { ok: true, value };
   if (from === spec.from && to === spec.to) {
     return { ok: true, value: Number((value * spec.multiply).toFixed(3)) };
   }
   if (from === spec.to && to === spec.from) {
     return { ok: true, value: Number((value / spec.multiply).toFixed(3)) };
-  }
-  if (mapped === 'hba1c') {
-    // IFCC: mmol/mol = 10.93*% − 23.5
-    if ((from === '%' || from === 'percent') && (to === 'mmol/mol' || to === 'mmolmol')) {
-      return { ok: true, value: Math.round(10.93 * value - 23.5) };
-    }
-    if ((from === 'mmol/mol' || from === 'mmolmol') && (from !== to) && (to === '%' || to === 'percent')) {
-      return { ok: true, value: Number(((value + 23.5) / 10.93).toFixed(1)) };
-    }
   }
   return { ok: false, reason: `Incomparable units ${fromUnit} → ${toUnit} for ${mapped}` };
 }
