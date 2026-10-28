@@ -74,6 +74,14 @@
      "options": {
       "reasoningEffort": "xhigh"
      }
+    },
+    "bench-qwen38r": {
+     "name": "bench-qwen38r",
+     "tool_call": true,
+     "limit": {
+      "context": 32768,
+      "output": 10000
+     }
     }
    }
   }

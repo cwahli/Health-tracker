@@ -34,11 +34,26 @@ def eliminations(tasks_done):
     return out
 
 def wait_easy():
+    n = 0
     while sh('tmux ls 2>/dev/null | grep -c "^colabjob-qwen38easy"').stdout.strip() not in ('0', ''):
+        if n % 5 == 0: log('waiting for qwen38easy to finish (heartbeat)')
+        n += 1
         time.sleep(60)
 
+def pick_qwen38():
+    """Ollama's qwen3.8 renderer 500s ('no user query found') on parallel-tool-call continuations. If the probe shows that and the
+    same weights with RENDERER qwen3.5 work, use bench-qwen38r for the hard tasks (documented in the report)."""
+    f = '/content/bakeoff/qwen38_probe.txt'
+    if not os.path.exists(f):
+        out = sh('python3 /content/bakeoff/harness/repro.py bench-qwen38 bench-qwen38r', timeout=900).stdout
+        open(f, 'w').write(out)
+    out = open(f).read()
+    if 'bench-qwen38 3 calls: HTTP 500' in out and 'bench-qwen38r 3 calls: OK' in out:
+        MODELS[0] = 'ollama/bench-qwen38r'
+    log('qwen3.8 probe ->', MODELS[0])
+
 def main():
-    wait_easy(); restore(); sh(f'cd {HT} && git checkout -q bakeoff-results')
+    wait_easy(); pick_qwen38(); restore(); sh(f'cd {HT} && git checkout -q bakeoff-results')
     done_rounds = []
     while True:
         rounds = json.load(open('/content/bakeoff/hard_rounds.json'))
