@@ -229,6 +229,12 @@ describe('data entry', () => {
     const openedThumb = openPdfBytes('thumb.pdf', thumb);
     expect(openedThumb.batch.parts[0].door).toBe('text');
     expect(openedThumb.visionCalls).toBe(0);
+    const dctThumb = new TextEncoder().encode(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]/Thumb 5 0 R>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R>>endobj\n4 0 obj<</Length 24>>stream\nBT (HDL 50 mg/dL) Tj ET\nendstream\nendobj\n5 0 obj<</Subtype /Image/Width 8/Height 8/Filter /DCTDecode/Length 4>>stream\nABCD\nendstream\nendobj\n%%EOF',
+    );
+    const openedDct = openPdfBytes('dct-thumb.pdf', dctThumb);
+    expect(openedDct.batch.parts[0].door).toBe('text');
+    expect(openedDct.visionCalls).toBe(0);
   });
 
   it('a history cell edit and the agent edit the same observation', () => {

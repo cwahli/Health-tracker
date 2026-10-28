@@ -156,6 +156,22 @@ function compressedStreamIds(raw: string): Set<number> {
   return ids;
 }
 
+function thumbIds(raw: string): Set<number> {
+  const ids = new Set<number>();
+  for (const item of raw.matchAll(/\/Thumb\s+(\d+)\s+\d+\s+R/g)) ids.add(Number(item[1]));
+  return ids;
+}
+
+function looseImageCount(visible: string, objects: Map<number, string>, thumbs: Set<number>): number {
+  if (thumbs.size === 0) return (visible.match(/\/Subtype\s*\/Image/g) || []).length;
+  let count = 0;
+  for (const [id, body] of objects) {
+    if (thumbs.has(id)) continue;
+    count += (body.match(/\/Subtype\s*\/Image/g) || []).length;
+  }
+  return count;
+}
+
 function pagesFromContents(fileId: string, visible: string, raw: string): PdfPageDescriptor[] | null {
   const objects = pdfObjects(visible);
   const pageDicts = orderedPageBodies(objects);
@@ -170,7 +186,7 @@ function pagesFromContents(fileId: string, visible: string, raw: string): PdfPag
     return { text, imageCount };
   });
   if (!pages.some((page) => page.imageCount > 0)) {
-    pages[0].imageCount = (visible.match(/\/Subtype\s*\/Image/g) || []).length;
+    pages[0].imageCount = looseImageCount(visible, objects, thumbIds(raw));
   }
   return pages.map((page, index) => ({
     fileId,
