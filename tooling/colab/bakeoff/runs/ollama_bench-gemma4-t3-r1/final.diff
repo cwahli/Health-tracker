@@ -1,0 +1,55 @@
+diff --git a/tooling/add-pair.js b/tooling/add-pair.js
+index f5b1d00d..8aa2b6a8 100644
+--- a/tooling/add-pair.js
++++ b/tooling/add-pair.js
+@@ -41,13 +41,7 @@
+  * refuses, which is the safe direction.
+  */
+ 
+-const fs = require('fs');
+-
+-const DEFAULT_URL = 'https://ltyyzxnxufvkorekglrf.supabase.co';
+-const TABLE = '/rest/v1/quick_signin_accounts';
+-const argv = process.argv.slice(2);
+-const has = f => argv.includes(f);
+-const val = (f, d) => { const i = argv.indexOf(f); return i === -1 ? d : argv[i + 1]; };
++const { argv, has, val } = require('./lib/args');
+ 
+ const isEmail = s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
+ 
+diff --git a/tooling/bot-dispatch.js b/tooling/bot-dispatch.js
+index 69ccec7d..ba2cedb1 100644
+--- a/tooling/bot-dispatch.js
++++ b/tooling/bot-dispatch.js
+@@ -62,9 +62,7 @@ const { pathToFileURL } = require('url');
+ 
+ const ROOT = path.join(__dirname, '..');
+ 
+-const argv = process.argv.slice(2);
+-const has = f => argv.includes(f);
+-const val = (f, d) => { const i = argv.indexOf(f); return i === -1 ? d : argv[i + 1]; };
++const { argv, has, val } = require('./lib/args');
+ 
+ const DEFAULT_PAGE = 'customer-payment-services';
+ 
+diff --git a/tooling/lib/args.js b/tooling/lib/args.js
+new file mode 100644
+index 00000000..b793b673
+--- /dev/null
++++ b/tooling/lib/args.js
+@@ -0,0 +1,15 @@
++'use strict';
++
++const argv = process.argv.slice(2);
++
++module.exports = {
++  argv,
++  has: (flag) => argv.includes(flag),
++  val: (flag, defaultValue) => {
++    const index = argv.indexOf(flag);
++    if (index === -1 || index + 1 >= argv.length) {
++      return defaultValue;
++    }
++    return argv[index + 1];
++  }
++};
