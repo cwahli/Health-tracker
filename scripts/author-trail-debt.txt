@@ -94,3 +94,10 @@ a5e1b6ac  no Author/Agent trailer on main: [queue-sync] refresh WORK_QUEUE.md; a
 0ddc831c  thinking level is not a word (n/a and friends); authored 2026-10-21; recorded 2026-10-22
 e302982f  no Author/Agent trailer on main: bootstrap git identity; authored 2026-10-27; recorded 2026-10-27
 d9ddd11d  no Author/Agent trailer on main: feat(colab) idempotent bootstrap; authored 2026-10-27; recorded 2026-10-27
+c4b39f97  no Author/Agent trailer on main: sage-watch alert on done/idle/dead; authored 2026-10-28; recorded 2026-10-28
+088328ea  no Author/Agent trailer on main: sage-watch fix splice indentation; authored 2026-10-28; recorded 2026-10-28
+5cb6d20f  no Author/Agent trailer on main: sage-watch remove leftover old main loop; authored 2026-10-28; recorded 2026-10-28
+2302bc5e  no Author/Agent trailer on main: sage-watch silently baseline jobs; authored 2026-10-28; recorded 2026-10-28
+c033348d  no Author/Agent trailer on main: colab restart sage-watch by PID; authored 2026-10-28; recorded 2026-10-28
+84f4c8d1  no Author/Agent trailer on main: colab bounded/idempotent setup_environment; authored 2026-10-28; recorded 2026-10-28
+12451f54  no Author/Agent trailer on main: colab bootstrap adds node to PATH; authored 2026-10-28; recorded 2026-10-28

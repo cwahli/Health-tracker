@@ -119,6 +119,7 @@ export async function d1UpsertFoods(foods: D1FoodRow[]): Promise<{ success: bool
         chat_transcript = excluded.chat_transcript,
         source_meal_id = excluded.source_meal_id,
         updated_at = excluded.updated_at
+      WHERE excluded.updated_at >= coalesce(food_logs.updated_at, '')
     `;
 
     const res = await d1Query(sql, params);
@@ -250,6 +251,7 @@ export async function d1UpsertBiomarkers(bios: D1BiomarkerRow[]): Promise<{ succ
         summary = excluded.summary,
         tests = excluded.tests,
         updated_at = excluded.updated_at
+      WHERE excluded.updated_at >= coalesce(biomarker_logs.updated_at, '')
     `;
 
     const res = await d1Query(sql, params);

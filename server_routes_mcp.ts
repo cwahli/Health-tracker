@@ -76,17 +76,69 @@ export function resolvePossibleUids(uid?: string, email?: string): string[] {
   ].filter(Boolean) as string[]));
 }
 
-export function toYYYYMMDD(val: any): string {
-  if (!val) return new Date().toISOString().split('T')[0];
+export function getCurrentDateInTimezone(timezone?: string): string {
+  const tz = timezone || 'Europe/London';
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    return formatter.format(new Date());
+  } catch (err) {
+    return new Date().toISOString().split('T')[0];
+  }
+}
+
+export function getYesterdayYYYYMMDD(referenceDate?: string, timezone?: string): string {
+  const ref = referenceDate ? toYYYYMMDD(referenceDate, timezone) : getCurrentDateInTimezone(timezone);
+  const parts = ref.split('-');
+  const d = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().split('T')[0];
+}
+
+export function getYesterdayInTimezone(timezone?: string): string {
+  return getYesterdayYYYYMMDD(undefined, timezone);
+}
+
+export function formatTimeInTimezone(dateVal: any, timezone?: string): string {
+  const tz = timezone || 'Europe/London';
+  try {
+    const d = dateVal ? new Date(dateVal) : new Date();
+    if (isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).format(d);
+  } catch {
+    return '';
+  }
+}
+
+export function toYYYYMMDD(val: any, timezone?: string): string {
+  if (!val) return getCurrentDateInTimezone(timezone);
   const str = String(val).trim();
-  if (!str) return new Date().toISOString().split('T')[0];
-  
-  const ymdMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!str) return getCurrentDateInTimezone(timezone);
+
+  const lower = str.toLowerCase();
+  if (lower === 'today') {
+    return getCurrentDateInTimezone(timezone);
+  }
+  if (lower === 'yesterday') {
+    return getYesterdayInTimezone(timezone);
+  }
+
+  const ymdMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (ymdMatch) {
     return `${ymdMatch[1]}-${ymdMatch[2].padStart(2, '0')}-${ymdMatch[3].padStart(2, '0')}`;
   }
 
-  const dmyMatch = str.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
+  const dmyMatch = str.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
   if (dmyMatch) {
     return `${dmyMatch[3]}-${dmyMatch[2].padStart(2, '0')}-${dmyMatch[1].padStart(2, '0')}`;
   }
@@ -106,22 +158,25 @@ export function toYYYYMMDD(val: any): string {
   try {
     const d = new Date(str);
     if (!isNaN(d.getTime())) {
-      const yyyy = d.getUTCFullYear();
-      const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-      const dd = String(d.getUTCDate()).padStart(2, '0');
-      return `${yyyy}-${mm}-${dd}`;
+      const tz = timezone || 'Europe/London';
+      try {
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+          timeZone: tz,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        });
+        return formatter.format(d);
+      } catch {
+        const yyyy = d.getUTCFullYear();
+        const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(d.getUTCDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+      }
     }
   } catch {}
 
   return str;
-}
-
-export function getYesterdayYYYYMMDD(referenceDate?: string): string {
-  const ref = referenceDate ? toYYYYMMDD(referenceDate) : new Date().toISOString().split('T')[0];
-  const parts = ref.split('-');
-  const d = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().split('T')[0];
 }
 
 export function formatPhotoUrls(imageUrls: any): string[] {
@@ -145,6 +200,29 @@ export function parseNumericTarget(val: any, fallback: number): number {
   if (!match) return fallback;
   const parsed = parseFloat(match[0]);
   return isNaN(parsed) ? fallback : parsed;
+}
+
+export function mergeTargetsWithRatchet(
+  existingTargets: Record<string, any> = {},
+  incomingTargets: Record<string, any> = {},
+  existingTimestamps: Record<string, number> = {},
+  incomingTimestamps: Record<string, number> = {},
+  fallbackIncomingTs: number = 0
+): { targets: Record<string, any>; targetTimestamps: Record<string, number> } {
+  const mergedTargets: Record<string, any> = { ...existingTargets };
+  const mergedTimestamps: Record<string, number> = { ...existingTimestamps };
+
+  for (const [key, val] of Object.entries(incomingTargets)) {
+    const existTs = existingTimestamps[key] || 0;
+    const inTs = incomingTimestamps[key] || fallbackIncomingTs;
+
+    if (inTs >= existTs) {
+      mergedTargets[key] = val;
+      mergedTimestamps[key] = inTs;
+    }
+  }
+
+  return { targets: mergedTargets, targetTimestamps: mergedTimestamps };
 }
 
 // ---------------------------------------------------------------------------
@@ -304,8 +382,9 @@ async function getAllUserBiomarkers(possibleUids: string[]): Promise<any[]> {
   return Array.from(bioMap.values());
 }
 
-function computeDayAllowance(targetDate: string, allMeals: any[], targets: any) {
-  const dayMeals = allMeals.filter((m) => toYYYYMMDD(m.date) === targetDate);
+function computeDayAllowance(targetDate: string, allMeals: any[], targets: any, timezone?: string) {
+  const userTz = timezone || 'Europe/London';
+  const dayMeals = allMeals.filter((m) => toYYYYMMDD(m.date, userTz) === targetDate);
 
   const targetCalories = parseNumericTarget(
     targets.calories ?? targets.calorieTarget ?? targets.dailyNutrientTargets?.calories,
@@ -349,6 +428,9 @@ function computeDayAllowance(targetDate: string, allMeals: any[], targets: any) 
       id: m.id,
       name: m.name || 'Logged Meal',
       time: m.date,
+      date_local: toYYYYMMDD(m.date, userTz),
+      time_local: formatTimeInTimezone(m.date, userTz),
+      timezone: userTz,
       calories: Math.round(kcal),
       protein_g: Math.round(pro * 10) / 10,
       carbs_g: Math.round(car * 10) / 10,
@@ -367,6 +449,7 @@ function computeDayAllowance(targetDate: string, allMeals: any[], targets: any) 
 
   return {
     date: targetDate,
+    timezone: userTz,
     target_allowance_kcal: targetCalories,
     consumed_kcal: consumedCalories,
     remaining_kcal: remainingCalories,
@@ -399,12 +482,24 @@ const MCP_TOOLS = [
       properties: {
         action: {
           type: 'string',
-          enum: ['get_profile', 'get_allowance_progress', 'get_dashboard', 'set_targets'],
+          enum: ['get_profile', 'get_allowance_progress', 'get_dashboard', 'set_targets', 'update_profile'],
           description: 'The home action to perform. Use get_allowance_progress to see consumed vs target kcal and macros for today and yesterday.'
         },
         date: {
           type: 'string',
-          description: 'Optional date (YYYY-MM-DD) for allowance progress (defaults to today and yesterday summary)'
+          description: 'Optional date (YYYY-MM-DD, "today", or "yesterday") for allowance progress (defaults to today and yesterday summary)'
+        },
+        timezone: {
+          type: 'string',
+          description: 'User IANA timezone identifier, e.g. "Europe/London", "America/New_York", "Asia/Tokyo"'
+        },
+        language: {
+          type: 'string',
+          description: 'User preferred language, e.g. "en", "id", "fr", "zh"'
+        },
+        nickname: {
+          type: 'string',
+          description: 'User nickname or display name'
         },
         targets: {
           type: 'object',
@@ -412,7 +507,7 @@ const MCP_TOOLS = [
         },
         payload: {
           type: 'object',
-          description: 'Optional payload for the action (alias for targets)'
+          description: 'Optional payload for the action (alias for targets or profile updates)'
         }
       },
       required: ['action']
@@ -431,15 +526,19 @@ const MCP_TOOLS = [
         },
         date: {
           type: 'string',
-          description: 'Filter meals for a single date (YYYY-MM-DD)'
+          description: 'Filter meals for a single date (YYYY-MM-DD, "today", or "yesterday")'
         },
         date_from: {
           type: 'string',
-          description: 'Start of date range (YYYY-MM-DD)'
+          description: 'Start of date range (YYYY-MM-DD, "today", or "yesterday")'
         },
         date_to: {
           type: 'string',
-          description: 'End of date range (YYYY-MM-DD)'
+          description: 'End of date range (YYYY-MM-DD, "today", or "yesterday")'
+        },
+        timezone: {
+          type: 'string',
+          description: 'Optional IANA timezone override (e.g. "Europe/London")'
         },
         search: {
           type: 'string',
@@ -487,11 +586,15 @@ const MCP_TOOLS = [
         },
         date_from: {
           type: 'string',
-          description: 'Start of date range (YYYY-MM-DD)'
+          description: 'Start of date range (YYYY-MM-DD, "today", or "yesterday")'
         },
         date_to: {
           type: 'string',
-          description: 'End of date range (YYYY-MM-DD)'
+          description: 'End of date range (YYYY-MM-DD, "today", or "yesterday")'
+        },
+        timezone: {
+          type: 'string',
+          description: 'Optional IANA timezone override (e.g. "Europe/London")'
         },
         limit: {
           type: 'number',
@@ -592,6 +695,7 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
         if (action === 'get_profile') {
           const profileData = await loadUserProfile(currentUser.uid);
           const rawProfile = profileData.profile || profileData;
+          const userTz = args.timezone || rawProfile.timezone || 'Europe/London';
           const report = profileData.report || {};
           const targets = rawProfile.targets || rawProfile.generalNutrientTargets || report.dailyNutrientTargets || {};
 
@@ -599,13 +703,18 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
             canonicalUid: currentUser.uid,
             email: currentUser.email,
             possibleUids,
+            timezone: userTz,
+            current_date: getCurrentDateInTimezone(userTz),
+            current_time: formatTimeInTimezone(new Date(), userTz),
             profile: {
               nickname: rawProfile.nickname || 'User',
               language: rawProfile.language || 'en',
               userType: rawProfile.userType || 'Standard',
+              timezone: userTz,
               ...rawProfile
             },
             targets,
+            targetTimestamps: profileData.targetTimestamps || rawProfile.targetTimestamps || {},
             report
           };
 
@@ -621,17 +730,18 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
         if (action === 'get_allowance_progress' || action === 'get_dashboard') {
           const profileData = await loadUserProfile(currentUser.uid);
           const rawProfile = profileData.profile || profileData;
+          const userTz = args.timezone || rawProfile.timezone || 'Europe/London';
           const report = profileData.report || {};
           const targets = rawProfile.targets || rawProfile.generalNutrientTargets || report.dailyNutrientTargets || {};
 
           const allMeals = await getAllUserFoods(possibleUids);
 
-          const requestedDate = args.date ? toYYYYMMDD(args.date) : null;
-          const todayDate = toYYYYMMDD(new Date());
-          const yesterdayDate = getYesterdayYYYYMMDD(todayDate);
+          const todayDate = getCurrentDateInTimezone(userTz);
+          const yesterdayDate = getYesterdayInTimezone(userTz);
+          const requestedDate = args.date ? toYYYYMMDD(args.date, userTz) : null;
 
           if (requestedDate && requestedDate !== todayDate && requestedDate !== yesterdayDate) {
-            const requestedProgress = computeDayAllowance(requestedDate, allMeals, targets);
+            const requestedProgress = computeDayAllowance(requestedDate, allMeals, targets, userTz);
             return res.json({
               jsonrpc: '2.0',
               id,
@@ -641,10 +751,13 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
             });
           }
 
-          const todayProgress = computeDayAllowance(todayDate, allMeals, targets);
-          const yesterdayProgress = computeDayAllowance(yesterdayDate, allMeals, targets);
+          const todayProgress = computeDayAllowance(todayDate, allMeals, targets, userTz);
+          const yesterdayProgress = computeDayAllowance(yesterdayDate, allMeals, targets, userTz);
 
           const result: any = {
+            timezone: userTz,
+            current_date: todayDate,
+            current_time: formatTimeInTimezone(new Date(), userTz),
             baseline_daily_allowance_kcal: parseNumericTarget(
               targets.calories ?? report.dailyNutrientTargets?.calories,
               1651
@@ -656,9 +769,11 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
           if (action === 'get_dashboard') {
             result.profile = {
               nickname: rawProfile.nickname || 'User',
-              language: rawProfile.language || 'en'
+              language: rawProfile.language || 'en',
+              timezone: userTz
             };
             result.targets = targets;
+            result.targetTimestamps = profileData.targetTimestamps || rawProfile.targetTimestamps || {};
           }
 
           return res.json({
@@ -676,17 +791,29 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
           const rawProfile = profileData.profile || profileData;
           const report = profileData.report || {};
 
+          const existingTimestamps = profileData.targetTimestamps || rawProfile.targetTimestamps || {};
+          const nowMs = Date.now();
+          const updatedTimestamps = { ...existingTimestamps };
+
+          for (const k of Object.keys(newTargets)) {
+            updatedTimestamps[k] = nowMs;
+          }
+
           rawProfile.targets = {
             ...(rawProfile.targets || {}),
             ...newTargets
           };
+          rawProfile.targetTimestamps = updatedTimestamps;
+
           if (!report.dailyNutrientTargets) report.dailyNutrientTargets = {};
           Object.assign(report.dailyNutrientTargets, newTargets);
+          report.targetTimestamps = updatedTimestamps;
 
           const updatedData = {
             ...profileData,
             profile: rawProfile,
             report,
+            targetTimestamps: updatedTimestamps,
             updated_at: new Date().toISOString()
           };
 
@@ -707,7 +834,59 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
                     {
                       success: true,
                       message: 'Nutrient targets updated successfully',
-                      updated_targets: rawProfile.targets
+                      updated_targets: rawProfile.targets,
+                      targetTimestamps: updatedTimestamps
+                    },
+                    null,
+                    2
+                  )
+                }
+              ]
+            }
+          });
+        }
+
+        if (action === 'update_profile') {
+          const profileData = await loadUserProfile(currentUser.uid);
+          const rawProfile = profileData.profile || profileData;
+
+          if (args.timezone) {
+            rawProfile.timezone = String(args.timezone).trim();
+          }
+          if (args.language) {
+            rawProfile.language = String(args.language).trim();
+          }
+          if (args.nickname) {
+            rawProfile.nickname = String(args.nickname).trim();
+          }
+          if (args.payload && typeof args.payload === 'object') {
+            Object.assign(rawProfile, args.payload);
+          }
+
+          const updatedData = {
+            ...profileData,
+            profile: rawProfile,
+            updated_at: new Date().toISOString()
+          };
+
+          inMemoryMcpProfiles.set(currentUser.uid, updatedData);
+
+          if (isD1Configured()) {
+            await d1UpsertProfile(currentUser.uid, updatedData);
+          }
+
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      success: true,
+                      message: 'Profile updated successfully',
+                      profile: rawProfile
                     },
                     null,
                     2
@@ -726,7 +905,7 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
             content: [
               {
                 type: 'text',
-                text: `Unsupported action "${action}" for tool "manage_home". Available: "get_profile", "get_allowance_progress", "get_dashboard", "set_targets".`
+                text: `Unsupported action "${action}" for tool "manage_home". Available: "get_profile", "get_allowance_progress", "get_dashboard", "set_targets", "update_profile".`
               }
             ]
           }
@@ -738,17 +917,20 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
       // ---------------------------------------------------------------------
       if (toolName === 'manage_meals') {
         const action = args.action;
+        const profileData = await loadUserProfile(currentUser.uid);
+        const rawProfile = profileData.profile || profileData;
+        const userTz = args.timezone || rawProfile.timezone || 'Europe/London';
 
         if (action === 'list') {
           const allMeals = await getAllUserFoods(possibleUids);
 
-          const filterDate = args.date ? toYYYYMMDD(args.date) : null;
-          const dateFrom = args.date_from ? toYYYYMMDD(args.date_from) : null;
-          const dateTo = args.date_to ? toYYYYMMDD(args.date_to) : null;
+          const filterDate = args.date ? toYYYYMMDD(args.date, userTz) : null;
+          const dateFrom = args.date_from ? toYYYYMMDD(args.date_from, userTz) : null;
+          const dateTo = args.date_to ? toYYYYMMDD(args.date_to, userTz) : null;
           const search = args.search ? String(args.search).toLowerCase().trim() : null;
 
           let filtered = allMeals.filter((m) => {
-            const mDate = toYYYYMMDD(m.date);
+            const mDate = toYYYYMMDD(m.date, userTz);
             if (filterDate && mDate !== filterDate) return false;
             if (dateFrom && mDate < dateFrom) return false;
             if (dateTo && mDate > dateTo) return false;
@@ -764,8 +946,8 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
           });
 
           filtered.sort((a, b) => {
-            const da = toYYYYMMDD(a.date);
-            const db = toYYYYMMDD(b.date);
+            const da = toYYYYMMDD(a.date, userTz);
+            const db = toYYYYMMDD(b.date, userTz);
             if (da !== db) return db.localeCompare(da);
             return String(b.updated_at || b.id).localeCompare(String(a.updated_at || a.id));
           });
@@ -774,25 +956,32 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
           const offset = typeof args.offset === 'number' && args.offset > 0 ? args.offset : 0;
           const paged = filtered.slice(offset, offset + limit);
 
-          const formattedMeals = paged.map((m) => ({
-            id: m.id,
-            date: m.date,
-            date_formatted: toYYYYMMDD(m.date),
-            name: m.name || 'Logged Meal',
-            composition: m.composition || '',
-            weight_grams: m.weight_grams || 0,
-            calories: Number(m.calories) || Number(m.nutrients?.calories) || 0,
-            saturated_fat_g: Number(m.saturated_fat) || Number(m.nutrients?.saturatedFat) || 0,
-            sodium_mg: Number(m.sodium) || Number(m.nutrients?.sodium) || 0,
-            added_sugar_g: Number(m.added_sugar) || Number(m.nutrients?.addedSugar) || 0,
-            nutrients: m.nutrients || {},
-            items_breakdown: m.items_breakdown || [],
-            image_urls: formatPhotoUrls(m.image_urls),
-            benefits: m.benefits || '',
-            risks: m.risks || '',
-            recommendation: m.recommendation || '',
-            updated_at: m.updated_at
-          }));
+          const formattedMeals = paged.map((m) => {
+            const dateLocal = toYYYYMMDD(m.date, userTz);
+            const timeLocal = formatTimeInTimezone(m.date, userTz);
+            return {
+              id: m.id,
+              date: m.date,
+              date_local: dateLocal,
+              time_local: timeLocal,
+              timezone: userTz,
+              date_formatted: dateLocal,
+              name: m.name || 'Logged Meal',
+              composition: m.composition || '',
+              weight_grams: m.weight_grams || 0,
+              calories: Number(m.calories) || Number(m.nutrients?.calories) || 0,
+              saturated_fat_g: Number(m.saturated_fat) || Number(m.nutrients?.saturatedFat) || 0,
+              sodium_mg: Number(m.sodium) || Number(m.nutrients?.sodium) || 0,
+              added_sugar_g: Number(m.added_sugar) || Number(m.nutrients?.addedSugar) || 0,
+              nutrients: m.nutrients || {},
+              items_breakdown: m.items_breakdown || [],
+              image_urls: formatPhotoUrls(m.image_urls),
+              benefits: m.benefits || '',
+              risks: m.risks || '',
+              recommendation: m.recommendation || '',
+              updated_at: m.updated_at
+            };
+          });
 
           return res.json({
             jsonrpc: '2.0',
@@ -803,6 +992,7 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
                   type: 'text',
                   text: JSON.stringify(
                     {
+                      timezone: userTz,
                       total: filtered.length,
                       limit,
                       offset,
@@ -861,9 +1051,15 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
             });
           }
 
+          const dateLocal = toYYYYMMDD(foundMeal.date, userTz);
+          const timeLocal = formatTimeInTimezone(foundMeal.date, userTz);
+
           const detail = {
             ...foundMeal,
-            date_formatted: toYYYYMMDD(foundMeal.date),
+            date_formatted: dateLocal,
+            date_local: dateLocal,
+            time_local: timeLocal,
+            timezone: userTz,
             calories: Number(foundMeal.calories) || Number(foundMeal.nutrients?.calories) || 0,
             image_urls: formatPhotoUrls(foundMeal.image_urls)
           };
@@ -897,23 +1093,26 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
       // ---------------------------------------------------------------------
       if (toolName === 'manage_biomarkers') {
         const action = args.action;
+        const profileData = await loadUserProfile(currentUser.uid);
+        const rawProfile = profileData.profile || profileData;
+        const userTz = args.timezone || rawProfile.timezone || 'Europe/London';
         const allBios = await getAllUserBiomarkers(possibleUids);
 
         if (action === 'list') {
-          const dateFrom = args.date_from ? toYYYYMMDD(args.date_from) : null;
-          const dateTo = args.date_to ? toYYYYMMDD(args.date_to) : null;
+          const dateFrom = args.date_from ? toYYYYMMDD(args.date_from, userTz) : null;
+          const dateTo = args.date_to ? toYYYYMMDD(args.date_to, userTz) : null;
           const requestedKeys: string[] = Array.isArray(args.keys)
             ? args.keys
             : args.key ? [args.key] : [];
 
           let filtered = allBios.filter((b) => {
-            const bDate = toYYYYMMDD(b.date);
+            const bDate = toYYYYMMDD(b.date, userTz);
             if (dateFrom && bDate < dateFrom) return false;
             if (dateTo && bDate > dateTo) return false;
             return true;
           });
 
-          filtered.sort((a, b) => toYYYYMMDD(b.date).localeCompare(toYYYYMMDD(a.date)));
+          filtered.sort((a, b) => toYYYYMMDD(b.date, userTz).localeCompare(toYYYYMMDD(a.date, userTz)));
 
           const limit = typeof args.limit === 'number' && args.limit > 0 ? args.limit : 50;
           const paged = filtered.slice(0, limit);
@@ -927,10 +1126,15 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
               }
               biomarkersMap = sub;
             }
+            const dateLocal = toYYYYMMDD(b.date, userTz);
+            const timeLocal = formatTimeInTimezone(b.date, userTz);
             return {
               id: b.id,
               date: b.date,
-              date_formatted: toYYYYMMDD(b.date),
+              date_formatted: dateLocal,
+              date_local: dateLocal,
+              time_local: timeLocal,
+              timezone: userTz,
               biomarkers: biomarkersMap,
               note: b.note || '',
               summary: b.summary || '',
@@ -948,6 +1152,7 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
                   type: 'text',
                   text: JSON.stringify(
                     {
+                      timezone: userTz,
                       total: filtered.length,
                       count: formatted.length,
                       biomarker_logs: formatted
@@ -970,7 +1175,7 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
           const keyReadings = new Map<string, Array<{ date: string; value: number; raw: any; unit: string }>>();
 
           for (const b of allBios) {
-            const dateStr = toYYYYMMDD(b.date);
+            const dateStr = toYYYYMMDD(b.date, userTz);
             const bios = b.biomarkers || {};
             for (const [k, val] of Object.entries(bios)) {
               if (requestedKeys.length > 0 && !requestedKeys.includes(k)) continue;
@@ -1032,7 +1237,7 @@ mcpRouter.post(MCP_PATHS, async (req: Request, res: Response) => {
             jsonrpc: '2.0',
             id,
             result: {
-              content: [{ type: 'text', text: JSON.stringify({ trends }, null, 2) }]
+              content: [{ type: 'text', text: JSON.stringify({ timezone: userTz, trends }, null, 2) }]
             }
           });
         }
