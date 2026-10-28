@@ -17,8 +17,6 @@ const getBiomarkerDef = (key: string) => biomarkerDefinitions.find(d => d.key ==
 
 import { BiomarkerExpandedSection } from './BiomarkerExpandedSection';
 import CombineBiomarkersModal from './CombineBiomarkersModal';
-import { lazyWithRetry } from '../utils/lazyWithRetry';
-const BiomarkerDictionaryModal = lazyWithRetry(() => import('./BiomarkerDictionaryModal'));
 import NotUsedBiomarkersModal from './NotUsedBiomarkersModal';
 import DataSanitizeApprovalModal from './DataSanitizeApprovalModal';
 import TaskPlaceholderCard from './TaskPlaceholderCard';
@@ -235,16 +233,7 @@ export default function MedicalHistoryTab({
   const [searchQuery, setSearchQuery] = useState('');
   const [reviewHistories, setReviewHistories] = useState<{[key: string]: ChatMessage[]}>({});
   const [openSubCategories, setOpenSubCategories] = useState<{ [category: string]: boolean }>({});
-  const [showDictionaryModal, setShowDictionaryModal] = useState(false);
   const [showNotUsedLocalModal, setShowNotUsedLocalModal] = useState(false);
-
-  useEffect(() => {
-    const handleOpenConsolidation = () => {
-      setShowDictionaryModal(true);
-    };
-    window.addEventListener('open-dictionary-consolidation', handleOpenConsolidation);
-    return () => window.removeEventListener('open-dictionary-consolidation', handleOpenConsolidation);
-  }, []);
 
   const toggleSubCategory = (cat: string) => {
     setOpenSubCategories(prev => ({
@@ -923,9 +912,9 @@ export default function MedicalHistoryTab({
             }}
             className="w-full px-2.5 py-1.5 text-xs font-semibold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-theme-border rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none transition-all cursor-pointer shadow-sm"
           >
-            {BIOMARKER_GROUPING_OPTIONS.map(opt => (
+            {BIOMARKER_GROUPING_OPTIONS.filter(opt => opt.value === 'risk').map(opt => (
               <option key={opt.value} value={opt.value}>
-                {opt.value === 'risk' ? t.byRiskCategories : opt.value === 'practice' ? t.byMedicalPractice : t.byMedicalConditions}
+                {t.byRiskCategories}
               </option>
             ))}
           </select>
@@ -1285,15 +1274,6 @@ export default function MedicalHistoryTab({
 
       <div className="mt-6 flex flex-col items-center gap-3 pb-8">
         <div className="flex flex-wrap items-center justify-center gap-3">
-          <button
-            id="open-biomarker-dictionary-btn"
-            onClick={() => setShowDictionaryModal(true)}
-            className="px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-bold text-xs rounded-xl border border-indigo-100 dark:border-indigo-800/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer flex items-center gap-2"
-          >
-            <ClipboardList className="w-4 h-4" />
-            {t.openBiomarkerDictionary}
-          </button>
-
           {onApplyDataSanitize && (
             <button
               type="button"
@@ -1345,34 +1325,6 @@ export default function MedicalHistoryTab({
           onSaveCombine={onCombineBiomarkers}
           onReviewWithAgent={onReviewWithAgent}
         />
-      )}
-
-      {showDictionaryModal && onLogMedical && (
-        <React.Suspense fallback={null}>
-        <BiomarkerDictionaryModal
-          profile={profile?.email === 'demo@healthcockpit.com' ? { ...profile, agentAnalyses: [] } : profile}
-          biomarkers={profile?.email === 'demo@healthcockpit.com' ? {} : biomarkers}
-          biomarkerHistory={profile?.email === 'demo@healthcockpit.com' ? [] : activeHistory}
-          onClose={() => {
-            setShowDictionaryModal(false);
-          }}
-          onReviewWithAgent={onReviewWithAgent}
-          onUpdateProfile={onUpdateProfile ? (updates) => onUpdateProfile(updates) : (updates) => onLogMedical({}, updates, undefined, undefined, undefined, true)}
-          onDeleteBiomarker={onDeleteBiomarker}
-          onFlagNotUsed={onFlagNotUsed}
-          onRestoreNotUsedGlobal={onRestoreNotUsedGlobal}
-          onDeleteMultipleBiomarkers={onDeleteMultipleBiomarkers}
-          onCombineBiomarkers={onCombineBiomarkers!}
-          onBatchCombineBiomarkers={onBatchCombineBiomarkers}
-          onBatchConsolidate={onBatchConsolidate}
-          onStandardizeUnits={onStandardizeUnits}
-          onLogMedical={onLogMedical}
-          onAgentAnalysisSaved={onAgentAnalysisSaved}
-          onDeleteAnalysis={onDeleteAnalysis}
-          selectedModelId={selectedModelId}
-          onChangeModelId={onChangeModelId}
-        />
-        </React.Suspense>
       )}
 
       {/* LOCAL NOT USED BIOMARKERS MODAL FOR MEDICAL HISTORY */}

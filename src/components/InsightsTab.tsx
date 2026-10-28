@@ -505,9 +505,8 @@ export default function InsightsTab({
         customDataReviewBatchKeys,
         setCustomDataReviewBatchKeys,
         setShowCustomDataReviewBatchModal,
-        onOpenDictionary: (key: string) => {
-          setDictionaryPreFillKey(key);
-          setShowDictionaryModal(true);
+        onOpenDictionary: (_key: string) => {
+          // The dictionary modal is gone. Callers keep the callback and open nothing.
         },
         handleApproveBatchStep2
       });
@@ -3052,7 +3051,7 @@ export default function InsightsTab({
           </div>
         </div>
       )}
-      {showDictionaryModal && (
+      {false && showDictionaryModal && (
         <React.Suspense fallback={null}>
         <BiomarkerDictionaryModal
           profile={profile?.email === 'demo@healthcockpit.com' ? { ...profile, agentAnalyses: [] } : profile}
