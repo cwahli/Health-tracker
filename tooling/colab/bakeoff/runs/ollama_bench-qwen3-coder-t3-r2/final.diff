@@ -1,0 +1,60 @@
+diff --git a/tooling/add-pair.js b/tooling/add-pair.js
+index f5b1d00d..b647d0e9 100644
+--- a/tooling/add-pair.js
++++ b/tooling/add-pair.js
+@@ -45,9 +45,7 @@ const fs = require('fs');
+ 
+ const DEFAULT_URL = 'https://ltyyzxnxufvkorekglrf.supabase.co';
+ const TABLE = '/rest/v1/quick_signin_accounts';
+-const argv = process.argv.slice(2);
+-const has = f => argv.includes(f);
+-const val = (f, d) => { const i = argv.indexOf(f); return i === -1 ? d : argv[i + 1]; };
++const { argv, has, val } = require('./lib/args');
+ 
+ const isEmail = s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
+ 
+diff --git a/tooling/bot-dispatch.js b/tooling/bot-dispatch.js
+index 69ccec7d..ba2cedb1 100644
+--- a/tooling/bot-dispatch.js
++++ b/tooling/bot-dispatch.js
+@@ -62,9 +62,7 @@ const { pathToFileURL } = require('url');
+ 
+ const ROOT = path.join(__dirname, '..');
+ 
+-const argv = process.argv.slice(2);
+-const has = f => argv.includes(f);
+-const val = (f, d) => { const i = argv.indexOf(f); return i === -1 ? d : argv[i + 1]; };
++const { argv, has, val } = require('./lib/args');
+ 
+ const DEFAULT_PAGE = 'customer-payment-services';
+ 
+diff --git a/tooling/check-contrast.js b/tooling/check-contrast.js
+index 3d53fd4a..203b8c65 100644
+--- a/tooling/check-contrast.js
++++ b/tooling/check-contrast.js
+@@ -25,9 +25,7 @@ const fs = require('fs');
+ const path = require('path');
+ 
+ const ROOT = path.join(__dirname, '..');
+-const argv = process.argv.slice(2);
+-const has = f => argv.includes(f);
+-const val = (f, d) => { const i = argv.indexOf(f); return i === -1 ? d : argv[i + 1]; };
++const { argv, has, val } = require('./lib/args');
+ 
+ // ------------------------------------------------------------- pure core ---
+ function parseColor(s) {
+diff --git a/tooling/lib/args.js b/tooling/lib/args.js
+new file mode 100644
+index 00000000..f62e0d76
+--- /dev/null
++++ b/tooling/lib/args.js
+@@ -0,0 +1,8 @@
++'use strict';
++const argv = process.argv.slice(2);
++const has = f => argv.includes(f);
++const val = (f, d) => {
++  const i = argv.indexOf(f);
++  return i === -1 ? d : argv[i + 1];
++};
++module.exports = { argv, has, val };
+\ No newline at end of file
