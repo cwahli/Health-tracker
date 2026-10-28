@@ -1,0 +1,17 @@
+diff --git a/components/mtd-pricing/fallback.css b/components/mtd-pricing/fallback.css
+index b9e28c0d..db41f76e 100644
+--- a/components/mtd-pricing/fallback.css
++++ b/components/mtd-pricing/fallback.css
+@@ -43,9 +43,9 @@
+  * `Theme/Text/text secondary color` and `text primary color` in their DARK
+  * modes — docs/TOKENS.md.
+  */
+-.theme-light [data-pattern-id='PS01'] .content-spot--footnotes p {
+-  color: rgba(255, 255, 255, 0.65);
+-}
++      .theme-light [data-pattern-id='PS01'] .content-spot--footnotes p {
++        color: rgba(255, 255, 255, 0.72);
++      }
+ 
+ .theme-light [data-pattern-id='PS01'] .content-spot--footnotes a {
+   color: rgba(255, 255, 255, 0.9);
