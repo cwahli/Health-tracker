@@ -1,0 +1,1 @@
+{"pass": false, "reasons": ["unrelated changes: tooling/fix_contrast.js", "cannot load functions: Unexpected token ':'", "selftest fails"], "changed": ["tooling/check-contrast.js", "tooling/fix_contrast.js"]}

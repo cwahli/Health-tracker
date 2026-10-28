@@ -1,0 +1,142 @@
+diff --git a/tooling/check-contrast.js b/tooling/check-contrast.js
+index 453bf193..dc77afef 100644
+--- a/tooling/check-contrast.js
++++ b/tooling/check-contrast.js
+@@ -46,16 +46,21 @@ function luminance([r, g, b]) {
+   const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+   return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+ }
+-// fg may carry alpha: blend over opaque bg first (how the browser paints it).
+-function ratio(fgStr, bgStr) {
+-  const fg = parseColor(fgStr), bg = parseColor(bgStr);
+-  if (!fg || !bg) return null;
+-  const a = fg[3];
+-  const eff = [0, 1, 2].map(i => fg[i] * (1 - a) + bg[i] * a);
+-  const L1 = luminance(eff), L2 = luminance(bg.slice(0, 3));
+-  return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+-}
+-// SVG asset fills: strip <defs> (clip paths paint nothing), collect fills.
++54:   const eff = [0, 1, 2].map(i => fg[i] * (1 - a) + bg[i] * a);
++55:   const L1 = luminance(eff), L2 = luminance(bg.slice(0, 3));
++56:   return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
++57: }
++58: // fg may carry alpha: blend over a specific background.
++59: function ratio(fgStr, bgStr) {
++60:   const fg = parseColor(fgStr), bg = parseColor(bgStr);
++61:   if (!fg || !bg) return null;
++62:   const a = fg[3];
++63:   const eff = [0, 1, 2].map(i => fg[i] * (1 - a) + bg[i] * a);
++64:   const L1 = luminance(eff), L2 = luminance(bg.slice(0, 3));
++65:   return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
++66: }
++67: // SVG asset fills: strip <defs> (clip paths paint nothing), collect fills.
++68: function svgFills(text) {
+ function svgFills(text) {
+   const noDefs = text.replace(/<defs[\s\S]*?<\/defs>/gi, '');
+   const out = new Set();
+@@ -82,10 +87,25 @@ function selftest() {
+   t('jade on light-grey passes text bar', jade >= 4.5 && jade < 4.7, jade);
+   const bril = ratio('#00D639', '#F2F5F6');
+   t('brilliant on light-grey fails graphics bar', bril !== null && bril < 3.0, bril);
+-  t('identical colors are 1', Math.abs(ratio('#F2F5F6', '#f2f5f6') - 1) < 0.001);
+-  const ink = ratio('rgba(0, 0, 0, 0.9)', 'rgb(242, 245, 246)');
+-  t('90%-black body text passes', ink !== null && ink >= 4.5, ink);
+-  t('bad color is null', ratio('nonsense', '#fff') === null);
++73:   const t = (n, cond, extra) => {
++74:     if (cond) pass++;
++75:     else { fail++; console.log(`  FAIL ${n}${extra === undefined ? '' : ' got ' + extra}`); }
++76:   };
++77:   console.log('WCAG math');
++78:   t('black/white is 21', Math.abs(ratio('#000000', '#ffffff') - 21) < 0.01, ratio('#000000', '#ffffff'));
++79:   const jade = ratio('#008146', '#F2F5F6');
++80:   t('jade on light-grey passes text bar', jade >= 4.5 && jade < 4.7, jade);
++81:   const bril = ratio('#00D639', '#F2F5F6');
++82:   t('brilliant on light-grey fails graphics bar', bril !== null && bril < 3.0, bril);
++83:   t('identical colors are 1', Math.abs(ratio('#F2F5F6', '#f2f5f6') - 1) < 0.001);
++84:   const ink = ratio('rgba(0, 0, 0, 0.9)', 'rgb(242, 245, 246)');
++85:   t('90%-black body text passes', ink !== null && ink >= 4.5, ink);
++86:   const regression = ratio('rgba(0, 0, 0, 0.5)', '#ffffff');
++87:   t('regression: 50%-black on white passes 2.0 threshold', regression !== null && regression >= 2.0, regression);
++88:   t('bad color is null', ratio('nonsense', '#fff') === null);
++89:   console.log('SVG fill extraction');
++90:   const fills = svgFills('<svg fill="none"><defs><rect fill="white"/></defs><path fill="#008146"/><path fill="#008146"/></svg>');
++
+   console.log('SVG fill extraction');
+   const fills = svgFills('<svg fill="none"><defs><rect fill="white"/></defs><path fill="#008146"/><path fill="#008146"/></svg>');
+   t('defs stripped, fills deduped', JSON.stringify(fills) === JSON.stringify(['#008146']), JSON.stringify(fills));
+diff --git a/tooling/fix_contrast.js b/tooling/fix_contrast.js
+new file mode 100644
+index 00000000..18444926
+--- /dev/null
++++ b/tooling/fix_contrast.js
+@@ -0,0 +1,70 @@
++'use strict';
++const fs = require('fs');
++
++function parseColor(s) {
++  s = String(s).trim().toLowerCase();
++  const named = { white: [255, 255, 255, 1], black: [0, 0, 0, 1] };
++  if (named[s]) return named[s];
++  let m = s.match(/^#([0-9a-f]{6})$/);
++  if (m) return [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16), 1];
++  m = s.match(/^#([0-9a-f]{3})$/);
++  if (m) return [0, 1, 2].map(i => parseInt(m[1][i] + m[1][i], 16)).concat(1);
++  m = s.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/);
++  if (m) return [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]];
++  return null;
++}
++
++function luminance([r, g, b]) {
++  const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
++  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
++}
++
++function ratio(fgStr, bgStr) {
++  const fg = parseColor(fgStr), bg = parseColor(bgStr);
++  if (!fg || !bg) return null;
++  const a = fg[3];
++  const eff = [0, 1, 2].map(i => fg[i] * (1 - a) + bg[i] * a);
++  const L1 = luminance(eff), L2 = luminance(bg.slice(0, 3));
++  return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
++}
++
++function svgFills(text) {
++    const noDefs = text.replace(/<defs[\s\S]*?<\/defs>/gi, '');
++    const out = new Set();
++    (noDefs.match(/fill\s*=\s*"([^"]+)"/gi) || []).forEach(m => {
++      const c = m.split('"')[1].toLowerCase();
++      if (c !== 'none') out.add(c);
++    });
++    (noDefs.match(/style\s*=\s*"[^"]*fill\s*:\s*([^;"]+)/gi) || []).forEach(m => {
++      const c = m.split(':').pop().trim().toLowerCase();
++      if (c !== 'none') out.add(c);
++    });
++    return [...out];
++}
++
++function selftest() {
++  let pass = 0, fail = 0;
++  const t = (n, cond, extra) => {
++    if (cond) pass++;
++    else { fail++; console.log(`  FAIL ${n}${extra === undefined ? '' : ' got ' + extra}`); }
++  };
++  console.log('WCAG math');
++  t('black/white is 21', Math.abs(ratio('#000000', '#ffffff') - 21) < 0.01, ratio('#000000', '#ffffff'));
++  const jade = ratio('#008146', '#F2F5F6');
++  t('jade on light-grey passes text bar', jade >= 4.5 && jade < 4.7, jade);
++  const bril = ratio('#00D639', '#F2F5F6');
++  t('brilliant on light-grey fails graphics bar', bril !== null && bril < 3.0, bril);
++  t('identical colors are 1', Math.abs(ratio('#F2F5F6', '#f2f5f6') - 1) < 0.001);
++  const ink = ratio('rgba(0, 0, 0, 0.9)', 'rgb(242, 245, 246)');
++  t('90%-black body text passes', ink !== null && ink >= 4.5, ink);
++  const regression = ratio('rgba(0, 0, 0, 0.5)', '#ffffff');
++  t('regression: 50%-black on white passes 2.0 threshold', regression !== null && regression >= 2.0, regression);
++  t('bad color is null', ratio('nonsense', '#fff') === null);
++  console.log('SVG fill extraction');
++  const fills = svgFills('<svg fill="none"><defs><rect fill="white"/></defs><path fill="#008146"/><path fill="#008146"/></svg>');
++  t('defs stripped, fills deduped', JSON.stringify(fills) === JSON.stringify(['#008146']), JSON.stringify(fills));
++  console.log(`\n${pass} passed, ${fail} failed`);
++  process.exit(fail ? 1 : 0);
++}
++
++selftest();
