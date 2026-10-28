@@ -185,6 +185,19 @@ describe('data entry', () => {
     );
     const openedReversed = openPdfBytes('reversed.pdf', reversed);
     expect(openedReversed.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL', 'LDL 130 mg/dL']);
+    const flate = new TextEncoder().encode(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 2/Kids[3 0 R 4 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 5 0 R>>endobj\n4 0 obj<</Type/Page/Parent 2 0 R/Contents 6 0 R>>endobj\n5 0 obj<</Length 24>>stream\nBT (HDL 50 mg/dL) Tj ET\nendstream\nendobj\n6 0 obj<</Filter /FlateDecode/Length 8>>stream\nABCDEFGH\nendstream\nendobj\n%%EOF',
+    );
+    const openedFlate = openPdfBytes('flate.pdf', flate);
+    expect(openedFlate.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL', '']);
+    expect(openedFlate.batch.parts.map((part) => part.door)).toEqual(['text', 'ocr']);
+    expect(openedFlate.visionCalls).toBe(2);
+    const onlyFlate = new TextEncoder().encode(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R>>endobj\n4 0 obj<</Filter /FlateDecode/Length 8>>stream\nABCDEFGH\nendstream\nendobj\n%%EOF',
+    );
+    const openedOnly = openPdfBytes('only-flate.pdf', onlyFlate);
+    expect(openedOnly.batch.parts[0].door).toBe('ocr');
+    expect(openedOnly.visionCalls).toBe(2);
   });
 
   it('a history cell edit and the agent edit the same observation', () => {

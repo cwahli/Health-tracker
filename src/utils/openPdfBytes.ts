@@ -90,13 +90,28 @@ function orderedPageBodies(objects: Map<number, string>): string[] {
   return ordered.map((id) => objects.get(id) || '');
 }
 
-function pagesFromContents(fileId: string, visible: string): PdfPageDescriptor[] | null {
+/** Object ids whose stream dict carries a /Filter. Those bytes are not text we can read. */
+function compressedStreamIds(raw: string): Set<number> {
+  const ids = new Set<number>();
+  const re = /(\d+)\s+\d+\s+obj([\s\S]*?)(?:stream|endobj)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(raw))) {
+    if (/\/Filter\b/.test(match[2])) ids.add(Number(match[1]));
+  }
+  return ids;
+}
+
+function pagesFromContents(fileId: string, visible: string, raw: string): PdfPageDescriptor[] | null {
   const objects = pdfObjects(visible);
   const pageDicts = orderedPageBodies(objects);
+  const compressed = compressedStreamIds(raw);
   if (!pageDicts.some((dict) => contentIds(dict).length > 0)) return null;
   const pages = pageDicts.map((dict) => {
-    const text = contentIds(dict).map((id) => textOperators(objects.get(id) || '')).join(' ').replace(/\s+/g, ' ').trim();
-    return { text, imageCount: referencedImageCount(dict, objects) };
+    const ids = contentIds(dict);
+    const text = ids.map((id) => textOperators(objects.get(id) || '')).join(' ').replace(/\s+/g, ' ').trim();
+    let imageCount = referencedImageCount(dict, objects);
+    if (ids.some((id) => compressed.has(id))) imageCount = Math.max(imageCount, 1);
+    return { text, imageCount };
   });
   if (!pages.some((page) => page.imageCount > 0)) {
     pages[0].imageCount = (visible.match(/\/Subtype\s*\/Image/g) || []).length;
@@ -119,7 +134,7 @@ export function describePdfBytes(fileId: string, bytes: Uint8Array): PdfPageDesc
     return [{ fileId, page: 1, text: '', imageCount: 0, imageAreaRatio: 0, locked: true }];
   }
   const visible = raw.replace(/\/Filter\s*\/FlateDecode[\s\S]*?endstream/g, '');
-  const perPage = pagesFromContents(fileId, visible);
+  const perPage = pagesFromContents(fileId, visible, raw);
   if (perPage) return perPage;
   const texts: string[] = [];
   const tj = /\(((?:\\.|[^\\)])*)\)\s*Tj/g;
