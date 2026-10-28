@@ -110,15 +110,24 @@ def load_env():
         pass
 
 
+def norm_auth(v):
+    """Secret may hold 'Authorization: Bearer <key>', 'Bearer <key>' or '<key>'."""
+    v = v.strip()
+    if v.lower().startswith("authorization:"):
+        v = v[len("authorization:"):].strip()
+    if not v.lower().startswith("bearer "):
+        v = "Bearer " + v
+    return v
+
+
 def post(payload):
     url = os.environ.get("SAGE_WATCHER_WEBHOOK_URL")
     if not url:
         return
     hdr = {"Content-Type": "application/json", "User-Agent": "sage-watch"}
     auth = os.environ.get("SAGE_WATCHER_WEBHOOK_AUTH", "")
-    if auth:
-        name, sep, val = auth.partition(": ")
-        hdr.update({name: val} if sep else {"Authorization": auth})
+    if auth.strip():
+        hdr["Authorization"] = norm_auth(auth)
     try:
         urllib.request.urlopen(urllib.request.Request(url, json.dumps(payload).encode(), hdr), timeout=15).read()
     except Exception as e:  # never log the URL/headers
