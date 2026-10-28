@@ -1,0 +1,69 @@
+diff --git a/tooling/add-pair.js b/tooling/add-pair.js
+index f5b1d00d..5e4cbc7e 100644
+--- a/tooling/add-pair.js
++++ b/tooling/add-pair.js
+@@ -41,15 +41,14 @@
+  * refuses, which is the safe direction.
+  */
+ 
+-const fs = require('fs');
+-
+-const DEFAULT_URL = 'https://ltyyzxnxufvkorekglrf.supabase.co';
+-const TABLE = '/rest/v1/quick_signin_accounts';
+ const argv = process.argv.slice(2);
+ const has = f => argv.includes(f);
+ const val = (f, d) => { const i = argv.indexOf(f); return i === -1 ? d : argv[i + 1]; };
+ 
+-const isEmail = s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
++const fs = require('fs');
++
++const DEFAULT_URL = 'https://ltyyzxnxufvkorekglrf.supabase.co';
++const TABLE = '/rest/v1/quick_signin_accounts';
+ 
+ function makeCode() {
+   // 10 digits from crypto, not Math.random. Readable aloud over a call, and
+diff --git a/tooling/lib/args.js b/tooling/lib/args.js
+new file mode 100644
+index 00000000..0cbd95d4
+--- /dev/null
++++ b/tooling/lib/args.js
+@@ -0,0 +1,38 @@
++'use strict';
++
++/**
++ * Common argument parsing utilities shared across tooling scripts.
++ * Provides argv, has, and val helper functions.
++ */
++
++/**
++ * Get the parsed yargs argv object with common flags.
++ * @returns {Object} The yargs argv object
++ */
++const argv = process.argv.slice(2).reduce((result, arg) => {
++  const [name, value] = arg.split('=');
++  result[name.replace(/^--?/, '')] = value || true;
++  return result;
++}, {});
++
++/**
++ * Check if a flag or argument is present in argv.
++ * @param {string} name - The argument name without dots
++ * @returns {boolean} True if the argument exists
++ */
++function has(name) {
++  return argv.hasOwnProperty(name) || argv[name];
++}
++
++/**
++ * Get the value of a flag or argument from argv.
++ * @param {string} name - The argument name with dots for nested args
++ * @returns {*} The argument value or undefined
++ */
++function val(name) {
++  return name.split('.').reduce((acc, part) => {
++    return acc && acc[part];
++  }, argv);
++}
++
++module.exports = { argv, has, val };
+\ No newline at end of file

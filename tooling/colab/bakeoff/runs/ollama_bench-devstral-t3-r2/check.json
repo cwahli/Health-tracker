@@ -1,0 +1,1 @@
+{"pass": false, "reasons": ["lib/args.js exports/behaviour wrong", "add-pair still defines helpers", "add-pair does not require ./lib/args", "bot-dispatch still defines helpers", "bot-dispatch does not require ./lib/args", "check-contrast still defines helpers", "check-contrast does not require ./lib/args"], "changed": ["tooling/add-pair.js", "tooling/lib/args.js"]}
