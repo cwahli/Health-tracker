@@ -11,7 +11,11 @@ import {
   setInMemoryMcpBiomarkers,
   clearInMemoryMcpData,
   toYYYYMMDD,
-  getYesterdayYYYYMMDD
+  getYesterdayYYYYMMDD,
+  getCurrentDateInTimezone,
+  getYesterdayInTimezone,
+  formatTimeInTimezone,
+  mergeTargetsWithRatchet
 } from './server_routes_mcp.js';
 import { ADMIN_CREDENTIALS, registerUser, signSessionToken } from './server_auth.js';
 
@@ -1071,6 +1075,216 @@ describe('MCP OAuth 2.1 & Streamable HTTP Handshake Spike', () => {
       expect(vitTrend.latest.value).toBe(62);
       expect(vitTrend.delta).toBe(12);
       expect(vitTrend.trend).toBe('increasing');
+    });
+  });
+
+  describe('Step 3: Timezone Alignment & Server-Side Sync Ratchet', () => {
+    const testUid = 'user_step3_tz_ratchet';
+    const testEmail = 'tz_test@example.com';
+    let accessToken: string;
+
+    beforeEach(() => {
+      accessToken = signSessionToken({
+        uid: testUid,
+        email: testEmail,
+        nickname: 'Tz Ratchet User'
+      });
+      setInMemoryMcpProfile(testUid, {
+        profile: {
+          id: testUid,
+          email: testEmail,
+          timezone: 'Europe/London',
+          targets: { calories: 1800, saturatedFat: 15 }
+        },
+        report: {
+          dailyNutrientTargets: { calories: 1800, saturatedFat: 15 }
+        }
+      });
+    });
+
+    it('resolves timezone-aware dates and relative date tokens correctly', () => {
+      // 1. Relative tokens 'today' and 'yesterday'
+      const londonToday = getCurrentDateInTimezone('Europe/London');
+      const londonYesterday = getYesterdayInTimezone('Europe/London');
+      expect(toYYYYMMDD('today', 'Europe/London')).toBe(londonToday);
+      expect(toYYYYMMDD('yesterday', 'Europe/London')).toBe(londonYesterday);
+
+      // 2. Cross-day boundary check for UTC timestamp
+      // 2026-10-27T23:30:00Z: in Tokyo (UTC+9) it is 2026-10-28; in New York (UTC-4) it is 2026-10-27
+      const ts = '2026-10-27T23:30:00.000Z';
+      const tokyoDate = toYYYYMMDD(ts, 'Asia/Tokyo');
+      const nyDate = toYYYYMMDD(ts, 'America/New_York');
+      expect(tokyoDate).toBe('2026-10-28');
+      expect(nyDate).toBe('2026-10-27');
+
+      // 3. formatTimeInTimezone
+      const tokyoTime = formatTimeInTimezone(ts, 'Asia/Tokyo');
+      const nyTime = formatTimeInTimezone(ts, 'America/New_York');
+      expect(tokyoTime).toContain('08:30:00');
+      expect(nyTime).toContain('19:30:00');
+    });
+
+    it('updates user timezone and language via manage_home:update_profile', async () => {
+      const updateRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'update-tz',
+          method: 'tools/call',
+          params: {
+            name: 'manage_home',
+            arguments: {
+              action: 'update_profile',
+              timezone: 'Asia/Tokyo',
+              language: 'ja',
+              nickname: 'Kenji'
+            }
+          }
+        })
+      });
+      expect(updateRes.status).toBe(200);
+      const updateData = JSON.parse((await updateRes.json()).result.content[0].text);
+      expect(updateData.success).toBe(true);
+      expect(updateData.profile.timezone).toBe('Asia/Tokyo');
+      expect(updateData.profile.language).toBe('ja');
+      expect(updateData.profile.nickname).toBe('Kenji');
+
+      // Verify get_profile reflects the new timezone and outputs current_date
+      const getRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'get-prof-tz',
+          method: 'tools/call',
+          params: {
+            name: 'manage_home',
+            arguments: { action: 'get_profile' }
+          }
+        })
+      });
+      const getData = JSON.parse((await getRes.json()).result.content[0].text);
+      expect(getData.timezone).toBe('Asia/Tokyo');
+      expect(getData.current_date).toBe(getCurrentDateInTimezone('Asia/Tokyo'));
+    });
+
+    it('queries meals with relative token "yesterday" and attaches date_local and time_local', async () => {
+      const yesterdayStr = getYesterdayInTimezone('Europe/London');
+      const todayStr = getCurrentDateInTimezone('Europe/London');
+
+      setInMemoryMcpFoods(testUid, [
+        {
+          id: 'meal-yest-1',
+          firebase_uid: testUid,
+          date: `${yesterdayStr}T19:30:00.000Z`,
+          name: 'Steak & Salad',
+          calories: 650,
+          saturated_fat: 12
+        },
+        {
+          id: 'meal-today-1',
+          firebase_uid: testUid,
+          date: `${todayStr}T12:00:00.000Z`,
+          name: 'Chicken Rice',
+          calories: 500,
+          saturated_fat: 4
+        }
+      ]);
+
+      const res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'list-yest',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: { action: 'list', date: 'yesterday' }
+          }
+        })
+      });
+      const data = JSON.parse((await res.json()).result.content[0].text);
+      expect(data.meals.length).toBe(1);
+      expect(data.meals[0].id).toBe('meal-yest-1');
+      expect(data.meals[0].date_local).toBe(yesterdayStr);
+      expect(data.meals[0].timezone).toBe('Europe/London');
+      expect(data.meals[0].time_local).toBeTruthy();
+    });
+
+    it('enforces target ratchet: newer MCP edits cannot be overwritten by stale client sync', () => {
+      const now = Date.now();
+      const existingTargets = { calories: 1651, saturatedFat: 12 };
+      const existingTimestamps = { calories: now, saturatedFat: now };
+
+      // Case 1: Stale client push (e.g. from an old tab with timestamp from 1 hour ago)
+      const staleIncomingTargets = { calories: 2000, saturatedFat: 20 };
+      const staleIncomingTimestamps = { calories: now - 3600000, saturatedFat: now - 3600000 };
+
+      const staleMerge = mergeTargetsWithRatchet(
+        existingTargets,
+        staleIncomingTargets,
+        existingTimestamps,
+        staleIncomingTimestamps,
+        now - 3600000
+      );
+      // Stale incoming must be rejected; newer existing targets preserved
+      expect(staleMerge.targets.calories).toBe(1651);
+      expect(staleMerge.targets.saturatedFat).toBe(12);
+
+      // Case 2: Fresh client push (newer timestamp)
+      const freshIncomingTargets = { calories: 1750, saturatedFat: 14 };
+      const freshIncomingTimestamps = { calories: now + 5000, saturatedFat: now + 5000 };
+
+      const freshMerge = mergeTargetsWithRatchet(
+        existingTargets,
+        freshIncomingTargets,
+        existingTimestamps,
+        freshIncomingTimestamps,
+        now + 5000
+      );
+      // Fresh incoming must win
+      expect(freshMerge.targets.calories).toBe(1750);
+      expect(freshMerge.targets.saturatedFat).toBe(14);
+      expect(freshMerge.targetTimestamps.calories).toBe(now + 5000);
+    });
+
+    it('stamps targetTimestamps when updating targets via set_targets', async () => {
+      const setRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'set-targets-ts',
+          method: 'tools/call',
+          params: {
+            name: 'manage_home',
+            arguments: {
+              action: 'set_targets',
+              targets: { calories: 1700, totalFibre: 35 }
+            }
+          }
+        })
+      });
+      const data = JSON.parse((await setRes.json()).result.content[0].text);
+      expect(data.success).toBe(true);
+      expect(data.updated_targets.calories).toBe(1700);
+      expect(data.targetTimestamps).toBeTruthy();
+      expect(data.targetTimestamps.calories).toBeGreaterThan(0);
+      expect(data.targetTimestamps.totalFibre).toBeGreaterThan(0);
     });
   });
 });
