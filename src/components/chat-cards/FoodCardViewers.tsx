@@ -899,16 +899,24 @@ export const AgentThoughtBox = ({
   const dietitianInstruction = dietInstruction ?? dietitianInstructionLegacy;
   const dietitianAnswer = dietAnswer ?? dietitianAnswerLegacy;
   const t = translations[language || "en"] || translations.en;
-  const [isExpanded, setIsExpanded] = React.useState(!!isLive);
+  // Collapsed by default — including while live analysis runs. User expands manually.
+  const [isExpanded, setIsExpanded] = React.useState(false);
 
-  React.useEffect(() => {
-    setIsExpanded(!!isLive);
-  }, [isLive]);
+  // Filter out transient progress placeholders that previously rendered under the
+  // "Vision Scout Scratchpad" header (e.g. "Applying portion selection...").
+  const isPlaceholderScoutText = (s?: string) => {
+    if (!s) return false;
+    const n = s.trim().toLowerCase();
+    return n === 'applying portion selection...' || n === 'applying portion selection…' ||
+      n === 'applying portion selection' || n === 'analysis queued...' ||
+      n === 'analysis queued…' || n === 'analysis queued';
+  };
+  const visibleScoutScratchpad = isPlaceholderScoutText(scoutScratchpad) ? undefined : scoutScratchpad;
 
-  const hasScratchpad = !!scoutScratchpad || !!dietitianScratchpad || !!activeStage || !!backendLogs || !!globalLiveLogs;
+  const hasScratchpad = !!visibleScoutScratchpad || !!dietitianScratchpad || !!activeStage || !!backendLogs || !!globalLiveLogs;
   if (!hasScratchpad && !placeholderStep && !isLive && (!warnings || warnings.length === 0)) return null;
 
-  const isImageAnalysis = hasImage ?? (!!scoutScratchpad || (placeholderStep && placeholderStep.toLowerCase().includes("photo")));
+  const isImageAnalysis = hasImage ?? (!!visibleScoutScratchpad || (placeholderStep && placeholderStep.toLowerCase().includes("photo")));
 
   // Derive step states
   let step1Status: 'completed' | 'active' | 'pending' = 'pending';
@@ -1006,10 +1014,10 @@ export const AgentThoughtBox = ({
                     <ScratchpadMarkdownViewer content={scoutInstruction} />
                   </div>
                 )}
-                {scoutScratchpad && (
+                {visibleScoutScratchpad && (
                   <div className="flex flex-col gap-1 mt-1">
                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{t.visionScoutScratchpad}</span>
-                    <ScratchpadMarkdownViewer content={scoutScratchpad} />
+                    <ScratchpadMarkdownViewer content={visibleScoutScratchpad} />
                   </div>
                 )}
                 {scoutAnswer && (

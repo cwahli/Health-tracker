@@ -3209,14 +3209,14 @@ export const isValEmpty = (val: any): boolean => {
 };
 
 export const getBiomarkerColor = (status: 'normal' | 'low' | 'high' | 'critical' | 'flagged' | 'unknown' | string): string => {
-  if (!status) return 'text-slate-400 bg-theme-bg/30';
+  if (!status) return 'text-slate-600 dark:text-slate-300 bg-theme-bg/30';
   const s = status.toLowerCase().trim();
 
   if (s === 'flagged' || s.includes('flagged')) {
-    return 'text-purple-600 bg-purple-50 dark:bg-purple-950/30 font-bold';
+    return 'text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/30 font-bold';
   }
   if (s.includes('critical') || s.includes('obese')) {
-    return 'text-rose-500 bg-rose-50 dark:bg-rose-950/30';
+    return 'text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/30';
   }
   if (
     s.includes('at risk') ||
@@ -3235,7 +3235,7 @@ export const getBiomarkerColor = (status: 'normal' | 'low' | 'high' | 'critical'
     s === 'low' ||
     s === 'high'
   ) {
-    return 'text-amber-500 bg-amber-50 dark:bg-amber-950/30';
+    return 'text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30';
   }
   if (
     s.includes('optimal') ||
@@ -3244,9 +3244,9 @@ export const getBiomarkerColor = (status: 'normal' | 'low' | 'high' | 'critical'
     s === 'normal' ||
     s === 'ok'
   ) {
-    return 'text-emerald-500 bg-emerald-50 dark:bg-emerald-950/30';
+    return 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/30';
   }
-  return 'text-slate-400 bg-theme-bg/30';
+  return 'text-slate-600 dark:text-slate-300 bg-theme-bg/30';
 };
 
 export const getBiomarkerBorderColor = (status: 'normal' | 'low' | 'high' | 'critical' | 'flagged' | 'unknown' | string): string => {
@@ -3357,7 +3357,7 @@ export function getBiomarkerEffectiveRisk(
     s.includes('high') ||
     s.includes('low')
   ) {
-    return { score: magnitude === null ? UNKNOWN_RISK_SCORE : magnitude, severity, tag: tag || 'At risk', bg: 'bg-amber-500', text: 'text-white' };
+    return { score: magnitude === null ? UNKNOWN_RISK_SCORE : magnitude, severity, tag: tag || 'At risk', bg: 'bg-amber-500', text: 'text-slate-950' };
   }
 
   // 2. If tag or status is Critical / Obese
@@ -3373,10 +3373,10 @@ export function getBiomarkerEffectiveRisk(
     s.includes('ok') ||
     rawStatus === 'normal'
   ) {
-    return { score: 0, severity: 0, tag: tag || 'Normal', bg: 'bg-emerald-600', text: 'text-white' };
+    return { score: 0, severity: 0, tag: tag || 'Normal', bg: 'bg-emerald-700', text: 'text-white' };
   }
 
-  return { score: UNKNOWN_RISK_SCORE, severity: null, tag: tag || 'Unknown', bg: 'bg-slate-400', text: 'text-white' };
+  return { score: UNKNOWN_RISK_SCORE, severity: null, tag: tag || 'Unknown', bg: 'bg-slate-600', text: 'text-white' };
 }
 
 /**

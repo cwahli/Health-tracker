@@ -85,7 +85,7 @@ export function MealPortionController({
             <button
               type="button"
               onClick={onAcceptPortion}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md transition-all cursor-pointer flex items-center justify-center"
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white shadow-md transition-all cursor-pointer flex items-center justify-center"
             >
               ✓ {t.acceptPortion || 'Accept'}
             </button>

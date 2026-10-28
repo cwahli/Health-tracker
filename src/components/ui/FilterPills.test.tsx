@@ -6,7 +6,7 @@ import { FilterPills } from './FilterPills';
 describe('FilterPills UI Primitive', () => {
   const items = [
     { id: 'all', label: 'All Items', count: 12 },
-    { id: 'active', label: 'Active', count: 5, activeColorClass: 'bg-emerald-600 text-white' },
+    { id: 'active', label: 'Active', count: 5, activeColorClass: 'bg-emerald-700 text-white' },
     { id: 'flagged', label: 'Flagged', count: 2, activeColorClass: 'bg-rose-600 text-white' },
   ];
 
@@ -28,6 +28,6 @@ describe('FilterPills UI Primitive', () => {
     );
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('data-testid="filter-pill-active"');
-    expect(html).toContain('bg-emerald-600');
+    expect(html).toContain('bg-emerald-700');
   });
 });

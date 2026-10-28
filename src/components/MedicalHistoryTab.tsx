@@ -794,7 +794,7 @@ export default function MedicalHistoryTab({
   // Helper to calculate highest risk info for a subcategory
   const getSubCategoryRiskInfo = (cat: string) => {
     if (cat === 'Biomarkers to Review' || cat === 'Unknown Range') {
-      return { label: t.biomarkersToReview, bg: 'bg-amber-600', text: 'text-white' };
+      return { label: t.biomarkersToReview, bg: 'bg-amber-700', text: 'text-white' };
     }
     const groupMarkers = getBiomarkersForSubCategory(cat);
     let highestRisk: BiomarkerEffectiveRisk = {
@@ -1039,7 +1039,7 @@ export default function MedicalHistoryTab({
                             });
                           }
                         }}
-                        className="px-2.5 py-1 text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors shrink-0 cursor-pointer shadow-xs"
+                        className="px-2.5 py-1 text-[11px] font-bold bg-amber-700 hover:bg-amber-800 text-white rounded-lg transition-colors shrink-0 cursor-pointer shadow-xs"
                       >
                         {t.fixAllWithDataReviewAgent}
                       </button>
