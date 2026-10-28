@@ -1,0 +1,13 @@
+diff --git a/tooling/check-contrast.js b/tooling/check-contrast.js
+index 453bf193..3d53fd4a 100644
+--- a/tooling/check-contrast.js
++++ b/tooling/check-contrast.js
+@@ -51,7 +51,7 @@ function ratio(fgStr, bgStr) {
+   const fg = parseColor(fgStr), bg = parseColor(bgStr);
+   if (!fg || !bg) return null;
+   const a = fg[3];
+-  const eff = [0, 1, 2].map(i => fg[i] * (1 - a) + bg[i] * a);
++  const eff = [0, 1, 2].map(i => fg[i] * a + bg[i] * (1 - a));
+   const L1 = luminance(eff), L2 = luminance(bg.slice(0, 3));
+   return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+ }

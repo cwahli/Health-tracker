@@ -1,0 +1,1 @@
+{"pass": false, "reasons": ["no regression test added to selftest"], "changed": ["tooling/check-contrast.js"]}
