@@ -1,0 +1,51 @@
+diff --git a/components/mtd-callout/callout.css b/components/mtd-callout/callout.css
+new file mode 100644
+index 00000000..1d6d6843
+--- /dev/null
++++ b/components/mtd-callout/callout.css
+@@ -0,0 +1,44 @@
++.mtd-callout {
++  box-sizing: border-box;
++  width: 100%;
++  max-width: 560px;
++  padding: 24px 32px;
++  background-color: #F2F5F6;
++  border-radius: 16px;
++  border-left: 4px solid #00D639;
++  font-family: 'Sage UI', Arial, sans-serif;
++}
++
++.mtd-callout__title {
++  margin: 0;
++  font-size: 20px;
++  line-height: 28px;
++  font-weight: 600;
++  color: #000000;
++}
++
++.mtd-callout__body {
++  margin: 8px 0 0;
++  font-size: 16px;
++  line-height: 24px;
++  font-weight: 400;
++  color: rgba(0, 0, 0, 0.65);
++}
++
++.mtd-callout__cta {
++  margin-top: 16px;
++  display: inline-flex;
++  min-height: 44px;
++  padding: 0 24px;
++}
++
++@media (max-width: 767px) {
++  .mtd-callout {
++    padding: 16px 20px;
++  }
++
++  .mtd-callout__title {
++    font-size: 18px;
++    line-height: 24px;
++  }
++}
+\ No newline at end of file
