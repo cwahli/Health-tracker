@@ -1287,4 +1287,678 @@ describe('MCP OAuth 2.1 & Streamable HTTP Handshake Spike', () => {
       expect(data.targetTimestamps.totalFibre).toBeGreaterThan(0);
     });
   });
+
+  describe('Step 4: Shared Domain Service & Mutation Tools (manage_meals, manage_biomarkers, manage_home)', () => {
+    const testUid = 'user_step4_mutations';
+    const testEmail = 'step4_test@example.com';
+    let accessToken: string;
+    let createdMealId = '';
+    let createdBioDate = '';
+    let createdBioId = '';
+
+    beforeEach(() => {
+      accessToken = signSessionToken({
+        uid: testUid,
+        email: testEmail,
+        nickname: 'Step4 User'
+      });
+    });
+
+    it('logs structured meals using finalizeDishLedger (single kcal writer)', async () => {
+      const logRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'log-meal-1',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: {
+              action: 'log_structured',
+              name: 'Grilled Salmon & Steamed Broccoli',
+              date: 'today',
+              items: [
+                {
+                  name: 'Salmon',
+                  weightGrams: 200,
+                  protein: 40,
+                  totalFat: 24,
+                  carbohydrates: 0,
+                  sodium: 120,
+                  saturatedFat: 5
+                },
+                {
+                  name: 'Steamed Broccoli',
+                  weightGrams: 150,
+                  protein: 4,
+                  totalFat: 0.5,
+                  carbohydrates: 10,
+                  sodium: 50,
+                  saturatedFat: 0.1
+                }
+              ]
+            }
+          }
+        })
+      });
+
+      expect(logRes.status).toBe(200);
+      const data = JSON.parse((await logRes.json()).result.content[0].text);
+      expect(data.id).toBeTruthy();
+      createdMealId = data.id;
+
+      // Atwater: Salmon (40*4 + 24*9 = 376) + Broccoli (4*4 + 10*4 + 0.5*9 = 60.5) = ~436.5 kcal
+      expect(data.calories).toBeGreaterThanOrEqual(430);
+      expect(data.calories).toBeLessThanOrEqual(445);
+      expect(data.items_breakdown).toHaveLength(2);
+      expect(data.receiptTable).toBeTruthy();
+      expect(data.date_local).toBe(getCurrentDateInTimezone('Europe/London'));
+
+      // Verify meal appears in manage_meals:list
+      const listRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'list-check-1',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: { action: 'list', search: 'Salmon' }
+          }
+        })
+      });
+      const listData = JSON.parse((await listRes.json()).result.content[0].text);
+      expect(listData.total).toBeGreaterThanOrEqual(1);
+      expect(listData.meals.some((m: any) => m.id === createdMealId)).toBe(true);
+    });
+
+    it('patches an existing meal via manage_meals:edit', async () => {
+      // 1. Create a meal first
+      const createRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'create-for-edit',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: {
+              action: 'log_structured',
+              name: 'Salmon Dish',
+              items: [
+                { name: 'Salmon', weightGrams: 200, protein: 40, totalFat: 24, carbohydrates: 0 }
+              ]
+            }
+          }
+        })
+      });
+      const mealToEdit = JSON.parse((await createRes.json()).result.content[0].text);
+
+      const editRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'edit-meal-1',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: {
+              action: 'edit',
+              meal_id: mealToEdit.id,
+              commands: [
+                {
+                  action: 'update_weight',
+                  itemName: 'Salmon',
+                  newWeightGrams: 250
+                }
+              ]
+            }
+          }
+        })
+      });
+
+      expect(editRes.status).toBe(200);
+      const editData = JSON.parse((await editRes.json()).result.content[0].text);
+      expect(editData.success).toBe(true);
+      expect(editData.changed).toBe(true);
+      const salmonItem = editData.meal.items_breakdown.find((it: any) => it.name === 'Salmon');
+      expect(salmonItem.weightGrams).toBe(250);
+      // Increased weight increases calories
+      expect(editData.meal.calories).toBeGreaterThan(450);
+    });
+
+    it('refuses destructive empty meal in manage_meals:edit', async () => {
+      // Create a meal with 2 items
+      const createRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'create-for-refuse',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: {
+              action: 'log_structured',
+              name: 'Two Item Dish',
+              items: [
+                { name: 'Salmon', weightGrams: 200, protein: 40, totalFat: 24, carbohydrates: 0 },
+                { name: 'Broccoli', weightGrams: 100, protein: 3, totalFat: 0, carbohydrates: 7 }
+              ]
+            }
+          }
+        })
+      });
+      const meal = JSON.parse((await createRes.json()).result.content[0].text);
+
+      const editRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'edit-empty-refuse',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: {
+              action: 'edit',
+              meal_id: meal.id,
+              commands: [
+                { action: 'remove_item', itemName: 'Salmon' },
+                { action: 'remove_item', itemName: 'Broccoli' }
+              ]
+            }
+          }
+        })
+      });
+
+      const resBody = await editRes.json();
+      expect(resBody.result.isError).toBe(true);
+      expect(resBody.result.content[0].text).toContain('Cannot delete all items from a meal');
+    });
+
+    it('deletes meal via manage_meals:delete and writes tombstone in deletedFoodLogIds', async () => {
+      // Create meal to delete
+      const createRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'create-for-del',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: {
+              action: 'log_structured',
+              name: 'Disposable Meal',
+              items: [
+                { name: 'Apple', weightGrams: 150, protein: 0.5, totalFat: 0.3, carbohydrates: 21 }
+              ]
+            }
+          }
+        })
+      });
+      const meal = JSON.parse((await createRes.json()).result.content[0].text);
+
+      const delRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'del-meal-1',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: {
+              action: 'delete',
+              meal_id: meal.id
+            }
+          }
+        })
+      });
+
+      expect(delRes.status).toBe(200);
+      const delData = JSON.parse((await delRes.json()).result.content[0].text);
+      expect(delData.success).toBe(true);
+      expect(delData.mealId).toBe(meal.id);
+      expect(delData.deleted_at).toBeGreaterThan(0);
+
+      // Verify tombstone stamped on user profile
+      const profRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'check-tombstone',
+          method: 'tools/call',
+          params: {
+            name: 'manage_home',
+            arguments: { action: 'get_profile' }
+          }
+        })
+      });
+      const profData = JSON.parse((await profRes.json()).result.content[0].text);
+      expect(profData.profile.deletedFoodLogIds[meal.id]).toBeGreaterThan(0);
+    });
+
+    it('logs biomarker entries with same-day merging, canonical key mapping, and plausibility gates', async () => {
+      // 1. Log first batch of biomarkers
+      const log1Res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'bio-log-1',
+          method: 'tools/call',
+          params: {
+            name: 'manage_biomarkers',
+            arguments: {
+              action: 'log_entries',
+              date: 'today',
+              readings: {
+                'LDL Cholesterol': 3.2,
+                'HbA1c': 5.4
+              },
+              note: 'Morning clinic draw'
+            }
+          }
+        })
+      });
+
+      expect(log1Res.status).toBe(200);
+      const log1Data = JSON.parse((await log1Res.json()).result.content[0].text);
+      expect(log1Data.success).toBe(true);
+      const recId = log1Data.record.id;
+      // Canonical mapping check ('LDL Cholesterol' -> 'ldl')
+      expect(log1Data.record.biomarkers.ldl).toBe(3.2);
+      expect(log1Data.record.biomarkers.hba1c).toBe(5.4);
+
+      // 2. Log second batch on the same day -> MUST merge without duplicate records
+      const log2Res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'bio-log-2',
+          method: 'tools/call',
+          params: {
+            name: 'manage_biomarkers',
+            arguments: {
+              action: 'log_entries',
+              date: 'today',
+              readings: {
+                'Fasting Glucose': 5.1
+              }
+            }
+          }
+        })
+      });
+
+      const log2Data = JSON.parse((await log2Res.json()).result.content[0].text);
+      expect(log2Data.success).toBe(true);
+      expect(log2Data.record.id).toBe(recId);
+      // All three markers present in single record
+      expect(log2Data.record.biomarkers.ldl).toBe(3.2);
+      expect(log2Data.record.biomarkers.hba1c).toBe(5.4);
+      expect(log2Data.record.biomarkers.fasting_glucose).toBe(5.1);
+
+      // 3. Improbable value test
+      const log3Res = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'bio-log-improbable',
+          method: 'tools/call',
+          params: {
+            name: 'manage_biomarkers',
+            arguments: {
+              action: 'log_entries',
+              date: 'today',
+              readings: {
+                'hematocrit': 42.1 // Expected 0.36-0.50
+              }
+            }
+          }
+        })
+      });
+      const log3Data = JSON.parse((await log3Res.json()).result.content[0].text);
+      expect(log3Data.warnings).toBeTruthy();
+      expect(log3Data.warnings[0]).toContain('flagged as improbable');
+    });
+
+    it('deletes biomarker values field-by-field and whole record with tombstone', async () => {
+      // 1. Create a biomarker record with 2 fields
+      const createRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'create-for-del-bio',
+          method: 'tools/call',
+          params: {
+            name: 'manage_biomarkers',
+            arguments: {
+              action: 'log_entries',
+              date: 'today',
+              readings: {
+                'LDL Cholesterol': 3.2,
+                'Fasting Glucose': 5.1
+              }
+            }
+          }
+        })
+      });
+      const createData = JSON.parse((await createRes.json()).result.content[0].text);
+      const bioRecordId = createData.record.id;
+
+      // 2. Delete single field 'fasting_glucose'
+      const delFieldRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'del-bio-field',
+          method: 'tools/call',
+          params: {
+            name: 'manage_biomarkers',
+            arguments: {
+              action: 'delete_values',
+              record_id: bioRecordId,
+              key: 'fasting_glucose'
+            }
+          }
+        })
+      });
+
+      expect(delFieldRes.status).toBe(200);
+      const delFieldData = JSON.parse((await delFieldRes.json()).result.content[0].text);
+      expect(delFieldData.success).toBe(true);
+      expect(delFieldData.deleted_key).toBe('fasting_glucose');
+      expect(delFieldData.remaining_biomarkers.fasting_glucose).toBeUndefined();
+      expect(delFieldData.remaining_biomarkers.ldl).toBe(3.2);
+
+      // 3. Delete entire record
+      const delRecordRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'del-bio-record',
+          method: 'tools/call',
+          params: {
+            name: 'manage_biomarkers',
+            arguments: {
+              action: 'delete_values',
+              record_id: bioRecordId
+            }
+          }
+        })
+      });
+
+      const delRecordData = JSON.parse((await delRecordRes.json()).result.content[0].text);
+      expect(delRecordData.success).toBe(true);
+      expect(delRecordData.deleted_id).toBe(bioRecordId);
+      expect(delRecordData.deleted_at).toBeGreaterThan(0);
+
+      // Verify tombstone in profile
+      const profRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'check-bio-tombstone',
+          method: 'tools/call',
+          params: {
+            name: 'manage_home',
+            arguments: { action: 'get_profile' }
+          }
+        })
+      });
+      const profData = JSON.parse((await profRes.json()).result.content[0].text);
+      expect(profData.profile.deletedBiomarkerLogIds[bioRecordId]).toBeGreaterThan(0);
+    });
+
+    it('manages clinical actions and daily habits via manage_home', async () => {
+      // 1. Add action
+      const addActRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'act-add',
+          method: 'tools/call',
+          params: {
+            name: 'manage_home',
+            arguments: {
+              action: 'manage_actions',
+              sub_action: 'add',
+              item: {
+                task: 'Schedule Coronary Calcium CT Scan',
+                explanation: 'Evaluate calcified plaque score',
+                priority: 'high',
+                type: 'test'
+              }
+            }
+          }
+        })
+      });
+      const addActData = JSON.parse((await addActRes.json()).result.content[0].text);
+      expect(addActData.success).toBe(true);
+      expect(addActData.actions).toHaveLength(1);
+      const actionId = addActData.actions[0].id;
+      expect(addActData.actions[0].task).toBe('Schedule Coronary Calcium CT Scan');
+      expect(addActData.actions[0].completed).toBe(false);
+
+      // 2. Toggle action
+      const toggleActRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'act-toggle',
+          method: 'tools/call',
+          params: {
+            name: 'manage_home',
+            arguments: {
+              action: 'manage_actions',
+              sub_action: 'toggle',
+              itemId: actionId
+            }
+          }
+        })
+      });
+      const toggleActData = JSON.parse((await toggleActRes.json()).result.content[0].text);
+      expect(toggleActData.actions.find((a: any) => a.id === actionId).completed).toBe(true);
+
+      // 3. Add habit
+      const addHabitRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'habit-add',
+          method: 'tools/call',
+          params: {
+            name: 'manage_home',
+            arguments: {
+              action: 'manage_habits',
+              sub_action: 'add',
+              habit: {
+                activity: 'Zone 2 Cardio 45m',
+                target: 'Daily'
+              }
+            }
+          }
+        })
+      });
+      const addHabitData = JSON.parse((await addHabitRes.json()).result.content[0].text);
+      expect(addHabitData.success).toBe(true);
+      expect(addHabitData.dailyBenefits).toHaveLength(1);
+      const habitId = addHabitData.dailyBenefits[0].id;
+
+      // 4. Toggle habit
+      const toggleHabitRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'habit-toggle',
+          method: 'tools/call',
+          params: {
+            name: 'manage_home',
+            arguments: {
+              action: 'manage_habits',
+              sub_action: 'toggle',
+              habitId
+            }
+          }
+        })
+      });
+      const toggleHabitData = JSON.parse((await toggleHabitRes.json()).result.content[0].text);
+      expect(toggleHabitData.dailyBenefits.find((h: any) => h.id === habitId).completed).toBe(true);
+    });
+
+    it('enforces idempotency preventing duplicate operations on agent retry', async () => {
+      const idempotencyKey = 'idem-unique-key-12345';
+
+      // 1. First execution
+      const res1 = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'idem-call-1',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: {
+              action: 'log_structured',
+              idempotency_key: idempotencyKey,
+              name: 'Idempotency Test Meal',
+              items: [{ name: 'Greek Yogurt', weightGrams: 170, protein: 17, totalFat: 0, carbohydrates: 6 }]
+            }
+          }
+        })
+      });
+      const data1 = JSON.parse((await res1.json()).result.content[0].text);
+      const firstMealId = data1.id;
+
+      // 2. Retry execution with SAME idempotency_key
+      const res2 = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'idem-call-2',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: {
+              action: 'log_structured',
+              idempotency_key: idempotencyKey,
+              name: 'Idempotency Test Meal',
+              items: [{ name: 'Greek Yogurt', weightGrams: 170, protein: 17, totalFat: 0, carbohydrates: 6 }]
+            }
+          }
+        })
+      });
+      const data2 = JSON.parse((await res2.json()).result.content[0].text);
+
+      // Must return identical cached record and meal ID without duplicate insertion
+      expect(data2.id).toBe(firstMealId);
+      expect(data2.name).toBe('Idempotency Test Meal');
+
+      // Verify in list that only ONE such meal exists
+      const listRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'idem-list-check',
+          method: 'tools/call',
+          params: {
+            name: 'manage_meals',
+            arguments: { action: 'list', search: 'Idempotency Test Meal' }
+          }
+        })
+      });
+      const listData = JSON.parse((await listRes.json()).result.content[0].text);
+      const matchingMeals = listData.meals.filter((m: any) => m.name === 'Idempotency Test Meal');
+      expect(matchingMeals).toHaveLength(1);
+    });
+  });
 });
