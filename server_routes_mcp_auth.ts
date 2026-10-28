@@ -1,7 +1,30 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { isD1Configured, d1Query } from './server_d1.js';
 import { authenticateUser, signSessionToken, verifySessionToken } from './server_auth.js';
+
+let firebaseClientConfig: any = null;
+try {
+  const cfgRaw = fs.readFileSync(path.resolve(process.cwd(), 'firebase-applet-config.json'), 'utf8');
+  firebaseClientConfig = JSON.parse(cfgRaw);
+} catch {
+  firebaseClientConfig = { projectId: 'health-tracker-b04dd', apiKey: '', authDomain: 'health-tracker-b04dd.firebaseapp.com' };
+}
+
+export async function verifyFirebaseTokenHelper(token: string): Promise<{ uid: string; email?: string } | null> {
+  if (!token || typeof token !== 'string') return null;
+  if (process.env.NODE_ENV === 'test' && token.startsWith('test_firebase_token_')) {
+    const parts = token.replace('test_firebase_token_', '').split('__');
+    return { uid: parts[0] || 'test_uid', email: parts[1] || 'test@example.com' };
+  }
+  try {
+    const { getAuth } = await import('firebase-admin/auth');
+    const decoded = await getAuth().verifyIdToken(token);
+    return { uid: decoded.uid, email: decoded.email };
+  } catch { return null; }
+}
 
 export const mcpAuthRouter = Router();
 
@@ -37,6 +60,7 @@ export interface StoredMcpAuthCode {
   code: string;
   client_id: string;
   firebase_uid: string;
+  user_email?: string;
   code_challenge: string;
   code_challenge_method: string;
   redirect_uri: string;
@@ -320,7 +344,19 @@ function renderConsentPage(params: {
       margin-top: 20px;
       line-height: 1.4;
     }
+    .btn-google { width:100%; background:#fff; color:#1f2937; font-size:15px; font-weight:500; padding:11px 16px; border:1px solid #d1d5db; border-radius:8px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom:16px; box-sizing:border-box; }
+    .btn-google:hover { background:#f3f4f6; }
+    .divider { display:flex; align-items:center; text-align:center; margin:18px 0; color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:0.5px; }
+    .divider::before, .divider::after { content:''; flex:1; border-bottom:1px solid var(--border); }
+    .divider span { padding:0 12px; }
+    .session-card { background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.3); border-radius:12px; padding:16px; margin-bottom:20px; text-align:center; }
+    .session-info { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:12px; }
+    .session-avatar { width:36px; height:36px; background:#064e3b; color:#34d399; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:16px; }
+    .session-email { font-size:14px; font-weight:600; color:var(--text); word-break:break-all; }
+    .btn-switch { background:transparent; border:none; color:var(--muted); font-size:12px; cursor:pointer; text-decoration:underline; margin-top:8px; }
   </style>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 </head>
 <body>
   <div class="card">
@@ -332,31 +368,111 @@ function renderConsentPage(params: {
     
     ${error ? `<div class="error-banner">${escapeHtml(error)}</div>` : ''}
 
-    <form method="POST" action="/oauth/authorize">
-      <input type="hidden" name="client_id" value="${escapeHtml(clientId)}" />
-      <input type="hidden" name="redirect_uri" value="${escapeHtml(redirectUri)}" />
-      <input type="hidden" name="code_challenge" value="${escapeHtml(codeChallenge)}" />
-      <input type="hidden" name="code_challenge_method" value="${escapeHtml(codeChallengeMethod)}" />
-      <input type="hidden" name="state" value="${escapeHtml(state || '')}" />
-      <input type="hidden" name="scope" value="${escapeHtml(scope || 'mcp:full')}" />
-
-      <div class="field">
-        <label for="email">Health-tracker Email</label>
-        <input type="email" id="email" name="email" required autocomplete="username" placeholder="name@example.com" />
+    <div id="session-card" style="display: none;" class="session-card">
+      <div class="session-info">
+        <div class="session-avatar">👤</div>
+        <div>
+          <div style="font-size:12px;color:var(--muted);">Currently signed in</div>
+          <div class="session-email" id="session-email"></div>
+        </div>
       </div>
+      <button type="button" id="btn-quick-connect" class="btn-submit">Connect this Account</button>
+      <div><button type="button" id="btn-switch-account" class="btn-switch">Sign in with a different account</button></div>
+    </div>
 
-      <div class="field">
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="••••••••" />
-      </div>
+    <div id="auth-methods-container">
+      <button type="button" id="google-signin-btn" class="btn-google">
+        <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.347 2.825.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/></svg>
+        <span class="btn-text">Continue with Google</span>
+      </button>
 
-      <button type="submit" class="btn-submit">Sign In & Connect</button>
-    </form>
+      <div class="divider"><span>or sign in with email</span></div>
+
+      <form id="auth-form" method="POST" action="/oauth/authorize">
+        <input type="hidden" name="client_id" value="${escapeHtml(clientId)}" />
+        <input type="hidden" name="redirect_uri" value="${escapeHtml(redirectUri)}" />
+        <input type="hidden" name="code_challenge" value="${escapeHtml(codeChallenge)}" />
+        <input type="hidden" name="code_challenge_method" value="${escapeHtml(codeChallengeMethod)}" />
+        <input type="hidden" name="state" value="${escapeHtml(state || '')}" />
+        <input type="hidden" name="scope" value="${escapeHtml(scope || 'mcp:full')}" />
+        <input type="hidden" id="firebase_id_token" name="firebase_id_token" value="" />
+        <input type="hidden" id="auth_token" name="auth_token" value="" />
+
+        <div class="field">
+          <label for="email">Health-tracker Email</label>
+          <input type="email" id="email" name="email" required autocomplete="username" placeholder="name@example.com" />
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="••••••••" />
+        </div>
+
+        <button type="submit" class="btn-submit">Sign In & Connect</button>
+      </form>
+    </div>
 
     <div class="footer-note">
       Connecting creates a scoped session binding to your profile only. Tokens expire automatically and can be revoked anytime.
     </div>
   </div>
+  <script>
+    (function() {
+      var cfg = ${JSON.stringify(firebaseClientConfig)};
+      var fbApp = (window.firebase && cfg && cfg.apiKey) ? (firebase.apps && firebase.apps.length ? firebase.app() : firebase.initializeApp(cfg)) : null;
+      var f = document.getElementById('auth-form'), em = document.getElementById('email'), pw = document.getElementById('password');
+      var fbTok = document.getElementById('firebase_id_token'), aTok = document.getElementById('auth_token');
+      var gBtn = document.getElementById('google-signin-btn'), sCard = document.getElementById('session-card'), authCont = document.getElementById('auth-methods-container');
+      var sEmail = document.getElementById('session-email'), qBtn = document.getElementById('btn-quick-connect'), swBtn = document.getElementById('btn-switch-account');
+      function sendToken(type, val) {
+        if (type === 'firebase') fbTok.value = val; else aTok.value = val;
+        if (em) em.removeAttribute('required'); if (pw) pw.removeAttribute('required');
+        f.submit();
+      }
+      function showSession(email, onGo) {
+        if (!sCard) return; sEmail.textContent = email; sCard.style.display = 'block';
+        if (authCont) authCont.style.display = 'none';
+        qBtn.onclick = onGo;
+        swBtn.onclick = function() {
+          if (window.firebase && firebase.auth) { try { firebase.auth().signOut(); } catch(e){} }
+          sCard.style.display = 'none'; if (authCont) authCont.style.display = 'block';
+        };
+      }
+      if (fbApp) {
+        try {
+          firebase.auth().getRedirectResult().then(function(r) {
+            if (r && r.user) r.user.getIdToken().then(function(t) { sendToken('firebase', t); });
+          }).catch(function() {});
+          firebase.auth().onAuthStateChanged(function(u) {
+            if (u && u.email) showSession(u.email, function() {
+              qBtn.disabled = true; qBtn.textContent = 'Connecting...';
+              u.getIdToken().then(function(t) { sendToken('firebase', t); }).catch(function(){ qBtn.disabled = false; });
+            });
+          });
+        } catch(e) {}
+        if (gBtn) gBtn.onclick = function() {
+          gBtn.disabled = true; var prov = new firebase.auth.GoogleAuthProvider(); prov.setCustomParameters({ prompt: 'select_account' });
+          firebase.auth().signInWithPopup(prov).then(function(r) {
+            if (r && r.user) r.user.getIdToken().then(function(t) { sendToken('firebase', t); });
+            else { gBtn.disabled = false; }
+          }).catch(function(err) {
+            gBtn.disabled = false;
+            if (err && (err.code === 'auth/popup-blocked' || err.code === 'auth/operation-not-supported-in-this-environment')) firebase.auth().signInWithRedirect(prov);
+          });
+        };
+      }
+      try {
+        var sTok = localStorage.getItem('auth_token');
+        if (sTok && (!sCard.style.display || sCard.style.display === 'none')) {
+          fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + sTok } }).then(function(r){ return r.json(); }).then(function(d) {
+            if (d && d.success && d.userProfile && d.userProfile.email) {
+              showSession(d.userProfile.email, function() { qBtn.disabled = true; sendToken('session', sTok); });
+            }
+          }).catch(function(){});
+        }
+      } catch(e) {}
+    })();
+  </script>
 </body>
 </html>`;
 }
@@ -420,6 +536,8 @@ mcpAuthRouter.post('/oauth/authorize', async (req: Request, res: Response) => {
   const {
     email,
     password,
+    firebase_id_token,
+    auth_token,
     client_id,
     redirect_uri,
     state,
@@ -437,8 +555,30 @@ mcpAuthRouter.post('/oauth/authorize', async (req: Request, res: Response) => {
   }
 
   // Authenticate user credentials
-  const authResult = await authenticateUser(email, password);
-  if (!authResult.success || !authResult.user) {
+  let authenticatedUser: { uid: string; email?: string } | null = null;
+  let authError = '';
+
+  if (firebase_id_token) {
+    authenticatedUser = await verifyFirebaseTokenHelper(firebase_id_token);
+    if (!authenticatedUser) authError = 'Invalid Google sign-in session. Please try again.';
+  }
+
+  if (!authenticatedUser && auth_token) {
+    const session = verifySessionToken(auth_token);
+    if (session) authenticatedUser = { uid: session.uid, email: session.email };
+    else authError = 'Session expired. Please sign in again.';
+  }
+
+  if (!authenticatedUser && email && password) {
+    const authResult = await authenticateUser(email, password);
+    if (authResult.success && authResult.user) {
+      authenticatedUser = { uid: authResult.user.uid, email: authResult.user.email };
+    } else {
+      authError = authResult.error || 'Invalid email or password';
+    }
+  }
+
+  if (!authenticatedUser) {
     let client = await findMcpClient(client_id);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.status(401).send(renderConsentPage({
@@ -449,11 +589,11 @@ mcpAuthRouter.post('/oauth/authorize', async (req: Request, res: Response) => {
       codeChallenge: code_challenge,
       codeChallengeMethod: code_challenge_method || 'S256',
       scope,
-      error: authResult.error || 'Invalid email or password'
+      error: authError || 'Invalid email or password'
     }));
   }
 
-  const canonicalUid = resolveCanonicalUid(authResult.user.uid, authResult.user.email);
+  const canonicalUid = resolveCanonicalUid(authenticatedUser.uid, authenticatedUser.email);
   const authCode = `mcp_code_${crypto.randomBytes(24).toString('base64url')}`;
   const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
 
@@ -461,6 +601,7 @@ mcpAuthRouter.post('/oauth/authorize', async (req: Request, res: Response) => {
     code: authCode,
     client_id: String(client_id || 'default_mcp_client'),
     firebase_uid: canonicalUid,
+    user_email: authenticatedUser.email,
     code_challenge,
     code_challenge_method: code_challenge_method || 'S256',
     redirect_uri,
@@ -570,7 +711,7 @@ mcpAuthRouter.post('/api/oauth/token', async (req: Request, res: Response) => {
       // 3. Issue Access Token & Refresh Token
       const accessToken = signSessionToken({
         uid: storedCode.firebase_uid,
-        email: `${storedCode.firebase_uid}@mcp.client`,
+        email: storedCode.user_email || `${storedCode.firebase_uid}@mcp.client`,
         nickname: 'Gemini MCP',
         userType: 'Standard'
       });

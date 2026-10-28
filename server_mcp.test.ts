@@ -4,7 +4,7 @@ import type { Server } from 'http';
 import crypto from 'crypto';
 import { mcpAuthRouter, resetMcpAuthStore, resolveCanonicalUid } from './server_routes_mcp_auth.js';
 import { mcpRouter, setInMemoryMcpProfile, clearInMemoryMcpProfiles } from './server_routes_mcp.js';
-import { ADMIN_CREDENTIALS, registerUser } from './server_auth.js';
+import { ADMIN_CREDENTIALS, registerUser, signSessionToken } from './server_auth.js';
 
 let app: express.Express;
 let server: Server;
@@ -157,6 +157,8 @@ describe('MCP OAuth 2.1 & Streamable HTTP Handshake Spike', () => {
       const html = await resOk.text();
       expect(html).toContain('Connect Health-tracker to Gemini');
       expect(html).toContain('Health-tracker Email');
+      expect(html).toContain('Continue with Google');
+      expect(html).toContain('firebase-app-compat.js');
     });
 
     it('completes the full OAuth 2.1 PKCE authorization and token exchange', async () => {
@@ -250,6 +252,121 @@ describe('MCP OAuth 2.1 & Streamable HTTP Handshake Spike', () => {
       expect(refreshRes.status).toBe(200);
       const refreshData = await refreshRes.json();
       expect(refreshData.access_token).toBeTruthy();
+    });
+
+    it('authenticates via Google OAuth Firebase ID token and binds canonical UID', async () => {
+      const pkce = generatePkcePair();
+      const redirectUri = 'https://gemini.google.com/oauth/callback';
+      const googleEmail = 'cwah.liu@gmail.com';
+      const fakeGoogleToken = `test_firebase_token_google_user_99__${googleEmail}`;
+
+      const authRes = await fetch(`${baseUrl}/oauth/authorize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          firebase_id_token: fakeGoogleToken,
+          client_id: 'test_client_id',
+          redirect_uri: redirectUri,
+          code_challenge: pkce.challenge,
+          code_challenge_method: 'S256'
+        }).toString(),
+        redirect: 'manual'
+      });
+
+      expect(authRes.status).toBe(302);
+      const location = authRes.headers.get('location');
+      expect(location).toBeTruthy();
+      const authCode = new URL(location!).searchParams.get('code');
+      expect(authCode).toMatch(/^mcp_code_/);
+
+      const tokenRes = await fetch(`${baseUrl}/api/oauth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'authorization_code',
+          code: authCode,
+          redirect_uri: redirectUri,
+          code_verifier: pkce.verifier
+        })
+      });
+
+      expect(tokenRes.status).toBe(200);
+      const tokenData = await tokenRes.json();
+      expect(tokenData.access_token).toBeTruthy();
+
+      // Check that this token is bound to canonical Chiwah UID
+      setInMemoryMcpProfile('hiJun2hTdDTk2igwerun2LKvwb42', {
+        nickname: 'Chiwah Google',
+        email: googleEmail,
+        weight: 70
+      });
+
+      const mcpRes = await fetch(`${baseUrl}/api/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${tokenData.access_token}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 101,
+          method: 'tools/call',
+          params: {
+            name: 'manage_home',
+            arguments: { action: 'get_profile' }
+          }
+        })
+      });
+
+      expect(mcpRes.status).toBe(200);
+      const mcpBody = await mcpRes.json();
+      const resultObj = JSON.parse(mcpBody.result.content[0].text);
+      expect(resultObj.profile.nickname).toBe('Chiwah Google');
+      expect(resultObj.profile.email).toBe(googleEmail);
+    });
+
+    it('authenticates via active session token (localStorage auth_token)', async () => {
+      const pkce = generatePkcePair();
+      const redirectUri = 'https://gemini.google.com/oauth/callback';
+      const existingToken = signSessionToken({
+        uid: 'user_active_session_123',
+        email: 'active@example.com',
+        nickname: 'Active User'
+      });
+
+      const authRes = await fetch(`${baseUrl}/oauth/authorize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          auth_token: existingToken,
+          client_id: 'test_client_id',
+          redirect_uri: redirectUri,
+          code_challenge: pkce.challenge,
+          code_challenge_method: 'S256'
+        }).toString(),
+        redirect: 'manual'
+      });
+
+      expect(authRes.status).toBe(302);
+      const location = authRes.headers.get('location');
+      expect(location).toBeTruthy();
+      const authCode = new URL(location!).searchParams.get('code');
+      expect(authCode).toMatch(/^mcp_code_/);
+
+      const tokenRes = await fetch(`${baseUrl}/api/oauth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'authorization_code',
+          code: authCode,
+          redirect_uri: redirectUri,
+          code_verifier: pkce.verifier
+        })
+      });
+
+      expect(tokenRes.status).toBe(200);
+      const tokenData = await tokenRes.json();
+      expect(tokenData.access_token).toBeTruthy();
     });
   });
 
