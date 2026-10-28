@@ -1,0 +1,28 @@
+diff --git a/tooling/check-contrast.js b/tooling/check-contrast.js
+index 453bf193..b17d1613 100644
+--- a/tooling/check-contrast.js
++++ b/tooling/check-contrast.js
+@@ -51,7 +51,7 @@ function ratio(fgStr, bgStr) {
+   const fg = parseColor(fgStr), bg = parseColor(bgStr);
+   if (!fg || !bg) return null;
+   const a = fg[3];
+-  const eff = [0, 1, 2].map(i => fg[i] * (1 - a) + bg[i] * a);
++  const eff = [0, 1, 2].map(i => bg[i] * (1 - a) + fg[i] * a);
+   const L1 = luminance(eff), L2 = luminance(bg.slice(0, 3));
+   return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+ }
+@@ -83,9 +83,11 @@ function selftest() {
+   const bril = ratio('#00D639', '#F2F5F6');
+   t('brilliant on light-grey fails graphics bar', bril !== null && bril < 3.0, bril);
+   t('identical colors are 1', Math.abs(ratio('#F2F5F6', '#f2f5f6') - 1) < 0.001);
+-  const ink = ratio('rgba(0, 0, 0, 0.9)', 'rgb(242, 245, 246)');
+-  t('90%-black body text passes', ink !== null && ink >= 4.5, ink);
+-  t('bad color is null', ratio('nonsense', '#fff') === null);
++   const ink = ratio('rgba(0, 0, 0, 0.9)', 'rgb(242, 245, 246)');
++   t('90%-black body text passes', ink !== null && ink >= 4.5, ink);
++   const ink2 = ratio('rgba(0, 0, 0, 0.8)', 'rgb(255, 255, 255)');
++   t('80%-black on white passes (regression)', ink2 !== null && ink2 >= 4.5, ink2);
++   t('bad color is null', ratio('nonsense', '#fff') === null);
+   console.log('SVG fill extraction');
+   const fills = svgFills('<svg fill="none"><defs><rect fill="white"/></defs><path fill="#008146"/><path fill="#008146"/></svg>');
+   t('defs stripped, fills deduped', JSON.stringify(fills) === JSON.stringify(['#008146']), JSON.stringify(fills));
