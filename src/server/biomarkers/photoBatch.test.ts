@@ -99,6 +99,30 @@ describe('lab photo and pdf doors', () => {
     expect(result.rows).toHaveLength(1);
   });
 
+  it('sends an OCR page without the other page in the file', async () => {
+    const pdf = Buffer.from(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 2/Kids[3 0 R 5 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R/PieceInfo<</ONLYPAGE1 1>>>>endobj\n4 0 obj<</Length 24>>stream\nBT (HDL 50 mg/dL) Tj ET\nendstream\nendobj\n5 0 obj<</Type/Page/Parent 2 0 R/Contents 6 0 R/PieceInfo<</PAGE2SCAN 1>>>>endobj\n6 0 obj<</Length 8/Filter/FlateDecode>>stream\nABCDEFGH\nendstream\nendobj\n%%EOF',
+    );
+    const payloads: string[] = [];
+    const prompts: string[] = [];
+    const result = await extractLabAttachments([`data:application/pdf;base64,${pdf.toString('base64')}`], async (job) => {
+      payloads.push(Buffer.from(job.data, 'base64').toString('latin1'));
+      prompts.push(job.prompt);
+      return agree(job);
+    });
+    expect(result.visionCalls).toBe(2);
+    expect(payloads).toHaveLength(2);
+    expect(payloads[0]).toBe(payloads[1]);
+    expect(payloads[0]).toContain('PAGE2SCAN');
+    expect(payloads[0]).toContain('ABCDEFGH');
+    expect(payloads[0]).not.toContain('ONLYPAGE1');
+    expect(payloads[0]).not.toContain('HDL 50');
+    expect(prompts[0]).toContain('Read page 1 only');
+    expect(result.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'pdf-1-p1-0', printed: 'HDL', value: 50, unit: 'mg/dL' }),
+    ]));
+  });
+
   it('keeps a model verify flag from deciding the row', () => {
     const read = pageReadFromModelText(3, JSON.stringify({
       passed: true,

@@ -5,6 +5,7 @@
 import { inflateRawSync, inflateSync } from 'node:zlib';
 import { enterDescribedPdfs } from './dataEntry';
 import type { PdfPageDescriptor, SourceBatch } from './healthRecord';
+import { routePdfPage } from './healthRecord';
 
 function pdfLiteral(body: string): string {
   return body.replace(/\\([()\\nrt])/g, (_match, ch: string) => {
@@ -114,7 +115,7 @@ function isPageDict(body: string): boolean {
 }
 
 /** Page-tree order. Object order is only the fallback when Kids is missing. */
-function orderedPageBodies(objects: Map<number, string>): string[] {
+function orderedPageIds(objects: Map<number, string>): number[] {
   const pageIds = [...objects.entries()].filter(([, body]) => isPageDict(body)).map(([id]) => id);
   const pageSet = new Set(pageIds);
   const ordered: number[] = [];
@@ -143,7 +144,11 @@ function orderedPageBodies(objects: Map<number, string>): string[] {
     }
   }
   for (const id of pageIds) if (!seen.has(id)) ordered.push(id);
-  return ordered.map((id) => objects.get(id) || '');
+  return ordered;
+}
+
+function orderedPageBodies(objects: Map<number, string>): string[] {
+  return orderedPageIds(objects).map((id) => objects.get(id) || '');
 }
 
 /** Object ids whose stream dict carries a /Filter. Those bytes are not text we can read. */
@@ -284,6 +289,169 @@ export function describePdfBytes(fileId: string, bytes: Uint8Array): PdfPageDesc
     imageCount: index === 0 ? imageCount : 0,
     imageAreaRatio: index === 0 ? imageAreaRatio : 0,
   }));
+}
+
+type ObjSlice = {
+  dictStart: number;
+  dictEnd: number;
+  streamStart: number;
+  streamEnd: number;
+};
+
+/** Byte offsets for classic `N gen obj` bodies. Object streams are not expanded. */
+function indexObjects(bytes: Uint8Array): Map<number, ObjSlice> {
+  const raw = Buffer.from(bytes).toString('latin1');
+  const found = new Map<number, ObjSlice>();
+  const re = /(\d+)\s+(\d+)\s+obj/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(raw))) {
+    const id = Number(match[1]);
+    const after = match.index + match[0].length;
+    const endobj = raw.indexOf('endobj', after);
+    if (endobj < 0) break;
+    let dictEnd = endobj;
+    let streamStart = -1;
+    let streamEnd = -1;
+    let end = endobj + 'endobj'.length;
+    const streamRel = raw.indexOf('stream', after);
+    if (streamRel >= 0 && streamRel < endobj) {
+      const endstream = raw.indexOf('endstream', streamRel);
+      if (endstream >= 0) {
+        const realEndobj = raw.indexOf('endobj', endstream);
+        if (realEndobj >= 0) end = realEndobj + 'endobj'.length;
+        dictEnd = streamRel;
+        streamStart = streamRel + 'stream'.length;
+        if (raw[streamStart] === '\r' && raw[streamStart + 1] === '\n') streamStart += 2;
+        else if (raw[streamStart] === '\n') streamStart += 1;
+        streamEnd = endstream;
+      }
+    }
+    found.set(id, { dictStart: after, dictEnd, streamStart, streamEnd });
+    re.lastIndex = end;
+  }
+  return found;
+}
+
+function skipTreeRefs(dict: string): string {
+  return dict
+    .replace(/\/Parent\s+\d+\s+\d+\s+R/g, '')
+    .replace(/\/Prev\s+\d+\s+\d+\s+R/g, '')
+    .replace(/\/Next\s+\d+\s+\d+\s+R/g, '')
+    .replace(/\/Thumb\s+\d+\s+\d+\s+R/g, '');
+}
+
+function followRefs(dict: string, slices: Map<number, ObjSlice>, raw: string): number[] {
+  const ids: number[] = [];
+  for (const item of skipTreeRefs(dict).matchAll(/(\d+)\s+\d+\s+R/g)) {
+    const id = Number(item[1]);
+    const target = slices.get(id);
+    if (!target) continue;
+    const body = raw.slice(target.dictStart, target.dictEnd);
+    if (/\/Type\s*\/Page(?!s)/.test(body)) continue;
+    if (/\/Type\s*\/Pages\b/.test(body)) continue;
+    if (/\/Type\s*\/Catalog\b/.test(body)) continue;
+    ids.push(id);
+  }
+  return ids;
+}
+
+function streamSlice(raw: string, bytes: Uint8Array, slice: ObjSlice): Buffer | null {
+  if (slice.streamStart < 0 || slice.streamEnd < slice.streamStart) return null;
+  const dict = raw.slice(slice.dictStart, slice.dictEnd);
+  const direct = /\/Length\s+(\d+)(?!\s+\d)/.exec(dict);
+  let end = slice.streamEnd;
+  if (direct) {
+    const byLength = slice.streamStart + Number(direct[1]);
+    if (byLength > slice.streamStart && byLength <= slice.streamEnd) end = byLength;
+  }
+  return Buffer.from(bytes.subarray(slice.streamStart, end));
+}
+
+function rewriteDict(dict: string, idMap: Map<number, number>, parentId: number | null): string {
+  let next = skipTreeRefs(dict).replace(/(\d+)\s+\d+\s+R/g, (_full, id: string) => {
+    const mapped = idMap.get(Number(id));
+    return mapped ? `${mapped} 0 R` : '0 0 R';
+  });
+  if (parentId != null) {
+    const at = next.indexOf('<<');
+    if (at >= 0) next = `${next.slice(0, at + 2)} /Parent ${parentId} 0 R${next.slice(at + 2)}`;
+  }
+  return next;
+}
+
+function emitObject(id: number, dict: string, stream: Buffer | null): Buffer {
+  const head = Buffer.from(`${id} 0 obj\n${dict.trim()}\n`, 'latin1');
+  if (!stream) return Buffer.concat([head, Buffer.from('endobj\n', 'latin1')]);
+  return Buffer.concat([
+    head,
+    Buffer.from('stream\n', 'latin1'),
+    stream,
+    Buffer.from('\nendstream\nendobj\n', 'latin1'),
+  ]);
+}
+
+function buildPdf(parts: Buffer[]): Buffer {
+  const header = Buffer.from('%PDF-1.4\n');
+  const offsets: number[] = [0];
+  let cursor = header.length;
+  for (const part of parts) {
+    offsets.push(cursor);
+    cursor += part.length;
+  }
+  let xref = `xref\n0 ${offsets.length}\n0000000000 65535 f \n`;
+  for (let i = 1; i < offsets.length; i += 1) {
+    xref += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+  }
+  const trailer = `trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${cursor}\n%%EOF\n`;
+  return Buffer.concat([header, ...parts, Buffer.from(xref + trailer)]);
+}
+
+/**
+ * One page as its own PDF, for the vision door. Copies the page object and the
+ * objects it references. Does not render, and does not follow the page tree or a thumbnail.
+ * Returns null when the copy would not open the same door as the source page.
+ */
+export function pdfPageBytes(bytes: Uint8Array, pageNumber: number): Uint8Array | null {
+  if (pageNumber < 1) return null;
+  const raw = Buffer.from(bytes).toString('latin1');
+  const visible = raw.replace(/\/Filter\s*\/FlateDecode[\s\S]*?endstream/g, '');
+  const pageId = orderedPageIds(pdfObjects(visible))[pageNumber - 1];
+  const slices = indexObjects(bytes);
+  if (!pageId || !slices.has(pageId)) return null;
+  const keepOrder: number[] = [];
+  const keep = new Set<number>();
+  const queue = [pageId];
+  while (queue.length) {
+    const id = queue.shift();
+    if (id == null || keep.has(id)) continue;
+    const slice = slices.get(id);
+    if (!slice) continue;
+    keep.add(id);
+    keepOrder.push(id);
+    const dict = raw.slice(slice.dictStart, slice.dictEnd);
+    for (const ref of followRefs(dict, slices, raw)) if (!keep.has(ref)) queue.push(ref);
+  }
+  const idMap = new Map<number, number>();
+  keepOrder.forEach((old, index) => idMap.set(old, index + 3));
+  const pageNew = idMap.get(pageId);
+  if (!pageNew) return null;
+  const parts = [
+    emitObject(1, '<< /Type /Catalog /Pages 2 0 R >>', null),
+    emitObject(2, `<< /Type /Pages /Count 1 /Kids [${pageNew} 0 R] >>`, null),
+  ];
+  for (const old of keepOrder) {
+    const slice = slices.get(old);
+    if (!slice) return null;
+    const dict = raw.slice(slice.dictStart, slice.dictEnd);
+    parts.push(emitObject(idMap.get(old) || 0, rewriteDict(dict, idMap, old === pageId ? 2 : null), streamSlice(raw, bytes, slice)));
+  }
+  const out = buildPdf(parts);
+  const sourcePage = describePdfBytes('full', bytes)[pageNumber - 1];
+  const splitPages = describePdfBytes('split', out);
+  const splitPage = splitPages[0];
+  if (!sourcePage || splitPages.length !== 1 || !splitPage) return null;
+  if (routePdfPage(splitPage).door !== routePdfPage(sourcePage).door) return null;
+  return out;
 }
 
 export function openPdfBytes(fileId: string, bytes: Uint8Array): {

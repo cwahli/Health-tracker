@@ -11,7 +11,7 @@ import {
   enterPhotos,
   enterTextDoors,
 } from '../../utils/dataEntry.js';
-import { describePdfBytes } from '../../utils/openPdfBytes.js';
+import { describePdfBytes, pdfPageBytes } from '../../utils/openPdfBytes.js';
 import { routePdfPage, verifyAgreement, type PageRead } from '../../utils/healthRecord.js';
 import type { IntakeRow } from './schema.js';
 
@@ -27,7 +27,7 @@ export type PageReadJob = {
 
 export type ReadPage = (job: PageReadJob) => Promise<PageRead>;
 
-type VisionJob = { page: number; mime: string; data: string };
+type VisionJob = { page: number; mime: string; data: string; promptPage: number };
 
 function decodeAttachment(input: string): { mime: string; base64: string; bytes: Uint8Array } {
   let mime = 'image/jpeg';
@@ -138,7 +138,7 @@ async function readVisionPage(job: VisionJob, readPage: ReadPage): Promise<{ pag
     try {
       const read = await readPage({
         page: job.page,
-        prompt: `${prompt}\nRead page ${job.page} only.`,
+        prompt: `${prompt}\nRead page ${job.promptPage} only.`,
         model,
         mime: job.mime,
         data: job.data,
@@ -186,13 +186,19 @@ export async function extractLabAttachments(
           }
         }
         if (door === 'ocr' || door === 'both') {
-          vision.push({ page: pageSeq, mime: 'application/pdf', data: file.base64 });
+          const split = pdfPageBytes(file.bytes, page.page);
+          vision.push({
+            page: pageSeq,
+            mime: 'application/pdf',
+            data: split ? Buffer.from(split).toString('base64') : file.base64,
+            promptPage: split ? 1 : page.page,
+          });
         }
       }
       return;
     }
     pageSeq += 1;
-    vision.push({ page: pageSeq, mime: file.mime || 'image/jpeg', data: file.base64 });
+    vision.push({ page: pageSeq, mime: file.mime || 'image/jpeg', data: file.base64, promptPage: pageSeq });
   });
 
   const countingRead: ReadPage = async (job) => {
