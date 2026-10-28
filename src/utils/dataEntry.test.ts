@@ -281,7 +281,11 @@ describe('data entry', () => {
     expect(openedObjectStream.pages.map((page) => page.text)).toEqual(['LDL 130 mg/dL', 'HDL 50 mg/dL']);
     expect(openedObjectStream.batch.parts.map((part) => part.door)).toEqual(['text', 'text']);
     expect(openedObjectStream.visionCalls).toBe(0);
-    const plain = Buffer.concat([Buffer.from('BT (HDL 50 mg/dL) Tj ET '), Buffer.alloc(8, 0x20)]);
+    const plain = Buffer.concat([
+      Buffer.from('BT (HDL 50 mg/dL'),
+      Buffer.alloc(16, 0x20),
+      Buffer.from(') Tj ET '),
+    ]);
     const columns = 8;
     const paeth = (left: number, up: number, upLeft: number) => {
       const score = left + up - upLeft;
@@ -297,7 +301,7 @@ describe('data entry', () => {
     let rowIndex = 0;
     for (let offset = 0; offset < plain.length; offset += columns) {
       const row = plain.subarray(offset, offset + columns);
-      const filter = [1, 2, 3, 4][rowIndex];
+      const filter = [0, 1, 2, 3, 4][rowIndex];
       rowIndex += 1;
       const encoded = Buffer.alloc(1 + row.length);
       encoded[0] = filter;
@@ -306,7 +310,7 @@ describe('data entry', () => {
         const up = prior[column];
         const upLeft = column > 0 ? prior[column - 1] : 0;
         const average = Math.floor((left + up) / 2);
-        const guess = filter === 2 ? up : filter === 3 ? average : filter === 4 ? paeth(left, up, upLeft) : left;
+        const guess = filter === 1 ? left : filter === 2 ? up : filter === 3 ? average : filter === 4 ? paeth(left, up, upLeft) : 0;
         encoded[1 + column] = (row[column] - guess) & 255;
       }
       predictedRows.push(encoded);
