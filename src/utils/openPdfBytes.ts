@@ -165,13 +165,38 @@ function inflateFlate(data: Buffer): string {
   }
 }
 
-/** The integer stored in `N gen obj`. A length object is that integer, not the object number. */
+/**
+ * The integer stored in `N gen obj`, read from that object's body.
+ * Digits inside a later stream are not another object.
+ */
 function objectInteger(raw: string, id: number, gen: number): number | null {
-  const re = new RegExp(`(?:^|[^\\d])${id}\\s+${gen}\\s+obj\\s*(\\d+)`, 'g');
-  let last: number | null = null;
+  const re = /(\d+)\s+(\d+)\s+obj/g;
   let match: RegExpExecArray | null;
-  while ((match = re.exec(raw))) last = Number(match[1]);
-  return last;
+  let value: number | null = null;
+  while ((match = re.exec(raw))) {
+    const after = match.index + match[0].length;
+    const endobj = raw.indexOf('endobj', after);
+    if (endobj < 0) break;
+    let bodyEnd = endobj;
+    let stop = endobj + 'endobj'.length;
+    const streamAt = raw.indexOf('stream', after);
+    if (streamAt >= 0 && streamAt < endobj) {
+      const endstream = raw.indexOf('endstream', streamAt);
+      if (endstream >= 0) {
+        const realEnd = raw.indexOf('endobj', endstream);
+        if (realEnd >= 0) {
+          bodyEnd = streamAt;
+          stop = realEnd + 'endobj'.length;
+        }
+      }
+    }
+    if (Number(match[1]) === id && Number(match[2]) === gen) {
+      const num = /^\s*(\d+)/.exec(raw.slice(after, bodyEnd));
+      value = num ? Number(num[1]) : null;
+    }
+    re.lastIndex = stop;
+  }
+  return value;
 }
 
 /** Direct `/Length 24`, or `/Length 8 0 R` resolved to object 8. Never the object id itself. */
@@ -191,8 +216,9 @@ function flatePayload(bytes: Uint8Array, id: number): string {
   const start = header.index + header[0].length;
   const length = declaredLength(header[1], raw);
   const end = length != null ? start + length : raw.indexOf('endstream', start);
-  if (end <= start || end > bytes.length) return '';
-  return inflateFlate(Buffer.from(bytes.subarray(start, end)));
+  const capped = Math.min(end, bytes.length);
+  if (capped <= start) return '';
+  return inflateFlate(Buffer.from(bytes.subarray(start, capped)));
 }
 
 function compressedStreamIds(raw: string): Set<number> {

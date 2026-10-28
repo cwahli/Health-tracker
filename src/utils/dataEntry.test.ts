@@ -224,6 +224,34 @@ describe('data entry', () => {
     expect(openedIndirectLength.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL']);
     expect(openedIndirectLength.batch.parts[0].door).toBe('text');
     expect(openedIndirectLength.visionCalls).toBe(0);
+    const decoy = Buffer.concat([
+      Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R>>endobj\n'),
+      Buffer.from('4 0 obj<</Filter /FlateDecode/Length 5 0 R>>stream\n'),
+      hdl,
+      Buffer.from(`\nendstream\nendobj\n5 0 obj\n${hdl.length}\nendobj\n6 0 obj<</Length 12>>stream\n5 0 obj\n1\nendstream\nendobj\n%%EOF`),
+    ]);
+    const openedDecoy = openPdfBytes('length-decoy.pdf', decoy);
+    expect(openedDecoy.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL']);
+    expect(openedDecoy.batch.parts[0].door).toBe('text');
+    expect(openedDecoy.visionCalls).toBe(0);
+    const notAnInteger = Buffer.concat([
+      Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R>>endobj\n'),
+      Buffer.from('4 0 obj<</Filter /FlateDecode/Length 5 0 R>>stream\n'),
+      hdl,
+      Buffer.from('\nendstream\nendobj\n5 0 obj\n(nope)\nendobj\n%%EOF'),
+    ]);
+    const openedNotInteger = openPdfBytes('length-not-integer.pdf', notAnInteger);
+    expect(openedNotInteger.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL']);
+    expect(openedNotInteger.batch.parts[0].door).toBe('text');
+    const oversize = Buffer.concat([
+      Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R>>endobj\n4 0 obj<</Filter /FlateDecode/Length 99999>>stream\n'),
+      hdl,
+      Buffer.from('\nendstream\nendobj\n%%EOF'),
+    ]);
+    const openedOversize = openPdfBytes('length-oversize.pdf', oversize);
+    expect(openedOversize.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL']);
+    expect(openedOversize.batch.parts[0].door).toBe('text');
+    expect(openedOversize.visionCalls).toBe(0);
     const filteredImage = new TextEncoder().encode(
       '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R/Resources<</XObject<</Im0 5 0 R>>>>>>endobj\n4 0 obj<</Length 12>>stream\nq /Im0 Do Q\nendstream\nendobj\n5 0 obj<</Filter /FlateDecode/Subtype /Image/Width 20/Height 20/Length 4>>stream\nABCD\nendstream\nendobj\n%%EOF',
     );
