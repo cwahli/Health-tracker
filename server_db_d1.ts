@@ -164,6 +164,39 @@ export async function d1GetFoodDetail(logId: string, possibleUids: string[]): Pr
   };
 }
 
+export async function d1GetFullFoodRecord(logId: string, possibleUids: string[]): Promise<any | null> {
+  if (!isD1Configured() || !logId) return null;
+  const placeholders = possibleUids.map(() => '?').join(', ');
+  const sql = `SELECT * FROM food_logs WHERE id = ? AND firebase_uid IN (${placeholders}) LIMIT 1`;
+  const res = await d1Query(sql, [logId, ...possibleUids]);
+  if (!res.success || !res.results || res.results.length === 0) return null;
+  const row = res.results[0];
+  return {
+    ...row,
+    nutrients: safeJsonParse(row.nutrients, {}),
+    items_breakdown: safeJsonParse(row.items_breakdown, []),
+    scout_items: safeJsonParse(row.scout_items, []),
+    image_urls: safeJsonParse(row.image_urls, []),
+    chat_transcript: safeJsonParse(row.chat_transcript, [])
+  };
+}
+
+export async function d1QueryFoods(possibleUids: string[], limit: number = 500): Promise<any[]> {
+  if (!isD1Configured() || !possibleUids || possibleUids.length === 0) return [];
+  const placeholders = possibleUids.map(() => '?').join(', ');
+  const sql = `SELECT * FROM food_logs WHERE firebase_uid IN (${placeholders}) ORDER BY date DESC, id DESC LIMIT ?`;
+  const res = await d1Query<any>(sql, [...possibleUids, limit]);
+  if (!res.success || !res.results) return [];
+  return res.results.map((r: any) => ({
+    ...r,
+    nutrients: safeJsonParse(r.nutrients, {}),
+    items_breakdown: safeJsonParse(r.items_breakdown, []),
+    scout_items: safeJsonParse(r.scout_items, []),
+    image_urls: safeJsonParse(r.image_urls, []),
+    chat_transcript: safeJsonParse(r.chat_transcript, [])
+  }));
+}
+
 // ==========================================
 // BIOMARKER LOGS
 // ==========================================
@@ -245,6 +278,19 @@ export async function d1DeleteBiomarkers(ids: string[]): Promise<{ success: bool
     }
   }
   return { success: true };
+}
+
+export async function d1QueryBiomarkers(possibleUids: string[], limit: number = 200): Promise<any[]> {
+  if (!isD1Configured() || !possibleUids || possibleUids.length === 0) return [];
+  const placeholders = possibleUids.map(() => '?').join(', ');
+  const sql = `SELECT * FROM biomarker_logs WHERE firebase_uid IN (${placeholders}) ORDER BY date DESC, id DESC LIMIT ?`;
+  const res = await d1Query<any>(sql, [...possibleUids, limit]);
+  if (!res.success || !res.results) return [];
+  return res.results.map((r: any) => ({
+    ...r,
+    biomarkers: safeJsonParse(r.biomarkers, {}),
+    tests: safeJsonParse(r.tests, [])
+  }));
 }
 
 // ==========================================
