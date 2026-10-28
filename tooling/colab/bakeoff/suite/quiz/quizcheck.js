@@ -52,11 +52,18 @@ const has=(s,...x)=>x.every(v=>String(s).replace(/\s/g,'').includes(v));
      const mr=m.getBoundingClientRect(),pr=panel.getBoundingClientRect(),cs=getComputedStyle(panel);
      const scrollers=[...document.querySelectorAll('*')].filter(e=>{const s=getComputedStyle(e);return e.scrollHeight>e.clientHeight+1&&/auto|scroll/.test(s.overflowY)&&e!==document.documentElement&&e!==document.body}).map(e=>{const r=e.getBoundingClientRect();return {t:e.tagName+'.'+String(e.className).slice(0,40),w:r.width,h:r.height}});
      const fr=document.getElementById('mtd-quiz-modal-frame'),d=fr.contentDocument;
-     return {vw,vh,modal:[mr.width,mr.height],panelW:pr.width,panelRadius:cs.borderTopLeftRadius,panelBorder:cs.borderTopWidth,panelMaxH:cs.maxHeight,scrollers,inner:[d.documentElement.scrollHeight,d.documentElement.clientHeight,getComputedStyle(d.documentElement).overflowY,getComputedStyle(d.body).overflowY]}});
+     return {vw,vh,modal:[mr.width,mr.height],panelW:pr.width,panelL:pr.left,panelRadius:cs.borderTopLeftRadius,panelBorder:cs.borderTopWidth,panelBorderColor:cs.borderTopColor,panelOverflow:cs.overflowY,panelMaxH:cs.maxHeight,panelPad:cs.paddingTop,gp:(()=>{const e=d.querySelector('main.solution-finder-host [class*=gomnIV]');if(!e)return null;const c=getComputedStyle(e);return {r:c.borderTopLeftRadius,bw:c.borderTopWidth,bc:c.borderTopColor,bg:c.backgroundColor}})(),scrollers,inner:[d.documentElement.scrollHeight,d.documentElement.clientHeight,getComputedStyle(d.documentElement).overflowY,getComputedStyle(d.body).overflowY]}});
    const g=geo;let ok=true;
    if(g.modal[0]<g.vw-1||g.modal[1]<g.vh-1){ok=false;reasons.push(`${k}: overlay not full viewport ${g.modal}`)}
-   if(g.panelW<g.vw*0.98){ok=false;reasons.push(`${k}: panel is a box (${Math.round(g.panelW)}px wide)`)}
-   if(parseFloat(g.panelRadius)>0||parseFloat(g.panelBorder)>0){ok=false;reasons.push(`${k}: panel still has border/radius (${g.panelRadius}/${g.panelBorder})`)}
+   // REVISED (v2): the panel stays the Figma 3776:6405 box: centred, 40px radius, NO border (removed in Figma), never clipping its content
+   const pcx=g.panelL+g.panelW/2;
+   if(!(g.panelW<g.vw-1&&g.panelW>=Math.min(1520,g.vw)-60)){ok=false;reasons.push(`${k}: panel is not the centred Figma box (${Math.round(g.panelW)}px wide of ${g.vw})`)}
+   if(Math.abs(pcx-g.vw/2)>2){ok=false;reasons.push(`${k}: panel not horizontally centred (centre ${Math.round(pcx)} vs ${g.vw/2})`)}
+   if(parseFloat(g.panelRadius)!==40||parseFloat(g.panelBorder)!==0){ok=false;reasons.push(`${k}: panel must have 40px radius and NO border (${g.panelRadius}/${g.panelBorder})`)}
+   // Figma 3776:6405: outer quiz body padding 40 (24 under 1200px); inner Gradient panel 1px #5e5e5e border, #1b1b1b fill, 40px radius
+   if(parseFloat(g.panelPad)!==(g.vw>=1200?40:24)){ok=false;reasons.push(`${k}: panel padding ${g.panelPad} (want ${g.vw>=1200?40:24}px)`)}
+   if(!g.gp||parseFloat(g.gp.r)!==40||parseFloat(g.gp.bw)!==1||g.gp.bc.replace(/\s/g,'')!=='rgb(94,94,94)'||g.gp.bg.replace(/\s/g,'')!=='rgb(27,27,27)'){ok=false;reasons.push(`${k}: gradient panel must be 1px #5e5e5e border, #1b1b1b fill, 40px radius (${JSON.stringify(g.gp)})`)}
+   if(g.panelOverflow!=='visible'||g.panelMaxH!=='none'){ok=false;reasons.push(`${k}: panel clips its content (overflow ${g.panelOverflow}, max-height ${g.panelMaxH})`)}
    const bad=g.scrollers.filter(s=>!(s.w>=g.vw*0.98&&s.h>=g.vh*0.98));
    if(bad.length){ok=false;reasons.push(`${k}: inner scroll container ${JSON.stringify(bad[0])}`)}
    if(g.inner[0]>g.inner[1]+1){ok=false;reasons.push(`${k}: quiz iframe scrolls internally`)}
