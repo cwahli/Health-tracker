@@ -1,0 +1,1 @@
+{"pass": false, "reasons": ["ratio(rgba(0, 0, 0, 0.5),#ffffff)=21 expected 3.977", "ratio(rgba(0, 128, 70, 0.8),rgb(242, 245, 246))=6.446179496626398 expected 3.313"], "changed": ["tooling/check-contrast.js"]}
