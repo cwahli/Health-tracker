@@ -83,8 +83,36 @@ def pick_qwen38():
         MODELS[0] = 'ollama/bench-qwen38r'
     log('qwen3.8 probe ->', MODELS[0])
 
+def run_queue():
+    """interleave: run queued jobs (/content/bakeoff/queue/*.sh) at a safe point between runs/rounds, never overlapping on the GPU."""
+    qd = '/content/bakeoff/queue'
+    for f in sorted(x for x in os.listdir(qd) if x.endswith('.sh')) if os.path.isdir(qd) else []:
+        log('QUEUE start', f)
+        pr = subprocess.Popen(f'bash {qd}/{f} >> /content/jobs/harddriver/queue-{f}.log 2>&1', shell=True)
+        n = 0
+        while pr.poll() is None:
+            time.sleep(30); n += 1
+            if n % 10 == 0: log('queue job running (heartbeat):', f, '|', (open(RES).read().count('\n') if os.path.exists(RES) else 0), 'result rows')
+        os.rename(f'{qd}/{f}', f'{qd}/{f}.done'); log('QUEUE done', f, 'rc', pr.returncode)
+    decide_qwen38()
+
+def decide_qwen38():
+    """if qwen3.8-fixed (easy T1-T5 x3) clearly beats the first qwen3.8 run (>=2 more passes of 15), use bench-qwen38r as the qwen3.8 entry in hard rounds."""
+    d = '/content/bakeoff/qwen38_decision.json'
+    if os.path.exists(d):
+        if json.load(open(d)).get('use') == 'ollama/bench-qwen38r': MODELS[0] = 'ollama/bench-qwen38r'
+        return
+    fx = [r for r in rows() if r['model'] == 'qwen3.8-fixed' and r['task'] <= 5]
+    if len(fx) < 15: return
+    old = [r for r in rows() if r['model'] == 'ollama/bench-qwen38' and r['task'] <= 5]
+    po, pf = sum(1 for r in old if r['pass_']), sum(1 for r in fx if r['pass_'])
+    use = 'ollama/bench-qwen38r' if pf >= po + 2 else 'ollama/bench-qwen38'
+    json.dump({'old_passes': po, 'old_n': len(old), 'fixed_passes': pf, 'fixed_n': len(fx), 'use': use, 'rule': 'fixed >= old + 2 passes'}, open(d, 'w'))
+    MODELS[0] = use; log('qwen3.8 decision: old %d/%d vs fixed %d/%d -> hard rounds use %s' % (po, len(old), pf, len(fx), use))
+    persist('qwen3.8 decision recorded')
+
 def main():
-    wait_easy(); pick_qwen38(); restore(); sh(f'cd {HT} && git checkout -q bakeoff-results')
+    wait_easy(); pick_qwen38(); restore(); run_queue(); sh(f'cd {HT} && git checkout -q bakeoff-results')
     done_rounds = []
     while True:
         rounds = json.load(open('/content/bakeoff/hard_rounds.json'))
@@ -92,6 +120,7 @@ def main():
         todo = [t for t in rounds if t not in done_rounds and t not in sus0]
         if not todo: break
         t = todo[0]
+        run_queue()
         hardbench.HARD = json.load(open('/content/bakeoff/hard_tasks.json'))
         elim = eliminations(done_rounds)
         for m in MODELS:

@@ -81,6 +81,9 @@
      "limit": {
       "context": 32768,
       "output": 10000
+     },
+     "options": {
+      "reasoningEffort": "medium"
      }
     }
    }
