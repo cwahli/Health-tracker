@@ -1,0 +1,22 @@
+diff --git a/tooling/check-contrast.js b/tooling/check-contrast.js
+index 453bf193..702b17f2 100644
+--- a/tooling/check-contrast.js
++++ b/tooling/check-contrast.js
+@@ -51,7 +51,7 @@ function ratio(fgStr, bgStr) {
+   const fg = parseColor(fgStr), bg = parseColor(bgStr);
+   if (!fg || !bg) return null;
+   const a = fg[3];
+-  const eff = [0, 1, 2].map(i => fg[i] * (1 - a) + bg[i] * a);
++  const eff = [0, 1, 2].map(i => fg[i] * a + bg[i] * (1 - a));
+   const L1 = luminance(eff), L2 = luminance(bg.slice(0, 3));
+   return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+ }
+@@ -85,6 +85,8 @@ function selftest() {
+   t('identical colors are 1', Math.abs(ratio('#F2F5F6', '#f2f5f6') - 1) < 0.001);
+   const ink = ratio('rgba(0, 0, 0, 0.9)', 'rgb(242, 245, 246)');
+   t('90%-black body text passes', ink !== null && ink >= 4.5, ink);
++  const tealAlpha = ratio('rgba(0, 128, 128, 0.7)', '#ffffff');
++  t('70%-alpha teal on white is ~1.35', tealAlpha !== null && tealAlpha > 1.2 && tealAlpha < 1.6, tealAlpha);
+   t('bad color is null', ratio('nonsense', '#fff') === null);
+   console.log('SVG fill extraction');
+   const fills = svgFills('<svg fill="none"><defs><rect fill="white"/></defs><path fill="#008146"/><path fill="#008146"/></svg>');
