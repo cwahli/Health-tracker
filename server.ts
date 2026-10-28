@@ -1311,6 +1311,7 @@ JSON SCHEMA STRICT REQUIREMENT:
 
 
 const app = express();
+app.set('trust proxy', 1);
 
 // Global CORS & preflight middleware for cross-origin, sandboxed iframes, and local development
 app.use((req, res, next) => {
