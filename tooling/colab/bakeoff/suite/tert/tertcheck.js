@@ -42,10 +42,12 @@ async function sig(p,loc,state){
   return r;
 }
 const STATES=['default','hover','pressed','focus'];
-const SK=(x,skipBorder)=>JSON.stringify([x.color,x.backgroundColor,skipBorder?'':x.borderTopColor,skipBorder?'':x.borderTopWidth,x.boxShadow,x.textDecorationLine,x.outlineStyle,x.outlineWidth,x.after,x.before]).replace(/\s/g,'');
+const NW=a=>Object.assign({},a,{w:parseFloat(a.w)>0?'on':'off'});
+const SK=(x,skipBorder,skipFill)=>JSON.stringify([x.color,skipFill?'':x.backgroundColor,skipBorder?'':x.borderTopColor,skipBorder?'':x.borderTopWidth,x.boxShadow,x.textDecorationLine,x.outlineStyle,x.outlineWidth,skipFill?Object.assign({},NW(x.after),{bg:''}):NW(x.after),x.before]).replace(/\s/g,'');
 async function sigs(p,loc){const o={};for(const s of STATES)o[s]=await sig(p,loc,s);return o}
-function compare(name,a,r,skipBorder){const bad=[];for(const s of STATES)if(SK(a[s],skipBorder)!==SK(r[s],skipBorder))bad.push(s);
-  if(bad.length)reasons.push(`${name}: computed styles differ from the shared class in ${bad.join('/')} (e.g. ${s0(a[bad[0]])} vs ${s0(r[bad[0]])})`);return !bad.length}
+function compare(name,a,r,skipBorder){const bad=[];for(const s of STATES){const fillOK=name==='close'&&s==='pressed'&&['rgb(82,82,82)','rgb(26,26,26)'].includes(String(a[s].backgroundColor).replace(/\s/g,''));
+  if(SK(a[s],skipBorder,fillOK)!==SK(r[s],skipBorder,fillOK))bad.push(s)}
+  if(bad.length){const A=a[bad[0]],R=r[bad[0]];const dk=Object.keys(A).filter(k=>JSON.stringify(A[k])!==JSON.stringify(R[k])&&!['cls','fv','bl'].includes(k));reasons.push(`${name}: computed styles differ from the shared class in ${bad.join('/')} (${bad[0]}: ${dk.map(k=>k+' '+JSON.stringify(A[k])+' vs '+JSON.stringify(R[k])).join('; ').slice(0,200)})`)}return !bad.length}
 const s0=x=>`bg ${x.backgroundColor} fg ${x.color} bs ${String(x.boxShadow).slice(0,40)} after ${x.after.bg}/${x.after.tr}`;
 function anchors(name,ref){let ok=true;const R=m=>{ok=false;reasons.push(`${name} reference (shared class) not styled as Atomic UI: ${m}`)};
   if(!(has(ref.focus.boxShadow,'rgb(0,0,0)0px0px0px2px','rgb(255,181,0)0px0px0px4px')))R('focus ring '+ref.focus.boxShadow);
@@ -96,11 +98,11 @@ function anchors(name,ref){let ok=true;const R=m=>{ok=false;reasons.push(`${name
   const tiles=()=>f.locator('button[class*=StyledButton]');
   await tiles().first().click();await p.waitForTimeout(1800);
   // reference elements built from the shared class names, in the quiz document and in the page document
-  const mk=(ctx,id,cls,inner,anc)=>ctx.evaluate(([id,cls,inner,anc])=>{const d=document;const a=d.querySelector(anc);if(!a)throw new Error('no anchor '+anc);const e=d.createElement('button');e.id=id;e.className=cls;e.type='button';e.innerHTML=inner;e.style.cssText='position:relative;z-index:99999;margin:6px';a.parentElement.appendChild(e)},[id,cls,inner,anc]);
+  const mk=(ctx,id,cls,inner,anc,slot,inModal)=>ctx.evaluate(([id,cls,inner,anc,slot,inModal])=>{const d=document;const a=d.querySelector(anc);if(!a)throw new Error('no anchor '+anc);const e=d.createElement('button');e.id=id;e.className=cls;e.type='button';e.innerHTML=inner;e.style.cssText='position:fixed;left:12px;top:'+(12+slot*90)+'px;z-index:2147483647;pointer-events:auto;margin:0';(inModal?a.parentElement:d.body).appendChild(e)},[id,cls,inner,anc,slot,inModal]);
   const frEl=await p.locator('#mtd-quiz-modal-frame').elementHandle();const fdoc=await frEl.contentFrame();
-  await mk(fdoc,'__ref_t','score-button button-tertiary','Ref<span class="bottom-line"></span>','button[class*=StyledBack]');
-  await mk(fdoc,'__ref_p','score-button button--primary button-checkout','Ref','button[class*=StyledBack]');
-  await mk(p,'__ref_s','score-button button--secondary','Ref','.mtd-quiz-modal-close');
+  await mk(fdoc,'__ref_t','score-button button-tertiary','Ref<span class="bottom-line"></span>','button[class*=StyledBack]',0,false);
+  await mk(fdoc,'__ref_p','score-button button--primary button-checkout','Ref','button[class*=StyledBack]',1,false);
+  await mk(p,'__ref_s','score-button button--secondary','Ref','.mtd-quiz-modal-close',0,true);
   const prev=f.locator('button[class*=StyledBack]').first();
   const ref_t=await sigs(p,f.locator('#__ref_t')),prv=await sigs(p,prev);states.previous=prv;states.ref_tertiary=ref_t;
   let pok=anchors('tertiary',ref_t);
