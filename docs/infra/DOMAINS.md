@@ -43,7 +43,10 @@
      * *These last two have no `health-tracker.co.uk` twin and block duckdns retirement — plan: [MC_DOMAIN_CUTOVER.md](./MC_DOMAIN_CUTOVER.md), ledger rows 11–12 in [COUK_MIGRATION.md](./COUK_MIGRATION.md).*
   2. Fallback routing and internal agent scripts that default to DuckDNS.
 * **Left (human):** delete the `health-tracking.duckdns.org` A record at the
-  DuckDNS dashboard; it still resolves to the dead OVH IP `51.254.217.163`.
+  DuckDNS dashboard. Checked 2026-10-29: it still resolves to the dead OVH IP
+  `51.254.217.163` and times out. This host has no DuckDNS token. `mc.` and
+  `agenda.` answer on `health-tracker.co.uk` (agenda returns 401). `/privacy`
+  and `/terms` return 200.
 
 ---
 
