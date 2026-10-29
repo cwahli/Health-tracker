@@ -202,7 +202,7 @@ The original qwen3.8 hit an Ollama renderer 500 ("no user query found") on paral
 <!-- REALWORK:BEGIN -->
 ## Real-work scoreboard (continuous)
 
-Source: `/content/bakeoff/realwork.jsonl` (one row per real Colab coding job; format in `REALWORK.md`). Updated: 2026-10-28T20:31:37+0000.
+Source: `/content/bakeoff/realwork.jsonl` (one row per real Colab coding job; format in `REALWORK.md`). Updated: 2026-10-29T00:04:52+0000.
 Ranked by verified success rate (a job counts as a success only if the real check or live verification passed). Time is used only to break ties. A job with no verification yet is listed under Unverified and not counted in the rate.
 
 **Easy jobs**
@@ -211,7 +211,11 @@ _no jobs logged yet_
 
 **Hard jobs (multi-file, layout/Figma, or test-preserving)**
 
-_no jobs logged yet_
+| Rank | Model | Verified success | Rate | Fakes | Retries | Median time of passing jobs | Unverified |
+|---|---|---|---|---|---|---|---|
+| 1 | opencode/deepseek-v4.1-flash-free | 3 of 3 | 100% | 0 | 4 | 5 min | 0 |
+| 2 | opencode/mimo-v2.6-flash-free | 0 of 1 | 0% | 0 | 1 | - | 0 |
+| 3 | freebuff/solar-pro-4 | 0 of 0 | - | 0 | 0 | - | 1 |
 
 Key: numbers like "3 of 4" are verified passes out of verified jobs, higher is better. Fakes = the model said it was done but the check failed. Retries = extra attempts. "-" means no passing job to time.
 <!-- REALWORK:END -->
