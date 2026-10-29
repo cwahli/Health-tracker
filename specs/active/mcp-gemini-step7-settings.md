@@ -1,10 +1,10 @@
 ---
 id: mcp-gemini-step7-settings
-status: locked
+status: done
 class: MCP_SETTINGS_UI
 edit_mode: patch
 skill: builder
-auto_go: true
+auto_go: false
 allowed_files:
   - server_routes_mcp_auth.ts
   - server_d1_schema.ts
@@ -34,6 +34,8 @@ gate:
 ---
 
 # MCP-GEMINI-STEP7 — Settings UI and i18n
+
+**Done 2026-10-29.** The settings card is on main. Do not re-execute this packet. The live handshake stays closed for now. `auto_go` is false so an unattended run does not pick it up.
 
 ## Journey
 A signed-in person opens the profile dialog and can copy the MCP server URL, create a Gemini client id and secret, and revoke that access. The secret is shown once. Revoke stops that person's Gemini sessions and does not touch another person's client.
