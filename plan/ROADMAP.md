@@ -425,6 +425,8 @@ Ingest **code** for B1–B6 is on GitHub. Ingest **v1 shipped 2026-09-14** — r
 
 **Page text:** an uncompressed PDF keeps each page's text on that page (`src/utils/openPdfBytes.ts`), in Kids order. A FlateDecode content stream is inflated with Node zlib and the text stays on that page. An indirect `/Length` is the integer in that object. A PDF 1.5 object stream is inflated and its page dictionaries are read in classic form. A PNG predictor on a FlateDecode stream is undone before the text is read. The row byte may be None, Sub, Up, Average, or Paeth. An 8-bit TIFF predictor is undone the same way. Any other predictor stays on the OCR door. A stream that does not inflate stays an OCR door. That OCR page is copied into its own one-page PDF before vision sees it, when the copy still opens the same door. Resources and boxes inherited from the parent pages node are copied onto that page. Do not add pdf.js or Tesseract. The seven stored copies stay separate.
 
+A short predictor row is padded with zero bytes and still read. A ToUnicode `beginbfchar` map is applied to a hex show string. A cross-reference stream type 2 entry supplies a page dictionary that is not a classic object.
+
 Weight/height stay `droppedByApply` until a product decision.
 
 ### After B6 (do not start to unstick B0–B4)

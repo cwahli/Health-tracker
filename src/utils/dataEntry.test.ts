@@ -345,6 +345,60 @@ describe('data entry', () => {
     expect(openedTiff.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL']);
     expect(openedTiff.batch.parts[0].door).toBe('text');
     expect(openedTiff.visionCalls).toBe(0);
+    const shortPlain = Buffer.from('BT (HDL 50 mg/dL) Tj ET');
+    const shortColumns = 8;
+    const shortRows: Buffer[] = [];
+    for (let offset = 0; offset < shortPlain.length; offset += shortColumns) {
+      const row = shortPlain.subarray(offset, offset + shortColumns);
+      const encoded = Buffer.alloc(1 + row.length);
+      encoded[0] = 0;
+      row.copy(encoded, 1);
+      shortRows.push(encoded);
+    }
+    const shortPredicted = deflateSync(Buffer.concat(shortRows));
+    const shortPage = Buffer.concat([
+      Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R>>endobj\n'),
+      Buffer.from(`4 0 obj<</Filter/FlateDecode/DecodeParms<</Predictor 15/Columns ${shortColumns}>>/Length ${shortPredicted.length}>>stream\n`),
+      shortPredicted,
+      Buffer.from('\nendstream\nendobj\n%%EOF'),
+    ]);
+    const openedShort = openPdfBytes('short-predictor.pdf', shortPage);
+    expect(openedShort.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL']);
+    expect(openedShort.batch.parts[0].door).toBe('text');
+    expect(openedShort.visionCalls).toBe(0);
+    const cmap = Buffer.from('1 beginbfchar\n<01> <0048>\n<02> <0044>\n<03> <004C>\n<04> <0020>\n<05> <0035>\n<06> <0030>\n<07> <006D>\n<08> <0067>\n<09> <002F>\n<0A> <0064>\nendbfchar\n');
+    const show = Buffer.from('BT /F1 12 Tf <010203040506040708090A03> Tj ET');
+    const unicodePage = Buffer.concat([
+      Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n'),
+      Buffer.from(`4 0 obj<</Length ${show.length}>>stream\n`),
+      show,
+      Buffer.from('\nendstream\nendobj\n5 0 obj<</Type/Font/ToUnicode 6 0 R>>endobj\n'),
+      Buffer.from(`6 0 obj<</Length ${cmap.length}>>stream\n`),
+      cmap,
+      Buffer.from('\nendstream\nendobj\n%%EOF'),
+    ]);
+    const openedUnicode = openPdfBytes('tounicode.pdf', unicodePage);
+    expect(openedUnicode.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL']);
+    expect(openedUnicode.batch.parts[0].door).toBe('text');
+    expect(openedUnicode.visionCalls).toBe(0);
+    const xrefHeader = '3 0\n';
+    const xrefValue = '<</Type/Page/Parent 2 0 R/Contents 4 0 R>>\n';
+    const xrefPlain = Buffer.from(`${xrefHeader}${xrefValue}`);
+    const xrefStream = deflateSync(xrefPlain);
+    const xrefIndex = Buffer.from([2, 8, 0]);
+    const xrefPage = Buffer.concat([
+      Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n4 0 obj<</Length 24>>stream\nBT (HDL 50 mg/dL) Tj ET\nendstream\nendobj\n'),
+      Buffer.from(`8 0 obj<</N 1/First ${Buffer.byteLength(xrefHeader)}/Filter/FlateDecode/Length ${xrefStream.length}>>stream\n`),
+      xrefStream,
+      Buffer.from('\nendstream\nendobj\n'),
+      Buffer.from(`9 0 obj<</Type/XRef/Size 10/W[1 1 1]/Index[3 1]/Length ${xrefIndex.length}>>stream\n`),
+      xrefIndex,
+      Buffer.from('\nendstream\nendobj\n%%EOF'),
+    ]);
+    const openedXref = openPdfBytes('xref.pdf', xrefPage);
+    expect(openedXref.pages.map((page) => page.text)).toEqual(['HDL 50 mg/dL']);
+    expect(openedXref.batch.parts[0].door).toBe('text');
+    expect(openedXref.visionCalls).toBe(0);
     const filteredImage = new TextEncoder().encode(
       '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R/Resources<</XObject<</Im0 5 0 R>>>>>>endobj\n4 0 obj<</Length 12>>stream\nq /Im0 Do Q\nendstream\nendobj\n5 0 obj<</Filter /FlateDecode/Subtype /Image/Width 20/Height 20/Length 4>>stream\nABCD\nendstream\nendobj\n%%EOF',
     );

@@ -16,19 +16,110 @@ function pdfLiteral(body: string): string {
   });
 }
 
-function textOperators(body: string): string {
-  if (/\/Filter\s*\/FlateDecode/.test(body)) return '';
+function utf16be(hex: string): string {
+  const bytes = Buffer.from(hex.replace(/\s+/g, ''), 'hex');
+  let text = '';
+  for (let i = 0; i + 1 < bytes.length; i += 2) {
+    const code = (bytes[i] << 8) | bytes[i + 1];
+    text += String.fromCharCode(code);
+  }
+  return text;
+}
+
+/** Source hex (no spaces, upper case) to Unicode. Built from beginbfchar and beginbfrange. */
+function parseToUnicode(body: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const put = (src: string, dest: string) => {
+    const key = src.replace(/\s+/g, '').toUpperCase();
+    if (key) map.set(key, utf16be(dest));
+  };
+  for (const block of body.matchAll(/beginbfchar([\s\S]*?)endbfchar/g)) {
+    for (const pair of block[1].matchAll(/<([0-9A-Fa-f\s]+)>\s*<([0-9A-Fa-f\s]+)>/g)) put(pair[1], pair[2]);
+  }
+  for (const block of body.matchAll(/beginbfrange([\s\S]*?)endbfrange/g)) {
+    for (const row of block[1].matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(?:<([0-9A-Fa-f\s]+)>|\[([\s\S]*?)\])/g)) {
+      const start = parseInt(row[1], 16);
+      const end = parseInt(row[2], 16);
+      const width = row[1].length;
+      const listed = row[4] ? [...row[4].matchAll(/<([0-9A-Fa-f\s]+)>/g)].map((item) => item[1]) : null;
+      const dest = row[3] ? Buffer.from(row[3].replace(/\s+/g, ''), 'hex') : null;
+      for (let code = start, step = 0; code <= end; code += 1, step += 1) {
+        const key = code.toString(16).toUpperCase().padStart(width, '0');
+        if (listed) {
+          if (listed[step]) put(key, listed[step]);
+        } else if (dest && dest.length >= 2) {
+          const next = Buffer.from(dest);
+          const unit = next.readUInt16BE(next.length - 2) + step;
+          next.writeUInt16BE(unit & 0xffff, next.length - 2);
+          map.set(key, utf16be(next.toString('hex')));
+        }
+      }
+    }
+  }
+  return map;
+}
+
+function applyCmap(bytes: Buffer, map: Map<string, string>): string {
+  if (map.size === 0) return bytes.toString('latin1');
+  const widths = [...new Set([...map.keys()].map((key) => key.length / 2))].filter((width) => width > 0).sort((a, b) => b - a);
+  let text = '';
+  let index = 0;
+  while (index < bytes.length) {
+    let matched = false;
+    for (const width of widths) {
+      if (index + width > bytes.length) continue;
+      const key = bytes.subarray(index, index + width).toString('hex').toUpperCase();
+      const value = map.get(key);
+      if (value == null) continue;
+      text += value;
+      index += width;
+      matched = true;
+      break;
+    }
+    if (!matched) {
+      text += String.fromCharCode(bytes[index]);
+      index += 1;
+    }
+  }
+  return text;
+}
+
+function readShows(body: string, fonts?: Map<string, Map<string, string>>): string {
   const found: string[] = [];
-  const show = /\(((?:\\.|[^\\)])*)\)\s*Tj/g;
+  const maps = fonts ?? new Map<string, Map<string, string>>();
+  let active = maps.size === 1 ? [...maps.values()][0] : new Map<string, string>();
+  const show = (bytes: Buffer) => {
+    const text = applyCmap(bytes, active);
+    if (text) found.push(text);
+  };
+  const re = /\/([A-Za-z0-9.]+)\s+[0-9.]+\s+Tf|\(((?:\\.|[^\\)])*)\)\s*Tj|<([0-9A-Fa-f\s]+)>\s*Tj|\[([\s\S]*?)\]\s*TJ/g;
   let hit: RegExpExecArray | null;
-  while ((hit = show.exec(body))) found.push(pdfLiteral(hit[1]));
-  const groups = /\[([\s\S]*?)\]\s*TJ/g;
-  while ((hit = groups.exec(body))) {
-    const piece = /\(((?:\\.|[^\\)])*)\)/g;
+  while ((hit = re.exec(body))) {
+    if (hit[1]) {
+      active = maps.get(hit[1]) ?? active;
+      continue;
+    }
+    if (hit[2] != null) {
+      show(Buffer.from(pdfLiteral(hit[2]), 'latin1'));
+      continue;
+    }
+    if (hit[3] != null) {
+      show(Buffer.from(hit[3].replace(/\s+/g, ''), 'hex'));
+      continue;
+    }
+    const inner = /\(((?:\\.|[^\\)])*)\)|<([0-9A-Fa-f\s]+)>/g;
     let one: RegExpExecArray | null;
-    while ((one = piece.exec(hit[1]))) found.push(pdfLiteral(one[1]));
+    while ((one = inner.exec(hit[4]))) {
+      if (one[1] != null) show(Buffer.from(pdfLiteral(one[1]), 'latin1'));
+      else if (one[2] != null) show(Buffer.from(one[2].replace(/\s+/g, ''), 'hex'));
+    }
   }
   return found.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function textOperators(body: string, fonts?: Map<string, Map<string, string>>): string {
+  if (/\/Filter\s*\/FlateDecode/.test(body)) return '';
+  return readShows(body, fonts);
 }
 
 function pdfObjects(raw: string): Map<number, string> {
@@ -251,12 +342,16 @@ function paeth(left: number, up: number, upLeft: number): number {
 function undoTiff(data: Buffer, parms: PngParms): Buffer | null {
   if (parms.predictor !== 2 || parms.bits !== 8 || parms.colors < 1) return null;
   const rowSize = Math.ceil((parms.columns * parms.colors * parms.bits) / 8);
-  if (rowSize <= 0 || data.length === 0 || data.length % rowSize !== 0) return null;
-  const out = Buffer.alloc(data.length);
-  for (let offset = 0; offset < data.length; offset += rowSize) {
+  if (rowSize <= 0 || data.length === 0) return null;
+  const rows = Math.ceil(data.length / rowSize);
+  const out = Buffer.alloc(rows * rowSize);
+  for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
+    const offset = rowIndex * rowSize;
     for (let column = 0; column < rowSize; column += 1) {
-      const left = column >= parms.colors ? out[offset + column - parms.colors] : 0;
-      out[offset + column] = (data[offset + column] + left) & 255;
+      const pos = offset + column;
+      const left = column >= parms.colors ? out[pos - parms.colors] : 0;
+      const byte = pos < data.length ? data[pos] : 0;
+      out[pos] = (byte + left) & 255;
     }
   }
   return out;
@@ -267,14 +362,18 @@ function undoPng(data: Buffer, parms: PngParms): Buffer | null {
   if (parms.predictor < 10 || parms.predictor > 15) return null;
   const rowSize = Math.ceil((parms.columns * parms.colors * parms.bits) / 8);
   const stride = rowSize + 1;
-  if (rowSize <= 0 || data.length === 0 || data.length % stride !== 0) return null;
+  if (rowSize <= 0 || data.length === 0) return null;
   const pixel = Math.max(1, Math.ceil((parms.colors * parms.bits) / 8));
-  const rows = data.length / stride;
+  const rows = Math.ceil(data.length / stride);
   const out = Buffer.alloc(rows * rowSize);
   let prev = Buffer.alloc(rowSize);
   for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
-    const filter = data[rowIndex * stride];
-    const source = data.subarray(rowIndex * stride + 1, rowIndex * stride + stride);
+    const rowStart = rowIndex * stride;
+    if (rowStart >= data.length) break;
+    const filter = data[rowStart];
+    const source = Buffer.alloc(rowSize);
+    const available = Math.min(rowSize, data.length - rowStart - 1);
+    if (available > 0) data.copy(source, 0, rowStart + 1, rowStart + 1 + available);
     const row = Buffer.alloc(rowSize);
     for (let column = 0; column < rowSize; column += 1) {
       const left = column >= pixel ? row[column - pixel] : 0;
@@ -345,24 +444,52 @@ function looseImageCount(visible: string, thumbs: Set<string>): number {
   return (body.match(/\/Subtype\s*\/Image/g) || []).length;
 }
 
+function streamText(id: number, raw: string, bytes: Uint8Array): string {
+  const item = streamObjects(raw).find((entry) => entry.id === id);
+  if (!item || item.streamStart < 0) return '';
+  const length = declaredLength(item.dict, raw);
+  const end = length != null ? Math.min(item.streamStart + length, item.streamEnd) : item.streamEnd;
+  if (end <= item.streamStart) return '';
+  const payload = Buffer.from(bytes.subarray(item.streamStart, end));
+  return /FlateDecode/.test(item.dict) ? decodedFlate(item.dict, payload, raw) : payload.toString('latin1');
+}
+
+function cmapsForPage(dict: string, objects: Map<number, string>, dicts: Map<number, string>, raw: string, bytes: Uint8Array): Map<string, Map<string, string>> {
+  const fonts = new Map<string, Map<string, string>>();
+  const resources = resolveKey(dict, 'Resources', dicts, objects);
+  if (!resources) return fonts;
+  const fontDict = resolveKey(resources, 'Font', dicts, objects);
+  if (!fontDict) return fonts;
+  for (const item of fontDict.matchAll(/\/([A-Za-z0-9.]+)\s+(\d+)\s+\d+\s+R/g)) {
+    const fontBody = objects.get(Number(item[2])) || dicts.get(Number(item[2])) || '';
+    const toUnicode = /\/ToUnicode\s+(\d+)\s+\d+\s+R/.exec(fontBody);
+    if (!toUnicode) continue;
+    const decoded = streamText(Number(toUnicode[1]), raw, bytes);
+    if (decoded) fonts.set(item[1], parseToUnicode(decoded));
+  }
+  return fonts;
+}
+
 function pagesFromContents(fileId: string, visible: string, raw: string, bytes: Uint8Array): PdfPageDescriptor[] | null {
   const objects = pdfObjects(visible);
   const pageDicts = orderedPageBodies(objects);
+  const pageIds = orderedPageIds(objects);
   const compressed = compressedStreamIds(raw);
   const dicts = rawDicts(raw);
   if (!pageDicts.some((dict) => contentIds(dict).length > 0)) return null;
-  const pages = pageDicts.map((dict) => {
+  const pages = pageDicts.map((dict, index) => {
     const ids = contentIds(dict);
+    const fonts = cmapsForPage(objects.get(pageIds[index]) || dict, objects, dicts, raw, bytes);
     const pieces: string[] = [];
     let unreadable = false;
     for (const id of ids) {
-      const plain = textOperators(objects.get(id) || '');
+      const plain = textOperators(objects.get(id) || '', fonts);
       if (plain) {
         pieces.push(plain);
         continue;
       }
       if (!compressed.has(id)) continue;
-      const inflated = textOperators(flatePayload(bytes, id));
+      const inflated = textOperators(flatePayload(bytes, id), fonts);
       if (inflated) pieces.push(inflated);
       else unreadable = true;
     }
@@ -456,6 +583,80 @@ function expandObjectStreams(bytes: Uint8Array): Uint8Array {
       if (!entry.value || classic.has(entry.id)) continue;
       classic.add(entry.id);
       extras.push(Buffer.from(`${entry.id} 0 obj\n${entry.value}\nendobj\n`, 'latin1'));
+    }
+  }
+  const withStreams = extras.length === 0 ? bytes : Buffer.concat([Buffer.from(bytes), Buffer.from('\n'), ...extras]);
+  return appendXRefObjects(withStreams);
+}
+
+function readBe(data: Buffer, offset: number, width: number): number {
+  let value = 0;
+  for (let i = 0; i < width; i += 1) value = (value << 8) | data[offset + i];
+  return value;
+}
+
+/** Type 2 entries name an object that lives in an object stream at a given index. */
+function xrefCompressed(decoded: string, dict: string): Array<{ id: number; stream: number; index: number }> {
+  const widths = /\/W\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s*\]/.exec(dict);
+  if (!widths) return [];
+  const w = [Number(widths[1]), Number(widths[2]), Number(widths[3])];
+  const stride = w[0] + w[1] + w[2];
+  if (stride <= 0) return [];
+  const data = Buffer.from(decoded, 'latin1');
+  const size = Number((/\/Size\s+(\d+)/.exec(dict) || [])[1] || 0);
+  const indexText = /\/Index\s*\[([^\]]*)\]/.exec(dict);
+  const ranges: Array<{ start: number; count: number }> = [];
+  if (indexText) {
+    const nums = indexText[1].trim().split(/\s+/).map(Number).filter((n) => Number.isFinite(n));
+    for (let i = 0; i + 1 < nums.length; i += 2) ranges.push({ start: nums[i], count: nums[i + 1] });
+  } else if (size > 0) ranges.push({ start: 0, count: size });
+  const found: Array<{ id: number; stream: number; index: number }> = [];
+  let cursor = 0;
+  for (const range of ranges) {
+    for (let n = 0; n < range.count; n += 1) {
+      if (cursor + stride > data.length) return found;
+      const type = w[0] === 0 ? 1 : readBe(data, cursor, w[0]);
+      const stream = readBe(data, cursor + w[0], w[1]);
+      const index = readBe(data, cursor + w[0] + w[1], w[2]);
+      if (type === 2) found.push({ id: range.start + n, stream, index });
+      cursor += stride;
+    }
+  }
+  return found;
+}
+
+function appendXRefObjects(bytes: Uint8Array): Uint8Array {
+  const raw = Buffer.from(bytes).toString('latin1');
+  const objects = streamObjects(raw);
+  const classic = new Set(objects.filter((item) => !/\/Type\s*\/XRef\b/.test(item.dict) && !/\/Type\s*\/ObjStm\b/.test(item.dict)).map((item) => item.id));
+  const extras: Buffer[] = [];
+  for (const item of objects) {
+    if (!/\/Type\s*\/XRef\b/.test(item.dict) || item.streamStart < 0) continue;
+    const length = declaredLength(item.dict, raw);
+    const streamEnd = length != null ? Math.min(item.streamStart + length, item.streamEnd) : item.streamEnd;
+    if (streamEnd <= item.streamStart) continue;
+    const payload = Buffer.from(bytes.subarray(item.streamStart, streamEnd));
+    const decoded = /FlateDecode/.test(item.dict) ? decodedFlate(item.dict, payload, raw) : payload.toString('latin1');
+    if (!decoded) continue;
+    for (const entry of xrefCompressed(decoded, item.dict)) {
+      if (classic.has(entry.id)) continue;
+      const holder = objects.find((candidate) => candidate.id === entry.stream);
+      if (!holder || holder.streamStart < 0) continue;
+      const count = Number((/\/N\s+(\d+)/.exec(holder.dict) || [])[1]);
+      const first = Number((/\/First\s+(\d+)/.exec(holder.dict) || [])[1]);
+      if (!count || !Number.isFinite(first) || entry.index >= count) continue;
+      const holderEnd = declaredLength(holder.dict, raw);
+      const end = holderEnd != null ? Math.min(holder.streamStart + holderEnd, holder.streamEnd) : holder.streamEnd;
+      if (end <= holder.streamStart) continue;
+      const body = Buffer.from(bytes.subarray(holder.streamStart, end));
+      const text = /FlateDecode/.test(holder.dict) ? decodedFlate(holder.dict, body, raw) : body.toString('latin1');
+      const values = objectsInStream(text, count, first);
+      const nums = text.slice(0, first).match(/\d+/g);
+      const wanted = nums && nums.length >= (entry.index + 1) * 2 ? Number(nums[entry.index * 2]) : entry.id;
+      const value = values.find((row) => row.id === wanted)?.value;
+      if (!value) continue;
+      classic.add(entry.id);
+      extras.push(Buffer.from(`${entry.id} 0 obj\n${value}\nendobj\n`, 'latin1'));
     }
   }
   if (extras.length === 0) return bytes;
