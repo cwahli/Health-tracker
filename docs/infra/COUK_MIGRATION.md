@@ -14,8 +14,7 @@ re-homed off OVH (`51.254.217.163`, "vps-france") to the current VM
 and `*.health-tracker.co.uk` through a **Cloudflare Tunnel** (`cloudflared`,
 ingress → `127.0.0.1:80`); TLS is at the Cloudflare edge. The old box no longer
 serves HTTP, so its duckdns site blocks went with it — step 8 is done by
-retirement, not by editing a Caddyfile. The only step left is the human DuckDNS
-dashboard deletion of the `health-tracking.duckdns.org` A record.
+retirement, not by editing a Caddyfile. Checked 2026-10-29: co.uk hosts answer, and `/privacy` plus `/terms` return 200 after the empty `/srv/www-legal` directory was filled from `/home/ubuntu/www-legal`. The DuckDNS A record still points at dead OVH `51.254.217.163`. This host has no DuckDNS token, so the dashboard deletion is not done. Supabase, Firebase, and Health Connect dashboards were not opened.
 
 **Status ledger (updated as steps land):**
 
@@ -30,7 +29,7 @@ dashboard deletion of the `health-tracking.duckdns.org` A record.
 | 6 | Live verification (site, TUI proof script, bot buttons, sub-services) | DONE — site 200, full TUI proof green on the new host |
 | 9 | Audit sweep: every remaining old-domain reference (gateway default lost in #581 rebuild, scorecard live origin on dead onrender, r14-tree defaults, relay-staging, plan canonicals) | DONE — `agent/domain-couk-audit` |
 | 10 | Relay-staging on co.uk (`/relay-staging/*` → `:8891` in the co.uk block) | after this PR merges (additive Caddy handle + doc updates) |
-| 7 | Console checks: Supabase redirect allowlist, Google OAuth consent links, Health Connect callback | HUMAN (dashboards) |
+| 7 | Console checks: Supabase redirect allowlist, Google OAuth consent links, Health Connect callback | PARTIAL 2026-10-29 — `/privacy` and `/terms` 200 after installing the pages into `/srv/www-legal`. Supabase, Firebase, and Health Connect dashboards were not opened from this host. |
 | 8 | Retirement: duckdns Caddy blocks removed | DONE 2026-10-18 — by host re-homing. The OVH box that served them is retired; the new VM (Cloudflare Tunnel) never had duckdns blocks. Human step left: delete the duckdns A record. |
 | 11 | DNS: `mc` / `agenda` → the production origin | `mc.` DONE (resolves live 2026-10-09); origin is now the new VM via the Cloudflare Tunnel (was `51.254.217.163`, OVH) |
 | 12 | Caddy blocks for `mc.` and `agenda.` (each **with a `log` block**) | DONE — both live on the new VM's Caddyfile (`mc.` + `agenda.` co.uk blocks present, TLS at the edge); the duckdns blocks retired with the OVH box |
