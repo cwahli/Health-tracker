@@ -1,10 +1,10 @@
 ---
 id: MCP-GEMINI-STEP6-DIAGNOSTICS
-status: locked
+status: done
 class: MCP_DIAGNOSTICS_AND_RELIABILITY
 edit_mode: rewrite
 skill: builder
-auto_go: true
+auto_go: false
 allowed_files:
   - src/server/domain/healthTrackerDomain.ts
   - server_routes_mcp.ts
@@ -26,6 +26,8 @@ gate:
 ---
 
 # MCP-GEMINI-STEP6-DIAGNOSTICS — Step 6: Diagnostic & Reliability Tools
+
+**Done 2026-10-29.** Step 6 is on main. Do not re-execute this packet. `auto_go` is false so an unattended run does not pick it up.
 
 ## 1. Objective
 1. **Implement `diagnose_health_data` tool in `server_routes_mcp.ts`:**
