@@ -222,3 +222,24 @@ _no jobs logged yet_
 
 Key: numbers like "3 of 4" are verified passes out of verified jobs, higher is better. Fakes = the model said it was done but the check failed. Retries = extra attempts. "-" means no passing job to time.
 <!-- REALWORK:END -->
+
+## Model choice and hardware notes (2026-10-29)
+
+### Model choice
+- **Default local model: qwen3.8 27B (dense)** — bake-off 13/15 pass, 0 fake.
+- **qwen3-coder:30b** is MoE (only a small part of the model is active per token): faster, but 11/15 pass with 3 fake, so it suits quick or easy jobs only.
+- **Suggested routing:** easy jobs → qwen3-coder; hard jobs → qwen3.8. Escalation is decided by real checks, not by the model's own claims.
+
+### Context limit (Colab L4)
+- The Colab L4 has 24 GB VRAM. The 27B model is about 17 GB, and the KV cache grows with context, so about **64k is the practical maximum** (compat-qwen38r64 uses about 20 GB).
+- Options for more context: an A100 40/80 GB (128k+), an 8-bit KV cache (about 2x context, small quality cost), or a smaller model.
+- Workaround in use: one single-shot call per section.
+
+### Real-work results (2026-10-29)
+| Job | Model / runner | Difficulty | Result | Time |
+|---|---|---|---|---|
+| compat-fix-1 | qwen3.8, Colab | hard | pass after 2 re-prompts | ~480 s |
+| compat-d1-prototype | DeepSeek, box opencode | hard | pass first try | ~900 s |
+| compat-d3 | DeepSeek, box | — | pass | — |
+
+DeepSeek is currently strongest for page builds; qwen3.8 is fine for sectioned writing.
