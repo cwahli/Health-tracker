@@ -15,6 +15,7 @@ export const BOT_COMMANDS = [
   { command: 'status_all', fleetRead: true, description: 'Show fleet-wide status across agents in this chat' },
   { command: 'new', description: 'Start a fresh session' },
   { command: 'compact', description: "Compact this chat's session in place (stays on it)" },
+  { command: 'stop', description: 'Stop the turn running in this chat' },
   { command: 'model_light_free', description: 'Pick a free model from the light pool (a quota hit moves inside light only)' },
   { command: 'model_free', description: 'Pick a free model: coding-capable lanes only (rating at or above 35)' },
   { command: 'model_go', description: 'Pick a lane on the paid Go plan (never moves on its own)' },
@@ -61,6 +62,11 @@ export const HIDDEN_COMMANDS = {
   // isKnownCommand() false, so a typed /model would fall through as a prompt.
   model: 'moved: the setter became /model_light_free, /model_free and /model_go — answers as a pointer and does not set or clear a model',
   models: 'moved: the model list became the three pool pickers — answers the same pointer',
+  // The fleet's own text tells users to "send /abort" (/tui off, the attach
+  // refusal, the relay's job comment), but no case ever handled it, so a typed
+  // /abort fell through to the tool as a prompt. It is an alias of /stop, kept
+  // handled so the spelling people already use works.
+  abort: 'alias of /stop — the fleet text tells users to send /abort, so it is handled here rather than forwarded as a prompt',
   store: 'ops: store queue status/flush is a background concern, typed on demand',
   setup: 'ops: provider readiness gaps, surfaced via /allowance and typed to fix',
   // The bot mini-apps went web-only (2026-10-11 owner call): no buttons, no
@@ -102,6 +108,7 @@ export const HELP_USAGE = {
   status_all: { args: '', text: 'fleet-wide status table across agents in this chat' },
   new: { args: '', text: 'start a fresh session' },
   compact: { args: '', text: "compact this chat's session in place (stays on it)" },
+  stop: { args: '', text: 'stop the turn running in this chat — kills a local turn, flags a remote one' },
   model_light_free: { args: '', text: 'pick from the light pool — a quota hit moves inside light only' },
   model_free: { args: '', text: 'pick from the coding pool (rating at or above 35) — a quota hit moves inside coding only' },
   model_go: { args: '', text: 'pick a lane on the paid Go plan — it never moves on its own' },

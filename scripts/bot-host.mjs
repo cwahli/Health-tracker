@@ -79,7 +79,7 @@ import { issueToken } from './tui-gateway.mjs';
 import { KNOWN_HOSTS, workerStatus, isLocalHost, machineLabel } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
-import { enqueueJob, awaitJob, requeueJob, getJob, DEFAULT_LEASE_MS } from './lib/worker-jobs.mjs';
+import { enqueueJob, awaitJob, requeueJob, getJob, DEFAULT_LEASE_MS, abortJob } from './lib/worker-jobs.mjs';
 import { preflightWorkerTurn, classifyWorkerFailure, retryDelayMs, preflightSummary, relayUrl } from './lib/swap-guards.mjs';
 import { routeState, routeFor, armRoute, confirmRoute, rollbackRoute, validateCanaryResult, failedRouteReason } from './lib/worker-routing.mjs';
 import { acquirePollerLease, releasePollerLease, renewPollerLease } from './lib/poller-lease.mjs';
@@ -3386,6 +3386,32 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       setPref(prefs, chatId, { agent: target });
       savePrefs(config.id, prefs);
       await api.sendMessage(chatId, `Agent set to ${target} for this chat.`);
+      return;
+    }
+
+    case 'stop':
+    case 'abort': {
+      // The native Command Code TG surface's /stop. A local turn is killed
+      // outright; a remote one is flagged through the job file, which the worker
+      // polls and then kills its own child on. The machinery (the `running` map
+      // and abortJob) and the fleet's own wording ("send /abort" in /tui off and
+      // the attach refusal) both predated a command that triggered them, so that
+      // text pointed at nothing and a typed /abort fell through to the tool.
+      const turn = running.get(chatId);
+      let stopped = false;
+      if (turn?.child) {
+        try { turn.child.kill('SIGKILL'); stopped = true; } catch { /* already gone */ }
+      }
+      if (turn?.jobId) {
+        try { stopped = Boolean(abortJob(turn.jobId)) || stopped; } catch { /* best effort */ }
+      }
+      if (turn) turn.aborted = true;
+      // Claim the stop only when something was actually killed or flagged: a turn
+      // that finished between the keyboard tap and this read is "nothing running",
+      // not a stop that silently did nothing.
+      await api.sendMessage(chatId, stopped
+        ? 'Stopping this turn.'
+        : 'Nothing is running in this chat right now.');
       return;
     }
 
