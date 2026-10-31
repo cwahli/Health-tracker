@@ -26,7 +26,7 @@
  *    skipped rather than treated as a frame.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -90,6 +90,42 @@ const EXIT_REASONS = {
 
 export function describeCommandcodeExit(code) {
   return EXIT_REASONS[Number(code)] || '';
+}
+
+/**
+ * The effort levels the CLI advertises for a model, from its own refusal message.
+ *
+ * `cmd` validates `--effort` against the model BEFORE calling it, so a sentinel
+ * level costs nothing and answers two ways:
+ *   `Unknown effort "x". Supported: off, high, max.`  -> that list
+ *   `Ornith 1.5 122B has no adjustable reasoning effort.` -> [] (none to offer)
+ * Returns null when the output matches neither (could not tell), so a caller can
+ * tell "no levels" from "unknown" instead of guessing.
+ */
+export function parseCommandcodeEffortProbe(text) {
+  const s = String(text ?? '');
+  const m = s.match(/Supported:\s*([a-z0-9,\s]+)\./i);
+  if (m) {
+    const levels = m[1].split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    if (levels.length) return levels;
+  }
+  if (/no adjustable reasoning effort/i.test(s)) return [];
+  return null;
+}
+
+export function commandcodeEffortLevels({ model = '', commandcodeBin, env = process.env, timeoutMs = 20000, exec = execFileSync } = {}) {
+  const args = [
+    '--no-auto-update', '-p', 'x',
+    ...(model ? ['-m', String(model)] : []),
+    '--effort', '__probe__',
+    '--skip-onboarding',
+  ];
+  try {
+    return parseCommandcodeEffortProbe(exec(resolveCommandcodeBin(commandcodeBin), args, { encoding: 'utf8', timeout: timeoutMs, env }));
+  } catch (err) {
+    // A non-zero exit still carries the message — on stdout or stderr.
+    return parseCommandcodeEffortProbe(`${err?.stdout || ''}\n${err?.stderr || ''}\n${err?.message || ''}`);
+  }
 }
 
 /** The argv for one headless turn. Exported so a sensor can pin it. */

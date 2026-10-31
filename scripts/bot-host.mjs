@@ -87,7 +87,7 @@ import { buildPack, packWithContents } from './lib/swap-pack.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { tuiSurfaceFor as tuiSurface, latestClineSessionId, canOpenSharedTui } from './lib/tui-surface.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
-import { runCommandcode } from './lib/agent-commandcode.mjs';
+import { runCommandcode, commandcodeEffortLevels } from './lib/agent-commandcode.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
 import { parsePermissionCallback, startPermissionWatch, stopPermissionWatch } from './lib/permission-bridge.mjs';
 import { recordError, noteHealthy, recordRecoveryAttempt, classifyErrorKind, evaluateRecovery } from './lib/error-log.mjs';
@@ -842,6 +842,23 @@ async function getFreeModels(caches, config) {
     caches.freeLocation = location;
   }
   return caches.free;
+}
+
+/**
+ * The reasoning-effort levels Command Code advertises for one model, memoized per
+ * process. The CLI answers WITHOUT running a turn — an unknown `--effort` is
+ * refused before the model is called — so the probe is cheap, and the memo keeps
+ * it to one spawn per model. `null` means "could not tell"; `[]` means the model
+ * has no adjustable effort.
+ */
+function commandcodeEfforts(caches, model, config) {
+  const key = String(model || '');
+  if (!key) return [];
+  if (!caches.commandcodeEfforts) caches.commandcodeEfforts = new Map();
+  if (!caches.commandcodeEfforts.has(key)) {
+    caches.commandcodeEfforts.set(key, commandcodeEffortLevels({ model: key, commandcodeBin: config?.agent?.commandcodeBin }));
+  }
+  return caches.commandcodeEfforts.get(key);
 }
 
 /**
@@ -3376,15 +3393,30 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const ref = parseModelRef(eff.model);
       // Gemini is single-shot: no variants, no opencode verbose lookup.
       // One refusal, no turn, no stored level (plan/TG_TOOL_SURFACE.md M4).
-      // Command Code is the same for this command: it has reasoning effort, but
-      // not through opencode's per-model variant catalog, so /thinking does
-      // nothing here rather than offer levels that would not apply.
-      if (ref.surface === 'gemini' || ref.surface === 'commandcode') {
+      if (ref.surface === 'gemini') {
         await api.sendMessage(chatId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.');
         return;
       }
+      // Command Code's own reasoning effort. The levels are the CLI's, read live
+      // from the model (no turn spent) because they differ per model and the CLI
+      // REFUSES a level a model does not offer — so an invented list would break
+      // the turn it was picked for.
+      let commandcodeLevels = null;
+      if (ref.surface === 'commandcode') {
+        commandcodeLevels = commandcodeEfforts(caches, ref.id, config);
+        if (commandcodeLevels === null) {
+          await api.sendMessage(chatId, `Could not read the reasoning-effort levels for ${ref.id} from the Command Code CLI — try again in a moment.`);
+          return;
+        }
+        if (!commandcodeLevels.length) {
+          await api.sendMessage(chatId, `${ref.id} has no adjustable reasoning effort, so /thinking does nothing here. Send a normal prompt instead.`);
+          return;
+        }
+      }
       const variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS
+          : ref.surface === 'commandcode' ? commandcodeLevels
+            : await getVariants(config, caches, eff.model);
       if (!cmd.args) {
         if (!variants.length) {
           await api.sendMessage(chatId, `No thinking levels exposed for ${eff.model}.`);
@@ -6955,9 +6987,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
             };
           }
         }
+        // The chat's thinking level is Command Code's own --effort. Only a level
+        // THIS model advertises travels: the CLI refuses an unknown one, so a
+        // stale level (set on a model that offered it) would break the turn.
+        const ccLevels = commandcodeEfforts(caches, candidate.id, config) || [];
+        const ccEffort = eff.variant && ccLevels.includes(String(eff.variant)) ? String(eff.variant) : '';
         return runCommandcode({
           prompt: finalPrompt,
           model: candidate.id,
+          effort: ccEffort,
           sessionId: turnSessionId,
           workspace: effectiveWorkspace,
           timeoutMs: config.agent.timeoutMs,

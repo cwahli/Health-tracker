@@ -4,6 +4,8 @@ import {
   describeCommandcodeExit,
   normalizeCommandcodeUsage,
   mapCommandcodeEvent,
+  parseCommandcodeEffortProbe,
+  commandcodeEffortLevels,
 } from '../scripts/lib/agent-commandcode.mjs';
 
 describe('buildCommandcodeArgs', () => {
@@ -68,5 +70,32 @@ describe('mapCommandcodeEvent', () => {
     expect(mapCommandcodeEvent({ type: 'event', event: { type: 'tool_running', toolName: 'bash' } }))
       .toEqual({ kind: 'tool', tool: 'bash', status: 'running' });
     expect(mapCommandcodeEvent({ type: 'result', subtype: 'success' })).toBeNull();
+  });
+});
+
+describe('effort probe', () => {
+  it('reads the supported list out of the CLI refusal', () => {
+    expect(parseCommandcodeEffortProbe('Unknown effort "bogus". Supported: off, high, max.')).toEqual(['off', 'high', 'max']);
+  });
+
+  it('reads "no adjustable reasoning effort" as an empty list, not an unknown', () => {
+    expect(parseCommandcodeEffortProbe('Ornith 1.5 122B has no adjustable reasoning effort.')).toEqual([]);
+  });
+
+  it('returns null when the output says neither', () => {
+    expect(parseCommandcodeEffortProbe('something else entirely')).toBeNull();
+  });
+
+  it('probes with the sentinel level and the model, and parses the answer', () => {
+    const calls = [];
+    const exec = (bin, args) => { calls.push([bin, args]); return 'Unknown effort "__probe__". Supported: low, high, max.'; };
+    const levels = commandcodeEffortLevels({ model: 'moonshotai/kimi-k3.1-pro', commandcodeBin: '/bin/sh', exec });
+    expect(levels).toEqual(['low', 'high', 'max']);
+    expect(calls[0][1]).toEqual(expect.arrayContaining(['-m', 'moonshotai/kimi-k3.1-pro', '--effort', '__probe__']));
+  });
+
+  it('never throws when the probe exits non-zero, and still reads the message', () => {
+    const exec = () => { throw Object.assign(new Error('boom'), { stdout: 'Unknown effort "x". Supported: off, high.' }); };
+    expect(commandcodeEffortLevels({ commandcodeBin: '/bin/sh', exec })).toEqual(['off', 'high']);
   });
 });
