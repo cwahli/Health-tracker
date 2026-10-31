@@ -150,7 +150,7 @@ check('tx off hides without stopping', getSession(s1.id, tmpStore).tx === false)
 
 // 4. One probe shape for every backend.
 const shapes = [];
-for (const backend of ['opencode', 'cline', 'grok', 'agy', 'gemini', 'human']) {
+for (const backend of ['opencode', 'cline', 'commandcode', 'grok', 'agy', 'gemini', 'human']) {
   const probe = debugProbe(backend, { session: s1, tmux: noTmux });
   shapes.push(Object.keys(probe).sort().join(','));
   check(`${backend} probe keys`, true);

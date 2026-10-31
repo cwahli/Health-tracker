@@ -27,11 +27,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { CLINE_SESSION_ID_RE, clineSessionsDir, listClineSessionIds } from './agent-cline.mjs';
+import { resolveCommandcodeBin } from './agent-commandcode.mjs';
 import { laneFor } from './lane-contract.mjs';
+
+/** Command Code session ids are UUIDs (verified in ~/.commandcode/projects/*). */
+export const COMMANDCODE_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const TUI_SURFACES = {
   opencode: { surface: 'opencode', tool: 'OpenCode', label: 'opencode TUI', terminal: true, sharedSession: true },
   cline: { surface: 'cline', tool: 'Cline', label: 'Cline TUI', terminal: true, sharedSession: false },
+  // Command Code resumes the SAME session in a terminal (`cmd --resume <id>`) as
+  // a headless turn, so the "same session" claim is true — but there is no shared
+  // server serialising the two, so the fleet enforces one-writer-at-a-time
+  // (both directions: the attach script waits for a live turn, and bot-host
+  // refuses a turn while a commandcode lease is held).
+  commandcode: { surface: 'commandcode', tool: 'Command Code', label: 'Command Code TUI', terminal: true, sharedSession: true },
   gemini: { surface: 'gemini', tool: 'Gemini', label: 'Gemini', terminal: false, sharedSession: false },
 };
 
@@ -42,6 +52,7 @@ export function surfaceForModel(model) {
   const raw = String(model || '').trim().toLowerCase();
   if (raw.startsWith('cline:')) return 'cline';
   if (raw.startsWith('gemini:')) return 'gemini';
+  if (raw.startsWith('commandcode:')) return 'commandcode';
   return DEFAULT_TUI_SURFACE;
 }
 
@@ -65,7 +76,9 @@ export function tuiSurfaceFor(model) {
 export function sessionIdMatchesSurface(id, surface) {
   const raw = String(id || '').trim();
   if (!raw) return false;
-  return surface === 'cline' ? CLINE_SESSION_ID_RE.test(raw) : /^ses_/.test(raw);
+  if (surface === 'cline') return CLINE_SESSION_ID_RE.test(raw);
+  if (surface === 'commandcode') return COMMANDCODE_SESSION_ID_RE.test(raw);
+  return /^ses_/.test(raw);
 }
 
 /**
@@ -118,8 +131,10 @@ export function resolveTuiLaunch({
   workspace = '',
   opencodeBin = 'opencode',
   clineBin = 'cline',
+  commandcodeBin = '',
   resolveOpencode = (v) => v,
   resolveCline = (v) => v,
+  resolveCommandcode = resolveCommandcodeBin,
 } = {}) {
   const known = TUI_SURFACES[surface];
   if (!known) return { argv: null, ...TUI_SURFACES[DEFAULT_TUI_SURFACE], reason: `unknown surface "${surface}"` };
@@ -144,6 +159,20 @@ export function resolveTuiLaunch({
       note: sessionId
         ? `resumed onto Cline session ${sessionId}`
         : 'a fresh Cline session — no Cline thread has been recorded for this chat yet',
+    };
+  }
+
+  if (surface === 'commandcode') {
+    // Shared session, so there is nothing to open without one — the caller
+    // (`canOpenSharedTui`) already refuses to offer /tui in that case, and this
+    // is the backstop for a direct call.
+    if (!sessionId) {
+      return { argv: null, ...known, reason: 'no Command Code session recorded for this chat yet' };
+    }
+    return {
+      argv: [resolveCommandcode(commandcodeBin), '--resume', String(sessionId)],
+      ...known,
+      note: `resumed onto Command Code session ${sessionId}`,
     };
   }
 

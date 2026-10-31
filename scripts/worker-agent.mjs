@@ -35,6 +35,7 @@ import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runOpencode } from './lib/agent-opencode.mjs';
 import { runCline } from './lib/agent-cline.mjs';
+import { runCommandcode } from './lib/agent-commandcode.mjs';
 import { buildChildEnv } from './lib/child-env.mjs';
 import { ensureBotLedger, stampDepleted, isConnectionFailure, freemodelRefToRoute } from './lib/free-lanes.mjs';
 import { isQuotaOrLimitError } from './lib/agent-opencode.mjs';
@@ -271,7 +272,14 @@ async function runJob(job) {
           onEvent: emitLive,
           onSpawn: (child) => { liveChild = child; },
         })
-      : await runOpencode({
+      : String(model || '').startsWith('commandcode:')
+        ? await runCommandcode({
+            prompt, model: model.slice('commandcode:'.length), workspace, env, envMode,
+            sessionId: resume.sessionId, timeoutMs: 900000,
+            onEvent: emitLive,
+            onSpawn: (child) => { liveChild = child; },
+          })
+        : await runOpencode({
           prompt, model, workspace, env, envMode, sessionId: resume.sessionId, timeoutMs: 900000,
           onEvent: emitLive,
           onSpawn: (child) => { liveChild = child; },

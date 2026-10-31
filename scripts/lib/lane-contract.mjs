@@ -35,6 +35,17 @@ export const LANES = {
     degradedReason: 'Cline CLI 3.0.65-3.0.68 headless-resume is broken (--id forces interactive mode); every run starts fresh.',
     roles: [...ROLES],
   },
+  commandcode: {
+    // Paid lane (Command Code subscription), opted into per chat or per bot; it
+    // is never part of the free-pool failover. Facts: `cmd -p` is a real one-shot
+    // (so `headless` is honoured, not degraded), it writes a resumable session
+    // per turn (so `resume` is honoured — the id comes OUT of the result frame
+    // and travels back in with --resume), and it runs tools unattended under
+    // --yolo. No shared server, so the fleet serialises its terminal against a
+    // bot turn itself (bot-host.mjs, commandcode gate).
+    kind: 'cli', apiOnly: false, tools: true, session: true,
+    degraded: [], roles: [...ROLES],
+  },
   grok: {
     kind: 'cli', apiOnly: false, tools: true, session: false,
     degraded: ['resume'],

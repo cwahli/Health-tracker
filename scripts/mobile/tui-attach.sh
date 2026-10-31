@@ -327,7 +327,7 @@ T_RESOLVED="$(now_ms)"
 # no pane name, no tmux below this point runs — so the next attach after the
 # first message resolves fresh and reaps correctly. Cline keeps its
 # fresh-thread path: its terminal never shares the turn thread by design.
-if [ -z "$SID" ] && [ "$SURFACE" = "opencode" ]; then
+if [ -z "$SID" ] && { [ "$SURFACE" = "opencode" ] || [ "$SURFACE" = "commandcode" ]; }; then
   echo "[tui] refused: nothing shared to attach to. This chat has no session"
   echo "recorded yet, so opening a terminal here would be blank and the bot"
   echo "would never join it."
@@ -469,6 +469,20 @@ case "$SURFACE" in
     echo "Close the Mini App and reopen it any time — tmux keeps your place."
     echo
     ;;
+  commandcode)
+    if [ -n "$SID" ]; then
+      echo "Command Code, in ${WORKTREE} — ${LAUNCH_NOTE}."
+      echo "This is the same session I answer in, so what you type here is the"
+      echo "conversation. Command Code has no shared server, so only one writer at"
+      echo "a time: while this terminal is open I hold a message back and tell you,"
+      echo "and it runs the moment you close the terminal."
+    else
+      echo "No chat session recorded yet — starting a fresh Command Code session"
+      echo "in ${WORKTREE}. Send me a message first and the next attach resumes it."
+    fi
+    echo "Close the Mini App and reopen it any time — tmux keeps your place."
+    echo
+    ;;
   *)
     if [ -n "$SID" ]; then
       echo "OpenCode, in ${WORKTREE} — ${LAUNCH_NOTE}."
@@ -517,9 +531,12 @@ announce() {
       // attached later shows up without the bot guessing.
       clients: Number(process.argv[5] || 0),
       since: Number(process.argv[6] || 0),
+      // Which lane this terminal is: bot-host reads it to gate a commandcode
+      // turn (no shared server) while this lease is live.
+      surface: String(process.argv[7] || ''),
     };
     fs.writeFileSync(process.argv[1], JSON.stringify(payload));
-  ' "$TUI_LEASE" "$SID" "$TMUX_NAME" "$BOT_ID" "$(tmux list-clients -t "$TMUX_NAME" 2>/dev/null | wc -l | tr -d ' ')" "$PANE_SINCE" 2>/dev/null || true
+  ' "$TUI_LEASE" "$SID" "$TMUX_NAME" "$BOT_ID" "$(tmux list-clients -t "$TMUX_NAME" 2>/dev/null | wc -l | tr -d ' ')" "$PANE_SINCE" "$SURFACE" 2>/dev/null || true
 }
 announce
 ( while true; do sleep 15; announce; done ) &

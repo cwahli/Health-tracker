@@ -509,7 +509,7 @@ export function projectLanes(table, session, { now = Date.now(), labelFn = defau
 // a Freebuff lane whose model path contains `deepseek/` resolved to deepseek and
 // rendered as plan code "DE".
 const PROVIDER_ALIASES = new Set([
-  'tokenharbor', 'cloudflare', 'freebuff', 'opencode', 'cline', 'gemini',
+  'tokenharbor', 'cloudflare', 'freebuff', 'opencode', 'cline', 'gemini', 'commandcode',
 ]);
 
 /** The provider that actually serves a lane, from its model path. */
@@ -542,6 +542,9 @@ function toModelRefShim(provider, model) {
 export function laneWalkRef(provider, model) {
   const surface = String(provider || '');
   if (surface === 'cline') return `cline:${model}`;
+  // Command Code ids carry a vendor path, so the lane keeps a colon prefix (see
+  // freemodels.toModelRef and routeCandidates — the three must agree).
+  if (surface === 'commandcode') return `commandcode:${String(model || '').replace(/^commandcode:/, '')}`;
   if (surface === 'gemini' || surface === 'google') {
     const id = String(model || '');
     return `gemini:${id.startsWith('gemini/') ? id : `gemini/${id}`}`;
@@ -851,6 +854,9 @@ export function planCodeForLane(lane) {
   const bucket = String(lane?.bucket || "").toLowerCase();
   if (provider === "cloudflare" || model.includes("cloudflare/") || bucket.includes("cloudflare")) return "CF";
   if (provider === "cline" || model.startsWith("cline")) return "CL";
+  // Command Code is a PAID lane with its own subscription allowance; it keeps a
+  // distinct code so a row can never be deduped onto a free lane's bar.
+  if (provider === "commandcode" || model.startsWith("commandcode:")) return "CC";
   if (provider === "freebuff" || bucket.includes("freebuff")) return "FB";
   // The go-plan pool is separate quota from the zen pool: it keeps its own code
   // so such a row can never be deduped onto the zen free row and read as the same
@@ -2191,6 +2197,7 @@ export function routeCandidates(ref) {
   if (!raw) return [];
   if (raw.startsWith("cline:")) return [{ provider: "cline", model: raw.slice("cline:".length) }];
   if (raw.startsWith("gemini:")) return [{ provider: "gemini", model: raw.slice("gemini:".length) }];
+  if (raw.startsWith("commandcode:")) return [{ provider: "commandcode", model: raw.slice("commandcode:".length) }];
   if (raw.startsWith("opencode:")) return [{ provider: "opencode", model: raw.slice("opencode:".length) }];
   if (!raw.includes("/")) return [{ provider: "opencode", model: raw }];
   const [provider, ...rest] = raw.split("/");

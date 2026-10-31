@@ -11,7 +11,7 @@ import {
 
 describe('laneFor', () => {
   it('describes every dispatch backend', () => {
-    for (const backend of ['opencode', 'cline', 'grok', 'agy', 'freebuff', 'gemini', 'human']) {
+    for (const backend of ['opencode', 'cline', 'commandcode', 'grok', 'agy', 'freebuff', 'gemini', 'human']) {
       expect(laneFor(backend).backend).toBe(backend);
     }
   });
@@ -38,6 +38,14 @@ describe('degraded markings', () => {
   it('keeps opencode and human clean', () => {
     expect(LANES.opencode.degraded).toEqual([]);
     expect(LANES.human.degraded).toEqual([]);
+  });
+
+  it('marks commandcode as a full CLI lane: tools + resumable session, nothing degraded', () => {
+    const cc = laneFor('commandcode');
+    expect(cc.kind).toBe('cli');
+    expect(cc.tools).toBe(true);
+    expect(cc.session).toBe(true);
+    expect(cc.degraded).toEqual([]);
   });
 
   // freebuff lane rows + laneSupports probe: tests/lane-contract-freebuff.test.ts (R-15)

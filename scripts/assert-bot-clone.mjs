@@ -79,6 +79,7 @@ export const PER_BOT_KEYS = new Set([
   'agent.workspace',
   'agent.opencodeBin',
   'agent.clineBin',
+  'agent.commandcodeBin',
   // The documented way to add a skill: additive onto the inherited list.
   'agent.skills',
   // Verification independence is structural: BOT_GROUP.md (chiwah-tax) requires

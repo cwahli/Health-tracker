@@ -284,12 +284,13 @@
       "runtime": "bot-host",
       "enabled": true,
       "extends": "vm",
-      "notes": "Thin clone of the registry master (scripts/add-bot.mjs): agent/progress/session are inherited. Add a per-bot difference only by allowlisting the key in scripts/assert-bot-clone.mjs.",
+      "notes": "Thin clone of the registry master (scripts/add-bot.mjs): agent/progress/session are inherited. Add a per-bot difference only by allowlisting the key in scripts/assert-bot-clone.mjs. agent.model is overridden to the Command Code lane (paid) as the opt-in default; switch a chat back with /model_free, or revert this row.",
       "telegram": {
         "tokenEnv": "VM3_BOT_TOKEN"
       },
       "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-vm3"
+        "playwrightOutputDir": "/tmp/bot-host-shots-vm3",
+        "model": "commandcode:deepseek/deepseek-v4-flash"
       }
     },
     {

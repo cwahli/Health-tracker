@@ -87,6 +87,7 @@ import { buildPack, packWithContents } from './lib/swap-pack.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { tuiSurfaceFor as tuiSurface, latestClineSessionId, canOpenSharedTui } from './lib/tui-surface.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
+import { runCommandcode } from './lib/agent-commandcode.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
 import { parsePermissionCallback, startPermissionWatch, stopPermissionWatch } from './lib/permission-bridge.mjs';
 import { recordError, noteHealthy, recordRecoveryAttempt, classifyErrorKind, evaluateRecovery } from './lib/error-log.mjs';
@@ -581,6 +582,7 @@ export function providerLabelForModel(model) {
   const surface = parseModelRef(model).surface;
   if (surface === 'cline') return 'Cline';
   if (surface === 'gemini') return 'Gemini';
+  if (surface === 'commandcode') return 'Command Code';
   return 'OpenCode';
 }
 
@@ -667,7 +669,7 @@ function extractEmbeddedMessage(text) {
  * the next step — never the raw envelope.
  */
 export function formatProviderFailure({ surface, model, lastError, stderr } = {}) {
-  const provider = surface === 'cline' ? 'Cline' : surface === 'gemini' ? 'Gemini' : 'OpenCode';
+  const provider = surface === 'cline' ? 'Cline' : surface === 'gemini' ? 'Gemini' : surface === 'commandcode' ? 'Command Code' : 'OpenCode';
   const combined = `${lastError || ''} ${stderr || ''}`;
   const hint = parseRetryAfter(combined);
   if (isQuotaOrLimitError(combined)) {
@@ -3357,7 +3359,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const ref = parseModelRef(eff.model);
       // Gemini is single-shot: no variants, no opencode verbose lookup.
       // One refusal, no turn, no stored level (plan/TG_TOOL_SURFACE.md M4).
-      if (ref.surface === 'gemini') {
+      // Command Code is the same for this command: it has reasoning effort, but
+      // not through opencode's per-model variant catalog, so /thinking does
+      // nothing here rather than offer levels that would not apply.
+      if (ref.surface === 'gemini' || ref.surface === 'commandcode') {
         await api.sendMessage(chatId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.');
         return;
       }
@@ -6598,7 +6603,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   let freebuffKept = null;
   {
     const laneRef = parseModelRef(eff.model);
-    const lane = laneRef.surface === 'cline' ? 'cline' : laneRef.surface === 'gemini' ? 'gemini' : 'opencode';
+    const lane = laneRef.surface === 'cline' ? 'cline' : laneRef.surface === 'commandcode' ? 'commandcode' : laneRef.surface === 'gemini' ? 'gemini' : 'opencode';
     const fb = redirectFreebuffTurn({ model: eff.model, hostModel: config.agent?.model });
     if (fb.refuse) {
       try { releaseFiles(claimed, claimId); } catch {}
@@ -6745,7 +6750,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // silent is held by the remote branch below — never run locally.
     const location = desiredLocation(prefs, chatId) || workLocation();
     const workId = sessionKey({ location, chat: String(chatId), workspace: effectiveWorkspace, project: activeProject.id });
-    const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
+    const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'commandcode' ? 'commandcode' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
     // G-1: everything about this turn that is already decided, recorded now rather
     // than at the end. Turns return early in plenty of ways — a held remote route, an
     // abort, a preflight refusal — and those are exactly the turns worth having in the
@@ -6886,6 +6891,41 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           model: candidate.id,
           timeoutMs: config.agent.timeoutMs,
           env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+        });
+      }
+      if (candidate.surface === 'commandcode') {
+        // Command Code has NO shared server (unlike opencode), so a terminal and
+        // a bot turn would both append the same transcript. The attach script
+        // already waits for a live turn before opening the terminal; this is the
+        // mirror — wait briefly for the terminal lease to clear, then refuse
+        // with a clear reason rather than race the file.
+        if (turnSessionId) {
+          const deadline = Date.now() + 20000;
+          while (tuiIsAttached(config.id, turnSessionId) && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 1500));
+          }
+          if (tuiIsAttached(config.id, turnSessionId)) {
+            return {
+              code: 0,
+              sessionID: turnSessionId,
+              finalText: '',
+              stderr: '',
+              lastError: 'a Command Code terminal is open on this conversation — close it (or send /tui off) and resend',
+              usage: { cost: 0, tokens: null },
+            };
+          }
+        }
+        return runCommandcode({
+          prompt: finalPrompt,
+          model: candidate.id,
+          sessionId: turnSessionId,
+          workspace: effectiveWorkspace,
+          timeoutMs: config.agent.timeoutMs,
+          commandcodeBin: config.agent.commandcodeBin,
+          onEvent: onObserverEvent,
+          onSpawn: (child) => running.set(chatId, { child, aborted: false }),
+          env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+          envMode: turnEnvMode,
         });
       }
       // Only a level this model offers travels as `#variant`. Anything else
@@ -7657,7 +7697,17 @@ async function dryRun(config, args) {
   await renderer.start();
   const ref = parseModelRef(config.agent.model);
   const result =
-    ref.surface === 'gemini'
+    ref.surface === 'commandcode'
+      ? await runCommandcode({
+          prompt,
+          model: ref.id,
+          workspace: config.agent.workspace,
+          timeoutMs: config.agent.timeoutMs,
+          commandcodeBin: config.agent.commandcodeBin,
+          onEvent: (event) => renderer.onEvent(event),
+          env: opencodeEnv(config),
+        })
+      : ref.surface === 'gemini'
       ? await runGemini({
           prompt,
           model: ref.id,
