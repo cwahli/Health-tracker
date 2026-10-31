@@ -1855,7 +1855,15 @@ export function poolForCommand(name) {
  */
 export function poolOfLane(lane) {
   if (!lane) return null;
-  if (planCodeForLane(lane) === 'OG') return 'go';
+  const plan = planCodeForLane(lane);
+  if (plan === 'OG') return 'go';
+  // Command Code rows are strong coding models and the lane is opted into
+  // deliberately, so they belong in the coding pool (/model_free) where a user
+  // looking to switch reaches first. Filing them by tier scattered 7 of 8 into
+  // the light pool, where they hid behind /model_light_free. This is display
+  // only: the walk still never targets them — bot-host's PAID_WALK_PLANS drops
+  // plan CC before the pool filter sees it.
+  if (plan === 'CC') return 'coding';
   const model = String(lane.model || '');
   if (!model) return null;
   return tierForModel(model).tier === 'high' ? 'coding' : 'light';
