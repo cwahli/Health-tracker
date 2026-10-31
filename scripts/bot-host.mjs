@@ -2951,50 +2951,69 @@ export function listTypedSkills(config) {
   return [...found.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 }
 
+/**
+ * The one /model_* picker body, built from the same projection the walk reads.
+ * Shared by the pool commands and the pager callback, so a page turn re-renders
+ * byte-identically instead of drifting to a second list.
+ */
+function freemodelPickerBody({ caches, config, chatId, pool = null, current = '' }) {
+  // The union, not the raw catalog: getAnnotatedFreeModels folds the ledger's
+  // own rows in, and those are the Token Harbor / Cloudflare / Freebuff models.
+  // Rendering the catalog alone listed 42 models and none of them were the ones
+  // /allowance was showing for those providers.
+  const { entries, annotated, table: fmTable, session: fmSession } = getAnnotatedFreeModels(caches, config.id);
+  if (!entries.length) return null;
+  return formatFreemodelWithDepletion(entries, annotated, {
+    current,
+    location: workLocation(),
+    pool,
+    canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation() }),
+    tableLanes: (fmTable && fmTable.lanes) || [],
+  });
+}
+
+/**
+ * One keyboard per pool — until a pool outgrows what Telegram accepts as a single
+ * reply_markup. The free pools top out in the low forties; the Command Code
+ * catalog is 73 lanes, and one keyboard for it came back
+ * "Bad Request: reply markup is too long" (live on vm3, 2026-10-31), so the pool
+ * pages instead. The pager's nav row (kind 'fmp') already existed in
+ * modelKeyboard and in handleCallback — it just had nothing building it. A paged
+ * keyboard drops the cancel footer; the body already names the way out.
+ */
+const FREEMODEL_PAGER_BOUND = 40;
+const FREEMODEL_PAGE_SIZE = 20;
+export function freemodelKeyboard(buttons, page = 0) {
+  if (buttons.length <= FREEMODEL_PAGER_BOUND) {
+    return modelKeyboard(buttons, {
+      kind: 'fm',
+      all: true,
+      footer: { text: headingWidth('Cancel — keep current model'), callback_data: 'noop' },
+    });
+  }
+  return modelKeyboard(buttons, { kind: 'fm', page, pageSize: FREEMODEL_PAGE_SIZE });
+}
+
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId = 0, kind = 'direct' }) {
   const eff = effective(config, prefs, chatId);
 
   /**
-   * The one picker body: the three pool commands render this, each filter of the
-   * one canonical list and nothing else. Three copies of this body is exactly how
-   * the three lists would drift apart from each other and from /allowance.
+   * The one picker body: the pool commands render this, each filter of the one
+   * canonical list and nothing else. The body itself lives at module level
+   * (freemodelPickerBody) so the pager callback re-renders the same thing.
    */
-  const sendFreeModelPicker = async ({ pool = null } = {}) => {
-    // The union, not the raw catalog: getAnnotatedFreeModels folds the ledger's
-    // own rows in, and those are the Token Harbor / Cloudflare / Freebuff models.
-    // Rendering the catalog alone listed 42 models and none of them were the ones
-    // /allowance was showing for those providers.
-    const { entries, annotated, table: fmTable, session: fmSession } = getAnnotatedFreeModels(caches, config.id);
-    if (!entries.length) {
+  const sendFreeModelPicker = async ({ pool = null, page = 0 } = {}) => {
+    const body = freemodelPickerBody({ caches, config, chatId, pool, current: eff.model });
+    if (!body) {
       await api.sendMessage(chatId, 'No free models found (opencode cache unreadable).');
       return;
     }
-    // Every row is a button, including the ones that cannot be used right now:
-    // the router keeps a depleted lane tappable so the tap can answer with what
-    // to use instead. Filtering them out of the keyboard is what made the two
-    // commands list different things.
-    // The table getAnnotatedFreeModels already folded the catalog into — the same
-    // one the annotation was computed against and the same one /allowance renders.
-    // Folding the union again here produced a different table (46 lanes against
-    // 48) and six models came back that the real list has dropped.
-    const body = formatFreemodelWithDepletion(entries, annotated, {
-      current: eff.model,
-      location: workLocation(),
-      pool,
-      canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation() }),
-      tableLanes: (fmTable && fmTable.lanes) || [],
-    });
-    // One keyboard with every model, no paging, and the router's cancel row.
+    // HTML, not Markdown: the table is a <code> block, which is the only
+    // left-aligned column-true rendering Telegram has, and Markdown has no
+    // equivalent that keeps columns.
     await api.sendMessage(chatId, body.text, {
-      // HTML, not Markdown: the table is a <code> block, which is the only
-      // left-aligned column-true rendering Telegram has, and Markdown has no
-      // equivalent that keeps columns.
       parse_mode: 'HTML',
-      reply_markup: modelKeyboard(body.buttons, {
-        kind: 'fm',
-        all: true,
-        footer: { text: headingWidth('Cancel — keep current model'), callback_data: 'noop' },
-      }),
+      reply_markup: freemodelKeyboard(body.buttons, page),
     });
   };
 
@@ -4775,24 +4794,22 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
       return;
     }
     if (kind === 'fmp') {
-      const entries = await getFreeModels(caches, config);
-      const eff = effective(config, prefs, chatId);
-      const { annotated } = getAnnotatedFreeModels(caches, config.id);
-      const selectable = annotated.filter((a) => a.selectable !== false);
-      const available = selectable.filter((a) => !a.depleted);
-      // `.text`, not the whole result: this call site handed editMessageText the
-      // return object, which Telegram renders as the literal "[object Object]" in
-      // the body. Unreachable today (nothing builds a kind:'fmp' keyboard), but it
-      // is the same /freemodel body and it was wrong.
-      await api.editMessageText(chatId, messageId, formatFreemodelWithDepletion(entries, annotated, {
-        current: eff.model,
-        location: workLocation(),
-      }).text, {
+      // The pager nav row. It re-renders the pool the chat is IN — running a pool
+      // command sets the pool (decision D2) — so a page turn cannot jump pools.
+      // Nothing built a kind:'fmp' keyboard before the Command Code catalog
+      // outgrew one reply_markup, so this branch was dead by construction.
+      const pool = prefs[chatId]?.pool || null;
+      const body = freemodelPickerBody({
+        caches, config, chatId, pool,
+        current: effective(config, prefs, chatId).model,
+      });
+      if (!body) {
+        await api.answerCallbackQuery(query.id, { text: 'No models' });
+        return;
+      }
+      await api.editMessageText(chatId, messageId, body.text, {
         parse_mode: 'HTML',
-        reply_markup: modelKeyboard(
-          (available.length ? available : selectable).map((entry) => ({ text: entry.label, data: entry.ref })),
-          { page: Number(value) || 0, kind: 'fm' },
-        ),
+        reply_markup: freemodelKeyboard(body.buttons, Number(value) || 0),
       });
       await api.answerCallbackQuery(query.id);
       return;

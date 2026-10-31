@@ -116,6 +116,7 @@ import {
   sweepOrphanedLeases,
   selectTurnLanes,
   formatFreemodelWithDepletion,
+  freemodelKeyboard,
   blockedProviderLines,
   FREEMODEL_EMPTY_BODY,
   getContextLimit,
@@ -996,6 +997,24 @@ describe('pickers', () => {
         expect(button.callback_data.length).toBeLessThanOrEqual(64);
       }
     }
+  });
+
+  it('keeps a small pool on one keyboard and pages a pool that outgrows reply_markup', () => {
+    // The free pools stay unpaged: one keyboard, with the cancel row.
+    const small = Array.from({ length: 5 }, (_, i) => ({ text: `m${i}`, data: `fm:commandcode:m${i}` }));
+    const onePage = freemodelKeyboard(small);
+    const oneFlat = onePage.inline_keyboard.flat();
+    expect(oneFlat).toHaveLength(6);
+    expect(oneFlat.some((b: { callback_data: string }) => b.callback_data === 'noop')).toBe(true);
+
+    // The Command Code catalog is 73 lanes; one keyboard for it came back
+    // "reply markup is too long" from Telegram (live on vm3, 2026-10-31).
+    const big = Array.from({ length: 73 }, (_, i) => ({ text: `cc:m${i}`, data: `fm:commandcode:m${i}` }));
+    const page0 = freemodelKeyboard(big, 0);
+    const flat = page0.inline_keyboard.flat();
+    expect(flat.length).toBeLessThanOrEqual(22); // 20 rows + the pager nav row
+    expect(flat.some((b: { callback_data: string }) => b.callback_data.startsWith('fmp:'))).toBe(true);
+    expect(JSON.stringify(page0).length).toBeLessThan(8000);
   });
 
   it('sorts free models first and marks them in the keyboard', () => {
