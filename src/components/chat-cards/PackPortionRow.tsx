@@ -153,7 +153,7 @@ export const PackPortionRow: React.FC<PackPortionRowProps> = ({
           <button
             type="button"
             onClick={handleAccept}
-            className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-all cursor-pointer"
+            className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-emerald-700 hover:bg-emerald-800 text-white shadow-sm transition-all cursor-pointer"
           >
             {t.acceptPortion || 'Accept'}
           </button>

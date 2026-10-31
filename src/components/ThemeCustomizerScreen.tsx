@@ -1381,7 +1381,7 @@ export default function ThemeCustomizerScreen({ theme }: ThemeCustomizerScreenPr
                                       !newPresetName.trim()
                                         ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-400 dark:text-indigo-500 cursor-not-allowed'
                                         : justSavedKey === 'new-preset'
-                                        ? 'bg-emerald-600 text-white cursor-default'
+                                        ? 'bg-emerald-700 text-white cursor-default'
                                         : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'
                                     }`}
                                   >
@@ -1398,7 +1398,7 @@ export default function ThemeCustomizerScreen({ theme }: ThemeCustomizerScreenPr
                                 <div key={idx} className={`flex flex-col gap-2 p-3 rounded-xl border shadow-sm transition-all ${active ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-400 dark:border-indigo-500 ring-2 ring-indigo-500/30' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'}`}>
                                   <div className="flex items-center gap-2 w-full">
                                     {active && (
-                                      <span className="w-4 h-4 rounded-full bg-emerald-600 dark:bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-xs" title="Preset Applied">
+                                      <span className="w-4 h-4 rounded-full bg-emerald-700 dark:bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs" title="Preset Applied">
                                         <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                                       </span>
                                     )}
@@ -1496,7 +1496,7 @@ export default function ThemeCustomizerScreen({ theme }: ThemeCustomizerScreenPr
                               <div key={'user'+idx} className={`flex justify-between items-center p-3 rounded-xl border shadow-sm transition-all ${active ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-400 dark:border-indigo-500 ring-2 ring-indigo-500/30' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'}`}>
                                 <div className="flex items-center gap-2 flex-1 truncate mr-2">
                                   {active && (
-                                    <span className="w-4 h-4 rounded-full bg-emerald-600 dark:bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-xs" title="Preset Applied">
+                                    <span className="w-4 h-4 rounded-full bg-emerald-700 dark:bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs" title="Preset Applied">
                                       <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                                     </span>
                                   )}
@@ -1634,7 +1634,7 @@ export default function ThemeCustomizerScreen({ theme }: ThemeCustomizerScreenPr
                               setJustSavedKey('new-preset');
                               setTimeout(() => setJustSavedKey(null), 1800);
                             }} 
-                            className={`w-full px-4 py-2.5 rounded-xl text-xs font-bold shadow-sm transition-all text-center ${!newPresetName.trim() ? 'bg-slate-100 dark:bg-slate-900 text-slate-400 dark:text-slate-600 cursor-not-allowed' : justSavedKey === 'new-preset' ? 'bg-emerald-600 text-white cursor-default' : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'}`}
+                            className={`w-full px-4 py-2.5 rounded-xl text-xs font-bold shadow-sm transition-all text-center ${!newPresetName.trim() ? 'bg-slate-100 dark:bg-slate-900 text-slate-400 dark:text-slate-600 cursor-not-allowed' : justSavedKey === 'new-preset' ? 'bg-emerald-700 text-white cursor-default' : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'}`}
                           >
                             {justSavedKey === 'new-preset' ? '✓ Preset Saved' : 'Save Current Configuration as Preset'}
                           </button>

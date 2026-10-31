@@ -1062,7 +1062,7 @@ export const BiomarkerAuditModal: React.FC<BiomarkerAuditModalProps> = ({
                       id: 'auto_proposals',
                       label: interpolate(t(profile?.language, 'auditFilterAuto'), { n: targetAutoUnitItems.length }),
                       icon: <Zap className="w-3.5 h-3.5" />,
-                      activeColorClass: 'bg-amber-600 text-white shadow-xs',
+                      activeColorClass: 'bg-amber-700 text-white shadow-xs',
                     },
                     {
                       id: 'agent_review',
@@ -1359,7 +1359,7 @@ export const BiomarkerAuditModal: React.FC<BiomarkerAuditModalProps> = ({
                       id: 'custom_calibrate',
                       label: interpolate(t(profile?.language, 'auditFilterCalibrate'), { n: targetCustomCalibrateItems.length }),
                       icon: <Bot className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400" />,
-                      activeColorClass: 'bg-emerald-600 text-white shadow-xs',
+                      activeColorClass: 'bg-emerald-700 text-white shadow-xs',
                     },
                     ...(targetCategoriseKeys.length > 0
                       ? [

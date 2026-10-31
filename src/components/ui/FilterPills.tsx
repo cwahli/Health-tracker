@@ -49,7 +49,7 @@ export function FilterPills<T extends string = string>({
     >
       {items.map((item) => {
         const isActive = item.id === activeId;
-        const defaultActiveColor = 'bg-amber-500 text-white shadow-xs';
+        const defaultActiveColor = 'bg-amber-500 text-slate-950 shadow-xs';
         const activeColor = item.activeColorClass || defaultActiveColor;
         const inactiveColor =
           'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60';
@@ -72,7 +72,7 @@ export function FilterPills<T extends string = string>({
               <span
                 className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
                   isActive
-                    ? 'bg-black/20 text-white'
+                    ? 'bg-black/20 text-slate-950'
                     : 'bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
                 }`}
               >

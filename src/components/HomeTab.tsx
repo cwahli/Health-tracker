@@ -1165,7 +1165,7 @@ export default function HomeTab({
                 onClick={() => {
                   onNavigateToTab?.('medical');
                 }}
-                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95 cursor-pointer flex items-center gap-1.5"
+                className="px-3.5 py-2 bg-amber-700 hover:bg-amber-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95 cursor-pointer flex items-center gap-1.5"
               >
                 <Activity className="w-3.5 h-3.5" />
                 <span>Review & Clean in Health</span>
@@ -1188,7 +1188,7 @@ export default function HomeTab({
 
       {/* Nutrition Allowance Tracker Dashboard (MOVED UP just above Health Status & BMI) */}
       <div id="dashboard-nutrition-targets" className="space-y-4">
-        <div className="flex justify-between items-center pb-2 border-b border-theme-border/50">
+        <div className="flex justify-between items-center gap-2 pb-2 border-b border-theme-border/50">
           <div className="flex items-center gap-2">
             <h3 className="font-bold text-theme-text text-sm flex items-center gap-1.5">
               <Heart className="w-4 h-4 text-indigo-600" />
@@ -2402,7 +2402,7 @@ export default function HomeTab({
 
               {/* Success Notification Banner */}
               {appliedToastMessage && (
-                <div className="px-5 py-2.5 bg-emerald-500 text-white text-xs font-bold flex items-center justify-between shadow-sm animate-in slide-in-from-top duration-200 shrink-0">
+                <div className="px-5 py-2.5 bg-emerald-700 text-white text-xs font-bold flex items-center justify-between shadow-sm animate-in slide-in-from-top duration-200 shrink-0">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-100" />
                     <span>{appliedToastMessage}</span>
@@ -2422,8 +2422,8 @@ export default function HomeTab({
                 {/* Left: Filter Tabs */}
                 <FilterPills<'all' | 'auto_fix' | 'ai_review'>
                   items={[
-                    { id: 'all', label: t.categoryAll, activeColorClass: 'bg-amber-500 text-white shadow-xs' },
-                    { id: 'auto_fix', label: t.autoFixable, activeColorClass: 'bg-emerald-600 text-white shadow-xs' },
+                    { id: 'all', label: t.categoryAll, activeColorClass: 'bg-amber-500 text-slate-950 shadow-xs' },
+                    { id: 'auto_fix', label: t.autoFixable, activeColorClass: 'bg-emerald-700 text-white shadow-xs' },
                     { id: 'ai_review', label: t.needsAiReview, activeColorClass: 'bg-indigo-600 text-white shadow-xs' },
                   ]}
                   activeId={telemetryFilterTab}
@@ -2749,7 +2749,7 @@ export default function HomeTab({
                                                 setTimeout(() => setAppliedToastMessage(null), 3000);
                                               }, 350);
                                             }}
-                                            className="px-2 py-0.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-md text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 shadow-2xs shrink-0"
+                                            className="px-2 py-0.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-md text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 shadow-2xs shrink-0"
                                             title={`Auto-fix ${rawVal} to ${previewConverted} ${unit}`}
                                           >
                                             <Zap className="w-2.5 h-2.5" />
