@@ -1366,7 +1366,9 @@ function poolNoteLines({ pool, location, total, usable, soonest = '' } = {}) {
   const name = poolDisplayName(pool, loc);
   const move = pool === 'go'
     ? 'the Go plan is paid, so this lane never moves on its own'
-    : 'a quota hit moves inside this pool only';
+    : pool === 'commandcode'
+      ? 'the Command Code subscription is paid, so this lane never moves on its own'
+      : 'a quota hit moves inside this pool only';
   if (!total) {
     return [`${name} — no lane of this pool is on ${loc} right now${soonest ? `; soonest reset in ${soonest}` : ''}. ${move}. ${POOL_EXIT_NOTE}`];
   }
@@ -3255,7 +3257,8 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'model_light_free':
     case 'model_free':
-    case 'model_go': {
+    case 'model_go':
+    case 'model_cc': {
       // Set the pool BEFORE showing it: the constraint has to hold for the very
       // next message a reader sends, not only once they tap a lane (decision D2),
       // or a chat that ran /model_light_free would still spend a coding lane on
@@ -5012,6 +5015,8 @@ export function pingOnlyModels({ isPingTurn, model, fallback } = {}) {
  * selectable from the ledger projection and the light/coding walks accept them).
  */
 const PAID_WALK_PLANS = new Set(['CC']);
+/** Pools whose lanes are paid; inside one, its own lanes are the fallback. */
+const PAID_POOLS = new Set(['go', 'commandcode']);
 
 /**
  * The lanes this turn may use, in order, from this host's own ledger.
@@ -5038,7 +5043,7 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   // The same projection /allowance and /freemodel read, so the walk can only
   // offer what those two surfaces call selectable.
   const projection = projectLanes(table, ledger.session || {}, { now, location: botId, readiness });
-  const lanes = projection.filter((r) => r.selectable && !PAID_WALK_PLANS.has(r.plan)).map((r) => ({ provider: r.provider, model: r.model, pref: r.pref, family: r.family, label: r.label, plan: r.plan }));
+  const lanes = projection.filter((r) => r.selectable).map((r) => ({ provider: r.provider, model: r.model, pref: r.pref, family: r.family, label: r.label, plan: r.plan }));
   const skipped = projection.filter((r) => !r.selectable).map((r) => ({
     provider: r.provider,
     model: r.model,
@@ -5060,7 +5065,14 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
     return row.model === current.model || (row.provider === current.provider && tail(row.model) === tail(current.model));
   };
   const currentSkipped = skipped.find(sameRoute) || routeKeySkipped({ model, current, session: ledger.session || {}, now });
-  const fallbackLanes = lanes.filter((l) => !sameRoute(l));
+  // A paid lane may be walked only INSIDE its own pool — the pool's own lanes
+  // are the fallback for a chat that deliberately chose that paid plan. Everywhere
+  // else, above all the unpooled cross-tier walk, a paid lane is never a target
+  // ("never paid"). Command Code has its own pool now (/model_cc), so this only
+  // bites the unpooled case — but that is exactly the case that used to leak.
+  const paidPool = PAID_POOLS.has(pool);
+  const walkable = paidPool ? lanes : lanes.filter((l) => !PAID_WALK_PLANS.has(l.plan));
+  const fallbackLanes = walkable.filter((l) => !sameRoute(l));
 
   // Same-type first: a depleted Standard lane walks to the next usable Standard
   // lane in /freemodel order, a depleted Light lane to the next usable Light
@@ -5099,9 +5111,10 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
     ? [...fallbackLanes].filter((l) => poolOfRoute(l) === pool).sort(bySameTier)
     : [];
   let orderedLanes;
-  if (pool === 'go') {
-    // A paid lane never moves on its own: the chat's own Go lane when it has a
+  if (PAID_POOLS.has(pool)) {
+    // A paid lane never moves on its own: the chat's own lane when it has a
     // usable one, otherwise the pool's own first lane — and never a second entry.
+    // Holds for the Go plan and for Command Code alike.
     orderedLanes = currentInPool && !currentSkipped ? [] : poolLanes.slice(0, 1);
   } else if (pool) {
     // Inside the pool, only the list's own order: the cross-tier concat is gone,

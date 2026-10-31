@@ -1832,6 +1832,10 @@ export const MODEL_POOLS = {
   light: { id: 'light', command: 'model_light_free' },
   coding: { id: 'coding', command: 'model_free' },
   go: { id: 'go', command: 'model_go' },
+  // A PAID pool of its own, like `go`: Command Code lanes are not free, so they
+  // must not sit inside a free pool's keyboard or its "moves inside this pool"
+  // promise. /model_cc is the only door to them.
+  commandcode: { id: 'commandcode', command: 'model_cc' },
 };
 
 /** The command that opens one pool, or '' for an unknown id. */
@@ -1857,13 +1861,11 @@ export function poolOfLane(lane) {
   if (!lane) return null;
   const plan = planCodeForLane(lane);
   if (plan === 'OG') return 'go';
-  // Command Code rows are strong coding models and the lane is opted into
-  // deliberately, so they belong in the coding pool (/model_free) where a user
-  // looking to switch reaches first. Filing them by tier scattered 7 of 8 into
-  // the light pool, where they hid behind /model_light_free. This is display
-  // only: the walk still never targets them — bot-host's PAID_WALK_PLANS drops
-  // plan CC before the pool filter sees it.
-  if (plan === 'CC') return 'coding';
+  // Command Code has its own PAID pool (/model_cc), so the free /model_free and
+  // /model_light_free keyboards never carry a paid row. Filing them by tier put
+  // them inside the free coding pool, whose header promises "a quota hit moves
+  // inside this pool only" — a promise a paid lane cannot keep.
+  if (plan === 'CC') return 'commandcode';
   const model = String(lane.model || '');
   if (!model) return null;
   return tierForModel(model).tier === 'high' ? 'coding' : 'light';
@@ -1896,6 +1898,7 @@ export function poolDisplayName(poolId, location = 'vps') {
   if (poolId === 'light') return `${loc} Light pool`;
   if (poolId === 'coding') return `${loc} Coding pool`;
   if (poolId === 'go') return `${loc} Go plan`;
+  if (poolId === 'commandcode') return `${loc} Command Code plan`;
   return `${loc} model pool`;
 }
 
