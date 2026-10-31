@@ -469,9 +469,11 @@ export function buildFreeModelList(opts = {}) {
     entries.push(pendingEntry('freebuff', 'Install Freebuff and sign in on this host; it is terminal-only.', location));
   }
   // Command Code is a PAID lane: it is listed so a chat can be put on it
-  // deliberately, but it is never part of the free inventory nor the free-pool
-  // failover (it has no MODEL_POOLS bucket). Rows go last so free lanes stay on
-  // top. The shortlist is bounded (see COMMANDCODE_MODELS).
+  // deliberately, but it must never be a failover target. That is enforced in
+  // bot-host's selectTurnLanes (PAID_WALK_PLANS excludes plan CC from the walk),
+  // NOT here — the picker deliberately shows it so the user can switch onto it.
+  // Rows go last so free lanes stay on top. The shortlist is bounded (see
+  // COMMANDCODE_MODELS).
   if (commandcodeReady({ ...opts, env, home })) {
     for (const id of COMMANDCODE_MODELS) {
       entries.push(entry(toModelRef('commandcode', id), {

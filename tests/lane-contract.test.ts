@@ -72,7 +72,7 @@ describe('checkBotRow / checkRegistry', () => {
   });
 
   it('rejects agent, model, and process names as ids', () => {
-    for (const id of ['dev', 'dispatch', 'coder', 'cline', 'gemini', 'agy']) {
+    for (const id of ['dev', 'dispatch', 'coder', 'cline', 'gemini', 'agy', 'commandcode']) {
       expect(checkBotRow({ id, runtime: 'bot-host' }).length).toBeGreaterThan(0);
     }
   });

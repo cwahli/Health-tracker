@@ -79,7 +79,7 @@ export const LANES = {
 /** Bot ids that would mistake an agent, model, or process for a place. */
 export const FORBIDDEN_BOT_IDS = [
   'dev', 'dispatch', 'coder', 'agent',
-  'cline', 'gemini', 'opencode', 'grok', 'antigravity', 'agy',
+  'cline', 'gemini', 'opencode', 'grok', 'antigravity', 'agy', 'commandcode',
 ];
 
 /**

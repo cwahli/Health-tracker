@@ -5001,6 +5001,19 @@ export function pingOnlyModels({ isPingTurn, model, fallback } = {}) {
 }
 
 /**
+ * Plan codes that are PAID and must never be a failover TARGET.
+ *
+ * The fleet rule is "never paid": a chat moved onto a paid lane deliberately, or
+ * a bot whose registry default IS a paid lane, is intended — but the free walk
+ * must not spend money on its own. `opencode-go` is kept out by its own pool and
+ * the `pool === 'go'` branch; Command Code (plan CC) has no pool, so it is
+ * excluded here. Without this, a free chat whose own lanes are dry would silently
+ * fail over onto the paid subscription (proved 2026-10-31: 8 CC lanes came back
+ * selectable from the ledger projection and the light/coding walks accept them).
+ */
+const PAID_WALK_PLANS = new Set(['CC']);
+
+/**
  * The lanes this turn may use, in order, from this host's own ledger.
  *
  * The old chain was [chat model, bot default]: two fixed entries, so a lane the
@@ -5025,7 +5038,7 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   // The same projection /allowance and /freemodel read, so the walk can only
   // offer what those two surfaces call selectable.
   const projection = projectLanes(table, ledger.session || {}, { now, location: botId, readiness });
-  const lanes = projection.filter((r) => r.selectable).map((r) => ({ provider: r.provider, model: r.model, pref: r.pref, family: r.family, label: r.label, plan: r.plan }));
+  const lanes = projection.filter((r) => r.selectable && !PAID_WALK_PLANS.has(r.plan)).map((r) => ({ provider: r.provider, model: r.model, pref: r.pref, family: r.family, label: r.label, plan: r.plan }));
   const skipped = projection.filter((r) => !r.selectable).map((r) => ({
     provider: r.provider,
     model: r.model,

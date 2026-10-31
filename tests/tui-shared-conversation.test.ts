@@ -224,6 +224,30 @@ describe('the terminal launches the lane the chat is on', () => {
     expect(tuiLaunchCommand(launch)).toBe("'/oc' '--session' 'ses_abc'");
   });
 
+  it('opens the Command Code TUI resumed onto its own UUID session', () => {
+    // The bin is a real path on purpose: the commandcode resolver probes when the
+    // given path is not executable, so a fake '/cc' would not be pinned verbatim.
+    const launch = resolveTuiLaunch({
+      surface: 'commandcode',
+      sessionId: 'eff6f47a-923b-430f-b066-1e5c62ae5a0c',
+      commandcodeBin: '/bin/sh',
+    });
+    expect(launch.argv).toEqual(['/bin/sh', '--resume', 'eff6f47a-923b-430f-b066-1e5c62ae5a0c']);
+    expect(launch.sharedSession).toBe(true);
+  });
+
+  it('refuses a Command Code terminal with no session to share', () => {
+    const launch = resolveTuiLaunch({ surface: 'commandcode', commandcodeBin: '/bin/sh' });
+    expect(launch.argv).toBeNull();
+    expect(launch.reason).toMatch(/no Command Code session/i);
+  });
+
+  it('matches a Command Code session id by UUID shape, never ses_', () => {
+    expect(sessionIdMatchesSurface('eff6f47a-923b-430f-b066-1e5c62ae5a0c', 'commandcode')).toBe(true);
+    expect(sessionIdMatchesSurface('ses_abc', 'commandcode')).toBe(false);
+    expect(sessionIdMatchesSurface('eff6f47a-923b-430f-b066-1e5c62ae5a0c', 'opencode')).toBe(false);
+  });
+
   it('refuses an API-only lane instead of falling back to opencode', () => {
     // A silent fallback IS the defect wearing a different hat. Gemini has no
     // screen; a scraped PTY with a badge is not a terminal.
