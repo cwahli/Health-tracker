@@ -99,6 +99,7 @@ import {
   clineReady,
   GEMINI_MODELS,
   GEMINI_TO_OPENCODE,
+  listCommandcodeModels,
   toModelRef,
 } from './lib/freemodels.mjs';
 import {
@@ -819,11 +820,24 @@ async function getAgents(config, caches) {
 async function getFreeModels(caches, config) {
   const location = workLocation();
   if (!caches.free || caches.freeLocation !== location) {
+    // The Command Code catalog is the CLI's own list, so it is fetched HERE (once,
+    // cached, refreshed with the rest of the list) and handed in — buildFreeModelList
+    // never spawns `cmd` itself, which keeps its direct callers and the tests fast.
+    // `[]` is a real answer ("fetched, nothing") and stops a retry on every build;
+    // undefined means "not tried yet".
+    if (caches.commandcodeModels === undefined) {
+      try {
+        caches.commandcodeModels = listCommandcodeModels({ commandcodeBin: config?.agent?.commandcodeBin }).map((m) => m.id);
+      } catch {
+        caches.commandcodeModels = [];
+      }
+    }
     caches.free = buildFreeModelList({
       location,
       env: process.env,
       opencodeBin: config?.agent?.opencodeBin,
       clineBin: config?.agent?.clineBin,
+      commandcodeModels: caches.commandcodeModels,
     });
     caches.freeLocation = location;
   }

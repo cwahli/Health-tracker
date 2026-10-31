@@ -363,6 +363,35 @@ export function commandcodeReady({ env = process.env, home = os.homedir(), comma
   return Boolean(auth && typeof auth === 'object' && Object.keys(auth).length > 0);
 }
 
+/**
+ * The lane's models, straight from the CLI's own catalog. `cmd --list-models`
+ * prints section headings and `id  description` rows; only the rows parse, so a
+ * heading can never become a model id. Never throws — an unreadable catalog is an
+ * empty list, and the caller falls back to the pinned COMMANDCODE_MODELS.
+ *
+ * Deliberately NOT called from buildFreeModelList: it spawns `cmd`, and doing that
+ * inside the list build regressed tests/bot-host.test.ts (an 8s spawn in a 5s
+ * test). bot-host fetches it once and caches it; direct callers get the pin.
+ */
+export function listCommandcodeModels({ env = process.env, commandcodeBin, timeoutMs = 8000, exec = execFileSync } = {}) {
+  let out = '';
+  try {
+    out = exec(resolveCommandcodeBin(commandcodeBin), ['--list-models'], { encoding: 'utf8', timeout: timeoutMs, env });
+  } catch {
+    return [];
+  }
+  const seen = new Set();
+  const rows = [];
+  for (const line of String(out).split('\n')) {
+    const m = line.match(/^(\S+\/\S+)\s{2,}(.+?)\s*$/);
+    if (!m || !/^[A-Za-z0-9]/.test(m[1])) continue;
+    if (seen.has(m[1])) continue;
+    seen.add(m[1]);
+    rows.push({ id: m[1], note: m[2].trim() });
+  }
+  return rows;
+}
+
 function entry(ref, { surface, tool, provider, selectable = true, location = '', note = '', pendingAction = '' } = {}) {
   const resolvedSurface = surface || 'opencode';
   const resolvedProvider = provider || String(ref).split('/')[0] || resolvedSurface;
@@ -472,10 +501,15 @@ export function buildFreeModelList(opts = {}) {
   // deliberately, but it must never be a failover target. That is enforced in
   // bot-host's selectTurnLanes (PAID_WALK_PLANS excludes plan CC from the walk),
   // NOT here — the picker deliberately shows it so the user can switch onto it.
-  // Rows go last so free lanes stay on top. The shortlist is bounded (see
-  // COMMANDCODE_MODELS).
+  // The rows are the CLI's own catalog when bot-host supplies it (`commandcodeModels`),
+  // else the pinned pin; either way the paid pool is exempt from version-dedupe
+  // (supersedeOlderVersions), so every model the subscription offers is listed.
   if (commandcodeReady({ ...opts, env, home })) {
-    for (const id of COMMANDCODE_MODELS) {
+    const provided = Array.isArray(opts.commandcodeModels) ? opts.commandcodeModels : [];
+    const ids = (provided.length ? provided : COMMANDCODE_MODELS)
+      .map((m) => (typeof m === 'string' ? m : m?.id))
+      .filter(Boolean);
+    for (const id of ids) {
       entries.push(entry(toModelRef('commandcode', id), {
         surface: 'commandcode',
         tool: 'commandcode',
