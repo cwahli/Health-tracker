@@ -27,11 +27,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { CLINE_SESSION_ID_RE, clineSessionsDir, listClineSessionIds } from './agent-cline.mjs';
-import { resolveCommandcodeBin } from './agent-commandcode.mjs';
+import { resolveCommandcodeBin, COMMANDCODE_SESSION_ID_RE } from './agent-commandcode.mjs';
 import { laneFor } from './lane-contract.mjs';
-
-/** Command Code session ids are UUIDs (verified in ~/.commandcode/projects/*). */
-export const COMMANDCODE_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const TUI_SURFACES = {
   opencode: { surface: 'opencode', tool: 'OpenCode', label: 'opencode TUI', terminal: true, sharedSession: true },

@@ -218,7 +218,11 @@ RESOLVED=$(node --input-type=module -e '
   out.MODEL = model;
 
   const isCline = out.SURFACE === "cline";
-  const map = readJson(path.join(stateDir, isCline ? "cline-sessions.json" : "sessions.json")) || {};
+  const isCommandcode = out.SURFACE === "commandcode";
+  // Command Code keeps its own map (UUID ids, not opencode ses_ ids): a cc chat
+  // attaches to the Command Code session the turns wrote, never to an opencode
+  // id `cmd` would refuse to resume.
+  const map = readJson(path.join(stateDir, isCline ? "cline-sessions.json" : isCommandcode ? "commandcode-sessions.json" : "sessions.json")) || {};
   // sessions.json rows are workspace-scoped since #365 (`<workspace>\0<id>`);
   // older rows (and cline-sessions.json) are bare ids. The scope is split
   // here, never matched: matching the packed string against `^ses_` is how

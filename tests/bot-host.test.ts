@@ -124,6 +124,7 @@ import {
   resetInBit,
   depletedLaneProse,
 } from '../scripts/bot-host.mjs';
+import { listCommandcodeModels } from '../scripts/lib/freemodels.mjs';
 import { isHardModelFailure, ensureBotLedger, withCatalogLanes, stampCooldown, CONNECTION_FAILED_COOLDOWN_MS, HARD_MODEL_FAILURE_COOLDOWN_MS, canonicalAllowanceLanes, planCodeForLane } from '../scripts/lib/free-lanes.mjs';
 import { projectLanes, nextUsableLane, formatCompactAllowanceChat, annotateFreemodelEntries } from '../scripts/lib/free-lanes.mjs';
 import { laneWalkRef } from '../scripts/lib/free-lanes.mjs';
@@ -1015,6 +1016,25 @@ describe('pickers', () => {
     expect(flat.length).toBeLessThanOrEqual(22); // 20 rows + the pager nav row
     expect(flat.some((b: { callback_data: string }) => b.callback_data.startsWith('fmp:'))).toBe(true);
     expect(JSON.stringify(page0).length).toBeLessThan(8000);
+  });
+
+  it('parses the Command Code catalog: vendor ids, bare first-party ids, no headings', () => {
+    const out = [
+      'Available models  ·  95 models',
+      '',
+      'Open Source',
+      '',
+      'deepseek/deepseek-v4-pro               hybrid-attention long-context reasoning',
+      'claude-sonnet-5-5                      best combo of speed & intelligence (recommended)',
+      'Anthropic',
+      '',
+      'gpt-6.1-terra                          frontier reasoning & agentic coding',
+    ].join('\n');
+    expect(listCommandcodeModels({ exec: () => out }).map((m) => m.id)).toEqual([
+      'deepseek/deepseek-v4-pro',
+      'claude-sonnet-5-5',
+      'gpt-6.1-terra',
+    ]);
   });
 
   it('sorts free models first and marks them in the keyboard', () => {

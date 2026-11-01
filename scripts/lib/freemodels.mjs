@@ -365,15 +365,20 @@ export function commandcodeReady({ env = process.env, home = os.homedir(), comma
 
 /**
  * The lane's models, straight from the CLI's own catalog. `cmd --list-models`
- * prints section headings and `id  description` rows; only the rows parse, so a
- * heading can never become a model id. Never throws — an unreadable catalog is an
- * empty list, and the caller falls back to the pinned COMMANDCODE_MODELS.
+ * prints section headings and `id  description` rows. An id may carry a vendor
+ * path (`deepseek/deepseek-v4-flash`) or be a bare first-party id
+ * (`claude-sonnet-5-5`, `gpt-6.1-terra`) — both parse. A heading never can: a
+ * heading's first word is followed by ONE space, a row's id by two or more.
+ * Never throws — an unreadable catalog is an empty list, and the caller falls
+ * back to the pinned COMMANDCODE_MODELS.
  *
- * Deliberately NOT called from buildFreeModelList: it spawns `cmd`, and doing that
- * inside the list build regressed tests/bot-host.test.ts (an 8s spawn in a 5s
- * test). bot-host fetches it once and caches it; direct callers get the pin.
+ * Deliberately NOT called from buildFreeModelList: it spawns `cmd` (~7s, it hits
+ * the account's catalog), and doing that inside the list build regressed
+ * tests/bot-host.test.ts (an 8s spawn in a 5s test). bot-host fetches it once and
+ * caches it; direct callers get the pin. The timeout is 30s, not 8: the fetch
+ * measured ~7s and an 8s budget made it flake to the pinned shortlist.
  */
-export function listCommandcodeModels({ env = process.env, commandcodeBin, timeoutMs = 8000, exec = execFileSync } = {}) {
+export function listCommandcodeModels({ env = process.env, commandcodeBin, timeoutMs = 30000, exec = execFileSync } = {}) {
   let out = '';
   try {
     out = exec(resolveCommandcodeBin(commandcodeBin), ['--list-models'], { encoding: 'utf8', timeout: timeoutMs, env });
@@ -383,7 +388,7 @@ export function listCommandcodeModels({ env = process.env, commandcodeBin, timeo
   const seen = new Set();
   const rows = [];
   for (const line of String(out).split('\n')) {
-    const m = line.match(/^(\S+\/\S+)\s{2,}(.+?)\s*$/);
+    const m = line.match(/^(\S+)\s{2,}(.+?)\s*$/);
     if (!m || !/^[A-Za-z0-9]/.test(m[1])) continue;
     if (seen.has(m[1])) continue;
     seen.add(m[1]);

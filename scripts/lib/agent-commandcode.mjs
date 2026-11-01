@@ -34,6 +34,9 @@ import { buildChildEnv } from './child-env.mjs';
 
 const HOME = os.homedir();
 
+/** Command Code session ids are UUIDs (verified in ~/.commandcode/projects/*). */
+export const COMMANDCODE_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** The `cmd` binary: explicit path wins, then the usual install locations. */
 export function resolveCommandcodeBin(explicit) {
   if (explicit) {

@@ -87,7 +87,7 @@ import { buildPack, packWithContents } from './lib/swap-pack.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { tuiSurfaceFor as tuiSurface, latestClineSessionId, canOpenSharedTui } from './lib/tui-surface.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
-import { runCommandcode, commandcodeEffortLevels } from './lib/agent-commandcode.mjs';
+import { runCommandcode, commandcodeEffortLevels, COMMANDCODE_SESSION_ID_RE } from './lib/agent-commandcode.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
 import { parsePermissionCallback, startPermissionWatch, stopPermissionWatch } from './lib/permission-bridge.mjs';
 import { recordError, noteHealthy, recordRecoveryAttempt, classifyErrorKind, evaluateRecovery } from './lib/error-log.mjs';
@@ -439,6 +439,12 @@ const saveSessions = (id, sessions) => saveMap(id, 'sessions.json', sessions);
 // — a cline id in that map would be handed straight to `opencode run --session`.
 const loadClineSessions = (id) => loadMap(id, 'cline-sessions.json');
 const saveClineSessions = (id, sessions) => saveMap(id, 'cline-sessions.json', sessions);
+// Command Code ids are UUIDs, not opencode `ses_…` ids, and `cmd` refuses to
+// resume an id it did not write ("No session ... found to resume") — so this lane
+// keeps its own map, the way cline does. Unlike cline it CAN resume headlessly,
+// so a commandcode turn reads the map before the run and writes it after.
+const loadCommandcodeSessions = (id) => loadMap(id, 'commandcode-sessions.json');
+const saveCommandcodeSessions = (id, sessions) => saveMap(id, 'commandcode-sessions.json', sessions);
 
 /**
  * The opencode session a chat is on, but only if it belongs to the workspace
@@ -1466,7 +1472,11 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     // missed is still a row of one pool, and letting it through unfiltered is how
     // a keyboard grows a second membership in the one list.
     if (pool && poolOfRow(v) !== pool) continue;
-    const m = String(v.lane?.model || v.ref || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
+    // The model's own name, surface prefix stripped. A bare first-party id
+    // (`commandcode:claude-sonnet-5-5`) has no slash to strip the prefix with, so
+    // comparing the raw ref here made every bare id look absent from the table and
+    // rendered it twice — once from the canonical row, once catalog-only.
+    const m = String(parseModelRef(String(v.lane?.model || v.ref || '')).id || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
     if (m && !inTable.has(m)) rows.push(v);
   }
   // A lane whose provider has no credential on this host leaves the count, the same
@@ -5151,7 +5161,13 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   const sameRoute = (row) => {
     if (!current.provider || !current.model) return false;
     const tail = (v) => String(v || '').replace(/^[^/]+\//, '').replace(/:free$/i, '');
-    return row.model === current.model || (row.provider === current.provider && tail(row.model) === tail(current.model));
+    // Provider-aware on purpose: a model path is not a route identity. The
+    // freebuff lane and the Command Code lane can carry the SAME path
+    // (`deepseek/deepseek-v4.1-flash`), and matching on the model alone made a
+    // commandcode request resolve to the freebuff table row — terminal-only, so
+    // the walk skipped the chat's own lane and moved the turn somewhere else
+    // (live on vm3, 2026-10-31).
+    return row.provider === current.provider && tail(row.model) === tail(current.model);
   };
   const currentSkipped = skipped.find(sameRoute) || routeKeySkipped({ model, current, session: ledger.session || {}, now });
   // A paid lane may be walked only INSIDE its own pool — the pool's own lanes
@@ -6919,10 +6935,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // the work session is resolved and its view settled — reading it earlier put
     // this assignment in the `workSession` temporal dead zone and every agent
     // turn died with "Cannot access 'workSession' before initialization".
-    turnSessionId = sessionForWorkspace(sessions, chatId, effectiveWorkspace)
-      || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
-        ? workSession.opencodeSessionId
-        : undefined);
+    // A commandcode chat resumes ITS OWN map: the opencode `ses_…` id bound in
+    // sessions.json is not a Command Code session, and `cmd` refuses to resume an
+    // id it did not write. Cline keeps its own map for the same reason (above).
+    turnSessionId = parseModelRef(eff.model).surface === 'commandcode'
+      ? sessionForWorkspace(loadCommandcodeSessions(config.id), chatId, effectiveWorkspace)
+      : sessionForWorkspace(sessions, chatId, effectiveWorkspace)
+        || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
+          ? workSession.opencodeSessionId
+          : undefined);
     // Connectivity pings run throwaway: force a fresh session so their
     // scaffolding never lands in the chat's transcript or the TUI.
     if (isPingTurn) turnSessionId = null;
@@ -7038,8 +7059,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         return runCommandcode({
           prompt: finalPrompt,
           model: candidate.id,
-          effort: ccEffort,
-          sessionId: turnSessionId,
+          // Defensive: only a Command Code UUID resumes. An opencode `ses_…` id
+          // (a chat that switched lanes mid-conversation) would make `cmd` die
+          // with "No session found to resume".
+          sessionId: turnSessionId && COMMANDCODE_SESSION_ID_RE.test(turnSessionId) ? turnSessionId : undefined,
           workspace: effectiveWorkspace,
           timeoutMs: config.agent.timeoutMs,
           commandcodeBin: config.agent.commandcodeBin,
@@ -7481,6 +7504,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         const clineSessions = loadClineSessions(config.id);
         clineSessions.set(chatId, result.sessionID);
         saveClineSessions(config.id, clineSessions);
+      } else if (resultSurface === 'commandcode') {
+        // Workspace-scoped like the opencode map, so a chat in two projects
+        // keeps two Command Code conversations.
+        const commandcodeSessions = loadCommandcodeSessions(config.id);
+        bindSessionForWorkspace(commandcodeSessions, chatId, effectiveWorkspace, result.sessionID);
+        saveCommandcodeSessions(config.id, commandcodeSessions);
       } else {
         // Scoped to the workspace the turn actually ran in, so the next turn —
         // and the TUI — resume this conversation rather than a stale one.
