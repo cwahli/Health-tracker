@@ -187,6 +187,8 @@
         "model_go": true,
         "allowance": true,
         "thinking": true,
+        "stop": false,
+        "model_cc": false,
         "models": false,
         "free": false,
         "agent": false,

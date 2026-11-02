@@ -1055,6 +1055,7 @@ function surfaceForModelRef(model) {
   const raw = String(model || '').trim().toLowerCase();
   if (raw.startsWith('cline:')) return 'cline';
   if (raw.startsWith('gemini:')) return 'gemini';
+  if (raw.startsWith('commandcode:')) return 'commandcode';
   return 'opencode';
 }
 
@@ -1076,6 +1077,7 @@ export function listTuiSessions({ env = process.env, root = null, bot = '', now 
   const dir = root || tuiStateRoot(env);
   const sessions = readTuiJson(dir, bot, 'sessions.json');
   const clineSessions = readTuiJson(dir, bot, 'cline-sessions.json');
+  const commandcodeSessions = readTuiJson(dir, bot, 'commandcode-sessions.json');
   const prefs = readTuiJson(dir, bot, 'prefs.json');
   const leases = readTuiJson(dir, bot, 'leases.json');
   const tuiOpen = readTuiJson(dir, bot, 'tui-open.json');
@@ -1083,6 +1085,7 @@ export function listTuiSessions({ env = process.env, root = null, bot = '', now 
   const chatIds = new Set([
     ...Object.keys(sessions),
     ...Object.keys(clineSessions),
+    ...Object.keys(commandcodeSessions),
     ...Object.keys(prefs).filter((k) => k !== '__meta'),
   ]);
   const rows = [];
@@ -1091,7 +1094,7 @@ export function listTuiSessions({ env = process.env, root = null, bot = '', now 
     const snapshot = tuiOpen.chatId === chatId ? tuiOpen : null;
     const model = prefModel || String(snapshot?.model || '');
     const surface = snapshot?.surface || surfaceForModelRef(model);
-    const map = surface === 'cline' ? clineSessions : sessions;
+    const map = surface === 'cline' ? clineSessions : surface === 'commandcode' ? commandcodeSessions : sessions;
     const { workspace, sessionId } = unscopeSessionId(map[chatId]);
     if (!sessionId && !snapshot?.sessionId) continue;
     rows.push({
@@ -1121,18 +1124,19 @@ export function snapshotTuiOpen({ env = process.env, root = null, bot = '', chat
   if (!cleanChat) return null;
   const sessions = readTuiJson(dir, bot, 'sessions.json');
   const clineSessions = readTuiJson(dir, bot, 'cline-sessions.json');
+  const commandcodeSessions = readTuiJson(dir, bot, 'commandcode-sessions.json');
   const prefs = readTuiJson(dir, bot, 'prefs.json');
   const prev = readTuiJson(dir, bot, 'tui-open.json');
   const prefModel = String(prefs[cleanChat]?.model || '');
   const model = prefModel || (prev.chatId === cleanChat ? String(prev.model || '') : '');
   const surface = (prev.chatId === cleanChat && prev.surface) || surfaceForModelRef(model);
-  const map = surface === 'cline' ? clineSessions : sessions;
+  const map = surface === 'cline' ? clineSessions : surface === 'commandcode' ? commandcodeSessions : sessions;
   const { workspace, sessionId } = unscopeSessionId(map[cleanChat]);
   const sid = sessionId || (prev.chatId === cleanChat ? String(prev.sessionId || '') : '');
   const ws = workspace || (prev.chatId === cleanChat ? String(prev.workspace || '') : '');
   // Shared-session lanes with no session are a refusal, not a blank row
   // (live 2026-10-04: a null snapshot reads as a broken record afterwards).
-  if (surface === 'opencode' && !sid) return null;
+  if ((surface === 'opencode' || surface === 'commandcode') && !sid) return null;
   if (surface === 'gemini') return null;
   const row = {
     chatId: cleanChat,

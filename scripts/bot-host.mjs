@@ -81,7 +81,7 @@ import { KNOWN_HOSTS, workerStatus, isLocalHost, machineLabel } from './lib/work
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { validateAttachTarget, attachNeedsConfirm, formatBytes, unorphan, recordOrphan } from './lib/session-orphans.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
-import { enqueueJob, awaitJob, requeueJob, getJob, DEFAULT_LEASE_MS } from './lib/worker-jobs.mjs';
+import { enqueueJob, awaitJob, requeueJob, getJob, DEFAULT_LEASE_MS, abortJob } from './lib/worker-jobs.mjs';
 import { preflightWorkerTurn, classifyWorkerFailure, retryDelayMs, preflightSummary, relayUrl } from './lib/swap-guards.mjs';
 import { routeState, routeFor, armRoute, confirmRoute, rollbackRoute, validateCanaryResult, failedRouteReason } from './lib/worker-routing.mjs';
 import { acquirePollerLease, releasePollerLease, renewPollerLease } from './lib/poller-lease.mjs';
@@ -89,6 +89,7 @@ import { buildPack, packWithContents } from './lib/swap-pack.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { tuiSurfaceFor as tuiSurface, latestClineSessionId, canOpenSharedTui } from './lib/tui-surface.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
+import { runCommandcode, commandcodeEffortLevels, COMMANDCODE_SESSION_ID_RE } from './lib/agent-commandcode.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
 import { parsePermissionCallback, startPermissionWatch, stopPermissionWatch } from './lib/permission-bridge.mjs';
 import { recordError, noteHealthy, recordRecoveryAttempt, classifyErrorKind, evaluateRecovery } from './lib/error-log.mjs';
@@ -100,6 +101,7 @@ import {
   clineReady,
   GEMINI_MODELS,
   GEMINI_TO_OPENCODE,
+  listCommandcodeModels,
   toModelRef,
 } from './lib/freemodels.mjs';
 import {
@@ -439,6 +441,12 @@ const saveSessions = (id, sessions) => saveMap(id, 'sessions.json', sessions);
 // — a cline id in that map would be handed straight to `opencode run --session`.
 const loadClineSessions = (id) => loadMap(id, 'cline-sessions.json');
 const saveClineSessions = (id, sessions) => saveMap(id, 'cline-sessions.json', sessions);
+// Command Code ids are UUIDs, not opencode `ses_…` ids, and `cmd` refuses to
+// resume an id it did not write ("No session ... found to resume") — so this lane
+// keeps its own map, the way cline does. Unlike cline it CAN resume headlessly,
+// so a commandcode turn reads the map before the run and writes it after.
+const loadCommandcodeSessions = (id) => loadMap(id, 'commandcode-sessions.json');
+const saveCommandcodeSessions = (id, sessions) => saveMap(id, 'commandcode-sessions.json', sessions);
 
 /**
  * The opencode session a chat is on, but only if it belongs to the workspace
@@ -583,6 +591,7 @@ export function providerLabelForModel(model) {
   const surface = parseModelRef(model).surface;
   if (surface === 'cline') return 'Cline';
   if (surface === 'gemini') return 'Gemini';
+  if (surface === 'commandcode') return 'Command Code';
   return 'OpenCode';
 }
 
@@ -669,7 +678,7 @@ function extractEmbeddedMessage(text) {
  * the next step — never the raw envelope.
  */
 export function formatProviderFailure({ surface, model, lastError, stderr } = {}) {
-  const provider = surface === 'cline' ? 'Cline' : surface === 'gemini' ? 'Gemini' : 'OpenCode';
+  const provider = surface === 'cline' ? 'Cline' : surface === 'gemini' ? 'Gemini' : surface === 'commandcode' ? 'Command Code' : 'OpenCode';
   const combined = `${lastError || ''} ${stderr || ''}`;
   const hint = parseRetryAfter(combined);
   if (isQuotaOrLimitError(combined)) {
@@ -842,15 +851,45 @@ async function getAgents(config, caches) {
 async function getFreeModels(caches, config) {
   const location = workLocation();
   if (!caches.free || caches.freeLocation !== location) {
+    // The Command Code catalog is the CLI's own list, so it is fetched HERE (once,
+    // cached, refreshed with the rest of the list) and handed in — buildFreeModelList
+    // never spawns `cmd` itself, which keeps its direct callers and the tests fast.
+    // `[]` is a real answer ("fetched, nothing") and stops a retry on every build;
+    // undefined means "not tried yet".
+    if (caches.commandcodeModels === undefined) {
+      try {
+        caches.commandcodeModels = listCommandcodeModels({ commandcodeBin: config?.agent?.commandcodeBin }).map((m) => m.id);
+      } catch {
+        caches.commandcodeModels = [];
+      }
+    }
     caches.free = buildFreeModelList({
       location,
       env: process.env,
       opencodeBin: config?.agent?.opencodeBin,
       clineBin: config?.agent?.clineBin,
+      commandcodeModels: caches.commandcodeModels,
     });
     caches.freeLocation = location;
   }
   return caches.free;
+}
+
+/**
+ * The reasoning-effort levels Command Code advertises for one model, memoized per
+ * process. The CLI answers WITHOUT running a turn — an unknown `--effort` is
+ * refused before the model is called — so the probe is cheap, and the memo keeps
+ * it to one spawn per model. `null` means "could not tell"; `[]` means the model
+ * has no adjustable effort.
+ */
+function commandcodeEfforts(caches, model, config) {
+  const key = String(model || '');
+  if (!key) return [];
+  if (!caches.commandcodeEfforts) caches.commandcodeEfforts = new Map();
+  if (!caches.commandcodeEfforts.has(key)) {
+    caches.commandcodeEfforts.set(key, commandcodeEffortLevels({ model: key, commandcodeBin: config?.agent?.commandcodeBin }));
+  }
+  return caches.commandcodeEfforts.get(key);
 }
 
 /**
@@ -1389,7 +1428,9 @@ function poolNoteLines({ pool, location, total, usable, soonest = '' } = {}) {
   const name = poolDisplayName(pool, loc);
   const move = pool === 'go'
     ? 'the Go plan is paid, so this lane never moves on its own'
-    : 'a quota hit moves inside this pool only';
+    : pool === 'commandcode'
+      ? 'the Command Code subscription is paid, so this lane never moves on its own'
+      : 'a quota hit moves inside this pool only';
   if (!total) {
     return [`${name} — no lane of this pool is on ${loc} right now${soonest ? `; soonest reset in ${soonest}` : ''}. ${move}. ${POOL_EXIT_NOTE}`];
   }
@@ -1456,7 +1497,11 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     // missed is still a row of one pool, and letting it through unfiltered is how
     // a keyboard grows a second membership in the one list.
     if (pool && poolOfRow(v) !== pool) continue;
-    const m = String(v.lane?.model || v.ref || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
+    // The model's own name, surface prefix stripped. A bare first-party id
+    // (`commandcode:claude-sonnet-5-5`) has no slash to strip the prefix with, so
+    // comparing the raw ref here made every bare id look absent from the table and
+    // rendered it twice — once from the canonical row, once catalog-only.
+    const m = String(parseModelRef(String(v.lane?.model || v.ref || '')).id || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
     if (m && !inTable.has(m)) rows.push(v);
   }
   // A lane whose provider has no credential on this host leaves the count, the same
@@ -3028,50 +3073,69 @@ export function listTypedSkills(config) {
   return [...found.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 }
 
+/**
+ * The one /model_* picker body, built from the same projection the walk reads.
+ * Shared by the pool commands and the pager callback, so a page turn re-renders
+ * byte-identically instead of drifting to a second list.
+ */
+function freemodelPickerBody({ caches, config, chatId, pool = null, current = '' }) {
+  // The union, not the raw catalog: getAnnotatedFreeModels folds the ledger's
+  // own rows in, and those are the Token Harbor / Cloudflare / Freebuff models.
+  // Rendering the catalog alone listed 42 models and none of them were the ones
+  // /allowance was showing for those providers.
+  const { entries, annotated, table: fmTable, session: fmSession } = getAnnotatedFreeModels(caches, config.id);
+  if (!entries.length) return null;
+  return formatFreemodelWithDepletion(entries, annotated, {
+    current,
+    location: workLocation(),
+    pool,
+    canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation() }),
+    tableLanes: (fmTable && fmTable.lanes) || [],
+  });
+}
+
+/**
+ * One keyboard per pool — until a pool outgrows what Telegram accepts as a single
+ * reply_markup. The free pools top out in the low forties; the Command Code
+ * catalog is 73 lanes, and one keyboard for it came back
+ * "Bad Request: reply markup is too long" (live on vm3, 2026-10-31), so the pool
+ * pages instead. The pager's nav row (kind 'fmp') already existed in
+ * modelKeyboard and in handleCallback — it just had nothing building it. A paged
+ * keyboard drops the cancel footer; the body already names the way out.
+ */
+const FREEMODEL_PAGER_BOUND = 40;
+const FREEMODEL_PAGE_SIZE = 20;
+export function freemodelKeyboard(buttons, page = 0) {
+  if (buttons.length <= FREEMODEL_PAGER_BOUND) {
+    return modelKeyboard(buttons, {
+      kind: 'fm',
+      all: true,
+      footer: { text: headingWidth('Cancel — keep current model'), callback_data: 'noop' },
+    });
+  }
+  return modelKeyboard(buttons, { kind: 'fm', page, pageSize: FREEMODEL_PAGE_SIZE });
+}
+
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId = 0, kind = 'direct' }) {
   const eff = effective(config, prefs, chatId);
 
   /**
-   * The one picker body: the three pool commands render this, each filter of the
-   * one canonical list and nothing else. Three copies of this body is exactly how
-   * the three lists would drift apart from each other and from /allowance.
+   * The one picker body: the pool commands render this, each filter of the one
+   * canonical list and nothing else. The body itself lives at module level
+   * (freemodelPickerBody) so the pager callback re-renders the same thing.
    */
-  const sendFreeModelPicker = async ({ pool = null } = {}) => {
-    // The union, not the raw catalog: getAnnotatedFreeModels folds the ledger's
-    // own rows in, and those are the Token Harbor / Cloudflare / Freebuff models.
-    // Rendering the catalog alone listed 42 models and none of them were the ones
-    // /allowance was showing for those providers.
-    const { entries, annotated, table: fmTable, session: fmSession } = getAnnotatedFreeModels(caches, config.id);
-    if (!entries.length) {
+  const sendFreeModelPicker = async ({ pool = null, page = 0 } = {}) => {
+    const body = freemodelPickerBody({ caches, config, chatId, pool, current: eff.model });
+    if (!body) {
       await api.sendMessage(chatId, 'No free models found (opencode cache unreadable).');
       return;
     }
-    // Every row is a button, including the ones that cannot be used right now:
-    // the router keeps a depleted lane tappable so the tap can answer with what
-    // to use instead. Filtering them out of the keyboard is what made the two
-    // commands list different things.
-    // The table getAnnotatedFreeModels already folded the catalog into — the same
-    // one the annotation was computed against and the same one /allowance renders.
-    // Folding the union again here produced a different table (46 lanes against
-    // 48) and six models came back that the real list has dropped.
-    const body = formatFreemodelWithDepletion(entries, annotated, {
-      current: eff.model,
-      location: workLocation(),
-      pool,
-      canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation() }),
-      tableLanes: (fmTable && fmTable.lanes) || [],
-    });
-    // One keyboard with every model, no paging, and the router's cancel row.
+    // HTML, not Markdown: the table is a <code> block, which is the only
+    // left-aligned column-true rendering Telegram has, and Markdown has no
+    // equivalent that keeps columns.
     await api.sendMessage(chatId, body.text, {
-      // HTML, not Markdown: the table is a <code> block, which is the only
-      // left-aligned column-true rendering Telegram has, and Markdown has no
-      // equivalent that keeps columns.
       parse_mode: 'HTML',
-      reply_markup: modelKeyboard(body.buttons, {
-        kind: 'fm',
-        all: true,
-        footer: { text: headingWidth('Cancel — keep current model'), callback_data: 'noop' },
-      }),
+      reply_markup: freemodelKeyboard(body.buttons, page),
     });
   };
 
@@ -3372,7 +3436,8 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'model_light_free':
     case 'model_free':
-    case 'model_go': {
+    case 'model_go':
+    case 'model_cc': {
       // Set the pool BEFORE showing it: the constraint has to hold for the very
       // next message a reader sends, not only once they tap a lane (decision D2),
       // or a chat that ran /model_light_free would still spend a coding lane on
@@ -3472,6 +3537,32 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'stop':
+    case 'abort': {
+      // The native Command Code TG surface's /stop. A local turn is killed
+      // outright; a remote one is flagged through the job file, which the worker
+      // polls and then kills its own child on. The machinery (the `running` map
+      // and abortJob) and the fleet's own wording ("send /abort" in /tui off and
+      // the attach refusal) both predated a command that triggered them, so that
+      // text pointed at nothing and a typed /abort fell through to the tool.
+      const turn = running.get(chatId);
+      let stopped = false;
+      if (turn?.child) {
+        try { turn.child.kill('SIGKILL'); stopped = true; } catch { /* already gone */ }
+      }
+      if (turn?.jobId) {
+        try { stopped = Boolean(abortJob(turn.jobId)) || stopped; } catch { /* best effort */ }
+      }
+      if (turn) turn.aborted = true;
+      // Claim the stop only when something was actually killed or flagged: a turn
+      // that finished between the keyboard tap and this read is "nothing running",
+      // not a stop that silently did nothing.
+      await api.sendMessage(chatId, stopped
+        ? 'Stopping this turn.'
+        : 'Nothing is running in this chat right now.');
+      return;
+    }
+
     case 'thinking': {
       const ref = parseModelRef(eff.model);
       // Gemini is single-shot: no variants, no opencode verbose lookup.
@@ -3480,9 +3571,27 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, 'This model has no thinking levels — /thinking does nothing here. Send a normal prompt instead.');
         return;
       }
+      // Command Code's own reasoning effort. The levels are the CLI's, read live
+      // from the model (no turn spent) because they differ per model and the CLI
+      // REFUSES a level a model does not offer — so an invented list would break
+      // the turn it was picked for.
+      let commandcodeLevels = null;
+      if (ref.surface === 'commandcode') {
+        commandcodeLevels = commandcodeEfforts(caches, ref.id, config);
+        if (commandcodeLevels === null) {
+          await api.sendMessage(chatId, `Could not read the reasoning-effort levels for ${ref.id} from the Command Code CLI — try again in a moment.`);
+          return;
+        }
+        if (!commandcodeLevels.length) {
+          await api.sendMessage(chatId, `${ref.id} has no adjustable reasoning effort, so /thinking does nothing here. Send a normal prompt instead.`);
+          return;
+        }
+      }
       let variants = [];
       try {
-        variants = ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+        variants = ref.surface === 'cline' ? CLINE_THINKING_LEVELS
+          : ref.surface === 'commandcode' ? commandcodeLevels
+            : await getVariants(config, caches, eff.model);
       } catch (err) {
         // A read failure must not read as "this model has no levels". Say which
         // it was, so the answer is actionable.
@@ -4686,24 +4795,22 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
       return;
     }
     if (kind === 'fmp') {
-      const entries = await getFreeModels(caches, config);
-      const eff = effective(config, prefs, chatId);
-      const { annotated } = getAnnotatedFreeModels(caches, config.id);
-      const selectable = annotated.filter((a) => a.selectable !== false);
-      const available = selectable.filter((a) => !a.depleted);
-      // `.text`, not the whole result: this call site handed editMessageText the
-      // return object, which Telegram renders as the literal "[object Object]" in
-      // the body. Unreachable today (nothing builds a kind:'fmp' keyboard), but it
-      // is the same /freemodel body and it was wrong.
-      await api.editMessageText(chatId, messageId, formatFreemodelWithDepletion(entries, annotated, {
-        current: eff.model,
-        location: workLocation(),
-      }).text, {
+      // The pager nav row. It re-renders the pool the chat is IN — running a pool
+      // command sets the pool (decision D2) — so a page turn cannot jump pools.
+      // Nothing built a kind:'fmp' keyboard before the Command Code catalog
+      // outgrew one reply_markup, so this branch was dead by construction.
+      const pool = prefs[chatId]?.pool || null;
+      const body = freemodelPickerBody({
+        caches, config, chatId, pool,
+        current: effective(config, prefs, chatId).model,
+      });
+      if (!body) {
+        await api.answerCallbackQuery(query.id, { text: 'No models' });
+        return;
+      }
+      await api.editMessageText(chatId, messageId, body.text, {
         parse_mode: 'HTML',
-        reply_markup: modelKeyboard(
-          (available.length ? available : selectable).map((entry) => ({ text: entry.label, data: entry.ref })),
-          { page: Number(value) || 0, kind: 'fm' },
-        ),
+        reply_markup: freemodelKeyboard(body.buttons, Number(value) || 0),
       });
       await api.answerCallbackQuery(query.id);
       return;
@@ -4832,7 +4939,9 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
       }
       let variants = [];
       try {
-        variants = ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+        variants = ref.surface === 'cline' ? CLINE_THINKING_LEVELS
+          : ref.surface === 'commandcode' ? (commandcodeEfforts(caches, ref.id, config) ?? [])
+            : await getVariants(config, caches, eff.model);
       } catch (err) {
         // Never leave a tap unanswered: the keyboard would sit there looking
         // live. Say what happened and clear it.
@@ -4847,7 +4956,7 @@ async function handleCallback({ api, config, prefs, caches, running = null, quer
       let variant = variants.includes(value) ? value : variants[Number(value)];
       if (!variant && ref.surface !== 'cline' && ref.surface !== 'gemini') {
         caches.verbose = null;
-        variants = await getVariants(config, caches, eff.model);
+        variants = ref.surface === 'commandcode' ? (commandcodeEfforts(caches, ref.id, config) ?? []) : await getVariants(config, caches, eff.model);
         variant = variants.includes(value) ? value : variants[Number(value)];
       }
       if (!variant) {
@@ -5115,6 +5224,21 @@ export function pingOnlyModels({ isPingTurn, model, fallback } = {}) {
 }
 
 /**
+ * Plan codes that are PAID and must never be a failover TARGET.
+ *
+ * The fleet rule is "never paid": a chat moved onto a paid lane deliberately, or
+ * a bot whose registry default IS a paid lane, is intended — but the free walk
+ * must not spend money on its own. `opencode-go` is kept out by its own pool and
+ * the `pool === 'go'` branch; Command Code (plan CC) has no pool, so it is
+ * excluded here. Without this, a free chat whose own lanes are dry would silently
+ * fail over onto the paid subscription (proved 2026-10-31: 8 CC lanes came back
+ * selectable from the ledger projection and the light/coding walks accept them).
+ */
+const PAID_WALK_PLANS = new Set(['CC']);
+/** Pools whose lanes are paid; inside one, its own lanes are the fallback. */
+const PAID_POOLS = new Set(['go', 'commandcode']);
+
+/**
  * The lanes this turn may use, in order, from this host's own ledger.
  *
  * The old chain was [chat model, bot default]: two fixed entries, so a lane the
@@ -5158,10 +5282,23 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   const sameRoute = (row) => {
     if (!current.provider || !current.model) return false;
     const tail = (v) => String(v || '').replace(/^[^/]+\//, '').replace(/:free$/i, '');
-    return row.model === current.model || (row.provider === current.provider && tail(row.model) === tail(current.model));
+    // Provider-aware on purpose: a model path is not a route identity. The
+    // freebuff lane and the Command Code lane can carry the SAME path
+    // (`deepseek/deepseek-v4.1-flash`), and matching on the model alone made a
+    // commandcode request resolve to the freebuff table row — terminal-only, so
+    // the walk skipped the chat's own lane and moved the turn somewhere else
+    // (live on vm3, 2026-10-31).
+    return row.provider === current.provider && tail(row.model) === tail(current.model);
   };
   const currentSkipped = skipped.find(sameRoute) || routeKeySkipped({ model, current, session: ledger.session || {}, now });
-  const fallbackLanes = lanes.filter((l) => !sameRoute(l));
+  // A paid lane may be walked only INSIDE its own pool — the pool's own lanes
+  // are the fallback for a chat that deliberately chose that paid plan. Everywhere
+  // else, above all the unpooled cross-tier walk, a paid lane is never a target
+  // ("never paid"). Command Code has its own pool now (/model_cc), so this only
+  // bites the unpooled case — but that is exactly the case that used to leak.
+  const paidPool = PAID_POOLS.has(pool);
+  const walkable = paidPool ? lanes : lanes.filter((l) => !PAID_WALK_PLANS.has(l.plan));
+  const fallbackLanes = walkable.filter((l) => !sameRoute(l));
 
   // Same-type first: a depleted Standard lane walks to the next usable Standard
   // lane in /freemodel order, a depleted Light lane to the next usable Light
@@ -5200,9 +5337,10 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
     ? [...fallbackLanes].filter((l) => poolOfRoute(l) === pool).sort(bySameTier)
     : [];
   let orderedLanes;
-  if (pool === 'go') {
-    // A paid lane never moves on its own: the chat's own Go lane when it has a
+  if (PAID_POOLS.has(pool)) {
+    // A paid lane never moves on its own: the chat's own lane when it has a
     // usable one, otherwise the pool's own first lane — and never a second entry.
+    // Holds for the Go plan and for Command Code alike.
     orderedLanes = currentInPool && !currentSkipped ? [] : poolLanes.slice(0, 1);
   } else if (pool) {
     // Inside the pool, only the list's own order: the cross-tier concat is gone,
@@ -6770,7 +6908,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   let freebuffKept = null;
   {
     const laneRef = parseModelRef(eff.model);
-    const lane = laneRef.surface === 'cline' ? 'cline' : laneRef.surface === 'gemini' ? 'gemini' : 'opencode';
+    const lane = laneRef.surface === 'cline' ? 'cline' : laneRef.surface === 'commandcode' ? 'commandcode' : laneRef.surface === 'gemini' ? 'gemini' : 'opencode';
     const fb = redirectFreebuffTurn({ model: eff.model, hostModel: config.agent?.model });
     if (fb.refuse) {
       try { releaseFiles(claimed, claimId); } catch {}
@@ -6917,7 +7055,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // silent is held by the remote branch below — never run locally.
     const location = desiredLocation(prefs, chatId) || workLocation();
     const workId = sessionKey({ location, chat: String(chatId), workspace: effectiveWorkspace, project: activeProject.id });
-    const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
+    const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'commandcode' ? 'commandcode' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
     // G-1: everything about this turn that is already decided, recorded now rather
     // than at the end. Turns return early in plenty of ways — a held remote route, an
     // abort, a preflight refusal — and those are exactly the turns worth having in the
@@ -6971,11 +7109,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // the work session is resolved and its view settled — reading it earlier put
     // this assignment in the `workSession` temporal dead zone and every agent
     // turn died with "Cannot access 'workSession' before initialization".
-    turnSessionId = sessionForWorkspace(sessions, chatId, effectiveWorkspace)
-      || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
+    // A commandcode chat resumes ITS OWN map: the opencode `ses_…` id bound in
+    // sessions.json is not a Command Code session, and `cmd` refuses to resume an
+    // id it did not write. Cline keeps its own map for the same reason (above).
+    const turnIsCommandcode = parseModelRef(eff.model).surface === 'commandcode';
+    turnSessionId = sessionForWorkspace(turnIsCommandcode ? loadCommandcodeSessions(config.id) : sessions, chatId, effectiveWorkspace)
+      || (!turnIsCommandcode && workSession?.viewMode === 'tui' && workSession.opencodeSessionId
         ? workSession.opencodeSessionId
         : undefined);
-
     // A TUI is open on this same conversation, so the user can watch this turn
     // happen in the terminal as well. It shares the session, so what runs here
     // shows up there — one turn at a time, never two at once.
@@ -7062,6 +7203,49 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           model: candidate.id,
           timeoutMs: config.agent.timeoutMs,
           env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+        });
+      }
+      if (candidate.surface === 'commandcode') {
+        // Command Code has NO shared server (unlike opencode), so a terminal and
+        // a bot turn would both append the same transcript. The attach script
+        // already waits for a live turn before opening the terminal; this is the
+        // mirror — wait briefly for the terminal lease to clear, then refuse
+        // with a clear reason rather than race the file.
+        if (turnSessionId) {
+          const deadline = Date.now() + 20000;
+          while (tuiIsAttached(config.id, turnSessionId) && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 1500));
+          }
+          if (tuiIsAttached(config.id, turnSessionId)) {
+            return {
+              code: 0,
+              sessionID: turnSessionId,
+              finalText: '',
+              stderr: '',
+              lastError: 'a Command Code terminal is open on this conversation — close it (or send /tui off) and resend',
+              usage: { cost: 0, tokens: null },
+            };
+          }
+        }
+        // The chat's thinking level is Command Code's own --effort. Only a level
+        // THIS model advertises travels: the CLI refuses an unknown one, so a
+        // stale level (set on a model that offered it) would break the turn.
+        const ccLevels = commandcodeEfforts(caches, candidate.id, config) || [];
+        const ccEffort = eff.variant && ccLevels.includes(String(eff.variant)) ? String(eff.variant) : '';
+        return runCommandcode({
+          prompt: finalPrompt,
+          model: candidate.id,
+          // Defensive: only a Command Code UUID resumes. An opencode `ses_…` id
+          // (a chat that switched lanes mid-conversation) would make `cmd` die
+          // with "No session found to resume".
+          sessionId: turnSessionId && COMMANDCODE_SESSION_ID_RE.test(turnSessionId) ? turnSessionId : undefined,
+          workspace: effectiveWorkspace,
+          timeoutMs: config.agent.timeoutMs,
+          commandcodeBin: config.agent.commandcodeBin,
+          onEvent: onObserverEvent,
+          onSpawn: (child) => running.set(chatId, { child, aborted: false }),
+          env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+          envMode: turnEnvMode,
         });
       }
       // Only a level this model offers travels as `#variant`. Anything else
@@ -7496,6 +7680,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         const clineSessions = loadClineSessions(config.id);
         clineSessions.set(chatId, result.sessionID);
         saveClineSessions(config.id, clineSessions);
+      } else if (resultSurface === 'commandcode') {
+        // Workspace-scoped like the opencode map, so a chat in two projects
+        // keeps two Command Code conversations.
+        const commandcodeSessions = loadCommandcodeSessions(config.id);
+        bindSessionForWorkspace(commandcodeSessions, chatId, effectiveWorkspace, result.sessionID);
+        saveCommandcodeSessions(config.id, commandcodeSessions);
       } else {
         // Scoped to the workspace the turn actually ran in, so the next turn —
         // and the TUI — resume this conversation rather than a stale one.
@@ -7833,7 +8023,17 @@ async function dryRun(config, args) {
   await renderer.start();
   const ref = parseModelRef(config.agent.model);
   const result =
-    ref.surface === 'gemini'
+    ref.surface === 'commandcode'
+      ? await runCommandcode({
+          prompt,
+          model: ref.id,
+          workspace: config.agent.workspace,
+          timeoutMs: config.agent.timeoutMs,
+          commandcodeBin: config.agent.commandcodeBin,
+          onEvent: (event) => renderer.onEvent(event),
+          env: opencodeEnv(config),
+        })
+      : ref.surface === 'gemini'
       ? await runGemini({
           prompt,
           model: ref.id,
