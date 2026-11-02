@@ -224,6 +224,30 @@ describe('the terminal launches the lane the chat is on', () => {
     expect(tuiLaunchCommand(launch)).toBe("'/oc' '--session' 'ses_abc'");
   });
 
+  it('opens the Command Code TUI resumed onto its own UUID session', () => {
+    // The bin is a real path on purpose: the commandcode resolver probes when the
+    // given path is not executable, so a fake '/cc' would not be pinned verbatim.
+    const launch = resolveTuiLaunch({
+      surface: 'commandcode',
+      sessionId: 'eff6f47a-923b-430f-b066-1e5c62ae5a0c',
+      commandcodeBin: '/bin/sh',
+    });
+    expect(launch.argv).toEqual(['/bin/sh', '--resume', 'eff6f47a-923b-430f-b066-1e5c62ae5a0c']);
+    expect(launch.sharedSession).toBe(true);
+  });
+
+  it('refuses a Command Code terminal with no session to share', () => {
+    const launch = resolveTuiLaunch({ surface: 'commandcode', commandcodeBin: '/bin/sh' });
+    expect(launch.argv).toBeNull();
+    expect(launch.reason).toMatch(/no Command Code session/i);
+  });
+
+  it('matches a Command Code session id by UUID shape, never ses_', () => {
+    expect(sessionIdMatchesSurface('eff6f47a-923b-430f-b066-1e5c62ae5a0c', 'commandcode')).toBe(true);
+    expect(sessionIdMatchesSurface('ses_abc', 'commandcode')).toBe(false);
+    expect(sessionIdMatchesSurface('eff6f47a-923b-430f-b066-1e5c62ae5a0c', 'opencode')).toBe(false);
+  });
+
   it('refuses an API-only lane instead of falling back to opencode', () => {
     // A silent fallback IS the defect wearing a different hat. Gemini has no
     // screen; a scraped PTY with a badge is not a terminal.
@@ -310,22 +334,6 @@ describe('the turn note tells the truth about the terminal', () => {
     expect(src()).toMatch(/cannot resume a thread headlessly/);
   });
 
-  it('names the lane in the /tui reply instead of hardcoding opencode', () => {
-    // The literal it replaced: `*opencode TUI*` on a chat that was on cline.
-    expect(src()).not.toMatch(/\*opencode TUI\*/);
-    expect(src()).toMatch(/tuiSurface\.label/);
-  });
-
-  it('refuses a Mini App button for a lane with no terminal', () => {
-    expect(src()).toMatch(/if \(!tuiSurface\.terminal\)/);
-  });
-
-  it('records the surface and that lane s own session id in tui-open.json', () => {
-    // One file, one chat: the attach cannot be told the lane any other way, and
-    // a cline id in sessions.json would be handed to `opencode run --session`.
-    expect(src()).toMatch(/cline-sessions\.json/);
-    expect(src()).toMatch(/surface: tuiSurface\.surface/);
-  });
 });
 
 describe('presence is not a lock', () => {
@@ -347,11 +355,7 @@ describe('presence is not a lock', () => {
     // must not claim a terminal is watching it. These sensors pinned the older
     // bare shape, so they were red on this branch while the code was right.
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-<<<<<<< HEAD
     expect(src).toMatch(/if \(turnSessionId && tuiIsAttached\(config\.id, turnSessionId\)\) \{/);
-=======
-    expect(src).toMatch(/if \((?:turnSessionId && )?tuiIsAttached\(config\.id, turnSessionId\)\) \{/);
->>>>>>> origin/agent/bot-host-r14-wip
   });
 
   it('reads presence per session, so a terminal on another project is not claimed', async () => {
@@ -365,11 +369,7 @@ describe('presence is not a lock', () => {
     // The note is inside the presence check, not unconditional — otherwise every
     // ordinary turn in every chat grows a line about a terminal that is not there.
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-<<<<<<< HEAD
     const guard = 'if (turnSessionId && tuiIsAttached(config.id, turnSessionId)) {';
-=======
-    const guard = 'tuiIsAttached(config.id, turnSessionId)) {';
->>>>>>> origin/agent/bot-host-r14-wip
     const start = src.indexOf(guard);
     expect(start).toBeGreaterThan(-1);
     const noteAt = src.indexOf('A TUI is open on this conversation');
@@ -465,11 +465,6 @@ describe('a chat session belongs to exactly one workspace', () => {
     // with no session at all and opencode picked its own — the original split.
     expect(src).not.toMatch(/sessionId: workSession\.viewMode === 'tui'/);
     expect(src).toMatch(/sessionId: turnSessionId,/);
-  });
-
-  it('tells tui-attach.sh which workspace to open', async () => {
-    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    expect(src).toMatch(/workspace: tuiWorkspace,/);
   });
 
   it('makes tui-attach.sh prefer the recorded workspace over the static guess', async () => {

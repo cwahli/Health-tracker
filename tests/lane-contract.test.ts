@@ -11,7 +11,7 @@ import {
 
 describe('laneFor', () => {
   it('describes every dispatch backend', () => {
-    for (const backend of ['opencode', 'cline', 'grok', 'agy', 'freebuff', 'gemini', 'human']) {
+    for (const backend of ['opencode', 'cline', 'commandcode', 'grok', 'agy', 'freebuff', 'gemini', 'human']) {
       expect(laneFor(backend).backend).toBe(backend);
     }
   });
@@ -40,6 +40,14 @@ describe('degraded markings', () => {
     expect(LANES.human.degraded).toEqual([]);
   });
 
+  it('marks commandcode as a full CLI lane: tools + resumable session, nothing degraded', () => {
+    const cc = laneFor('commandcode');
+    expect(cc.kind).toBe('cli');
+    expect(cc.tools).toBe(true);
+    expect(cc.session).toBe(true);
+    expect(cc.degraded).toEqual([]);
+  });
+
   // freebuff lane rows + laneSupports probe: tests/lane-contract-freebuff.test.ts (R-15)
 });
 
@@ -64,7 +72,7 @@ describe('checkBotRow / checkRegistry', () => {
   });
 
   it('rejects agent, model, and process names as ids', () => {
-    for (const id of ['dev', 'dispatch', 'coder', 'cline', 'gemini', 'agy']) {
+    for (const id of ['dev', 'dispatch', 'coder', 'cline', 'gemini', 'agy', 'commandcode']) {
       expect(checkBotRow({ id, runtime: 'bot-host' }).length).toBeGreaterThan(0);
     }
   });

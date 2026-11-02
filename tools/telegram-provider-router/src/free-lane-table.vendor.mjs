@@ -512,7 +512,7 @@ export function projectLanes(table, session, { now = Date.now(), labelFn = defau
 // a Freebuff lane whose model path contains `deepseek/` resolved to deepseek and
 // rendered as plan code "DE".
 const PROVIDER_ALIASES = new Set([
-  'tokenharbor', 'cloudflare', 'freebuff', 'opencode', 'cline', 'gemini',
+  'tokenharbor', 'cloudflare', 'freebuff', 'opencode', 'cline', 'gemini', 'commandcode',
 ]);
 
 /** The provider that actually serves a lane, from its model path. */
@@ -545,6 +545,9 @@ function toModelRefShim(provider, model) {
 export function laneWalkRef(provider, model) {
   const surface = String(provider || '');
   if (surface === 'cline') return `cline:${model}`;
+  // Command Code ids carry a vendor path, so the lane keeps a colon prefix (see
+  // freemodels.toModelRef and routeCandidates — the three must agree).
+  if (surface === 'commandcode') return `commandcode:${String(model || '').replace(/^commandcode:/, '')}`;
   if (surface === 'gemini' || surface === 'google') {
     const id = String(model || '');
     return `gemini:${id.startsWith('gemini/') ? id : `gemini/${id}`}`;
@@ -854,6 +857,9 @@ export function planCodeForLane(lane) {
   const bucket = String(lane?.bucket || "").toLowerCase();
   if (provider === "cloudflare" || model.includes("cloudflare/") || bucket.includes("cloudflare")) return "CF";
   if (provider === "cline" || model.startsWith("cline")) return "CL";
+  // Command Code is a PAID lane with its own subscription allowance; it keeps a
+  // distinct code so a row can never be deduped onto a free lane's bar.
+  if (provider === "commandcode" || model.startsWith("commandcode:")) return "CC";
   if (provider === "freebuff" || bucket.includes("freebuff")) return "FB";
   // The go-plan pool is separate quota from the zen pool: it keeps its own code
   // so such a row can never be deduped onto the zen free row and read as the same
@@ -1695,17 +1701,19 @@ export function supersedeOlderVersions(lanes, { scoreOf = null } = {}) {
   };
   const out = [];
   const dropped = [];
+  // A PAID catalog the reader picks from is exempt from version-dedupe: a newer
+  // free model of the same family must not hide the paid one, and a newer paid
+  // model must not hide an older paid one the subscription still offers. This
+  // holds for the Go plan and for Command Code (its own /model_cc pool) alike.
+  const isPaidPlanLane = (lane) => ['OG', 'CC'].includes(planCodeForLane(lane));
   for (const lane of lanes || []) {
     const id = String(lane?.model || '');
-    // The Go plan is a paid catalog the reader picks from. A newer free
-    // DeepSeek must not hide the Go DeepSeek, and a newer Go model must not
-    // hide an older one the subscription still offers.
-    if (planCodeForLane(lane) === 'OG') { out.push(lane); continue; }
+    if (isPaidPlanLane(lane)) { out.push(lane); continue; }
     const mine = versionOf(id);
     const family = familyOf(id);
     const rival = (lanes || []).find((other) => {
       if (other === lane) return false;
-      if (planCodeForLane(other) === 'OG') return false;
+      if (isPaidPlanLane(other)) return false;
       if (familyOf(other?.model || '') !== family) return false;
       return cmp(versionOf(other?.model || ''), mine) > 0;
     });
@@ -1829,6 +1837,10 @@ export const MODEL_POOLS = {
   light: { id: 'light', command: 'model_light_free' },
   coding: { id: 'coding', command: 'model_free' },
   go: { id: 'go', command: 'model_go' },
+  // A PAID pool of its own, like `go`: Command Code lanes are not free, so they
+  // must not sit inside a free pool's keyboard or its "moves inside this pool"
+  // promise. /model_cc is the only door to them.
+  commandcode: { id: 'commandcode', command: 'model_cc' },
 };
 
 /** The command that opens one pool, or '' for an unknown id. */
@@ -1852,7 +1864,13 @@ export function poolForCommand(name) {
  */
 export function poolOfLane(lane) {
   if (!lane) return null;
-  if (planCodeForLane(lane) === 'OG') return 'go';
+  const plan = planCodeForLane(lane);
+  if (plan === 'OG') return 'go';
+  // Command Code has its own PAID pool (/model_cc), so the free /model_free and
+  // /model_light_free keyboards never carry a paid row. Filing them by tier put
+  // them inside the free coding pool, whose header promises "a quota hit moves
+  // inside this pool only" — a promise a paid lane cannot keep.
+  if (plan === 'CC') return 'commandcode';
   const model = String(lane.model || '');
   if (!model) return null;
   return tierForModel(model).tier === 'high' ? 'coding' : 'light';
@@ -1885,6 +1903,7 @@ export function poolDisplayName(poolId, location = 'vps') {
   if (poolId === 'light') return `${loc} Light pool`;
   if (poolId === 'coding') return `${loc} Coding pool`;
   if (poolId === 'go') return `${loc} Go plan`;
+  if (poolId === 'commandcode') return `${loc} Command Code plan`;
   return `${loc} model pool`;
 }
 
@@ -2194,6 +2213,7 @@ export function routeCandidates(ref) {
   if (!raw) return [];
   if (raw.startsWith("cline:")) return [{ provider: "cline", model: raw.slice("cline:".length) }];
   if (raw.startsWith("gemini:")) return [{ provider: "gemini", model: raw.slice("gemini:".length) }];
+  if (raw.startsWith("commandcode:")) return [{ provider: "commandcode", model: raw.slice("commandcode:".length) }];
   if (raw.startsWith("opencode:")) return [{ provider: "opencode", model: raw.slice("opencode:".length) }];
   if (!raw.includes("/")) return [{ provider: "opencode", model: raw }];
   const [provider, ...rest] = raw.split("/");
