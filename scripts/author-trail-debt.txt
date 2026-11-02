@@ -86,6 +86,11 @@ af32be32  no-trailer queue-sync commit on main, recorded 2026-10-15 (not mine to
 0f398ada  no-trailer squash-merge of #796 dropped the branch trailer; authorship in branch commit 7cdd6771 + PR #796, recorded 2026-10-15 (not mine to rewrite)
 a5e1b6ac  no Author/Agent trailer on main: [queue-sync] refresh WORK_QUEUE.md; authored 2026-10-17; recorded 2026-10-17
 0283afac  no Author/Agent trailer on main: [queue-sync] refresh WORK_QUEUE.md; authored 2026-10-16; recorded 2026-10-17
+350e079a  no-location trailer on main: fix(food): food-history rings match Home top nutrients with snap slider; recorded 2026-10-23 (not mine to rewrite)
+0ddc831c  bad-level trailer on main: colab: newer, faster Ollama models per GPU tier; recorded 2026-10-23 (not mine to rewrite)
+2d5efab1  no-trailer commit on main: fix(colab): default queue host to colabq@51.254.217.163; recorded 2026-10-23 (not mine to rewrite)
+6c433c5b  no-trailer commit on main: fix(colab): queue ssh port defaults to 22 for the new VPS; recorded 2026-10-23 (not mine to rewrite)
+6c3b1ba1  no-trailer commit on main: fix(colab): auto-start Ollama per ollama/* job; recorded 2026-10-23 (not mine to rewrite)
 6d912419  no Author/Agent trailer on main: [queue-sync] refresh WORK_QUEUE.md; authored 2026-10-18; recorded 2026-10-18
 350e079a  no thinking level in Author trailer (Author: Muse Spark 1.3 Contributor VM); food-lane commit, authored 2026-10-19; recorded 2026-10-19 (not mine to rewrite — owner to fix trailer tooling)
 6c3b1ba1  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-10-21; recorded 2026-10-22

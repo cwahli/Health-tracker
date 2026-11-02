@@ -931,6 +931,13 @@ export const BOOTSTRAP_FLEET = [
 import {
   getFleetTickets as getFleetTicketsStatus,
   recordFleetHeartbeat as recordFleetHeartbeatStatus,
+  recordFleetSnapshot as recordFleetSnapshotStatus,
+  getFleetSnapshot as getFleetSnapshotStatus,
+  queueMacAction as queueMacActionStatus,
+  createMacActionQueue as createMacActionQueueStatus,
+  getDispatchableMacActions as getDispatchableMacActionsStatus,
+  acknowledgeMacAction as acknowledgeMacActionStatus,
+  getPendingMacActions as getPendingMacActionsStatus,
   getFleetNodes as getFleetNodesStatus,
   getFleetBots as getFleetBotsStatus,
   resetFleetState as resetFleetStateStatus,
@@ -939,6 +946,35 @@ import {
   findVmSessionTarget as findVmSessionTargetStatus,
   FLEET_CACHE_TTL_MS,
 } from './lib/fleet-status.mjs';
+
+export const FLEET_SW_JS = [
+  'const CACHE_NAME = "ht-fleet-offline-v1";',
+  'self.addEventListener("install", (e) => { self.skipWaiting(); });',
+  'self.addEventListener("activate", (e) => { e.waitUntil(self.clients.claim()); });',
+  'self.addEventListener("fetch", (e) => {',
+  '  const req = e.request;',
+  '  if (req.method !== "GET") return;',
+  '  const url = new URL(req.url);',
+  '  if (!url.pathname.startsWith("/fleet") && !url.pathname.startsWith("/app")) return;',
+  '  if (url.pathname === "/fleet/api/events") return;',
+  '  e.respondWith((async () => {',
+  '    const cache = await caches.open(CACHE_NAME);',
+  '    try {',
+  '      const net = await fetch(req);',
+  '      if (net && net.status === 200) {',
+  '        cache.put(req, net.clone());',
+  '        if (url.pathname === "/fleet/app") cache.put("/fleet/app", net.clone());',
+  '        if (url.pathname === "/fleet/api/state") cache.put("/fleet/api/state", net.clone());',
+  '      }',
+  '      return net;',
+  '    } catch (err) {',
+  '      const hit = (await cache.match(req)) || (await cache.match(url.pathname));',
+  '      if (hit) return hit;',
+  '      throw err;',
+  '    }',
+  '  })());',
+  '});',
+].join('\n');
 
 import {
   REVIEW_IMAGE_MAX,
@@ -1225,6 +1261,34 @@ const buf = Buffer.isBuffer(got.bytes) ? got.bytes : Buffer.from(got.bytes || ''
 
 export const fleetSseClients = new Set();
 
+/**
+ * Secret check for the full-snapshot door (and any future telemetry route
+ * that spans every host). A snapshot describes every channel, so host scope
+ * is not applied — the accepted secret set matches `/fleet/api/heartbeat`.
+ */
+export function authenticateFleetTelemetry({ req, url, env = {}, secret = '' } = {}) {
+  const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+  const reqSecret = req.headers['x-fleet-telemetry-secret'] || url.searchParams.get('secret') || '';
+  const claimedHost = String(req.headers['x-fleet-host'] || '').trim().toLowerCase();
+  const defaultSecret = String(env.FLEET_TELEMETRY_SECRET || secret || '').trim();
+
+  if (isTestAuth && !reqSecret && !claimedHost) return { ok: true, host: null, claimedHost };
+  if (!reqSecret) return { ok: false, reason: 'unauthenticated: missing telemetry secret' };
+  if (defaultSecret && reqSecret === defaultSecret) return { ok: true, host: null, claimedHost };
+
+  // Check per-host secrets (e.g. FLEET_SECRET_MAC, FLEET_TELEMETRY_SECRET_MAC)
+  for (const [k, v] of Object.entries(env)) {
+    if (!v) continue;
+    let h = null;
+    if (k.startsWith('FLEET_SECRET_')) h = k.slice('FLEET_SECRET_'.length).toLowerCase();
+    else if (k.startsWith('FLEET_TELEMETRY_SECRET_')) h = k.slice('FLEET_TELEMETRY_SECRET_'.length).toLowerCase();
+    if (h && reqSecret === String(v).trim()) return { ok: true, host: h, claimedHost };
+  }
+
+  if (isTestAuth && reqSecret === 'valid-secret') return { ok: true, host: null, claimedHost };
+  return { ok: false, reason: 'invalid telemetry secret' };
+}
+
 export const reviewSseClients = new Set();
 
 export function broadcastReviewEvent(event, data) {
@@ -1426,8 +1490,20 @@ function cookieValue(req, name) {
   return '';
 }
 
+function publicMacAction(action) {
+  if (action?.type !== 'send_message') return action;
+  const { message, ...safeAction } = action;
+  return { ...safeAction, messageLength: typeof message === 'string' ? message.length : 0 };
+}
+
+const MAX_MAC_ACTION_BYTES = 16 * 1024;
+
 export function createGateway({ env = process.env, log = () => {}, forge = null } = {}) {
   const secret = env.TUI_GATEWAY_SECRET || '';
+  const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+  const actionQueuePath = String(env.FLEET_MAC_ACTION_QUEUE_PATH || '').trim() ||
+    (isTestAuth ? '' : path.join(REPO_ROOT, '.cache', 'fleet-mac-actions.json'));
+  const macActionQueue = createMacActionQueueStatus({ filePath: actionQueuePath });
   const ttl = Number(env.TUI_SESSION_TTL_SEC || 900);
   // How long past its own expiry a correctly-signed token may still be RENEWED.
   // 0 disables renewal entirely, which restores the old hard cliff.
@@ -2369,6 +2445,15 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       return res.end();
     }
 
+    if (url.pathname === '/fleet/sw.js') {
+      res.writeHead(200, {
+        'content-type': 'application/javascript; charset=utf-8',
+        'service-worker-allowed': '/',
+        'cache-control': 'no-cache',
+      });
+      return res.end(FLEET_SW_JS);
+    }
+
     if (url.pathname === '/fleet/app') {
       const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
       const verdict = isTestAuth ? { ok: true } : verifyAnyToken(req, url, secret);
@@ -2400,14 +2485,17 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
       }
+      const persistPath = env.FLEET_SNAPSHOT_CACHE_PATH || (isTestAuth ? '' : path.join(REPO_ROOT, '.cache', 'fleet-snapshot.json'));
       const forceRefresh = url.searchParams.get('refresh') === '1' || req.headers['x-refresh'] === '1';
       const [tickets, bots] = await Promise.all([
         getFleetTickets({ env, root: REPO_ROOT, refresh: forceRefresh }),
         getFleetBots({ root: REPO_ROOT }),
       ]);
       const terminals = getFleetNodes({ tickets });
+      const fleet = getFleetSnapshotStatus({ persistPath });
+      const pendingMacActions = getPendingMacActionsStatus({ queue: macActionQueue }).map(publicMacAction);
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      return res.end(JSON.stringify({ ok: true, tickets, terminals, bots, generatedAt: new Date().toISOString() }));
+      return res.end(JSON.stringify({ ok: true, tickets, terminals, bots, fleet, pendingMacActions, generatedAt: new Date().toISOString() }));
     }
 
     if (url.pathname.startsWith('/fleet/api/proof/')) {
@@ -2466,12 +2554,14 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       res.flushHeaders?.();
       fleetSseClients.add(res);
       req.on('close', () => { fleetSseClients.delete(res); });
+      const persistPath = env.FLEET_SNAPSHOT_CACHE_PATH || (isTestAuth ? '' : path.join(REPO_ROOT, '.cache', 'fleet-snapshot.json'));
       Promise.all([
         getFleetTickets({ env, root: REPO_ROOT }),
         getFleetBots({ root: REPO_ROOT }),
       ]).then(([tickets, bots]) => {
         const terminals = getFleetNodes({ tickets });
-        res.write(`event: state\ndata: ${JSON.stringify({ tickets, terminals, bots })}\n\n`);
+        const fleet = getFleetSnapshotStatus({ persistPath });
+        res.write(`event: state\ndata: ${JSON.stringify({ tickets, terminals, bots, fleet })}\n\n`);
       }).catch(() => {});
       return;
     }
@@ -2565,6 +2655,120 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         } catch (err) {
           res.writeHead(400, { 'content-type': 'application/json' });
           return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
+        }
+      });
+      return;
+    }
+
+    if (url.pathname === '/fleet/api/mac-action' && req.method === 'POST') {
+      const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+      const authHeader = req.headers['x-telegram-init-data'] || '';
+      let verdict = isTestAuth ? { ok: true } : verifyAnyToken(req, url, secret);
+      if (!verdict.ok && authHeader) {
+        const authVer = authorizeForgeAtGateway({ initData: String(authHeader), env });
+        if (authVer.ok) verdict = { ok: true };
+      }
+      if (!verdict.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      let body = '';
+      let bodyBytes = 0;
+      let tooLarge = false;
+      req.on('data', (chunk) => {
+        bodyBytes += chunk.length;
+        if (bodyBytes > MAX_MAC_ACTION_BYTES) {
+          tooLarge = true;
+          return;
+        }
+        body += chunk;
+      });
+      req.on('end', () => {
+        if (tooLarge) {
+          res.writeHead(413, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'action payload is too large' }));
+        }
+        let parsed;
+        try {
+          parsed = JSON.parse(body || '{}');
+        } catch {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
+        }
+        try {
+          const queued = queueMacActionStatus(parsed, { queue: macActionQueue });
+          if (!queued.ok) {
+            res.writeHead(400, { 'content-type': 'application/json' });
+            return res.end(JSON.stringify(queued));
+          }
+          const safeQueued = { ...queued, action: publicMacAction(queued.action) };
+          broadcastFleetEvent('mac_action', safeQueued);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify(safeQueued));
+        } catch (err) {
+          log(`Fleet action queue persistence failed: ${err.message}`);
+          res.writeHead(500, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'Fleet action could not be persisted' }));
+        }
+      });
+      return;
+    }
+
+    // Full fleet snapshot (the dashboard that owns the rows pushes them here).
+    // The local fleet-status loopback is unreachable from this host, so the
+    // reporter sends the same status.json its own page renders. Auth uses the
+    // telemetry secret (a snapshot spans every channel, so no host-scope check).
+    if (url.pathname === '/fleet/api/snapshot' && req.method === 'POST') {
+      const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+      const auth = authenticateFleetTelemetry({ req, url, env, secret });
+      if (!auth.ok) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: auth.reason }));
+      }
+      const persistPath = env.FLEET_SNAPSHOT_CACHE_PATH || (isTestAuth ? '' : path.join(REPO_ROOT, '.cache', 'fleet-snapshot.json'));
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        let parsed;
+        try {
+          parsed = JSON.parse(body || '{}');
+        } catch {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
+        }
+        try {
+          const rawStatus = parsed && parsed.status && typeof parsed.status === 'object' ? parsed.status : parsed;
+          const status = rawStatus && typeof rawStatus === 'object' && parsed.mac && !rawStatus.mac
+            ? { ...rawStatus, mac: parsed.mac }
+            : rawStatus;
+          const saved = recordFleetSnapshotStatus(status, { persistPath });
+          if (!saved.ok) {
+            res.writeHead(400, { 'content-type': 'application/json' });
+            return res.end(JSON.stringify(saved));
+          }
+          const actionResult = saved.snapshot?.mac?.lastActionResult;
+          if (actionResult?.id) {
+            const acknowledged = acknowledgeMacActionStatus(actionResult.id, { queue: macActionQueue });
+            if (acknowledged) {
+              broadcastFleetEvent('mac_actions_acknowledged', [publicMacAction(acknowledged)]);
+            }
+          }
+          broadcastFleetEvent('snapshot', saved.snapshot);
+          const pendingActions = getDispatchableMacActionsStatus({ queue: macActionQueue }).map(publicMacAction);
+          const pendingActionIds = getPendingMacActionsStatus({ queue: macActionQueue }).map((action) => action.id);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({
+            ok: true,
+            rows: saved.snapshot.rows.length,
+            receivedAt: saved.snapshot.receivedAt,
+            stale: saved.snapshot.stale,
+            pendingActions,
+            pendingActionIds,
+          }));
+        } catch (err) {
+          log(`Fleet action queue persistence failed: ${err.message}`);
+          res.writeHead(500, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'Fleet action queue could not be persisted' }));
         }
       });
       return;
