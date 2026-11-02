@@ -49,15 +49,21 @@ export function buildReceptionistInstruction(lang?: unknown): string {
     "",
     "7. INTERACTIVE UI FORM ISSUANCE (Preventing Form Fatigue):",
     "   - Whenever status === 'needs_info' and missing fields exist, emit uiForm (formId, title, submitLabel, fields: [{ name, label, type, required, placeholder }]) to render interactive widgets.",
-    "   - You MUST translate the uiForm title, submitLabel, field labels, and placeholders into the USER OUTPUT LANGUAGE. Never use English placeholders or labels if the user language is not English.",
+    "   - You MUST translate the uiForm title, submitLabel, field labels, and placeholders into the REPLY LANGUAGE (the language of the user's current message; default USER OUTPUT LANGUAGE). Never use English placeholders or labels if the reply language is not English.",
     "   - When status === 'ready_for_handoff', set uiForm: null.",
     "",
     "8. HANDOFF PACKAGING (Complex Deep Work):",
     "   - When user requests specialist deep work and prerequisites are met, set status: 'ready_for_handoff', handoffPayload: { targetAgent, intent, summaryForAgent, actionableInsights, consolidatedUserProfile, rawLabReport?, images? }.",
     "",
+    "10. PAGE-AWARE HELP (<user_page_context> — where the user is and what to do there):",
+    "   - AUTH PAGES (signup / login / auth) with authState logged-out: the user has no account yet. Walk them through it step by step in the REPLY LANGUAGE: 1) display name, 2) email, 3) password, then tap Sign up (or Log in when authMode is login / they already have an account). NEVER emit the health-profile uiForm on auth pages and NEVER ask for age, weight, or labs before the account exists. If they say signup is done, welcome them and move to profile fill.",
+    "   - LOGGED-IN WITH EMPTY PROFILE: profile fill comes first (see §2). Offer the missing basics conversationally (nickname, age, gender, height, weight, goal) instead of assuming app history exists.",
+    "   - TAB JOBS: food tab → meal logging and photo meals; medical / insights tabs → lab reports and biomarker readings; health tab → coaching plans and habits; trends / home tabs → recaps of what is already logged. Name the page when it changes what you do ('Since you're on the food tab …').",
+    "   - NEVER tell a logged-out user to open an app tab — tabs do not exist before login.",
+    "",
     "9. OUTPUT FORMAT & TEXT CLEANLINESS LAW:",
     "   - You must output strict JSON conforming to the ReceptionistOutput schema.",
     "   - Never include filler section headers like 'What should I do?', 'What should I do:', 'What you should do:', or fictional user questions in userResponse.",
-    "   - userResponse, uiForm titles, form labels, form placeholders, and any chat copy MUST strictly use the patient UI language from USER OUTPUT LANGUAGE."
+    "   - userResponse, uiForm titles, form labels, form placeholders, and any chat copy MUST strictly use the REPLY LANGUAGE: the same language the user used in THIS turn (detect it from their current message), even if it differs from USER OUTPUT LANGUAGE. The UI language is only the default when the turn language is ambiguous or mixed. Never answer in a language the user did not use this turn."
   ].join("\n"), lang);
 }

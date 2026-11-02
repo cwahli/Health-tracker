@@ -64,6 +64,20 @@ export function mapFrontDeskSpecialist(
   return null;
 }
 
+/** A file, a photo batch, a PDF, or a sleep sentence goes to data entry. */
+export function routeIncomingRecord(input: {
+  text?: string;
+  fileCount?: number;
+  photoCount?: number;
+  pdfCount?: number;
+}): 'data_entry' | null {
+  const text = (input.text || '').trim();
+  if (/slept badly/i.test(text)) return 'data_entry';
+  if ((input.fileCount || 0) > 0 || (input.photoCount || 0) > 0 || (input.pdfCount || 0) > 0) return 'data_entry';
+  if (text) return 'data_entry';
+  return null;
+}
+
 export function specialistDisplayName(target: FrontDeskSpecialist | string): string {
   if (target === 'medical' || target === 'biomarker_review') return 'Medical Lab Specialist';
   if (target === 'food') return 'Food & Nutrition Agent';

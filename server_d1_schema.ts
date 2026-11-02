@@ -289,6 +289,36 @@ CREATE TABLE IF NOT EXISTS food_catalog_sync_events (
   payload TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
+  client_id TEXT PRIMARY KEY,
+  client_secret_hash TEXT,
+  client_name TEXT,
+  redirect_uris TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS mcp_auth_codes (
+  code TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  firebase_uid TEXT NOT NULL,
+  code_challenge TEXT NOT NULL,
+  code_challenge_method TEXT NOT NULL DEFAULT 'S256',
+  redirect_uri TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_auth_codes_client ON mcp_auth_codes(client_id);
+
+CREATE TABLE IF NOT EXISTS mcp_refresh_tokens (
+  token TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  firebase_uid TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  revoked_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_refresh_tokens_uid ON mcp_refresh_tokens(firebase_uid);
+
 `;
 
 let schemaEnsured = false;
@@ -410,6 +440,12 @@ export async function ensureD1Schema(): Promise<{ success: boolean; error?: stri
     // Safe migration check for existing D1 databases lacking image_url
     try {
       await d1Query('ALTER TABLE brand_menu_items ADD COLUMN image_url TEXT');
+    } catch (_) {}
+    try {
+      await d1Query('ALTER TABLE mcp_oauth_clients ADD COLUMN owner_uid TEXT');
+    } catch (_) {}
+    try {
+      await d1Query('ALTER TABLE mcp_oauth_clients ADD COLUMN revoked_at INTEGER');
     } catch (_) {}
     // Saved-meal lineage pointer (duplicate/restage parent id).
     try {

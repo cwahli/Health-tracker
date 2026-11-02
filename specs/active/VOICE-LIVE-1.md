@@ -1,10 +1,10 @@
 ---
 id: VOICE-LIVE-1
-status: locked
+status: closed-for-now
 class: VOICE_STREAMING_ARCHITECTURE
 edit_mode: patch
 skill: builder
-auto_go: true
+auto_go: false
 allowed_files:
   - server.ts
   - server_gemini_live_ws.ts
@@ -144,6 +144,9 @@ Real user interactions with the receptionist are short question bursts (**1 to 3
 ---
 
 ## 5. Definition of Done
+
+**Closed for now (2026-10-29, owner).** Do not run the Android proof. The boxes below stay the original list. Echo cancellation stays off. Reopen only if the owner asks.
+
 * [ ] Server WebSocket relay `/api/gemini/live-ws` connected and handling bidirectional audio with Google AI Studio.
 * [ ] Client `VoiceReceptionistFab.tsx` streaming 16kHz PCM in and playing 24kHz PCM out with hardware echo cancellation.
 * [ ] Zero browser dictation errors (`no-speech` eliminated).

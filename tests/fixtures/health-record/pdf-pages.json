@@ -1,0 +1,25 @@
+{
+  "files": [
+    {
+      "fileId": "file-a",
+      "pages": [
+        {"page": 1, "text": "HDL 50 mg/dL", "imageCount": 0, "imageAreaRatio": 0},
+        {"page": 2, "text": "", "imageCount": 1, "imageAreaRatio": 0.95},
+        {"page": 3, "text": "HDL 50", "imageCount": 1, "imageAreaRatio": 0.4}
+      ]
+    },
+    {
+      "fileId": "file-b",
+      "pages": [
+        {"page": 1, "text": "A short note about the visit", "imageCount": 1, "imageAreaRatio": 0.05},
+        {"page": 2, "text": "", "imageCount": 0, "imageAreaRatio": 0}
+      ]
+    },
+    {
+      "fileId": "file-c",
+      "pages": [
+        {"page": 1, "text": "Secret text behind a password", "imageCount": 0, "imageAreaRatio": 0, "locked": true}
+      ]
+    }
+  ]
+}

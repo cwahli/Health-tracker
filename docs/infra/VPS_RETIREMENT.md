@@ -95,10 +95,13 @@ Notes for whoever goes looking:
 ## 5. Still owed
 
 - **Human, DNS:** delete the `health-tracking.duckdns.org` A record at the
-  DuckDNS dashboard. It still resolves to the dead OVH IP.
-- **Human, console:** the checks in `COUK_MIGRATION.md` §6 step 7 (Supabase
-  redirect allowlist, Google OAuth consent links, Health Connect callback),
-  and the Firefox/Safari pass for the gateway login.
+  DuckDNS dashboard. Checked 2026-10-29: it still resolves to the dead OVH IP
+  and times out. This host has no DuckDNS token, so the record was not deleted.
+- **Console, 2026-10-29:** `/privacy` and `/terms` were 404 because
+  `/srv/www-legal` was empty. The pages from `/home/ubuntu/www-legal` were
+  installed and both return 200. Supabase, Firebase, and Health Connect
+  dashboards were not opened. The Firefox/Safari gateway login pass is still
+  a phone check.
 - **Serving trees on migration branches.** `/home/ubuntu/bot-host` (the live
   `tui-gateway` tree) and `/home/ubuntu/tgtg-audit` (the live `tgtg-audit`
   service) still sit on their `migrate-*` branches, and the bot-host tree

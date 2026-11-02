@@ -1,0 +1,16 @@
+{
+  "slug": "biomarker-history-screen",
+  "node": "builder-start",
+  "at": "2026-10-28T10:06:21.941Z",
+  "git": {
+    "head": "d35b4a8f830491d623cdb3a3a533600dcb5a5ddb",
+    "stashCommit": null
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/biomarker-history-screen.md"
+  ]
+}

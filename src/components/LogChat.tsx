@@ -121,6 +121,8 @@ interface LogChatProps {
   onDataReviewBatchChange?: (idx: number | string) => void;
   onJobEnqueued?: (jobId: string, kind: 'food' | 'medical') => void;
   handoffPayload?: any;
+  /** App tab the user is looking at (front-desk page context). */
+  activeTab?: string;
 }
 const getSessionId = (): string => {
   if (typeof window === 'undefined') return 'global';
@@ -169,7 +171,8 @@ export default function LogChat({
   dataReviewSharedState = null,
   onDataReviewBatchChange,
   onJobEnqueued,
-  handoffPayload = null
+  handoffPayload = null,
+  activeTab,
 }: LogChatProps) {
   const [delegatedAgentType, setDelegatedAgentType] = useState<AgentType | null>(null);
   const [delegatedHandoffPayload, setDelegatedHandoffPayload] = useState<any>(null);
@@ -3360,6 +3363,7 @@ ${logsText}`);
       const bodyData: any = {
         userId: auth.currentUser?.uid || undefined,
         message: userMsg?.content || textToSend,
+        pageContext: { page: activeTab || 'unknown' },
         image: tempAnalysisImages[0] || tempImages[0] || undefined,
         images: tempAnalysisImages.length > 0 ? tempAnalysisImages : (tempImages.length > 0 ? tempImages : undefined),
         imageDates: tempDates.length > 0 ? tempDates : undefined,

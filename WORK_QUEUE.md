@@ -1,34 +1,32 @@
-# Work queue (generated 2026-10-22T11:07:55Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
+# Work queue (generated 2026-11-02T14:44:17Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
 
-## Ready to merge (3)
+## Ready to merge (4)
 
-- #781 `agent/meal-qa-queue` — chore(meal-qa): snapshot pending loop queue (5 requests + state, 2026-10-08/09) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 169)
-- #804 `agent/attach-visible` — fix(picker): attached sessions never hide, like the session in use (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 50)
-- #849 `agent/colab-queue-host` — fix(colab): queue host back to this VPS (root@103.147.32.117) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 0)
+- #781 `agent/meal-qa-queue` — chore(meal-qa): snapshot pending loop queue (5 requests + state, 2026-10-08/09) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 215)
+- #804 `agent/attach-visible` — fix(picker): attached sessions never hide, like the session in use (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 96)
+- #850 `agent/fleet-live-table` — feat(fleet): live fleet table in the mini-app (owner: DeepSeek V4.1 Flash Free (none) Mac; behind main: 45)
+- #875 `ship/food-rings` — fix(ui): darken status colors so small badges clear contrast (owner: Grok 4.7 (High) VM; behind main: 9)
 
 ## In flight (0)
 
 _Empty — everything open is unblocked._
 
-## Unowned carry-over (15)
+## Unowned carry-over (9)
 
-- agent/tui-expect-fix (named by merged #848; branch gone, no follow-up)
-- agent/voice-header-cleanup (named by merged #847; branch gone, no follow-up)
-- agent/voice-resume-fix (named by merged #846; branch gone, no follow-up)
-- agent/wa-gateway (named by merged #845; branch gone, no follow-up)
-- agent/voice-minitranscript (named by merged #844; branch gone, no follow-up)
-- agent/voice-resume (named by merged #843; branch gone, no follow-up)
-- agent/voice-minibadge (named by merged #842; branch gone, no follow-up)
-- agent/voice-halfduplex (named by merged #840; branch gone, no follow-up)
-- agent/whatsapp-verify-fixes (named by merged #839; branch gone, no follow-up)
-- agent/voice-probe-fix (named by merged #838; branch gone, no follow-up)
-- agent/voice-speaker-route (named by merged #837; branch gone, no follow-up)
-- agent/voice-drop-proactivity (named by merged #836; branch gone, no follow-up)
-- agent/voice-aec-retest (named by merged #835; branch gone, no follow-up)
-- agent/voice-echo-gate (named by merged #834; branch gone, no follow-up)
-- agent/voice-speaker (named by merged #832; branch gone, no follow-up)
+- plan/ROADMAP.md#track-b-biomarkers-active (named by merged #881; live notes)
+- plan/ROADMAP.md#track-b-biomarkers-active (named by merged #880; live notes)
+- plan/ROADMAP.md#track-b-biomarkers-active (named by merged #879; live notes)
+- plan/ROADMAP.md#track-b-biomarkers-active (named by merged #878; live notes)
+- plan/ROADMAP.md#track-b-biomarkers-active (named by merged #876; live notes)
+- plan/ROADMAP.md#remaining-work (named by merged #873; live notes)
+- plan/ROADMAP.md (named by merged #871; live notes)
+- plan/ROADMAP.md (named by merged #869; live notes)
+- plan/ROADMAP.md (named by merged #867; live notes)
 
-## Dangling pointers (0)
+## Dangling pointers (4)
 
-_None._
+- a (named by merged #874; resolves to nothing)
+- Live (named by merged #863; resolves to nothing)
+- Live (named by merged #862; resolves to nothing)
+- Step (named by merged #860; resolves to nothing)
 

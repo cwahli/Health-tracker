@@ -114,6 +114,10 @@ You MUST respond strictly with a valid JSON object in this format:
     "dailyActivities": [
       { "activity": "Daily brisk walking", "target": "6,000 - 8,000 steps" },
       { "activity": "Light mobility & stretching", "target": "10-15 mins daily" }
+    ],
+    "allowanceKcal": "The daily calorie allowance. Use the same number as the calories nutrient target.",
+    "testPlan": [
+      { "test": "The lab or check this profile should repeat", "why": "Why the allowance and the record point at it" }
     ]
   }
 }`;

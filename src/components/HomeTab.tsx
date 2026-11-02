@@ -19,6 +19,8 @@ import { lazyWithRetry } from '../utils/lazyWithRetry';
 
 const LogChat = lazyWithRetry(() => import('./LogChat'));
 import { JobStore } from '../jobs/JobStore';
+import { homeStrip } from '../utils/homeStrip';
+import { confirmedRecordFacts } from '../utils/recordFacts';
 
 const defaultNutrientTargets: { [key: string]: string } = {
   calories: "1800 kcal",
@@ -1192,6 +1194,15 @@ export default function HomeTab({
               <Heart className="w-4 h-4 text-indigo-600" />
               {t.topTargets}
             </h3>
+            {(() => {
+              const strip = homeStrip({ facts: confirmedRecordFacts(profile) });
+              if (strip.lines.length === 0) return null;
+              return (
+                <ul id="health-record-strip" className="text-[10px] text-slate-500" aria-label={t.recordStrip}>
+                  {strip.lines.map((line) => <li key={line}>{line}</li>)}
+                </ul>
+              );
+            })()}
             {/* Quick Timeframe Switcher */}
             <div className="flex items-center bg-slate-100 dark:bg-slate-800/80 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700/60">
               <button

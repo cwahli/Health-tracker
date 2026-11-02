@@ -25,6 +25,7 @@ import {
   mergeLiveTranscript,
 } from '../services/geminiLiveAudioClient';
 import type { LiveToolCall, LiveVoicePersona } from '../services/geminiLiveAudioClient';
+import { resolveSpokenHandoff } from '../utils/specialistMesh';
 
 export interface VoiceReceptionistFabProps {
   profile: UserProfile | null;
@@ -35,6 +36,8 @@ export interface VoiceReceptionistFabProps {
   biomarkerHistory?: any[];
   activeTab: string;
   setActiveTab: (tab: any) => void;
+  /** Login vs signup mode of the auth screen (logged-out voice help). */
+  authMode?: 'login' | 'signup';
   onLogMeal?: () => void;
   onCompareMeal?: () => void;
   onOpenMedical?: () => void;
@@ -184,6 +187,7 @@ export default function VoiceReceptionistFab({
   biomarkerHistory = [],
   activeTab,
   setActiveTab,
+  authMode,
   onLogMeal,
   onCompareMeal,
   onOpenMedical,
@@ -461,10 +465,12 @@ export default function VoiceReceptionistFab({
         ? 'Halo! Ini adalah contoh suara saya. Bagaimana menurut Anda?'
         : profile?.language === 'fr'
         ? 'Bonjour ! Voici un exemple de ma voix. Comment me trouvez-vous ?'
+        : profile?.language === 'zh'
+        ? '你好！这是我的声音示例。你觉得怎么样？'
         : 'Hello! This is how my voice sounds. I am ready to help you with your health and meals!';
     const utterance = new SpeechSynthesisUtterance(sampleText);
     const lang = profile?.language || 'en';
-    utterance.lang = lang === 'id' ? 'id-ID' : lang === 'fr' ? 'fr-FR' : 'en-GB';
+    utterance.lang = lang === 'id' ? 'id-ID' : lang === 'fr' ? 'fr-FR' : lang === 'zh' ? 'zh-CN' : 'en-GB';
     utterance.rate = speed;
     utterance.pitch = 1.0;
 
@@ -501,7 +507,7 @@ export default function VoiceReceptionistFab({
 
       const utterance = new SpeechSynthesisUtterance(cleanText);
       const lang = profile?.language || 'en';
-      utterance.lang = lang === 'id' ? 'id-ID' : lang === 'fr' ? 'fr-FR' : 'en-GB';
+      utterance.lang = lang === 'id' ? 'id-ID' : lang === 'fr' ? 'fr-FR' : lang === 'zh' ? 'zh-CN' : 'en-GB';
       utterance.rate = voiceSpeed;
       utterance.pitch = 1.0;
 
@@ -683,6 +689,8 @@ export default function VoiceReceptionistFab({
         ? 'id-ID'
         : profile?.language === 'fr'
         ? 'fr-FR'
+        : profile?.language === 'zh'
+        ? 'zh-CN'
         : (profile?.language === 'en' ? (deviceLang.startsWith('en') ? deviceLang : 'en-US') : deviceLang);
       recognition.lang = langCode;
 
@@ -1105,9 +1113,10 @@ export default function VoiceReceptionistFab({
         }
         answer({ ok: true, tab: target });
       } else if (name === 'handoff_specialist') {
-        const detail = `Handoff to ${a.specialist || 'specialist'}${a.context ? `: ${a.context}` : ''}`;
+        const target = resolveSpokenHandoff(String(a.specialist || ''), String(a.context || ''));
+        const detail = `Handoff to ${target}${a.context ? `: ${a.context}` : ''}`;
         liveActionRef.current = { type: 'agent_handoff', details: detail };
-        answer({ ok: true });
+        answer({ ok: true, specialist: target, tool: 'handoff_specialist' });
       } else if (name === 'log_meal') {
         const desc =
           a.description ||
@@ -1244,6 +1253,9 @@ export default function VoiceReceptionistFab({
         profile,
         language: profile?.language || 'en',
         voice: liveVoice,
+        page: profile ? activeTab : 'auth',
+        authState: profile ? 'logged-in' : 'logged-out',
+        authMode,
         recentMeals: recentMealsSummary,
       });
     } catch (err: any) {
@@ -1367,6 +1379,11 @@ export default function VoiceReceptionistFab({
           engine: 'gemini-3.5-flash-lite',
           existingMemory: memoryRef.current,
           specialistContainers: { activeTab },
+          pageContext: {
+            page: profile ? activeTab : 'auth',
+            authState: profile ? 'logged-in' : 'logged-out',
+            ...(authMode ? { authMode } : {}),
+          },
         }),
       });
 

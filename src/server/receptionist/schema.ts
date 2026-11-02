@@ -106,9 +106,26 @@ export interface ModificationCommand {
   reason?: string;
 }
 
+export type ReceptionistPage =
+  | 'signup' | 'login' | 'auth'
+  | 'home' | 'insights' | 'health' | 'food' | 'medical' | 'trends'
+  | 'unknown';
+
+export interface ReceptionistPageContext {
+  /** App area the user is looking at right now. */
+  page: ReceptionistPage;
+  /** Whether the user has an account session. */
+  authState: 'logged-out' | 'logged-in';
+  /** Login vs signup mode of the auth screen (auth pages only). */
+  authMode?: 'login' | 'signup';
+  /** True when the health profile has no core demographics yet. */
+  profileEmpty: boolean;
+}
+
 export interface ReceptionistInputPayload {
   currentUserMessage: string;
   chatHistory: ChatMessage[];
+  pageContext?: ReceptionistPageContext | null;
   existingUserProfile?: UserProfileSnapshot | null;
   existingMemory?: UserMemory | null;
   existingActivitiesAndTasks?: ActivityOrTaskItem[] | null;

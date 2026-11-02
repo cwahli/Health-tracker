@@ -1,4 +1,5 @@
 import { evaluateMealGate, MealGateResult } from '../mealBuild/mealGate.js';
+import { mealRecordPayload } from './recordFacts.js';
 import { getSessionLog } from '../jobs/sessionLog.js';
 import {
   buildCanonicalRunTree,
@@ -252,6 +253,10 @@ export function buildDebugMarkdownReport(input: DebugReportInput): string {
   if (input.jobId || tree.jobId) lines.push(`- **Job ID:** \`${input.jobId || tree.jobId}\``);
   if (input.status || tree.status) lines.push(`- **Status:** ${input.status || tree.status}`);
   lines.push(`- **Pack:** ${tree.pack}`);
+  const recordPayload = mealRecordPayload(input.patientContext);
+  if (recordPayload.facts.length > 0) {
+    lines.push(`- **Record facts:** ${recordPayload.facts.join('; ')}`);
+  }
   if (input.mode) lines.push(`- **Mode:** ${input.mode}`);
   if (input.version !== undefined) lines.push(`- **Version:** ${input.version}`);
   if (input.savable !== undefined) lines.push(`- **Savable:** ${input.savable}`);

@@ -186,6 +186,8 @@ export default function AppShell(p: AppViewProps) {
     val,
     values
   } = p;
+  // Login vs signup mode of the auth screen (logged-out voice help).
+  const [authMode, setAuthMode] = React.useState<'login' | 'signup'>('login');
 
   if (isAuthChecking) {
     return (
@@ -200,13 +202,14 @@ export default function AppShell(p: AppViewProps) {
   if (!profile) {
     return (
       <div className="relative min-h-screen bg-theme-bg text-theme-text font-sans">
-        <AuthScreen onLogin={handleLogin} />
+        <AuthScreen onLogin={handleLogin} onAuthModeChange={setAuthMode} />
         <VoiceReceptionistFab
           profile={null}
           setProfile={setProfile}
           saveAndSync={saveAndSync}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
+          authMode={authMode}
         />
       </div>
     );

@@ -1610,6 +1610,7 @@ export const en = {
   "top": "Top",
   "topNutrientTargets": "Top Nutrient Targets",
   "topTargets": "Top Targets",
+  "recordStrip": "Confirmed record",
   "topWeeklyNutrientTargets": "Top Weekly Nutrient Targets",
   "totalCalories": "Total Calories",
   "totalDurationStr": "Total Duration Str",

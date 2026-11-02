@@ -119,7 +119,7 @@ foodAnalyzeRouter.get("/api/gemini/instruction-preview", async (req, res) => {
 
 // Gemini Food Analyze Endpoint
 
-import { callReceptionistAgent } from './src/server/receptionist/index.js';
+import { callReceptionistAgent, normalizePageContext } from './src/server/receptionist/index.js';
 import { runBiomarkerPipeline } from './src/server/biomarkers/pipeline.js';
 
 // Health Preparation & Receptionist Agent
@@ -138,6 +138,7 @@ foodAnalyzeRouter.post("/api/gemini/front-desk", async (req, res) => {
       existingMemory,
       existingActivitiesAndTasks,
       specialistContainers,
+      pageContext,
     } = req.body;
     
     let targetModel = typeof engine === 'object' ? engine?.name || engine?.model || "gemini-3.5-flash-lite" : (engine || "gemini-3.5-flash-lite");
@@ -209,6 +210,7 @@ foodAnalyzeRouter.post("/api/gemini/front-desk", async (req, res) => {
       existingMemory: existingMemory || null,
       existingActivitiesAndTasks: existingActivitiesAndTasks || null,
       language: profile?.language || null,
+      pageContext: normalizePageContext(pageContext, req.body?.userId, existingUserProfile),
       biomarkers: Object.keys(synchronizedBiomarkers).length > 0 ? synchronizedBiomarkers : null,
       foodLogs: foodLogs || null,
       biomarkerHistory: biomarkerHistory || null,

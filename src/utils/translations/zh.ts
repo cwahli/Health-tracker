@@ -1598,6 +1598,7 @@ export const zh = {
   "top": "顶部",
   "topNutrientTargets": "主要营养素目标",
   "topTargets": "主要目标",
+  "recordStrip": "已确认记录",
   "topWeeklyNutrientTargets": "每周主要营养素目标",
   "totalCalories": "总热量",
   "totalDurationStr": "总时长字符串",

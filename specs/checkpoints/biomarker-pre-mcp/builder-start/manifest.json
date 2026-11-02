@@ -1,0 +1,16 @@
+{
+  "slug": "biomarker-pre-mcp",
+  "node": "builder-start",
+  "at": "2026-10-28T10:48:52.909Z",
+  "git": {
+    "head": "bd2baf2f38a7978666782d9eec6a5fe4008517ec",
+    "stashCommit": null
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/biomarker-pre-mcp.md"
+  ]
+}
