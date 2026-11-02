@@ -77,4 +77,13 @@ befe83e9  tui-lifecycle session/workspace binding: fully upstream in evolved for
 # file after the squash (refusal timing, connect timing). Landing the branch
 # would revert those later edits. The branches stay: agent/model-pools is a
 # named hold. One sha covers both branches.
+
+# origin/migrate-bothost-fr-20261017 — the two TUI commits (Command Code lane,
+# model-cc route fixes) are landed as squash 65447ab3 on agent/land-bothost-fr,
+# PR #882, with the original shas in its body. The squash is not in origin/main
+# until #882 merges, so the patch check cannot see it yet. Delete this branch and
+# these two lines when #882 merges. Rewriting the branch to put it in a PR was
+# refused: its 12 original commits lack the Author trailer the identity gate needs.
+c4e063a8  origin/migrate-bothost-fr-20261017: landed as squash 65447ab3 (PR #882, agent/land-bothost-fr), waived 2026-11-02
+9f81cdc7  origin/migrate-bothost-fr-20261017: landed as squash 65447ab3 (PR #882, agent/land-bothost-fr), waived 2026-11-02
 02bba992  origin/agent/model-pools and origin/agent/model-pools-bin-fallback: #614 squash a1d9ef7c already has the /model_free sentence in tui-attach.sh; later main edits moved the file, so the pre-squash sha is stranded, waived 2026-10-09

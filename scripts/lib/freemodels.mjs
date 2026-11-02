@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { resolveClineBin } from './agent-cline.mjs';
 import { resolveOpencodeBin } from './agent-opencode.mjs';
+import { resolveCommandcodeBin } from './agent-commandcode.mjs';
 import * as setupGapsModule from './setup-gaps.mjs';
 
 export const CLINE_FREE_MODELS = [
@@ -87,12 +88,18 @@ export function parseModelRef(raw) {
   const value = String(raw ?? '').trim();
   if (value.startsWith('cline:')) return { surface: 'cline', id: value.slice('cline:'.length), raw: value };
   if (value.startsWith('gemini:')) return { surface: 'gemini', id: value.slice('gemini:'.length), raw: value };
+  if (value.startsWith('commandcode:')) return { surface: 'commandcode', id: value.slice('commandcode:'.length), raw: value };
   if (value.startsWith('opencode:')) return { surface: 'opencode', id: value.slice('opencode:'.length), raw: value };
   return { surface: 'opencode', id: value, raw: value };
 }
 
 export function toModelRef(surface, id) {
   if (surface === 'cline') return `cline:${id}`;
+  // Command Code ids carry a vendor path (`deepseek/deepseek-v4-flash`) that must
+  // NOT be mistaken for a bare OpenCode provider/model pair, so the lane keeps a
+  // colon prefix like cline/gemini. parseModelRef and free-lanes.routeCandidates
+  // read the same prefix — keep all three in sync.
+  if (surface === 'commandcode') return `commandcode:${String(id || '').replace(/^commandcode:/, '')}`;
   // `google/` catalog rows execute through the direct Gemini runner: the
   // OpenCode `google/` provider is unavailable on hosts without a wired
   // OpenCode google credential (live VPS 2026-10-03), while GEMINI_API_KEY
@@ -129,6 +136,7 @@ export function formatFreeLabel(ref) {
     const pretty = id.replace(/^cline-free\//, '').replace(/-/g, ' ');
     return `cline:${pretty} (free)`;
   }
+  if (surface === 'commandcode') return `cc:${id} (paid)`;
   if (surface === 'gemini') return `gemini:${id.replace(/^gemini\//, '')} (moved to opencode)`;
   if (/^freebuff\//i.test(ref)) return `Freebuff:${id.replace(/^freebuff\//, '')} (terminal-only)`;
   // The "(keyed)" suffix said how the row is reached — through the shared Gemini
@@ -396,6 +404,75 @@ export function freebuffReady({ env = process.env, home = os.homedir(), readJson
   return findFreebuffCredentials({ env, home }).ok === true;
 }
 
+/**
+ * The Command Code rows the picker offers. Bounded and PINNED on purpose — the
+ * picker renders ONE keyboard with no paging and Telegram caps that at 100
+ * buttons, so the 70+ models `cmd --list-models` returns would break
+ * /model_free for every lane. A pinned shortlist is the fleet's own idiom
+ * (CLINE_FREE_MODELS, GEMINI_MODELS) and needs no live catalog call, so building
+ * the list stays fast and subprocess-free beyond the readiness probe. A
+ * dedicated paged sub-picker for the full catalog is a follow-up.
+ */
+export const COMMANDCODE_MODELS = [
+  'deepseek/deepseek-v4-flash',
+  'deepseek/deepseek-v4-pro',
+  'moonshotai/kimi-k3.1-pro',
+  'zai-org/glm-5.3',
+  'qwen/qwen3.8-max',
+  'minimaxai/minimax-m3',
+  'xiaomi/mimo-v2.6-pro',
+  'ornith/ornith-1.5-122b',
+];
+
+const COMMANDCODE_AUTH_PATH = (home) => path.join(home, '.commandcode', 'auth.json');
+
+/**
+ * Is the Command Code lane usable on this host? Two independent facts, and a
+ * refusal must name the missing one: the `cmd` binary must be installed, and
+ * there must be a credential — either COMMAND_CODE_API_KEY in the env, or a
+ * `~/.commandcode/auth.json` written by `cmd login`.
+ */
+export function commandcodeReady({ env = process.env, home = os.homedir(), commandcodeBin, readJson = defaultReadJson } = {}) {
+  if (hasValue(env, ['COMMAND_CODE_API_KEY'])) return true;
+  if (!commandAvailable(resolveCommandcodeBin(commandcodeBin), { env })) return false;
+  const auth = readJson(COMMANDCODE_AUTH_PATH(home));
+  return Boolean(auth && typeof auth === 'object' && Object.keys(auth).length > 0);
+}
+
+/**
+ * The lane's models, straight from the CLI's own catalog. `cmd --list-models`
+ * prints section headings and `id  description` rows. An id may carry a vendor
+ * path (`deepseek/deepseek-v4-flash`) or be a bare first-party id
+ * (`claude-sonnet-5-5`, `gpt-6.1-terra`) — both parse. A heading never can: a
+ * heading's first word is followed by ONE space, a row's id by two or more.
+ * Never throws — an unreadable catalog is an empty list, and the caller falls
+ * back to the pinned COMMANDCODE_MODELS.
+ *
+ * Deliberately NOT called from buildFreeModelList: it spawns `cmd` (~7s, it hits
+ * the account's catalog), and doing that inside the list build regressed
+ * tests/bot-host.test.ts (an 8s spawn in a 5s test). bot-host fetches it once and
+ * caches it; direct callers get the pin. The timeout is 30s, not 8: the fetch
+ * measured ~7s and an 8s budget made it flake to the pinned shortlist.
+ */
+export function listCommandcodeModels({ env = process.env, commandcodeBin, timeoutMs = 30000, exec = execFileSync } = {}) {
+  let out = '';
+  try {
+    out = exec(resolveCommandcodeBin(commandcodeBin), ['--list-models'], { encoding: 'utf8', timeout: timeoutMs, env });
+  } catch {
+    return [];
+  }
+  const seen = new Set();
+  const rows = [];
+  for (const line of String(out).split('\n')) {
+    const m = line.match(/^(\S+)\s{2,}(.+?)\s*$/);
+    if (!m || !/^[A-Za-z0-9]/.test(m[1])) continue;
+    if (seen.has(m[1])) continue;
+    seen.add(m[1]);
+    rows.push({ id: m[1], note: m[2].trim() });
+  }
+  return rows;
+}
+
 function entry(ref, { surface, tool, provider, selectable = true, location = '', note = '', pendingAction = '' } = {}) {
   const resolvedSurface = surface || 'opencode';
   const resolvedProvider = provider || String(ref).split('/')[0] || resolvedSurface;
@@ -504,6 +581,30 @@ export function buildFreeModelList(opts = {}) {
     }
   } else {
     entries.push(pendingEntry('freebuff', 'Install Freebuff and sign in on this host; it is terminal-only.', location));
+  }
+  // Command Code is a PAID lane: it is listed so a chat can be put on it
+  // deliberately, but it must never be a failover target. That is enforced in
+  // bot-host's selectTurnLanes (PAID_WALK_PLANS excludes plan CC from the walk),
+  // NOT here — the picker deliberately shows it so the user can switch onto it.
+  // The rows are the CLI's own catalog when bot-host supplies it (`commandcodeModels`),
+  // else the pinned pin; either way the paid pool is exempt from version-dedupe
+  // (supersedeOlderVersions), so every model the subscription offers is listed.
+  if (commandcodeReady({ ...opts, env, home })) {
+    const provided = Array.isArray(opts.commandcodeModels) ? opts.commandcodeModels : [];
+    const ids = (provided.length ? provided : COMMANDCODE_MODELS)
+      .map((m) => (typeof m === 'string' ? m : m?.id))
+      .filter(Boolean);
+    for (const id of ids) {
+      entries.push(entry(toModelRef('commandcode', id), {
+        surface: 'commandcode',
+        tool: 'commandcode',
+        provider: 'commandcode',
+        location,
+        note: 'paid Command Code subscription',
+      }));
+    }
+  } else {
+    entries.push(pendingEntry('commandcode', 'Install the Command Code CLI and sign in (`cmd login`) on this host; it is a paid lane.', location));
   }
   return entries;
 }
