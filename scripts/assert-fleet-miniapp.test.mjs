@@ -14,10 +14,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 
 import {
   createGateway,
@@ -42,10 +44,18 @@ import {
   recordFleetSnapshot,
   getFleetSnapshot,
   normalizeMacTelemetry,
+  createMacActionQueue,
   queueMacAction,
-  drainMacActions,
+  getDispatchableMacActions,
+  acknowledgeMacAction,
+  getPendingMacActions,
 } from './lib/fleet-status.mjs';
-import { pushSnapshot, collectMacSystemStatus, executeMacAction } from './fleet-snapshot-push.mjs';
+import {
+  pushSnapshot,
+  collectMacSystemStatus,
+  executeMacAction,
+  createActionReceiptStore,
+} from './fleet-snapshot-push.mjs';
 
 function makeInitData(botToken, { user = { id: 123456, first_name: 'Test' }, authDate = Math.floor(Date.now() / 1000) } = {}) {
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
@@ -231,12 +241,14 @@ test('gateway /fleet routes: landing, auth, app, state, and heartbeat', async ()
     assert.ok(appHtml.includes('id="body-fleet"'));
     assert.ok(appHtml.includes('id="table-tickets"'));
     assert.ok(appHtml.includes('id="table-bots"'));
-    assert.ok(appHtml.includes('>Location<'));
-    assert.ok(appHtml.includes('>Tool<'));
+    assert.ok(appHtml.includes('>Brief<'));
+    assert.ok(appHtml.includes('>Status &amp; working on<'));
     assert.ok(appHtml.includes('>Model<'));
-    assert.ok(appHtml.includes('>Status<'));
-    assert.ok(appHtml.includes('>Task<'));
+    assert.ok(appHtml.includes('>Last activity<'));
     assert.ok(appHtml.includes('>Allowance<'));
+    assert.ok(appHtml.includes('id="fleet-send-dialog"'));
+    assert.ok(appHtml.includes('id="fleet-history-dialog"'));
+    assert.ok(appHtml.includes('position: sticky; left: 0'));
 
     // 4. POST /fleet/api/heartbeat records heartbeat
     const beatRes = await fetch(`${base}/fleet/api/heartbeat`, {
@@ -325,6 +337,27 @@ const SNAPSHOT_FIXTURE = {
   quota: { remaining_h: 0, resets_at: '2026-10-22T23:00:07+00:00', resets_in: '0h 20m', stale: false },
 };
 
+function sendSnapshot(state = 'AVAILABLE', rows = []) {
+  const row = {
+    id: 'watch:vscode:deadbeef',
+    tool: 'vscode',
+    model: 'claude-haiku',
+    model_name: 'Claude Haiku 5.5',
+    state,
+    source: 'agent-watch',
+    brief: 'Fleet route verification',
+    working_on: 'Waiting for an instruction',
+    last_activity: Math.floor(Date.now() / 1000),
+    history: [{ at: new Date().toISOString(), tool: 'vscode', id: 'deadbeef', brief: 'Earlier request', working_on: 'Earlier reply', model: 'claude-haiku' }],
+  };
+  return {
+    project: 'Health-tracker',
+    updated: new Date().toISOString(),
+    channels: [{ name: 'Mac (local)', resources: [row, ...rows] }],
+    mac: { reporterOnline: true },
+  };
+}
+
 test('normalizeFleetSnapshot gives one row per resource with task and allowance', () => {
   const t0 = 10000000;
   const snap = normalizeFleetSnapshot(SNAPSHOT_FIXTURE, { now: t0 });
@@ -350,6 +383,170 @@ test('normalizeFleetSnapshot gives one row per resource with task and allowance'
   assert.equal(vps.location, 'Indonesia VPS');
   assert.equal(vps.status, 'available');
   assert.equal(vps.allowance.text, '—');
+});
+
+test('Fleet snapshot preserves watcher text, history, activity and unknown state', () => {
+  const t0 = Date.now();
+  const payload = sendSnapshot('UNKNOWN');
+  const rawHistoryAt = payload.channels[0].resources[0].history[0].at;
+  const snap = normalizeFleetSnapshot(payload, { now: t0 });
+  const row = snap.rows[0];
+  assert.equal(row.status, 'unknown');
+  assert.equal(row.brief, 'Fleet route verification');
+  assert.equal(row.working_on, 'Waiting for an instruction');
+  assert.equal(row.lastActivity > 0, true);
+  assert.equal(row.history.length, 1);
+  assert.equal(row.history[0].brief, 'Earlier request');
+  assert.equal(row.history[0].at, new Date(rawHistoryAt).toISOString());
+});
+
+test('Fleet snapshot marks stale or offline watcher status unknown and retains last-known history', () => {
+  resetFleetStateForTest();
+  const now = Date.now();
+  const saved = recordFleetSnapshot(sendSnapshot('WORKING'), { now });
+  assert.equal(saved.snapshot.rows[0].status, 'working');
+
+  const reporterOffline = getFleetSnapshot({ now: now + 25_000 });
+  assert.equal(reporterOffline.mac.reporterOnline, false);
+  assert.equal(reporterOffline.rows[0].status, 'unknown');
+  assert.equal(reporterOffline.rows[0].brief, 'Fleet route verification');
+  assert.equal(reporterOffline.rows[0].history.length, 1);
+
+  const stale = getFleetSnapshot({ now: now + 91_000 });
+  assert.equal(stale.stale, true);
+  assert.equal(stale.rows[0].status, 'unknown');
+});
+
+test('Fleet history normalizes Unix timestamps and falls back to the latest brief and answer', () => {
+  const timestampSeconds = Math.floor(Date.parse('2026-11-02T15:00:00.000Z') / 1000);
+  const payload = sendSnapshot('AVAILABLE');
+  const row = payload.channels[0].resources[0];
+  row.history = [{ at: timestampSeconds, brief: 'User prompt', working_on: 'Agent answer' }];
+  const normalized = normalizeFleetSnapshot(payload);
+  assert.equal(normalized.rows[0].history[0].at, new Date(timestampSeconds * 1000).toISOString());
+
+  row.history = Array.from({ length: 12 }, (_, index) => ({
+    at: timestampSeconds + index,
+    brief: `User prompt ${index + 1}`,
+    working_on: `Agent answer ${index + 1}`,
+  }));
+  assert.equal(normalizeFleetSnapshot(payload).rows[0].history.length, 12);
+
+  row.history = [];
+  const fallback = normalizeFleetSnapshot(payload);
+  assert.equal(fallback.rows[0].history.length, 1);
+  assert.equal(fallback.rows[0].history[0].brief, row.brief);
+  assert.equal(fallback.rows[0].history[0].working_on, row.working_on);
+  assert.equal(fallback.rows[0].history[0].at, new Date(row.last_activity * 1000).toISOString());
+});
+
+test('Fleet page queues busy-session messages and renders timestamped user/agent history', () => {
+  const html = fs.readFileSync(path.join(process.cwd(), 'src/miniapp/fleet.html'), 'utf8');
+  assert.match(html, /status !== 'available' && status !== 'working'/);
+  assert.match(html, /Queued until this session reports AVAILABLE/);
+  assert.match(html, /History \(' \+ history\.length \+ '\)/);
+  assert.match(html, /<b>User:<\/b>/);
+  assert.match(html, /<b>Agent:<\/b>/);
+  assert.match(html, /date\.toLocaleString\(\)/);
+  assert.match(html, /mac_actions_acknowledged/);
+});
+
+test('send_message stays queued until AVAILABLE and reporter acknowledgement', () => {
+  resetFleetStateForTest();
+  const now = Date.now();
+  const rowId = 'watch:vscode:deadbeef';
+  const action = { type: 'send_message', tool: 'vscode', rowId, message: '  hello\nthere\u0001  ' };
+
+  recordFleetSnapshot(sendSnapshot('WORKING'), { now });
+  const queued = queueMacAction(action, { now: now + 5000 });
+  assert.equal(queued.ok, true);
+  assert.equal(queued.action.sessionId, 'deadbeef');
+  assert.equal(queued.action.message, 'hello\nthere');
+  assert.equal(queued.action.status, 'queued');
+  assert.equal(queueMacAction(action, { now: now + 5000 }).error, 'a message is already queued for this session');
+  assert.deepEqual(getDispatchableMacActions({ now: now + 6000 }), []);
+  assert.equal(getPendingMacActions().length, 1);
+  assert.deepEqual(getDispatchableMacActions({ now: now + 25_000 }), []);
+  assert.equal(getPendingMacActions().length, 1);
+  recordFleetSnapshot(sendSnapshot('AVAILABLE'), { now: now + 30_000 });
+  const ready = getDispatchableMacActions({ now: now + 30_000 });
+  assert.equal(ready.length, 1);
+  assert.equal(ready[0].message, 'hello\nthere');
+  assert.equal(ready[0].status, 'in_flight');
+  assert.equal(getPendingMacActions().length, 1);
+  recordFleetSnapshot(sendSnapshot('WORKING'), { now: now + 31_000 });
+  const retry = getDispatchableMacActions({ now: now + 31_000 });
+  assert.equal(retry.length, 1, 'in-flight actions retry even if the session becomes busy');
+  assert.equal(retry[0].id, ready[0].id);
+  assert.equal(acknowledgeMacAction(ready[0].id)?.id, ready[0].id);
+  assert.equal(getPendingMacActions().length, 0);
+
+  resetFleetStateForTest();
+  recordFleetSnapshot(sendSnapshot('UNKNOWN'), { now });
+  assert.match(queueMacAction(action, { now: now + 1000 }).error, /status is unknown/);
+
+  resetFleetStateForTest();
+  recordFleetSnapshot(sendSnapshot('WORKING'), { now });
+  assert.equal(queueMacAction(action, { now: now + 1000 }).ok, true);
+
+  resetFleetStateForTest();
+  recordFleetSnapshot(sendSnapshot('AVAILABLE'), { now });
+  assert.equal(queueMacAction(action, { now: now + 91_000 }).error, 'fleet snapshot is stale');
+
+  resetFleetStateForTest();
+  recordFleetSnapshot(sendSnapshot('AVAILABLE', [{
+    id: rowId,
+    tool: 'vscode',
+    state: 'AVAILABLE',
+    source: 'agent-watch',
+  }]), { now });
+  assert.equal(queueMacAction(action, { now: now + 1000 }).error, 'watcher row is missing or ambiguous');
+  assert.equal(queueMacAction({ ...action, tool: 'freebuff', rowId: 'watch:freebuff:deadbeef' }, { now }).error, 'invalid watcher row id');
+});
+
+test('persistent Mac action queues recover across gateway restarts and reject write failures', () => {
+  resetFleetStateForTest();
+  const now = Date.now();
+  const rowId = 'watch:vscode:deadbeef';
+  recordFleetSnapshot(sendSnapshot('WORKING'), { now });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-action-queue-'));
+  const filePath = path.join(dir, 'actions.json');
+  try {
+    const first = createMacActionQueue({ filePath });
+    const queued = queueMacAction(
+      { type: 'send_message', tool: 'vscode', rowId, message: 'Keep this queued' },
+      { now, queue: first },
+    );
+    assert.equal(queued.ok, true);
+
+    const restarted = createMacActionQueue({ filePath });
+    assert.equal(getPendingMacActions({ queue: restarted })[0].message, 'Keep this queued');
+    recordFleetSnapshot(sendSnapshot('AVAILABLE'), { now: now + 1000 });
+    const [dispatched] = getDispatchableMacActions({ now: now + 1000, queue: restarted });
+    assert.equal(dispatched.status, 'in_flight');
+
+    const afterRestart = createMacActionQueue({ filePath });
+    assert.equal(getDispatchableMacActions({ now: now + 2000, queue: afterRestart })[0].id, dispatched.id);
+    assert.equal(acknowledgeMacAction(dispatched.id, { queue: afterRestart }).id, dispatched.id);
+    assert.deepEqual(getPendingMacActions({ queue: createMacActionQueue({ filePath }) }), []);
+    assert.equal(fs.statSync(filePath).mode & 0o777, 0o600);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  const blocker = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-action-blocker-'));
+  const broken = createMacActionQueue({ filePath: path.join(blocker, 'actions.json') });
+  fs.rmSync(blocker, { recursive: true, force: true });
+  fs.writeFileSync(blocker, 'not a directory');
+  try {
+    assert.throws(
+      () => queueMacAction({ type: 'toggle_switch', target: 'fleetd', state: 'off' }, { queue: broken }),
+      /EEXIST|ENOTDIR/,
+    );
+    assert.deepEqual(getPendingMacActions({ queue: broken }), []);
+  } finally {
+    fs.rmSync(blocker, { force: true });
+  }
 });
 
 test('recordFleetSnapshot ages and clears with the fleet cache', () => {
@@ -451,16 +648,80 @@ test('pushSnapshot posts the local status.json to the gateway snapshot door', as
     return {
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({ ok: true, rows: 3, receivedAt: '2026-10-22T23:40:00.000Z', stale: false }),
+      text: async () => JSON.stringify({
+        ok: true,
+        rows: 3,
+        receivedAt: '2026-10-22T23:40:00.000Z',
+        stale: false,
+        pendingActions: [{ id: 'act-pending' }],
+        pendingActionIds: ['act-pending'],
+      }),
     };
   };
   const res = await pushSnapshot({ fetchImpl, secret: 's3cret', gatewayUrl: 'https://example.test' });
   assert.equal(res.ok, true);
   assert.equal(res.rows, 3);
+  assert.deepEqual(res.pendingActions, [{ id: 'act-pending' }]);
+  assert.deepEqual(res.pendingActionIds, ['act-pending']);
   assert.ok(calls[1].url.endsWith('/fleet/api/snapshot'));
   assert.equal(calls[1].opts.headers['x-fleet-telemetry-secret'], 's3cret');
   const body = JSON.parse(calls[1].opts.body);
   assert.equal(body.status.project, 'sage-prototypes');
+});
+
+test('action receipt store deduplicates completed actions, retries deferred actions, and restricts file permissions', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-action-receipts-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const directory = path.join(tmp, 'state');
+  const filePath = path.join(directory, 'receipts.json');
+  const action = { id: 'act-receipt-test' };
+  const store = createActionReceiptStore({ filePath });
+  let executions = 0;
+
+  const deferred = await store.execute(action, async () => {
+    executions += 1;
+    return { id: action.id, ok: false, message: 'Session is busy', deferred: true };
+  });
+  assert.equal(deferred.deferred, true);
+
+  const completed = await createActionReceiptStore({ filePath }).execute(action, async () => {
+    executions += 1;
+    return { id: action.id, ok: true, message: 'Visible submission confirmed' };
+  });
+  const duplicate = await createActionReceiptStore({ filePath }).execute(action, async () => {
+    executions += 1;
+    throw new Error('Completed action must not be executed again');
+  });
+  assert.equal(executions, 2);
+  assert.equal(completed.ok, true);
+  assert.deepEqual(duplicate, completed);
+  assert.equal(fs.statSync(directory).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(filePath).mode & 0o777, 0o600);
+});
+
+test('action receipt store converts interrupted delivery to an explicit no-retry result', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-action-interrupted-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const filePath = path.join(tmp, 'receipts.json');
+  const action = { id: 'act-interrupted-test' };
+  fs.writeFileSync(filePath, JSON.stringify({
+    version: 1,
+    receipts: [{ id: action.id, state: 'started', startedAt: new Date().toISOString() }],
+  }));
+  let executions = 0;
+
+  const interrupted = await createActionReceiptStore({ filePath }).execute(action, async () => {
+    executions += 1;
+    return { id: action.id, ok: true, message: 'Must not be resent' };
+  });
+  const replay = await createActionReceiptStore({ filePath }).execute(action, async () => {
+    executions += 1;
+    throw new Error('Interrupted action must not be executed again');
+  });
+  assert.equal(executions, 0);
+  assert.equal(interrupted.ok, false);
+  assert.match(interrupted.message, /not retried automatically/);
+  assert.deepEqual(replay, interrupted);
 });
 
 test('getFleetNodes separates PM ticket claim from worker liveness badge', () => {
@@ -882,7 +1143,7 @@ test('normalizeMacTelemetry normalises switches, system resources and top proces
   assert.equal(norm.processes[0].killable, true);
 });
 
-test('queueMacAction validates switch toggles and pids, and drains cleanly', () => {
+test('queueMacAction validates switch toggles and pids and keeps actions until acknowledged', () => {
   resetFleetStateForTest();
   const q1 = queueMacAction({ type: 'toggle_switch', target: 'fleetd', state: 'off' });
   assert.equal(q1.ok, true);
@@ -895,24 +1156,144 @@ test('queueMacAction validates switch toggles and pids, and drains cleanly', () 
   const qKill = queueMacAction({ type: 'kill_pid', pid: 4321 });
   assert.equal(qKill.ok, true);
 
-  const actions = drainMacActions();
+  const actions = getDispatchableMacActions();
   assert.equal(actions.length, 2);
   assert.equal(actions[0].target, 'fleetd');
   assert.equal(actions[1].pid, 4321);
+  assert.equal(getPendingMacActions().length, 2);
 
-  // Drained: subsequent call returns empty
-  assert.equal(drainMacActions().length, 0);
+  assert.equal(getDispatchableMacActions().length, 2, 'unacknowledged actions are returned again');
+  for (const action of actions) acknowledgeMacAction(action.id);
+  assert.equal(getDispatchableMacActions().length, 0);
 });
 
-test('gateway serves /fleet/sw.js and /fleet/api/mac-action with auth', async () => {
+test('Mac action queue refuses overflow without evicting earlier actions', () => {
+  resetFleetStateForTest();
+  const firstAt = Date.now();
+  const accepted = [];
+  for (let i = 0; i < 20; i += 1) {
+    const result = queueMacAction(
+      { type: 'toggle_switch', target: 'fleetd', state: 'off' },
+      { now: firstAt + i },
+    );
+    assert.equal(result.ok, true);
+    accepted.push(result.action.id);
+  }
+  assert.equal(
+    queueMacAction({ type: 'kill_pid', pid: 4321 }, { now: firstAt + 21 }).error,
+    'Mac action queue is full',
+  );
+  assert.deepEqual(getPendingMacActions().map((action) => action.id), accepted);
+});
+
+test('executeMacAction starts OpenCode only for the exact fresh idle watcher session', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-send-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const home = path.join(tmp, 'home');
+  const statePath = path.join(home, '.local', 'state', 'agent-watch', 'state.json');
+  const binary = path.join(home, '.opencode', 'bin', 'opencode');
+  const sendLogPath = path.join(home, 'Library', 'Logs', 'fleet-send.log');
+  fs.mkdirSync(path.dirname(binary), { recursive: true });
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  fs.writeFileSync(binary, '');
+  const sessionId = 'ses_abcd1234';
+  const writeState = (sessions) => fs.writeFileSync(statePath, JSON.stringify({
+    heartbeat: 60,
+    last_run: Date.now() / 1000,
+    sessions: { opencode: sessions },
+  }));
+  writeState([{ id: sessionId, busy: false }]);
+  const calls = [];
+  const spawnImpl = (command, args, options) => {
+    calls.push({ command, args, options });
+    const child = new EventEmitter();
+    child.unref = () => {};
+    setImmediate(() => child.emit('exit', 0));
+    return child;
+  };
+  const action = {
+    id: 'act-test',
+    type: 'send_message',
+    tool: 'opencode',
+    rowId: `watch:opencode:${sessionId}`,
+    sessionId,
+    message: 'Return FLEET-ACK',
+  };
+  const result = await executeMacAction(action, { home, watchStatePath: statePath, sendLogPath, spawnImpl });
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, binary);
+  assert.ok(calls[0].args.includes(sessionId));
+  assert.ok(calls[0].args.includes(action.message));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.doesNotMatch(fs.readFileSync(sendLogPath, 'utf8'), /Return FLEET-ACK/);
+
+  writeState([{ id: sessionId, busy: true }]);
+  const refused = await executeMacAction(action, { home, watchStatePath: statePath, sendLogPath, spawnImpl });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.deferred, true);
+  assert.match(refused.message, /busy or its state is unknown/);
+  assert.equal(calls.length, 1);
+});
+
+test('executeMacAction waits for the VS Code sender acknowledgement', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-vscode-send-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const home = path.join(tmp, 'home');
+  const statePath = path.join(home, '.local', 'state', 'agent-watch', 'state.json');
+  const helperPath = path.join(home, '.config', 'health-tracker', 'fleet-vscode-screen-send.mjs');
+  const sendLogPath = path.join(home, 'Library', 'Logs', 'fleet-send.log');
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  fs.mkdirSync(path.dirname(helperPath), { recursive: true });
+  fs.writeFileSync(helperPath, '');
+  fs.writeFileSync(statePath, JSON.stringify({
+    heartbeat: 60,
+    last_run: Date.now() / 1000,
+    sessions: { vscode: [{ id: 'cafe1234', busy: false }] },
+  }));
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stdin = new PassThrough();
+    child.unref = () => {};
+    setImmediate(() => {
+      child.stdout.write(`${JSON.stringify({ ok: true, message: 'Visible submission confirmed' })}\n`);
+      child.emit('exit', 0);
+    });
+    return child;
+  };
+  const result = await executeMacAction({
+    id: 'act-vscode-test',
+    type: 'send_message',
+    tool: 'vscode',
+    rowId: 'watch:vscode:cafe1234',
+    sessionId: 'cafe1234',
+    message: 'Return VSCODE-ACK',
+  }, { home, watchStatePath: statePath, helperPath, sendLogPath, spawnImpl });
+  assert.equal(result.ok, true);
+  assert.match(result.message, /Visible submission confirmed/);
+});
+
+test('gateway serves /fleet/sw.js and queues Mac actions until the reporter acknowledges them', async () => {
   resetFleetStateForTest();
   const secret = 'gw-test-sec-999';
-  const handle = createGateway({ env: { FLEET_TEST_AUTH: '1', FLEET_TELEMETRY_SECRET: secret, TUI_GATEWAY_SECRET: secret } });
+  const queueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-gateway-actions-'));
+  const queuePath = path.join(queueDir, 'actions.json');
+  const env = {
+    FLEET_TEST_AUTH: '1',
+    FLEET_TELEMETRY_SECRET: secret,
+    TUI_GATEWAY_SECRET: secret,
+    FLEET_MAC_ACTION_QUEUE_PATH: queuePath,
+  };
+  const handle = createGateway({ env });
   const server = http.createServer(handle);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
+  let eventReader;
+  let restartedServer;
 
   try {
+    recordFleetSnapshot(sendSnapshot('AVAILABLE'), { now: Date.now() });
     // 1. GET /fleet/sw.js returns Service Worker
     const swRes = await fetch(`${base}/fleet/sw.js`);
     assert.equal(swRes.status, 200);
@@ -931,22 +1312,151 @@ test('gateway serves /fleet/sw.js and /fleet/api/mac-action with auth', async ()
     assert.equal(actData.ok, true);
     assert.equal(actData.action.target, 'fleetd');
 
-    // 3. POST /fleet/api/snapshot returns pending actions to reporter
+    const oversized = await fetch(`${base}/fleet/api/mac-action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'x'.repeat(16 * 1024 + 1),
+    });
+    assert.equal(oversized.status, 413);
+
+    // 3. A message action is queued without echoing its contents to Fleet clients.
+    const sendRes = await fetch(`${base}/fleet/api/mac-action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'send_message',
+        tool: 'vscode',
+        rowId: 'watch:vscode:deadbeef',
+        message: 'Reply exactly SEND-ACK',
+      }),
+    });
+    assert.equal(sendRes.status, 200);
+    const sendData = await sendRes.json();
+    assert.equal(sendData.ok, true);
+    assert.equal(sendData.action.messageLength, 'Reply exactly SEND-ACK'.length);
+    assert.equal(Object.hasOwn(sendData.action, 'message'), false);
+
+    const eventRes = await fetch(`${base}/fleet/api/events`);
+    assert.equal(eventRes.status, 200);
+    eventReader = eventRes.body.getReader();
+    const decoder = new TextDecoder();
+    let eventBuffer = '';
+    const waitForAcknowledgement = (async () => {
+      while (true) {
+        const { value, done } = await eventReader.read();
+        if (done) throw new Error('Fleet SSE closed before action acknowledgement');
+        eventBuffer += decoder.decode(value);
+        const start = eventBuffer.indexOf('event: mac_actions_acknowledged\n');
+        if (start >= 0) {
+          const end = eventBuffer.indexOf('\n\n', start);
+          if (end >= 0) return eventBuffer.slice(start, end);
+        }
+      }
+    })();
+
+    // 4. POST /fleet/api/snapshot returns pending actions to reporter
     const snapRes = await fetch(`${base}/fleet/api/snapshot`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-fleet-telemetry-secret': secret },
       body: JSON.stringify({
-        status: SNAPSHOT_FIXTURE,
-        mac: { hostname: 'my-mac', switches: [{ id: 'fleetd', on: true }] },
+        status: {
+          ...sendSnapshot('AVAILABLE'),
+          mac: { hostname: 'my-mac', reporterOnline: true, switches: [{ id: 'fleetd', on: true }] },
+        },
       }),
     });
     assert.equal(snapRes.status, 200);
     const snapData = await snapRes.json();
     assert.equal(snapData.ok, true);
-    assert.equal(snapData.pendingActions.length, 1);
+    assert.equal(snapData.pendingActions.length, 2);
     assert.equal(snapData.pendingActions[0].target, 'fleetd');
+    assert.equal(snapData.pendingActions[1].messageLength, 'Reply exactly SEND-ACK'.length);
+    assert.equal(Object.hasOwn(snapData.pendingActions[1], 'message'), false);
+    assert.deepEqual(snapData.pendingActionIds, snapData.pendingActions.map((action) => action.id));
+
+    const restartedServerHandle = http.createServer(createGateway({ env }));
+    restartedServer = restartedServerHandle;
+    await new Promise((resolve) => restartedServerHandle.listen(0, '127.0.0.1', resolve));
+    const restartedBase = `http://127.0.0.1:${restartedServerHandle.address().port}`;
+    const recoveredRes = await fetch(`${restartedBase}/fleet/api/snapshot`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-telemetry-secret': secret },
+      body: JSON.stringify({ status: { ...sendSnapshot('AVAILABLE'), mac: { hostname: 'my-mac', reporterOnline: true } } }),
+    });
+    assert.equal(recoveredRes.status, 200);
+    const recoveredData = await recoveredRes.json();
+    assert.deepEqual(recoveredData.pendingActionIds, snapData.pendingActionIds);
+
+    const ackRes = await fetch(`${base}/fleet/api/snapshot`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-telemetry-secret': secret },
+      body: JSON.stringify({
+        status: {
+          ...sendSnapshot('AVAILABLE'),
+          mac: {
+            hostname: 'my-mac',
+            reporterOnline: true,
+            lastActionResult: {
+              id: snapData.pendingActions[0].id,
+              ok: true,
+              message: 'Action completed',
+              at: new Date().toISOString(),
+            },
+          },
+        },
+      }),
+    });
+    assert.equal(ackRes.status, 200);
+    const ackData = await ackRes.json();
+    assert.equal(ackData.pendingActions.length, 1);
+    assert.equal(ackData.pendingActions[0].id, snapData.pendingActions[1].id);
+    assert.deepEqual(ackData.pendingActionIds, [snapData.pendingActions[1].id]);
+
+    let dispatchTimeout;
+    const dispatchFrame = await Promise.race([
+      waitForAcknowledgement,
+      new Promise((_, reject) => {
+        dispatchTimeout = setTimeout(() => reject(new Error('Fleet SSE did not report action acknowledgement')), 3000);
+      }),
+    ]).finally(() => clearTimeout(dispatchTimeout));
+    const eventData = dispatchFrame.split('\n').find((line) => line.startsWith('data: '));
+    const dispatched = JSON.parse(eventData.slice(6));
+    assert.equal(dispatched.length, 1);
+    assert.equal(dispatched[0].id, snapData.pendingActions[0].id);
+    assert.equal(Object.hasOwn(dispatched[0], 'message'), false);
+    assert.equal(dispatchFrame.includes('SEND-ACK'), false);
+
+    const finalAck = await fetch(`${base}/fleet/api/snapshot`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-telemetry-secret': secret },
+      body: JSON.stringify({
+        status: {
+          ...sendSnapshot('AVAILABLE'),
+          mac: {
+            hostname: 'my-mac',
+            reporterOnline: true,
+            lastActionResult: {
+              id: snapData.pendingActions[1].id,
+              ok: true,
+              message: 'Message submitted',
+              at: new Date().toISOString(),
+            },
+          },
+        },
+      }),
+    });
+    assert.equal(finalAck.status, 200);
+    const finalData = await finalAck.json();
+    assert.deepEqual(finalData.pendingActionIds, []);
+    await eventReader.cancel();
   } finally {
+    if (eventReader) await eventReader.cancel().catch(() => {});
+    if (restartedServer) {
+      restartedServer.closeAllConnections?.();
+      restartedServer.close();
+    }
     server.closeAllConnections?.();
     server.close();
+    fs.rmSync(queueDir, { recursive: true, force: true });
   }
 });

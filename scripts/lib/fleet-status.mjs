@@ -267,7 +267,100 @@ export const FLEET_SNAPSHOT_STALE_MS = 90 * 1000;
 export const MAC_REPORTER_OFFLINE_SEC = 20;
 
 let fleetSnapshotCache = { at: 0, data: null };
-let macPendingActions = [];
+const MAC_ACTION_QUEUE_LIMIT = 20;
+
+function storedMacAction(action) {
+  if (!action || typeof action !== 'object' || typeof action.id !== 'string' || !action.id) {
+    throw new Error('Fleet action queue contains an invalid action');
+  }
+  if (!['queued', 'in_flight'].includes(action.status)) {
+    throw new Error(`Fleet action ${action.id} has an invalid status`);
+  }
+  if (action.type === 'send_message') {
+    if (typeof action.message !== 'string' || action.message.length < 1 || action.message.length > 2000) {
+      throw new Error(`Fleet message action ${action.id} has invalid message text`);
+    }
+    return {
+      id: action.id,
+      type: action.type,
+      tool: action.tool,
+      rowId: action.rowId,
+      sessionId: action.sessionId,
+      message: action.message,
+      status: action.status,
+      requestedAt: action.requestedAt,
+    };
+  }
+  if (action.type === 'toggle_switch') {
+    return {
+      id: action.id,
+      type: action.type,
+      target: action.target,
+      state: action.state,
+      status: action.status,
+      requestedAt: action.requestedAt,
+    };
+  }
+  if (action.type === 'kill_pid') {
+    return {
+      id: action.id,
+      type: action.type,
+      pid: action.pid,
+      status: action.status,
+      requestedAt: action.requestedAt,
+    };
+  }
+  throw new Error(`Fleet action ${action.id} has an unsupported type`);
+}
+
+function readMacActionQueue(filePath) {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(`Fleet action queue is not valid JSON: ${err.message}`);
+    }
+    if (parsed?.version !== 1 || !Array.isArray(parsed.actions) || parsed.actions.length > MAC_ACTION_QUEUE_LIMIT) {
+      throw new Error('Fleet action queue has an unsupported or invalid format');
+    }
+    return parsed.actions.map(storedMacAction);
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];
+    throw new Error(`Unable to load Fleet action queue at ${filePath}: ${err.message}`, { cause: err });
+  }
+}
+
+export function createMacActionQueue({ filePath = '' } = {}) {
+  let actions = filePath ? readMacActionQueue(filePath) : [];
+  const replace = (next) => {
+    if (!Array.isArray(next) || next.length > MAC_ACTION_QUEUE_LIMIT) {
+      throw new Error('Fleet action queue exceeds its limit');
+    }
+    const normalized = next.map(storedMacAction);
+    if (filePath) {
+      const directory = path.dirname(filePath);
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+      const temporaryPath = `${filePath}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+      const fd = fs.openSync(temporaryPath, 'wx', 0o600);
+      try {
+        fs.writeFileSync(fd, `${JSON.stringify({ version: 1, actions: normalized })}\n`, 'utf8');
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      fs.renameSync(temporaryPath, filePath);
+    }
+    actions = normalized;
+  };
+  return Object.freeze({
+    getPending: () => actions.map((action) => ({ ...action })),
+    replace,
+  });
+}
+
+const defaultMacActionQueue = createMacActionQueue();
 
 export function normalizeMacTelemetry(mac) {
   if (!mac || typeof mac !== 'object') return null;
@@ -337,11 +430,52 @@ export function normalizeMacTelemetry(mac) {
   };
 }
 
-export function queueMacAction(action, { now = Date.now() } = {}) {
+export function queueMacAction(action, { now = Date.now(), queue = defaultMacActionQueue } = {}) {
   if (!action || typeof action !== 'object') return { ok: false, error: 'invalid action' };
   const type = String(action.type || '').trim();
-  if (type !== 'toggle_switch' && type !== 'kill_pid') {
+  if (type !== 'toggle_switch' && type !== 'kill_pid' && type !== 'send_message') {
     return { ok: false, error: 'unsupported action type' };
+  }
+  const pendingActions = queue.getPending();
+  if (pendingActions.length >= MAC_ACTION_QUEUE_LIMIT) return { ok: false, error: 'Mac action queue is full' };
+  if (type === 'send_message') {
+    const rowId = String(action.rowId || '').trim();
+    const match = rowId.match(/^watch:(vscode|commandcode|opencode):([A-Za-z0-9_-]{4,80})$/);
+    if (!match) return { ok: false, error: 'invalid watcher row id' };
+    const [, tool, sessionId] = match;
+    if (action.tool !== tool) return { ok: false, error: 'tool does not match watcher row id' };
+    if (typeof action.message !== 'string') return { ok: false, error: 'message must be text' };
+    const message = action.message.replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '').trim();
+    if (!message || message.length > 2000) return { ok: false, error: 'message must be 1-2000 characters' };
+
+    const snapshot = getFleetSnapshot({ now });
+    if (!snapshot) return { ok: false, error: 'fleet snapshot is unavailable' };
+    if (snapshot.stale) return { ok: false, error: 'fleet snapshot is stale' };
+    if (snapshot.mac?.reporterOnline !== true) return { ok: false, error: 'Mac reporter is offline' };
+    const matches = snapshot.rows.filter((row) => row.id === rowId);
+    if (matches.length !== 1) return { ok: false, error: 'watcher row is missing or ambiguous' };
+    const row = matches[0];
+    if (row.source !== 'agent-watch' || row.location !== 'Mac (local)' || row.tool !== tool) {
+      return { ok: false, error: 'watcher row does not match a local Mac agent' };
+    }
+    if (row.status !== 'available' && row.status !== 'working') {
+      return { ok: false, error: `refused: agent status is ${row.status}` };
+    }
+    if (pendingActions.some((pending) => pending.type === 'send_message' && pending.rowId === rowId)) {
+      return { ok: false, error: 'a message is already queued for this session' };
+    }
+    const item = {
+      id: `act-${now}-${Math.random().toString(36).slice(2, 7)}`,
+      type,
+      tool,
+      rowId,
+      sessionId,
+      message,
+      status: 'queued',
+      requestedAt: new Date(now).toISOString(),
+    };
+    queue.replace([...pendingActions, item]);
+    return { ok: true, action: item, pending: pendingActions.length + 1 };
   }
   if (type === 'toggle_switch') {
     const target = String(action.target || '').trim();
@@ -354,11 +488,11 @@ export function queueMacAction(action, { now = Date.now() } = {}) {
       type,
       target,
       state,
+      status: 'queued',
       requestedAt: new Date(now).toISOString(),
     };
-    macPendingActions.push(item);
-    if (macPendingActions.length > 20) macPendingActions = macPendingActions.slice(-20);
-    return { ok: true, action: item, pending: macPendingActions.length };
+    queue.replace([...pendingActions, item]);
+    return { ok: true, action: item, pending: pendingActions.length + 1 };
   }
   const pid = Number(action.pid);
   if (!Number.isInteger(pid) || pid <= 100) {
@@ -368,21 +502,64 @@ export function queueMacAction(action, { now = Date.now() } = {}) {
     id: `act-${now}-${Math.random().toString(36).slice(2, 7)}`,
     type,
     pid,
+    status: 'queued',
     requestedAt: new Date(now).toISOString(),
   };
-  macPendingActions.push(item);
-  if (macPendingActions.length > 20) macPendingActions = macPendingActions.slice(-20);
-  return { ok: true, action: item, pending: macPendingActions.length };
+  queue.replace([...pendingActions, item]);
+  return { ok: true, action: item, pending: pendingActions.length + 1 };
 }
 
-export function drainMacActions() {
-  const out = macPendingActions.slice();
-  macPendingActions = [];
+export function getDispatchableMacActions({ now = Date.now(), queue = defaultMacActionQueue } = {}) {
+  const snapshot = getFleetSnapshot({ now });
+  const out = [];
+  const next = [];
+  let changed = false;
+  for (const action of queue.getPending()) {
+    if (action.status === 'in_flight') {
+      out.push(action);
+      next.push(action);
+      continue;
+    }
+    if (action.type !== 'send_message') {
+      const inFlight = { ...action, status: 'in_flight' };
+      out.push(inFlight);
+      next.push(inFlight);
+      changed = true;
+      continue;
+    }
+    const matches = snapshot?.rows.filter((row) => row.id === action.rowId) || [];
+    const ready = snapshot && !snapshot.stale && snapshot.mac?.reporterOnline === true &&
+      matches.length === 1 &&
+      matches[0].source === 'agent-watch' &&
+      matches[0].location === 'Mac (local)' &&
+      matches[0].tool === action.tool &&
+      matches[0].status === 'available';
+    if (ready) {
+      const inFlight = { ...action, status: 'in_flight' };
+      out.push(inFlight);
+      next.push(inFlight);
+      changed = true;
+    } else {
+      next.push(action);
+    }
+  }
+  if (changed) queue.replace(next);
   return out;
 }
 
-export function getPendingMacActions() {
-  return macPendingActions.slice();
+export function acknowledgeMacAction(id, { queue = defaultMacActionQueue } = {}) {
+  const actionId = String(id || '');
+  if (!actionId) return null;
+  const pending = queue.getPending();
+  const index = pending.findIndex((action) => action.id === actionId);
+  if (index < 0) return null;
+  const [acknowledged] = pending.splice(index, 1);
+  queue.replace(pending);
+  return acknowledged;
+}
+
+export function getPendingMacActions({ queue = defaultMacActionQueue } = {}) {
+  return queue.getPending();
 }
 
 const SNAPSHOT_STATUS = new Map([
@@ -398,6 +575,7 @@ const SNAPSHOT_STATUS = new Map([
   ['unreachable', 'down'],
   ['offline', 'down'],
   ['disabled', 'disabled'],
+  ['unknown', 'unknown'],
   ['stale', 'stale'],
   ['error', 'error'],
   ['failed', 'error'],
@@ -406,6 +584,18 @@ const SNAPSHOT_STATUS = new Map([
 function snapshotText(value, max = 240) {
   const s = String(value ?? '').replace(/\s+/g, ' ').trim();
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+function snapshotTimestamp(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const numeric = Number(value);
+  let timestamp = Number.NaN;
+  if (Number.isFinite(numeric) && numeric >= 1_000_000_000) {
+    timestamp = numeric >= 100_000_000_000 ? numeric : numeric * 1000;
+  } else {
+    timestamp = Date.parse(String(value));
+  }
+  return Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toISOString() : '';
 }
 
 export function snapshotStatus(raw) {
@@ -542,14 +732,44 @@ export function normalizeFleetSnapshot(payload, { now = Date.now() } = {}) {
     for (const row of resources) {
       if (!row || typeof row !== 'object') continue;
       const status = snapshotStatus(row.state);
+      const tool = snapshotText(row.tool || '—', 40);
+      const model = snapshotText(row.model_name || row.model || '—', 120);
+      const source = snapshotText(row.source || '', 40);
+      const brief = snapshotText(row.brief || snapshotTask(row, agents, lanes), 600);
+      const workingOn = snapshotText(row.working_on || '', 800);
+      const lastActivity = Number(row.last_activity) || 0;
+      const history = Array.isArray(row.history)
+        ? row.history.map((entry) => ({
+            at: snapshotTimestamp(entry?.at),
+            tool: snapshotText(entry?.tool || '', 40),
+            id: snapshotText(entry?.id || '', 120),
+            brief: snapshotText(entry?.brief || '', 400),
+            working_on: snapshotText(entry?.working_on || '', 400),
+            model: snapshotText(entry?.model || '', 120),
+          })).filter((entry) => entry.brief || entry.working_on)
+        : [];
+      if (!history.length && source === 'agent-watch' && (brief || workingOn)) {
+        history.push({
+          at: snapshotTimestamp(lastActivity) || snapshotTimestamp(payload.updated) || receivedAt,
+          tool,
+          id: snapshotText(row.id || '', 120).split(':').pop() || '',
+          brief,
+          working_on: workingOn,
+          model: snapshotText(row.model || '', 120),
+        });
+      }
       rows.push({
         id: snapshotText(row.id || '', 120),
         location,
-        tool: snapshotText(row.tool || '—', 40),
-        model: snapshotText(row.model_name || row.model || '—', 120),
+        tool,
+        model,
         modelId: snapshotText(row.model || '', 120),
         status,
         task: snapshotTask(row, agents, lanes),
+        brief,
+        working_on: workingOn,
+        lastActivity,
+        history,
         allowance: snapshotAllowance(row, quota),
         weight: snapshotText(row.weight || '', 12),
         role: snapshotText(row.role || 'worker', 20),
@@ -623,8 +843,23 @@ function withSnapshotAge(data, now) {
       });
     }
   }
+  const rows = data.rows.map((row) => {
+    const watcherOffline = row.source === 'agent-watch' &&
+      row.location === 'Mac (local)' &&
+      (!mac || mac.reporterOnline !== true);
+    if (!stale && !watcherOffline) return row;
+    const reason = stale
+      ? `status unknown: snapshot is stale (${ageSec}s old)`
+      : `status unknown: Mac reporter is offline (${ageSec}s since last push)`;
+    return {
+      ...row,
+      status: 'unknown',
+      detail: snapshotText(row.detail ? `${row.detail} · ${reason}` : reason, 440),
+    };
+  });
   return {
     ...data,
+    rows,
     mac,
     ageSec,
     stale,
@@ -1366,5 +1601,5 @@ export function resetFleetState() {
   fleetTicketsCache = { cachedAt: 0, rows: [] };
   fleetNodeHeartbeats.clear();
   fleetSnapshotCache = { at: 0, data: null };
-  macPendingActions = [];
+  defaultMacActionQueue.replace([]);
 }

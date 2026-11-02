@@ -934,7 +934,9 @@ import {
   recordFleetSnapshot as recordFleetSnapshotStatus,
   getFleetSnapshot as getFleetSnapshotStatus,
   queueMacAction as queueMacActionStatus,
-  drainMacActions as drainMacActionsStatus,
+  createMacActionQueue as createMacActionQueueStatus,
+  getDispatchableMacActions as getDispatchableMacActionsStatus,
+  acknowledgeMacAction as acknowledgeMacActionStatus,
   getPendingMacActions as getPendingMacActionsStatus,
   getFleetNodes as getFleetNodesStatus,
   getFleetBots as getFleetBotsStatus,
@@ -1484,8 +1486,20 @@ function cookieValue(req, name) {
   return '';
 }
 
+function publicMacAction(action) {
+  if (action?.type !== 'send_message') return action;
+  const { message, ...safeAction } = action;
+  return { ...safeAction, messageLength: typeof message === 'string' ? message.length : 0 };
+}
+
+const MAX_MAC_ACTION_BYTES = 16 * 1024;
+
 export function createGateway({ env = process.env, log = () => {}, forge = null } = {}) {
   const secret = env.TUI_GATEWAY_SECRET || '';
+  const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
+  const actionQueuePath = String(env.FLEET_MAC_ACTION_QUEUE_PATH || '').trim() ||
+    (isTestAuth ? '' : path.join(REPO_ROOT, '.cache', 'fleet-mac-actions.json'));
+  const macActionQueue = createMacActionQueueStatus({ filePath: actionQueuePath });
   const ttl = Number(env.TUI_SESSION_TTL_SEC || 900);
   // How long past its own expiry a correctly-signed token may still be RENEWED.
   // 0 disables renewal entirely, which restores the old hard cliff.
@@ -2475,7 +2489,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       ]);
       const terminals = getFleetNodes({ tickets });
       const fleet = getFleetSnapshotStatus({ persistPath });
-      const pendingMacActions = getPendingMacActionsStatus();
+      const pendingMacActions = getPendingMacActionsStatus({ queue: macActionQueue }).map(publicMacAction);
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify({ ok: true, tickets, terminals, bots, fleet, pendingMacActions, generatedAt: new Date().toISOString() }));
     }
@@ -2655,21 +2669,42 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
       }
       let body = '';
-      req.on('data', (chunk) => { body += chunk; });
+      let bodyBytes = 0;
+      let tooLarge = false;
+      req.on('data', (chunk) => {
+        bodyBytes += chunk.length;
+        if (bodyBytes > MAX_MAC_ACTION_BYTES) {
+          tooLarge = true;
+          return;
+        }
+        body += chunk;
+      });
       req.on('end', () => {
+        if (tooLarge) {
+          res.writeHead(413, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'action payload is too large' }));
+        }
+        let parsed;
         try {
-          const parsed = JSON.parse(body || '{}');
-          const queued = queueMacActionStatus(parsed);
+          parsed = JSON.parse(body || '{}');
+        } catch {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
+        }
+        try {
+          const queued = queueMacActionStatus(parsed, { queue: macActionQueue });
           if (!queued.ok) {
             res.writeHead(400, { 'content-type': 'application/json' });
             return res.end(JSON.stringify(queued));
           }
-          broadcastFleetEvent('mac_action', queued);
+          const safeQueued = { ...queued, action: publicMacAction(queued.action) };
+          broadcastFleetEvent('mac_action', safeQueued);
           res.writeHead(200, { 'content-type': 'application/json' });
-          return res.end(JSON.stringify(queued));
+          return res.end(JSON.stringify(safeQueued));
         } catch (err) {
-          res.writeHead(400, { 'content-type': 'application/json' });
-          return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
+          log(`Fleet action queue persistence failed: ${err.message}`);
+          res.writeHead(500, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'Fleet action could not be persisted' }));
         }
       });
       return;
@@ -2690,8 +2725,14 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       let body = '';
       req.on('data', (chunk) => { body += chunk; });
       req.on('end', () => {
+        let parsed;
         try {
-          const parsed = JSON.parse(body || '{}');
+          parsed = JSON.parse(body || '{}');
+        } catch {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
+        }
+        try {
           const rawStatus = parsed && parsed.status && typeof parsed.status === 'object' ? parsed.status : parsed;
           const status = rawStatus && typeof rawStatus === 'object' && parsed.mac && !rawStatus.mac
             ? { ...rawStatus, mac: parsed.mac }
@@ -2701,8 +2742,16 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
             res.writeHead(400, { 'content-type': 'application/json' });
             return res.end(JSON.stringify(saved));
           }
+          const actionResult = saved.snapshot?.mac?.lastActionResult;
+          if (actionResult?.id) {
+            const acknowledged = acknowledgeMacActionStatus(actionResult.id, { queue: macActionQueue });
+            if (acknowledged) {
+              broadcastFleetEvent('mac_actions_acknowledged', [publicMacAction(acknowledged)]);
+            }
+          }
           broadcastFleetEvent('snapshot', saved.snapshot);
-          const pendingActions = drainMacActionsStatus();
+          const pendingActions = getDispatchableMacActionsStatus({ queue: macActionQueue }).map(publicMacAction);
+          const pendingActionIds = getPendingMacActionsStatus({ queue: macActionQueue }).map((action) => action.id);
           res.writeHead(200, { 'content-type': 'application/json' });
           return res.end(JSON.stringify({
             ok: true,
@@ -2710,10 +2759,12 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
             receivedAt: saved.snapshot.receivedAt,
             stale: saved.snapshot.stale,
             pendingActions,
+            pendingActionIds,
           }));
         } catch (err) {
-          res.writeHead(400, { 'content-type': 'application/json' });
-          return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
+          log(`Fleet action queue persistence failed: ${err.message}`);
+          res.writeHead(500, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'Fleet action queue could not be persisted' }));
         }
       });
       return;

@@ -7,7 +7,7 @@
  * deployed gateway cannot dial back. This reporter reads that status.json,
  * attaches Mac switch & resource telemetry (`mac`), and POSTs it to the
  * gateway's `/fleet/api/snapshot` door, while also executing any queued Mac
- * switch/kill actions returned by the gateway.
+ * switch, process, and guarded agent-message actions returned by the gateway.
  *
  * Usage:
  *   node scripts/fleet-snapshot-push.mjs --once
@@ -43,6 +43,14 @@ const PROTECTED_PROCESSES = new Set([
   'sshd',
 ]);
 
+const SEND_TOOLS = new Set(['opencode', 'commandcode']);
+const VSCODE_SEND_HELPER = path.join(os.homedir(), '.config', 'health-tracker', 'fleet-vscode-screen-send.mjs');
+const SEND_LOG = path.join(os.homedir(), 'Library', 'Logs', 'fleet-send.log');
+const WATCH_STATE = path.join(os.homedir(), '.local', 'state', 'agent-watch', 'state.json');
+const ACTION_RECEIPTS = path.join(os.homedir(), '.local', 'state', 'health-tracker', 'fleet-action-receipts.json');
+const SEND_STATE_MAX_AGE_MS = 5 * 60 * 1000;
+const sendRunning = new Map();
+
 export function getArg(name, fallback = '') {
   const argv = process.argv;
   for (let i = 0; i < argv.length; i += 1) {
@@ -72,6 +80,195 @@ export function readSecretFile(file) {
   } catch {
     return {};
   }
+}
+
+function cleanSendMessage(raw) {
+  return String(raw || '').replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '').trim();
+}
+
+function findCommandCodeFile(sessionId, home) {
+  const root = path.join(home, '.commandcode', 'projects');
+  const hits = [];
+  try {
+    for (const dir of fs.readdirSync(root)) {
+      let files = [];
+      try {
+        files = fs.readdirSync(path.join(root, dir));
+      } catch {
+        continue;
+      }
+      for (const file of files) {
+        if (file.endsWith('.jsonl') && !file.endsWith('.checkpoints.jsonl') && file.startsWith(sessionId)) {
+          hits.push(path.join(root, dir, file));
+        }
+      }
+    }
+  } catch {
+    return null;
+  }
+  return hits.length === 1 ? hits[0] : null;
+}
+
+function sendSessionError(tool, sessionId, watchStatePath, now = Date.now()) {
+  let state;
+  let stat;
+  try {
+    stat = fs.statSync(watchStatePath);
+    state = JSON.parse(fs.readFileSync(watchStatePath, 'utf8'));
+  } catch {
+    return 'Watcher state unavailable';
+  }
+  const heartbeat = Number(state.heartbeat) || 60;
+  const lastRun = Number(state.last_run);
+  const maxAgeMs = Math.max(180, 3 * heartbeat) * 1000;
+  if (!Number.isFinite(lastRun) || now - lastRun * 1000 > maxAgeMs || now - stat.mtimeMs > SEND_STATE_MAX_AGE_MS) {
+    return 'Watcher state is stale; refusing to send';
+  }
+  const sessions = state.sessions && typeof state.sessions === 'object' && Array.isArray(state.sessions[tool])
+    ? state.sessions[tool]
+    : [];
+  const matches = sessions.filter((session) => session && String(session.id) === sessionId &&
+    (!session.tool || String(session.tool) === tool));
+  if (matches.length !== 1) return 'Session not found or ambiguous in watcher state';
+  if (matches[0].busy !== false) return 'Refused: session is busy or its state is unknown';
+  return null;
+}
+
+function appendSendLog(sendLogPath, line) {
+  try {
+    fs.mkdirSync(path.dirname(sendLogPath), { recursive: true });
+    fs.appendFileSync(sendLogPath, `${new Date().toISOString()} ${line}\n`);
+  } catch (err) {
+    console.error(`[fleet-send] unable to write send log: ${err.message}`);
+  }
+}
+
+function startVscodeSend({ id, at, sessionId, message, key, home, spawnImpl, sendLogPath, helperPath }) {
+  const refuse = (text) => ({ id, ok: false, message: text, at });
+  if (!fs.existsSync(helperPath)) return refuse('VS Code sender helper is missing');
+
+  fs.mkdirSync(path.dirname(sendLogPath), { recursive: true });
+  const logFd = fs.openSync(sendLogPath, 'a');
+  let child;
+  try {
+    child = spawnImpl(process.execPath, [helperPath], {
+      detached: true,
+      stdio: ['pipe', 'pipe', logFd],
+      cwd: home,
+    });
+  } finally {
+    fs.closeSync(logFd);
+  }
+  sendRunning.set(key, child);
+  child.unref();
+  child.on('error', (err) => {
+    if (sendRunning.get(key) === child) sendRunning.delete(key);
+    appendSendLog(sendLogPath, `vscode ${sessionId.slice(0, 8)} spawn error: ${err.message}`);
+  });
+  child.on('exit', (code) => {
+    if (sendRunning.get(key) === child) sendRunning.delete(key);
+    appendSendLog(sendLogPath, `vscode ${sessionId.slice(0, 8)} chars=${message.length} exit=${code}`);
+  });
+
+  return new Promise((resolve) => {
+    let buffer = '';
+    let settled = false;
+    const finish = (outcome) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(outcome);
+    };
+    const timer = setTimeout(() => {
+      finish(refuse('VS Code sender did not acknowledge within 60 seconds; status is uncertain and further sends are blocked until it exits'));
+    }, 60_000);
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk;
+      const newline = buffer.indexOf('\n');
+      if (newline < 0) return;
+      child.stdout.destroy();
+      try {
+        const ack = JSON.parse(buffer.slice(0, newline));
+        if (ack.ok !== true) {
+          finish(refuse(`VS Code send failed: ${String(ack.error || 'sender rejected the message').slice(0, 180)}`));
+          return;
+        }
+        const warning = ack.warning ? `; watcher tracking warning: ${String(ack.warning).slice(0, 160)}` : '';
+        finish({
+          id,
+          ok: true,
+          message: `${String(ack.message || `Submitted to VS Code session ${sessionId.slice(0, 8)}`)}${warning}. The Brief updates within about a minute`,
+          at,
+        });
+      } catch {
+        finish(refuse('VS Code sender returned an invalid acknowledgement'));
+      }
+    });
+    child.on('error', (err) => finish(refuse(`VS Code sender failed to start: ${err.message}`)));
+    child.stdin.on('error', (err) => finish(refuse(`VS Code sender input failed: ${err.message}`)));
+    child.on('exit', (code) => {
+      if (!settled) finish(refuse(`VS Code sender exited before acknowledging (code ${code})`));
+    });
+    child.stdin.end(JSON.stringify({ sessionId, message }));
+  });
+}
+
+async function startSendMessage(action, id, at, { home, watchStatePath, sendLogPath, helperPath, spawnImpl }) {
+  const tool = String(action.tool || '');
+  const rowId = String(action.rowId || '');
+  const sessionId = String(action.sessionId || '');
+  const message = cleanSendMessage(action.message);
+  const refuse = (text) => ({ id, ok: false, message: text, at });
+
+  if (!SEND_TOOLS.has(tool) && tool !== 'vscode') {
+    return refuse(`Refused: send is not supported for ${tool || 'this tool'}`);
+  }
+  const match = rowId.match(/^watch:(vscode|commandcode|opencode):([A-Za-z0-9_-]{4,80})$/);
+  if (!match || match[1] !== tool || match[2] !== sessionId) {
+    return refuse('Refused: target does not match the watcher row');
+  }
+  if (!message || message.length > 2000) return refuse('Refused: message must be 1-2000 characters');
+
+  const key = `${tool}:${sessionId}`;
+  if (sendRunning.has(key)) return refuse('A message is already running in this session');
+  const stateError = sendSessionError(tool, sessionId, watchStatePath);
+  if (stateError) return { ...refuse(stateError), deferred: true };
+
+  if (tool === 'vscode') {
+    return startVscodeSend({ id, at, sessionId, message, key, home, spawnImpl, sendLogPath, helperPath });
+  }
+
+  let args;
+  if (tool === 'opencode') {
+    args = ['run', '--session', sessionId, '--auto', '--', message];
+  } else {
+    const sessionFile = findCommandCodeFile(sessionId, home);
+    if (!sessionFile) return refuse('Refused: session file not found or ambiguous');
+    args = ['--session', sessionFile, '-p', '--yolo', '--', message];
+  }
+
+  const binary = tool === 'opencode'
+    ? path.join(home, '.opencode', 'bin', 'opencode')
+    : path.join(home, '.local', 'bin', 'cmd');
+  if (!fs.existsSync(binary)) return refuse(`${tool} CLI is missing`);
+  fs.mkdirSync(path.dirname(sendLogPath), { recursive: true });
+  const child = spawnImpl(binary, args, {
+    detached: true,
+    stdio: ['ignore', 'ignore', 'ignore'],
+    cwd: home,
+  });
+  sendRunning.set(key, child);
+  child.on('error', (err) => {
+    if (sendRunning.get(key) === child) sendRunning.delete(key);
+    appendSendLog(sendLogPath, `${tool} ${sessionId.slice(0, 8)} spawn error: ${err.message}`);
+  });
+  child.on('exit', (code) => {
+    if (sendRunning.get(key) === child) sendRunning.delete(key);
+    appendSendLog(sendLogPath, `${tool} ${sessionId.slice(0, 8)} chars=${message.length} exit=${code}`);
+  });
+  child.unref();
+  return { id, ok: true, message: `Started send to ${tool} session ${sessionId.slice(0, 8)}; the Brief updates within about a minute`, at };
 }
 
 function runCmd(cmd, args = [], timeout = 2500) {
@@ -266,17 +463,31 @@ export function collectMacSystemStatus({ lastActionResult = null, reporterStopPe
   };
 }
 
-export function executeMacAction(action) {
+export async function executeMacAction(action, options = {}) {
   const at = new Date().toISOString();
   if (!action || typeof action !== 'object') {
     return { id: '', ok: false, message: 'Invalid action', at };
   }
   const id = String(action.id || '');
+  const home = options.home || os.homedir();
+  const watchStatePath = options.watchStatePath || WATCH_STATE;
+  const sendLogPath = options.sendLogPath || SEND_LOG;
+  const helperPath = options.helperPath || VSCODE_SEND_HELPER;
+  const spawnImpl = options.spawnImpl || spawn;
   try {
+    if (action.type === 'send_message') {
+      return await startSendMessage(action, id, at, {
+        home,
+        watchStatePath,
+        sendLogPath,
+        helperPath,
+        spawnImpl,
+      });
+    }
+
     if (action.type === 'toggle_switch') {
       const target = String(action.target || '');
       const turnOn = String(action.state || '') === 'on';
-      const home = os.homedir();
 
       if (target === 'fleetd') {
         if (turnOn) {
@@ -417,7 +628,103 @@ export async function pushSnapshot({
     receivedAt: data.receivedAt,
     stale: data.stale,
     pendingActions: Array.isArray(data.pendingActions) ? data.pendingActions : [],
+    pendingActionIds: Array.isArray(data.pendingActionIds) ? data.pendingActionIds : null,
   };
+}
+
+function loadActionReceipts(filePath) {
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (err) {
+    if (err.code === 'ENOENT') return new Map();
+    throw new Error(`Unable to load Fleet action receipts at ${filePath}: ${err.message}`, { cause: err });
+  }
+  if (parsed?.version !== 1 || !Array.isArray(parsed.receipts)) {
+    throw new Error(`Fleet action receipts at ${filePath} have an unsupported or invalid format`);
+  }
+  const receipts = new Map();
+  for (const receipt of parsed.receipts) {
+    if (!receipt || typeof receipt.id !== 'string' || !receipt.id ||
+        !['started', 'completed'].includes(receipt.state)) {
+      throw new Error(`Fleet action receipts at ${filePath} contain an invalid entry`);
+    }
+    if (receipt.state === 'completed' &&
+        (!receipt.outcome || typeof receipt.outcome !== 'object' || receipt.outcome.id !== receipt.id)) {
+      throw new Error(`Fleet action receipt ${receipt.id} has an invalid outcome`);
+    }
+    receipts.set(receipt.id, receipt);
+  }
+  return receipts;
+}
+
+function writeActionReceipts(filePath, receipts) {
+  const directory = path.dirname(filePath);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temporaryPath = `${filePath}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+  const fd = fs.openSync(temporaryPath, 'wx', 0o600);
+  try {
+    fs.writeFileSync(fd, `${JSON.stringify({ version: 1, receipts: [...receipts.values()] })}\n`, 'utf8');
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(temporaryPath, filePath);
+}
+
+export function createActionReceiptStore({ filePath = ACTION_RECEIPTS } = {}) {
+  let receipts = filePath ? loadActionReceipts(filePath) : new Map();
+  const save = (next) => {
+    if (filePath) writeActionReceipts(filePath, next);
+    receipts = next;
+  };
+  return Object.freeze({
+    async execute(action, executor = executeMacAction) {
+      const id = String(action?.id || '');
+      if (!id) throw new Error('Fleet action receipt requires an action id');
+      const previous = receipts.get(id);
+      if (previous?.state === 'completed') return { ...previous.outcome };
+      if (previous?.state === 'started') {
+        const outcome = {
+          id,
+          ok: false,
+          message: 'Delivery was interrupted; it was not retried automatically. Send again if needed.',
+          at: new Date().toISOString(),
+        };
+        const next = new Map(receipts);
+        next.set(id, { id, state: 'completed', outcome });
+        save(next);
+        return { ...outcome };
+      }
+
+      const started = new Map(receipts);
+      started.set(id, { id, state: 'started', startedAt: new Date().toISOString() });
+      save(started);
+      const outcome = await executor(action);
+      if (outcome?.deferred === true) {
+        const waiting = new Map(receipts);
+        waiting.delete(id);
+        save(waiting);
+        return outcome;
+      }
+      const completedOutcome = {
+        id,
+        ok: Boolean(outcome?.ok),
+        message: String(outcome?.message || 'Action completed without a result').slice(0, 220),
+        at: String(outcome?.at || new Date().toISOString()),
+        ...(outcome?.stoppingReporter ? { stoppingReporter: true } : {}),
+      };
+      const completed = new Map(receipts);
+      completed.set(id, { id, state: 'completed', outcome: completedOutcome });
+      save(completed);
+      return { ...completedOutcome };
+    },
+    prune(pendingActionIds) {
+      const pending = new Set((Array.isArray(pendingActionIds) ? pendingActionIds : []).map(String));
+      const next = new Map([...receipts].filter(([id]) => pending.has(id)));
+      if (next.size !== receipts.size) save(next);
+    },
+  });
 }
 
 async function main() {
@@ -432,6 +739,8 @@ async function main() {
   let lastState = '';
   let lastActionResult = null;
   let reporterStopPending = false;
+  const receiptPath = getArg('action-receipts', process.env.FLEET_ACTION_RECEIPTS_PATH || ACTION_RECEIPTS);
+  const actionReceipts = createActionReceiptStore({ filePath: receiptPath });
 
   const beat = async () => {
     try {
@@ -453,22 +762,30 @@ async function main() {
           console.warn(`[fleet-snapshot] ${res.stage} failed: ${res.error}`);
         }
       }
+      if (res.ok && Array.isArray(res.pendingActionIds)) actionReceipts.prune(res.pendingActionIds);
       if (res.ok && Array.isArray(res.pendingActions) && res.pendingActions.length > 0) {
         for (const act of res.pendingActions) {
-          const outcome = executeMacAction(act);
+          const outcome = await actionReceipts.execute(act);
+          if (outcome.deferred === true) {
+            console.log(`[fleet-snapshot] waiting for ${act.tool} session to become available`);
+            continue;
+          }
           lastActionResult = outcome;
-          console.log(`[fleet-snapshot] executed action ${act.type} (${act.target || act.pid}): ${outcome.message}`);
+          const target = act.type === 'send_message' ? `${act.tool} ${act.rowId}` : (act.target || act.pid);
+          console.log(`[fleet-snapshot] executed action ${act.type} (${target}): ${outcome.message}`);
           if (outcome.stoppingReporter) reporterStopPending = true;
+          const followMac = collectMacSystemStatus({ lastActionResult, reporterStopPending });
+          const acknowledged = await pushSnapshot({
+            sourceUrl,
+            gatewayUrl,
+            secret,
+            mac: followMac,
+            fallbackOnSourceError: true,
+          });
+          if (acknowledged.ok && Array.isArray(acknowledged.pendingActionIds)) {
+            actionReceipts.prune(acknowledged.pendingActionIds);
+          }
         }
-        // Immediately push an updated snapshot reflecting the action result
-        const followMac = collectMacSystemStatus({ lastActionResult, reporterStopPending });
-        await pushSnapshot({
-          sourceUrl,
-          gatewayUrl,
-          secret,
-          mac: followMac,
-          fallbackOnSourceError: true,
-        });
       }
       return res;
     } catch (err) {

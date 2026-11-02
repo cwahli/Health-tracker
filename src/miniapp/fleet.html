@@ -129,34 +129,73 @@
   .btn-act.btn-off { background: #7f1d1d; border-color: #dc2626; color: #fecaca; }
   .btn-act:disabled { opacity: 0.45; cursor: not-allowed; }
 
-  /* Phones: six columns must fit the viewport, not hide Task/Allowance behind
-     a sideways swipe. Fixed layout + wrapping keeps every field on screen. */
+  #table-fleet { min-width: 980px; }
+  #table-fleet .col-brief { width: 280px; min-width: 240px; }
+  #table-fleet .col-working { width: 340px; min-width: 300px; }
+  #table-fleet .col-model { width: 210px; min-width: 190px; }
+  #table-fleet .col-activity { width: 180px; min-width: 160px; }
+  #table-fleet .col-allowance { width: 180px; min-width: 160px; }
+  #table-fleet th:first-child, #table-fleet td:first-child {
+    position: sticky; left: 0; z-index: 3;
+    width: 280px; min-width: 240px; max-width: 320px;
+    white-space: normal; background: #1e293b; box-shadow: 2px 0 0 0 #334155;
+  }
+  #table-fleet thead th:first-child { z-index: 7; background: #1d4ed8; }
+
+  /* The first column stays pinned while the rest of the Fleet row scrolls on phones. */
   @media (max-width: 720px) {
-    #table-fleet { table-layout: fixed; width: 100%; }
-    #table-fleet .col-location { width: 15%; }
-    #table-fleet .col-tool { width: 16%; }
-    #table-fleet .col-model { width: 17%; }
-    #table-fleet .col-status { width: 16%; }
-    #table-fleet .col-task { width: 20%; }
-    #table-fleet .col-allowance { width: 16%; }
+    #table-fleet { table-layout: fixed; min-width: 1080px; }
+    #table-fleet .col-brief { width: 240px; min-width: 240px; }
     #table-fleet th, #table-fleet td {
       padding: 6px 5px; font-size: 11px; line-height: 1.35;
       word-break: normal; overflow-wrap: break-word;
     }
     #table-fleet th { font-size: 9px; letter-spacing: 0; white-space: normal; }
     #table-fleet th:first-child, #table-fleet td:first-child {
-      width: auto; min-width: 0; max-width: none;
-      position: static; box-shadow: none;
+      width: 240px; min-width: 240px; max-width: 240px;
+      position: sticky; left: 0; box-shadow: 2px 0 0 0 #334155;
     }
-    #table-fleet .task-cell { min-width: 0; max-width: none; }
-    #table-fleet .model-cell { min-width: 0; }
-    #table-fleet .tool-cell { white-space: normal; }
-    #table-fleet .tool-cell code { font-size: 9.5px; padding: 1px 3px; overflow-wrap: break-word; word-break: normal; }
+    #table-fleet .col-working { width: 320px; }
+    #table-fleet .col-model { width: 200px; }
+    #table-fleet .col-activity { width: 170px; }
+    #table-fleet .col-allowance { width: 170px; }
     #table-fleet .badge { font-size: 8px; padding: 1px 4px; }
     #table-fleet .renew { white-space: normal; }
     .tabbar .masthead { flex-wrap: wrap; }
     .tabbar .tabs label { padding: 5px 9px; font-size: 11.5px; }
   }
+
+  .fleet-text-wrap { display: flex; align-items: flex-start; gap: 5px; }
+  .fleet-text { min-width: 0; flex: 1; color: #cbd5e1; }
+  .fleet-text-clamp {
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .fleet-text-wrap.expanded .fleet-text-clamp { display: block; }
+  .fleet-text-toggle {
+    flex: none; padding: 0 4px; border: 0; background: transparent; color: #7dd3fc;
+    font: inherit; cursor: pointer;
+  }
+  .fleet-model-name { color: #f8fafc; font-weight: 600; }
+  .fleet-model-origin { color: #94a3b8; font-size: 11px; }
+  .fleet-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .fleet-actions .btn-act { padding: 3px 7px; }
+  .fleet-actions .btn-act:disabled { opacity: 0.6; }
+  .fleet-dialog {
+    width: min(560px, calc(100vw - 28px)); max-height: 85vh; overflow: auto;
+    padding: 18px; border: 1px solid #475569; border-radius: 10px;
+    background: #0f172a; color: #e2e8f0;
+  }
+  .fleet-dialog::backdrop { background: rgba(2, 6, 23, .72); }
+  .fleet-dialog h3 { margin: 0 0 8px; color: #f8fafc; font-size: 16px; }
+  .fleet-dialog p { margin: 6px 0 10px; }
+  .fleet-dialog textarea {
+    display: block; width: 100%; min-height: 140px; resize: vertical;
+    padding: 9px; border: 1px solid #475569; border-radius: 6px;
+    background: #1e293b; color: #e2e8f0; font: inherit;
+  }
+  .fleet-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+  .fleet-history-item { padding: 10px 0; border-top: 1px solid #334155; }
+  .fleet-history-meta { color: #94a3b8; font-size: 11px; }
 
   /* Long agent sentences must not turn one fleet row into half the screen. */
   .task-clamp {
@@ -249,25 +288,23 @@
         <div class="st-scroll">
           <table class="st-table" id="table-fleet">
             <colgroup>
-              <col class="col-location">
-              <col class="col-tool">
+              <col class="col-brief">
+              <col class="col-working">
               <col class="col-model">
-              <col class="col-status">
-              <col class="col-task">
+              <col class="col-activity">
               <col class="col-allowance">
             </colgroup>
             <thead>
               <tr>
-                <th>Location</th>
-                <th>Tool</th>
+                <th>Brief</th>
+                <th>Status &amp; working on</th>
                 <th>Model</th>
-                <th>Status</th>
-                <th>Task</th>
+                <th>Last activity</th>
                 <th>Allowance</th>
               </tr>
             </thead>
             <tbody id="body-fleet">
-              <tr><td colspan="6" style="text-align:center;padding:24px;color:#94a3b8">Loading fleet…</td></tr>
+              <tr><td colspan="5" style="text-align:center;padding:24px;color:#94a3b8">Loading fleet…</td></tr>
             </tbody>
           </table>
         </div>
@@ -387,6 +424,23 @@
   </div>
 </div>
 
+<dialog id="fleet-send-dialog" class="fleet-dialog">
+  <h3 id="fleet-send-title">Send a message</h3>
+  <p id="fleet-send-context"></p>
+  <textarea id="fleet-send-message" maxlength="2000" aria-label="Message to agent" placeholder="Enter the instruction to send"></textarea>
+  <div class="fleet-dialog-actions">
+    <button class="btn-act" type="button" onclick="window._closeFleetSend()">Cancel</button>
+    <button class="btn-act btn-on" id="fleet-send-submit" type="button" onclick="window._submitFleetSend()">Send message</button>
+  </div>
+</dialog>
+<dialog id="fleet-history-dialog" class="fleet-dialog">
+  <h3 id="fleet-history-title">Fleet history</h3>
+  <div id="fleet-history-list"></div>
+  <div class="fleet-dialog-actions">
+    <button class="btn-act" type="button" onclick="window._closeFleetHistory()">Close</button>
+  </div>
+</dialog>
+
 <script>
 (function () {
   var CACHE_KEY = 'ht_fleet_state_v1';
@@ -408,7 +462,7 @@
     } catch (e) {}
   }
 
-  var state = { tickets: [], terminals: [], bots: [], fleet: null, cachedAt: null, offline: false };
+  var state = { tickets: [], terminals: [], bots: [], fleet: null, pendingMacActions: [], cachedAt: null, offline: false };
 
   function saveOfflineCache() {
     try {
@@ -467,6 +521,7 @@
     }
     if (s === 'disabled') return '<span class="badge badge-disabled"><span class="badge-dot"></span>Disabled</span>';
     if (s === 'stale') return '<span class="badge badge-stale"><span class="badge-dot"></span>Stale</span>';
+    if (s === 'unknown') return '<span class="badge badge-stale"><span class="badge-dot"></span>Unknown</span>';
     if (s === 'waiting_prompt' || s === 'waiting') return '<span class="badge badge-waiting"><span class="badge-dot"></span>Waiting</span>';
     return '<span class="badge badge-idle"><span class="badge-dot"></span>' + esc(s) + '</span>';
   }
@@ -566,28 +621,163 @@
     if (!tb) return;
     var rows = fleetRows();
     if (!rows.length) {
-      tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#94a3b8">No live fleet data yet</td></tr>';
+      tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#94a3b8">No live fleet data yet</td></tr>';
       document.getElementById('count-fleet').textContent = '0';
       renderFleetSummary();
       return;
     }
     tb.innerHTML = rows.map(function (r) {
-      var task = r.task ? rawEsc(r.task) : '<span class="empty-cell">—</span>';
-      var tool = r.tool && r.tool !== '—' ? '<code>' + rawEsc(r.tool) + '</code>' : '<span class="empty-cell">—</span>';
+      var brief = r.brief ? rawEsc(r.brief) : '<span class="empty-cell">—</span>';
+      var workingOn = r.working_on ? rawEsc(r.working_on) : '<span class="empty-cell">—</span>';
       var model = r.model && r.model !== '—' ? rawEsc(r.model) : '<span class="empty-cell">—</span>';
+      var origin = fleetToolLabel(r.tool) + ' (' + fleetLocationLabel(r.location) + ')';
       var title = r.detail ? ' title="' + rawEsc(r.detail) + '"' : '';
+      var history = Array.isArray(r.history) ? r.history : [];
+      var historyButton = (r.source === 'agent-watch' || history.length)
+        ? '<button class="btn-act" type="button" data-row-id="' + rawEsc(r.id) + '" onclick="window._openFleetHistory(this)">History (' + history.length + ')</button>'
+        : '';
+      var sendControl = fleetSendControl(r);
+      var activity = Number(r.lastActivity) > 0
+        ? formatTimeAgo(new Date(Number(r.lastActivity) * 1000).toISOString())
+        : '<span class="empty-cell">—</span>';
       return '<tr>' +
-        '<td><strong>' + rawEsc(r.location) + '</strong></td>' +
-        '<td class="tool-cell">' + tool + '</td>' +
-        '<td class="model-cell">' + model + '</td>' +
-        '<td>' + renderStatusBadge(r.status) + '</td>' +
-        '<td class="task-cell"' + title + '><div class="task-clamp">' + task + '</div></td>' +
+        '<td class="fleet-brief-cell"' + title + '><div class="fleet-text-wrap"><div class="fleet-text fleet-text-clamp">' + brief + '</div>' +
+          '<button class="fleet-text-toggle" type="button" aria-label="Expand brief" onclick="window._toggleFleetText(this)">+</button></div>' +
+          '<div class="fleet-actions">' + sendControl + historyButton + '</div></td>' +
+        '<td><div>' + renderStatusBadge(r.status) + '</div><div class="fleet-text-wrap" style="margin-top:5px"><div class="fleet-text fleet-text-clamp">' + workingOn + '</div>' +
+          '<button class="fleet-text-toggle" type="button" aria-label="Expand status text" onclick="window._toggleFleetText(this)">+</button></div></td>' +
+        '<td class="model-cell"><div class="fleet-model-name">' + model + '</div><div class="fleet-model-origin">' + rawEsc(origin) + '</div></td>' +
+        '<td>' + activity + '</td>' +
         '<td>' + allowanceCell(r) + '</td>' +
         '</tr>';
     }).join('');
     document.getElementById('count-fleet').textContent = String(rows.length);
     renderFleetSummary();
   }
+
+  function fleetToolLabel(tool) {
+    var labels = { vscode: 'Vscode', commandcode: 'Command Code', opencode: 'OpenCode', freebuff: 'Freebuff', antigravity: 'Antigravity' };
+    return labels[String(tool || '').toLowerCase()] || String(tool || 'Unknown');
+  }
+
+  function fleetLocationLabel(location) {
+    return String(location || '').replace(/\s*\(local\)\s*$/i, '') || 'Unknown';
+  }
+
+  function fleetSendReason(row) {
+    var supported = ['opencode', 'commandcode', 'vscode'];
+    if (!row || row.source !== 'agent-watch' || !/^watch:(vscode|commandcode|opencode):[A-Za-z0-9_-]{4,80}$/.test(String(row.id || ''))) {
+      return 'Only supported local watcher sessions can receive messages';
+    }
+    if (supported.indexOf(String(row.tool || '').toLowerCase()) < 0) return 'Sending is not verified for ' + fleetToolLabel(row.tool);
+    if (!state.fleet || state.fleet.stale || state.offline) return 'Fleet snapshot is stale or offline';
+    if (!state.fleet.mac || state.fleet.mac.reporterOnline !== true) return 'Mac reporter is offline';
+    var status = String(row.status || '').toLowerCase();
+    if (status !== 'available' && status !== 'working') return 'Agent must be WORKING or AVAILABLE to queue a message';
+    return '';
+  }
+
+  function openFleetDialog(dialog) {
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+  }
+
+  function closeFleetDialog(dialog) {
+    if (typeof dialog.close === 'function') dialog.close();
+    else dialog.removeAttribute('open');
+  }
+
+  function fleetSendControl(row) {
+    if (!row || row.source !== 'agent-watch') return '';
+    var queued = state.pendingMacActions.some(function (action) {
+      return action.type === 'send_message' && action.rowId === row.id;
+    });
+    if (queued) {
+      return '<button class="btn-act" type="button" disabled title="Queued until this session reports AVAILABLE">Queued</button>';
+    }
+    var reason = fleetSendReason(row);
+    return reason
+      ? '<button class="btn-act" type="button" disabled title="' + rawEsc(reason) + '">Send unavailable</button>'
+      : '<button class="btn-act btn-on" type="button" data-row-id="' + rawEsc(row.id) + '" onclick="window._openFleetSend(this)">Send</button>';
+  }
+
+  var pendingFleetSendRowId = '';
+  window._toggleFleetText = function (button) {
+    var wrap = button.parentNode;
+    var expanded = wrap.classList.toggle('expanded');
+    button.textContent = expanded ? '−' : '+';
+    button.setAttribute('aria-label', expanded ? 'Collapse text' : 'Expand text');
+  };
+
+  window._openFleetSend = function (button) {
+    var rowId = button.getAttribute('data-row-id');
+    var matches = fleetRows().filter(function (row) { return row.id === rowId; });
+    var row = matches.length === 1 ? matches[0] : null;
+    if (!row || fleetSendReason(row)) return;
+    pendingFleetSendRowId = row.id;
+    document.getElementById('fleet-send-title').textContent = 'Send to ' + fleetToolLabel(row.tool);
+    document.getElementById('fleet-send-context').textContent =
+      (row.brief || row.id) + ' · If busy, the message waits until this session is AVAILABLE.';
+    document.getElementById('fleet-send-message').value = '';
+    openFleetDialog(document.getElementById('fleet-send-dialog'));
+    document.getElementById('fleet-send-message').focus();
+  };
+
+  window._closeFleetSend = function () {
+    closeFleetDialog(document.getElementById('fleet-send-dialog'));
+    pendingFleetSendRowId = '';
+  };
+
+  window._submitFleetSend = function () {
+    var rowMatches = fleetRows().filter(function (row) { return row.id === pendingFleetSendRowId; });
+    var row = rowMatches.length === 1 ? rowMatches[0] : null;
+    var input = document.getElementById('fleet-send-message');
+    var button = document.getElementById('fleet-send-submit');
+    var message = String(input.value || '').trim();
+    if (!row || fleetSendReason(row)) {
+      document.getElementById('fleet-send-context').textContent = 'Refused: the session is no longer uniquely available.';
+      return;
+    }
+    if (!message || message.length > 2000) {
+      document.getElementById('fleet-send-context').textContent = 'Enter a message between 1 and 2000 characters.';
+      return;
+    }
+    button.disabled = true;
+    sendMacAction({
+      type: 'send_message',
+      tool: row.tool,
+      rowId: row.id,
+      message: message,
+    }, 'message to ' + fleetToolLabel(row.tool)).then(function (ok) {
+      button.disabled = false;
+      if (ok) window._closeFleetSend();
+    });
+  };
+
+  window._openFleetHistory = function (button) {
+    var rowId = button.getAttribute('data-row-id');
+    var matches = fleetRows().filter(function (candidate) { return candidate.id === rowId; });
+    var row = matches.length === 1 ? matches[0] : null;
+    var history = row && Array.isArray(row.history) ? row.history : [];
+    function timestamp(value) {
+      var date = new Date(value);
+      return isNaN(date.getTime()) ? 'Timestamp unavailable' : date.toLocaleString();
+    }
+    document.getElementById('fleet-history-title').textContent = 'History · ' + fleetToolLabel(row && row.tool);
+    document.getElementById('fleet-history-list').innerHTML = history.length
+      ? history.map(function (entry) {
+          return '<div class="fleet-history-item"><div class="fleet-history-meta">' +
+            rawEsc(timestamp(entry.at)) + ' · ' + rawEsc(entry.model || fleetToolLabel(entry.tool)) +
+            '</div><div><b>User:</b> ' + (entry.brief ? rawEsc(entry.brief) : '—') + '</div>' +
+            '<div><b>Agent:</b> ' + (entry.working_on ? rawEsc(entry.working_on) : '—') + '</div></div>';
+        }).join('')
+      : '<p>No recorded messages for this session yet.</p>';
+    openFleetDialog(document.getElementById('fleet-history-dialog'));
+  };
+
+  window._closeFleetHistory = function () {
+    closeFleetDialog(document.getElementById('fleet-history-dialog'));
+  };
 
   function renderFleetSummary() {
     var el = document.getElementById('fleet-summary');
@@ -770,9 +960,10 @@
   function sendMacAction(payload, btnText) {
     var sumEl = document.getElementById('mac-summary');
     if (sumEl) {
-      sumEl.innerHTML = 'Sending to Mac: <b>' + rawEsc(btnText) + '</b> (applies on next 5s heartbeat)…';
+      sumEl.innerHTML = (payload.type === 'send_message' ? 'Queueing message to agent: <b>' : 'Sending to Mac: <b>') +
+        rawEsc(btnText) + '</b>…';
     }
-    fetch('/fleet/api/mac-action' + (location.search || ''), {
+    return fetch('/fleet/api/mac-action' + (location.search || ''), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(payload),
@@ -781,16 +972,27 @@
       .then(function (res) {
         if (sumEl) {
           sumEl.innerHTML = res.ok
-            ? 'Queued for Mac: <b>' + rawEsc(btnText) + '</b> — waiting for Mac confirmation…'
+            ? (payload.type === 'send_message'
+                ? 'Queued: <b>' + rawEsc(btnText) + '</b> will be sent when the session is AVAILABLE.'
+                : 'Queued for Mac: <b>' + rawEsc(btnText) + '</b> — waiting for Mac confirmation…')
             : '<span class="warn">Failed: ' + rawEsc(res.error || 'unknown error') + '</span>';
+        }
+        if (res.ok && payload.type === 'send_message' && res.action) {
+          state.pendingMacActions = state.pendingMacActions.filter(function (action) {
+            return action.id !== res.action.id;
+          });
+          state.pendingMacActions.push(res.action);
+          renderFleet();
         }
         setTimeout(function () { fetchState(null, true); }, 2500);
         setTimeout(function () { fetchState(null, true); }, 5500);
+        return Boolean(res.ok);
       })
       .catch(function (err) {
         if (sumEl) {
           sumEl.innerHTML = '<span class="warn">Offline — cannot reach gateway to send Mac action.</span>';
         }
+        return false;
       });
   }
 
@@ -895,6 +1097,7 @@
     if (data.terminals) state.terminals = data.terminals;
     if (data.bots) state.bots = data.bots;
     if (data.fleet !== undefined) state.fleet = data.fleet;
+    if (Array.isArray(data.pendingMacActions)) state.pendingMacActions = data.pendingMacActions;
     if (!fromCache) {
       state.cachedAt = data.generatedAt || new Date().toISOString();
       saveOfflineCache();
@@ -995,6 +1198,15 @@
           renderTickets();
           renderBots();
           renderMac();
+        } catch (err) {}
+      });
+      sse.addEventListener('mac_actions_acknowledged', function (e) {
+        try {
+          var dispatchedIds = new Set(JSON.parse(e.data).map(function (action) { return action && action.id; }));
+          state.pendingMacActions = state.pendingMacActions.filter(function (action) {
+            return !dispatchedIds.has(action.id);
+          });
+          renderFleet();
         } catch (err) {}
       });
       sse.addEventListener('heartbeat', function (e) {
