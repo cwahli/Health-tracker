@@ -1,10 +1,10 @@
-# Work queue (generated 2026-11-03T13:36:36Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
+# Work queue (generated 2026-11-04T13:45:26Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
 
 ## Ready to merge (3)
 
-- #781 `agent/meal-qa-queue` — chore(meal-qa): snapshot pending loop queue (5 requests + state, 2026-10-08/09) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 220)
-- #804 `agent/attach-visible` — fix(picker): attached sessions never hide, like the session in use (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 101)
-- #875 `ship/food-rings` — fix(ui): darken status colors so small badges clear contrast (owner: Grok 4.7 (High) VM; behind main: 14)
+- #781 `agent/meal-qa-queue` — chore(meal-qa): snapshot pending loop queue (5 requests + state, 2026-10-08/09) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 221)
+- #804 `agent/attach-visible` — fix(picker): attached sessions never hide, like the session in use (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 102)
+- #875 `ship/food-rings` — fix(ui): darken status colors so small badges clear contrast (owner: Grok 4.7 (High) VM; behind main: 15)
 
 ## In flight (0)
 
