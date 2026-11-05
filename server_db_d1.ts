@@ -554,9 +554,83 @@ export interface D1JobRecord {
   updated_at?: string;
 }
 
-export async function d1UpsertJob(job: D1JobRecord): Promise<{ success: boolean; error?: string }> {
+// Keys that mean a job row already carries a real analysis result. The client
+// re-posts its local JobStore snapshot to /api/jobs/upsert on every store
+// change, and that snapshot is still a welcome/live skeleton while the realtime
+// status row (succeeded / awaiting_user) can arrive before the result payload.
+// The blind ON CONFLICT overwrite then erased the server-authored clean_result,
+// photo_url and status_message — meals showed "Analysis complete" in the UI
+// while the row became an empty shell (meal-result loss, Nov 5).
+const JOB_RESULT_PAYLOAD_KEYS = [
+  'pendingFoodLog', 'items', 'mealBuild', 'portionClarify', 'scoutItems',
+  'verdict', 'clinicalAdvice', 'comparisonData', 'foodData', 'report',
+  'agentResult', 'needsPortionClarify', 'is_r2',
+] as const;
+
+// text/message also carry results, but a status placeholder ("Analysis
+// complete") is short. Only substantial prose counts as a payload.
+const JOB_RESULT_TEXT_KEYS = ['text', 'message'] as const;
+const JOB_RESULT_TEXT_MIN_LENGTH = 40;
+
+export function cleanResultHasJobPayload(value: any): boolean {
+  if (value == null) return false;
+  let parsed = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return false;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') return false;
+  for (const key of JOB_RESULT_PAYLOAD_KEYS) {
+    const v = (parsed as any)[key];
+    if (Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== '') return true;
+  }
+  for (const key of JOB_RESULT_TEXT_KEYS) {
+    const v = (parsed as any)[key];
+    if (typeof v === 'string' && v.trim().length >= JOB_RESULT_TEXT_MIN_LENGTH) return true;
+  }
+  return false;
+}
+
+export interface D1JobUpsertOptions {
+  /**
+   * 'client' applies the thin-snapshot guard: a payload with no result may not
+   * replace a stored result, its photo, or the completion state. 'server'
+   * writes (job start / finish) are trusted as-is. Default 'server'.
+   */
+  source?: 'client' | 'server';
+}
+
+export async function d1UpsertJob(
+  job: D1JobRecord,
+  options: D1JobUpsertOptions = {}
+): Promise<{ success: boolean; error?: string }> {
   if (!isD1Configured()) return { success: false, error: 'D1 not configured' };
   if (!job || !job.id || !job.user_id) return { success: false, error: 'Missing job.id or job.user_id' };
+
+  // Client snapshots carry local state only. Read the stored row so a thinner
+  // snapshot cannot erase a result the server already wrote (the overwrite
+  // bug above); server writes stay trusted for retry/new-turn resets.
+  const protectStoredResult = options.source === 'client';
+  let existing: any = null;
+  if (protectStoredResult) {
+    const existingRes = await d1Query<any>(
+      'SELECT status, progress_percent, status_message, photo_url, debug_url, clean_result FROM agent_jobs WHERE id = ? LIMIT 1',
+      [job.id]
+    );
+    if (existingRes.success && existingRes.results && existingRes.results.length > 0) {
+      existing = existingRes.results[0];
+    }
+  }
+  const preserveStoredResult = protectStoredResult
+    && cleanResultHasJobPayload(existing?.clean_result)
+    && !cleanResultHasJobPayload(job.clean_result);
+
+  let status = job.status || 'queued';
+  let progressPercent = typeof job.progress_percent === 'number' ? job.progress_percent : 0;
+  let statusMessage = job.status_message || null;
 
   // Guard clean_result size: if clean_result is large and lacks is_r2 pointer, stringify safely
   let cleanResultStr = '{}';
@@ -566,6 +640,16 @@ export async function d1UpsertJob(job: D1JobRecord): Promise<{ success: boolean;
     } else {
       cleanResultStr = String(job.clean_result);
     }
+  }
+
+  if (preserveStoredResult) {
+    status = existing.status || status;
+    progressPercent = typeof existing.progress_percent === 'number' ? existing.progress_percent : progressPercent;
+    statusMessage = existing.status_message ?? statusMessage;
+    cleanResultStr = typeof existing.clean_result === 'string'
+      ? existing.clean_result
+      : JSON.stringify(existing.clean_result ?? {});
+    console.warn(`[D1 Job Upsert] Preserved stored result for ${job.id} — client snapshot carried no meal payload`);
   }
 
   const now = new Date().toISOString();
@@ -593,11 +677,11 @@ export async function d1UpsertJob(job: D1JobRecord): Promise<{ success: boolean;
     job.user_id,
     job.kind || 'food',
     job.mode || 'review',
-    job.status || 'queued',
-    typeof job.progress_percent === 'number' ? job.progress_percent : 0,
-    job.status_message || null,
-    job.photo_url || null,
-    job.debug_url || null,
+    status,
+    progressPercent,
+    statusMessage,
+    job.photo_url || existing?.photo_url || null,
+    job.debug_url || existing?.debug_url || null,
     cleanResultStr,
     typeof job.current_turn === 'number' ? job.current_turn : 1,
     job.created_at || now,
