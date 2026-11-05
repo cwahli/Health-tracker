@@ -31,7 +31,7 @@ jobsRouter.post('/api/jobs/upsert', async (req, res) => {
     console.log(`[DIAG4] /api/jobs/upsert starting for job ${payload.id}, payload size ${payloadSize} bytes`);
 
     if (isD1Configured()) {
-      const d1Res = await d1UpsertJob(payload);
+      const d1Res = await d1UpsertJob(payload, { source: 'client' });
       console.log(`[DIAG4] /api/jobs/upsert d1UpsertJob finished for job ${payload.id} in ${Date.now() - diag4Start}ms`);
       if (!d1Res.success) {
         console.error('Failed to upsert job to D1 via server:', d1Res.error);
