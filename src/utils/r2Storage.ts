@@ -146,17 +146,28 @@ export async function fetchDebugPayloadFromR2(jobIdOrUrl: string): Promise<any> 
   return null;
 }
 
-export async function uploadJobResultToR2(jobId: string, result: any): Promise<boolean> {
+/**
+ * Persist a finished job result to R2 and return its public URL, or '' when
+ * the upload fails. serverJobs persists this URL as the `r2_url` of the D1
+ * pointer, so the return value is part of the contract (it used to return a
+ * bare boolean, which left `r2_url: true` unreachable).
+ *
+ * The route reads `payload`; `result` is also sent so an older route build
+ * that still reads `result` keeps working during a rolling deploy.
+ */
+export async function uploadJobResultToR2(jobId: string, result: any): Promise<string> {
   try {
     const res = await fetch(resolveApiUrl('/api/r2/upload-job-result'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId, result })
+      body: JSON.stringify({ jobId, payload: result, result })
     });
-    return res.ok;
+    if (!res.ok) return '';
+    const data = await res.json().catch(() => ({}));
+    return data.url || data.r2_url || '';
   } catch (err) {
     console.warn('[r2Storage] uploadJobResultToR2 error:', err);
-    return false;
+    return '';
   }
 }
 
