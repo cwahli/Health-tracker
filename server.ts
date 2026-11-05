@@ -3926,8 +3926,15 @@ async function startServer() {
         }
       }
     }));
-    // Explicit 404 for missing hashed assets to prevent SPA fallback serving index.html as JS/CSS
+    // Explicit 404 for missing hashed assets to prevent SPA fallback serving index.html as JS/CSS.
+    // STALE_CHUNK (2026-11-06): a missing chunk must NEVER be cached. The 2026-11-05
+    // deploy 404'd new hashes mid-build and the Cloudflare edge cached the misses,
+    // looping HomeTab on fresh profiles until edge expiry. no-store on all layers,
+    // including the Cloudflare-specific header.
     app.use('/assets', (req, res) => {
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      res.setHeader('CDN-Cache-Control', 'no-store');
+      res.setHeader('Cloudflare-CDN-Cache-Control', 'no-store');
       res.status(404).type('text/plain').send('Asset not found');
     });
     app.get("*", (req, res) => {

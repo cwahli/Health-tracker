@@ -29,7 +29,20 @@ fi
 echo "=== Deploy started at $(date) ($LOCAL_HEAD -> $REMOTE_HEAD) ===" >> "$DEPLOY_LOG"
 git reset --hard origin/main
 npm ci --prefer-offline
-npm run build
+# STALE_CHUNK (2026-11-06): never build into the live dist/ — vite empties its
+# outDir first, so mid-build requests 404, and the Cloudflare edge cached those
+# misses (apex HomeTab loop on fresh profiles, 2026-11-05). Build web assets
+# into dist.next, overlay chunks before html (every referenced file exists at
+# every instant), then restart onto the complete tree. Old unreferenced hashes
+# accumulate in dist/assets (harmless, immutable); prune manually if needed.
+rm -rf dist.next
+npx vite build --outDir dist.next --emptyOutDir
+npm run build:server
+mkdir -p dist dist/assets
+cp -r dist.next/assets/. dist/assets/
+find dist.next -maxdepth 1 -type f ! -name '*.html' -exec cp {} dist/ \;
+cp dist.next/*.html dist/
+rm -rf dist.next
 sudo systemctl restart health-tracker
 echo "=== Deploy completed at $(date) ===" >> "$DEPLOY_LOG"
 bash "$DEPLOY_DIR/scripts/sync-hermes-skills.sh"
