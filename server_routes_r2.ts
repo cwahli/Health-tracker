@@ -768,6 +768,34 @@ r2Router.post(['/api/r2/upload-debug', '/api/debug/upload'], async (req, res) =>
   }
 });
 
+/**
+ * Read a finished job result back from R2 (`jobs/<jobId>_result.json`).
+ * Same-object read of what `/api/r2/upload-job-result` writes; powers the
+ * transparent is_r2 resolve in `/api/jobs/status` and the same-origin client
+ * fallback. Returns null when R2 is unconfigured or the object is missing so
+ * callers fall back to the inline stub fields.
+ */
+export async function fetchJobResultFromR2Direct(jobId: string): Promise<any> {
+  const client = getS3Client();
+  if (!client) return null;
+  const safeId = String(jobId || 'unknown').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 120);
+  if (!safeId) return null;
+  try {
+    const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+    const res = await client.send(new GetObjectCommand({
+      Bucket: CLOUDFLARE_R2_BUCKET_NAME,
+      Key: `jobs/${safeId}_result.json`,
+    }));
+    if (res.Body) {
+      const str = await (res.Body as any).transformToString();
+      return JSON.parse(str);
+    }
+  } catch {
+    // NotFound on a missing/expired result is expected — caller falls back.
+  }
+  return null;
+}
+
 r2Router.post('/api/r2/upload-job-result', async (req, res) => {
   try {
     // `payload` is the current field; `result` is accepted so a browser or
@@ -798,6 +826,18 @@ r2Router.post('/api/r2/upload-job-result', async (req, res) => {
   } catch (err: any) {
     console.error('Failed to upload job result to R2:', err);
     res.status(500).json({ error: err.message || 'Failed to upload job result' });
+  }
+});
+
+r2Router.get('/api/r2/job-result', async (req, res) => {
+  try {
+    const jobId = String(req.query.jobId || req.query.id || '');
+    if (!jobId) return res.status(400).json({ error: 'jobId required' });
+    const payload = await fetchJobResultFromR2Direct(jobId);
+    if (!payload) return res.status(404).json({ error: 'Job result not found' });
+    return res.json(payload);
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Failed to load job result' });
   }
 });
 

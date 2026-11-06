@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { resolveApiUrl, uploadJobResultToR2 } from './r2Storage';
+import { fetchJobResultFromR2, preserveR2StubInlineFields } from './r2Storage';
 
 // Sensor for the server-side "Failed to parse URL from /api/r2/upload-job-result"
 // error: Node fetch rejects relative URLs, so the job pipeline must resolve API
@@ -91,5 +92,43 @@ describe('uploadJobResultToR2', () => {
     const fetchMock = vi.fn(async () => ({ ok: false, json: async () => ({ error: 'Missing jobId or payload' }) }));
     vi.stubGlobal('fetch', fetchMock);
     await expect(uploadJobResultToR2('job_3', {})).resolves.toBe('');
+  });
+});
+
+// Sensor for HOLLOW_RESULT (portion card NO IMAGE + fallback title while the
+// result sat in R2: the only reader asked for GET /api/r2/job-result — missing).
+describe('fetchJobResultFromR2', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  it('fetches the absolute job-result route and returns the parsed payload', async () => {
+    process.env.INTERNAL_BASE_URL = 'http://127.0.0.1:3000';
+    const payload = { portionClarify: { items: [{ name: 'Soup' }] }, scoutItems: [{ name: 'Soup' }] };
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => payload }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(fetchJobResultFromR2('job_9')).resolves.toEqual(payload);
+    expect((fetchMock.mock.calls[0] as any)[0]).toBe('http://127.0.0.1:3000/api/r2/job-result?jobId=job_9');
+  });
+  it('returns null when the route 404s or the fetch throws (pointer stays, never throws)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) })));
+    await expect(fetchJobResultFromR2('job_missing')).resolves.toBeNull();
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('Failed to parse URL'); }));
+    await expect(fetchJobResultFromR2('job_9')).resolves.toBeNull();
+  });
+});
+
+describe('preserveR2StubInlineFields', () => {
+  it('keeps question/names/photo, drops the dead pointer, fills only missing pieces', () => {
+    const out = preserveR2StubInlineFields({
+      is_r2: true, r2_url: 'https://cdn.example/j1.json', message: 'Confirm your portion',
+      needsPortionClarify: true, portionClarify: { items: [{ name: 'Soup' }] },
+      scoutItems: [{ name: 'Soup' }], photoUrl: '/photos/j1.jpg',
+    }, 'Waiting for portion choice');
+    expect(out.is_r2).toBeUndefined();
+    expect(out.message).toBe('Confirm your portion');
+    expect(out.portionClarify).toEqual({ items: [{ name: 'Soup' }] });
+    expect(out.scoutItems).toEqual([{ name: 'Soup' }]);
+    expect(out.photoUrl).toBe('/photos/j1.jpg');
+    expect(preserveR2StubInlineFields({ message: 'm' }, 's').pendingFoodLog.name).toBe('Meal');
+    expect(preserveR2StubInlineFields(null, 'Waiting').message).toBe('Waiting');
+    expect(preserveR2StubInlineFields(undefined, undefined).message).toBe('Analysis complete');
   });
 });
