@@ -224,8 +224,15 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
             const isRetryAttempt = effectiveAttempt > 1 || job.status === 'failed' || !!job.error || /retry|retrying|failed/i.test(latestForSubmit.statusMessage || '');
             const clientOwnsSubmit = !isRetryAttempt && !!latestForSubmit.clientSubmitPending
               && !String(latestForSubmit.statusMessage || '').includes('background runner retrying submit');
+            // Single-owner guard: LogChat's in-flight POST may land after the
+            // watchdog released ownership. If the server already accepted this
+            // turn (Analyzing/Uploaded flavour + serverSubmittedAt), poll —
+            // do not POST a second time. Failed turns still resubmit.
+            const serverAlreadyAccepted = !!latestForSubmit.serverSubmittedAt
+              && /analyzing|uploaded|queued on server|retrying \(attempt/i.test(String(latestForSubmit.statusMessage || ''))
+              && !latestForSubmit.resumeStage;
             // Ensure job is submitted to server for retries or new jobs not yet pushed
-            const needsServerSubmit = !clientOwnsSubmit && (
+            const needsServerSubmit = !clientOwnsSubmit && !serverAlreadyAccepted && (
               isRetryAttempt ||
               !latestForSubmit.serverSubmittedAt ||
               !!latestForSubmit.resumeStage

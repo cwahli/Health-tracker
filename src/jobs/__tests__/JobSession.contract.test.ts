@@ -332,8 +332,7 @@ describe('JobSession contract (STALE_TURN)', () => {
     expect(vi.mocked(upsertJobToSupabase)).not.toHaveBeenCalled();
   });
 
-  it('compare completion preserves mode=evaluation + comparison through the store (group render boundary)', () => {
-    // Live shape (debug-job_1789204750819): the App.tsx poller finalize reads
+  it('compare completion preserves mode=evaluation + comparison through the store (group render boundary)', () => {    // Live shape (debug-job_1789204750819): the App.tsx poller finalize reads
     // job.result for mode/comparison. If the store dropped either, group
     // cards never render on the server-owned polling path.
     const compareResult: any = {
@@ -360,5 +359,30 @@ describe('JobSession contract (STALE_TURN)', () => {
     expect(stored.mode).toBe('evaluation');
     expect(stored.comparison?.groups?.length).toBe(1);
     expect(stored.comparison?.recommendedOption).toBe('A');
+  });
+
+  it('watchdog release preserves the turn (self-heal handoff)', () => {
+    const inFlightAt = Date.now() - 60_000;
+    JobStore.createJob({
+      id: 'watch1',
+      status: 'queued',
+      currentTurn: 2,
+      clientSubmitPending: true,
+      inFlightTurnAt: inFlightAt,
+      statusMessage: 'Uploading to server… Keep this tab open',
+      inputSnapshot: { text: 'Analyze this meal photo.', imageRefs: ['img'], mode: 'review' },
+    });
+    // Same transition the JobQueueRunner watchdog performs after 45s.
+    JobStore.apply({
+      type: 'ServerStatus',
+      id: 'watch1',
+      clientSubmitPending: false,
+      statusMessage: 'Connection delayed; background runner retrying submit...',
+    } as any);
+    const job = JobStore.getJob('watch1')!;
+    expect(job.clientSubmitPending).toBe(false);
+    expect(job.inFlightTurnAt).toBe(inFlightAt);
+    expect(job.currentTurn).toBe(2);
+    expect(previewStatus(job) === 'queued' || previewStatus(job) === 'running').toBe(true);
   });
 });
