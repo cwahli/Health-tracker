@@ -191,6 +191,55 @@ export function providerReadiness({ env = process.env, home = os.homedir(), loca
         terminalOnly: true,
       };
 
+  // Command Code is a paid lane with its own binary + credential. It was
+  // missing here while the picker and the turn path both consulted it, so a
+  // host without `cmd` burned a turn to learn it (raw "spawn cmd ENOENT",
+  // live VM3 2026-11-06) instead of reporting not-set-up in /setup.
+  const ccBin =
+    binaryOnPath(env, 'cmd') ||
+    binaryOnPath(env, 'command-code') ||
+    ['.npm-global/bin/cmd', '.npm-global/bin/command-code'].some((rel) => {
+      try {
+        fs.accessSync(path.join(home, rel), fs.constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    }) ||
+    ['/usr/local/bin/cmd', '/usr/bin/cmd'].some((abs) => {
+      try {
+        fs.accessSync(abs, fs.constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  const ccAuthed =
+    hasEnv(env, 'COMMAND_CODE_API_KEY') ||
+    (() => {
+      try {
+        const auth = JSON.parse(fs.readFileSync(path.join(home, '.commandcode', 'auth.json'), 'utf8'));
+        return Boolean(auth && typeof auth === 'object' && Object.keys(auth).length > 0);
+      } catch {
+        return false;
+      }
+    })();
+  out.commandcode = ccBin
+    ? ccAuthed
+      ? { ready: true, needs: null, fix: null, command: null, note: 'paid Command Code subscription lane' }
+      : {
+          ready: false,
+          needs: 'Command Code sign-in (`cmd login` or COMMAND_CODE_API_KEY)',
+          fix: 'run `cmd login` on this host, then restart the bot',
+          command: '/setup',
+        }
+    : {
+        ready: false,
+        needs: 'the Command Code CLI (`cmd`) on this host',
+        fix: 'install the Command Code CLI and run `cmd login` on this host, then restart the bot',
+        command: '/setup',
+      };
+
   return out;
 }
 

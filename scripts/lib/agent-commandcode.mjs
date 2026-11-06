@@ -285,7 +285,18 @@ export function runCommandcode({
       stderr += chunk.toString();
     });
     child.on('error', (err) => {
-      lastError = err.message;
+      // A missing `cmd` binary otherwise surfaces as the raw errno
+      // ("spawn cmd ENOENT"), which names nothing to do (live VM3
+      // 2026-11-06). Keep the raw text in stderr for the log and give
+      // the chat an actionable line instead.
+      const raw = String(err?.message || err);
+      if (err?.code === 'ENOENT' || /ENOENT/i.test(raw)) {
+        stderr += `\n${raw}`;
+        lastError =
+          'Command Code CLI (`cmd`) is not installed on this host — install it and run `cmd login` (or set COMMAND_CODE_API_KEY), then resend. Nothing was spent; pick a /model_free lane to keep chatting meanwhile.';
+      } else {
+        lastError = raw;
+      }
       finish(-1);
     });
     child.on('close', (code) => {
