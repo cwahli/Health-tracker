@@ -7305,7 +7305,11 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         onSpawn: (child) => running.set(chatId, { child, aborted: false, serverUrl: workSession.serverUrl, opencodeSessionId: workSession.opencodeSessionId }),
         onAbort: () => abortOpencodeSession({ serverUrl: workSession.serverUrl, sessionId: workSession.opencodeSessionId }).catch(() => false),
         extraArgs,
-        env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+        // Connectivity pings must prove the chain alive as cheaply as possible:
+        // no skills, no browser MCP. The prompt already says "no tools", but the
+        // env booted Playwright/Chrome anyway — that scaffolding is what made a
+        // bare `hi` take 21s (live VM3 2026-11-06). Work turns keep everything.
+        env: { ...opencodeEnv(isPingTurn ? { ...config, agent: { ...config.agent, sharedSkills: [], playwrightOutputDir: undefined } } : config), ...chatEnv(api, chatId) },
         envMode: turnEnvMode,
       });
     };
