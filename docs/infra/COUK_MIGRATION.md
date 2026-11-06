@@ -8,6 +8,14 @@ is owned (Cloudflare Registrar), the apex is already live on the VPS, and this
 doc covers what that plan left out — the TG bot buttons, the TUI/web gateway
 hosts, and the retirement sequence.
 
+**2026-10-18 — RETIRED, and this plan closes by host re-homing.** Production was
+re-homed off OVH (`51.254.217.163`, "vps-france") to the current VM
+(`standar-c3r3a-1845`, `103.147.32.117`), which publishes `health-tracker.co.uk`
+and `*.health-tracker.co.uk` through a **Cloudflare Tunnel** (`cloudflared`,
+ingress → `127.0.0.1:80`); TLS is at the Cloudflare edge. The old box no longer
+serves HTTP, so its duckdns site blocks went with it — step 8 is done by
+retirement, not by editing a Caddyfile. Checked 2026-10-29: co.uk hosts answer, and `/privacy` plus `/terms` return 200 after the empty `/srv/www-legal` directory was filled from `/home/ubuntu/www-legal`. The DuckDNS A record still points at dead OVH `51.254.217.163`. This host has no DuckDNS token, so the dashboard deletion is not done. Supabase, Firebase, and Health Connect dashboards were not opened.
+
 **Status ledger (updated as steps land):**
 
 | # | Step | State |
@@ -15,14 +23,16 @@ hosts, and the retirement sequence.
 | 0 | Apex + www live on Caddy (`health-tracker.co.uk`, Let's Encrypt) | DONE (pre-existing) |
 | 1 | GitHub push webhook → `https://health-tracker.co.uk/webhook/deploy` | DONE (pre-existing, hook `682068098`) |
 | 2 | Repo defaults point at co.uk (QA, screenshots, skills, tunnels, gateway defaults) | DONE — #579 merged; audit sweep `agent/domain-couk-audit` moved the last gateway default, test pins, memory seeds, scorecard live origin, and plan canonicals |
-| 3 | DNS: `tui`/`web`/`omb`/`tgtg` A records → `51.254.217.163` (DNS-only) | DONE by human 2026-10-06, verified resolving |
+| 3 | DNS: `tui`/`web`/`omb`/`tgtg` → the production origin | DONE — originally `51.254.217.163` (OVH); since 2026-10-18 the origin is the new VM via the Cloudflare Tunnel (`*.health-tracker.co.uk`) |
 | 4 | Caddy blocks for the four co.uk subdomains | DONE — active, `tui`/`web` 200 (`omb` 502 + `tgtg` 401 = parity with duckdns twins) |
 | 5 | Bot envs: `TUI_GATEWAY_URL` → `https://tui.health-tracker.co.uk` + `OPENCODE_WEB_URL` → `https://web.health-tracker.co.uk` + `OPENCODE_WEB_HOST` → `web.health-tracker.co.uk` | DONE — all bot envs incl. vm4/vm5/vm6/android/opencode/collab/mobile; units restarted, verified in PIDs |
 | 6 | Live verification (site, TUI proof script, bot buttons, sub-services) | DONE — site 200, full TUI proof green on the new host |
 | 9 | Audit sweep: every remaining old-domain reference (gateway default lost in #581 rebuild, scorecard live origin on dead onrender, r14-tree defaults, relay-staging, plan canonicals) | DONE — `agent/domain-couk-audit` |
 | 10 | Relay-staging on co.uk (`/relay-staging/*` → `:8891` in the co.uk block) | after this PR merges (additive Caddy handle + doc updates) |
-| 7 | Console checks: Supabase redirect allowlist, Google OAuth consent links, Health Connect callback | HUMAN (dashboards) |
-| 8 | Retirement: remove duckdns Caddy blocks after access logs go quiet | after step 6 + soak |
+| 7 | Console checks: Supabase redirect allowlist, Google OAuth consent links, Health Connect callback | PARTIAL 2026-10-29 — `/privacy` and `/terms` 200 after installing the pages into `/srv/www-legal`. Supabase, Firebase, and Health Connect dashboards were not opened from this host. |
+| 8 | Retirement: duckdns Caddy blocks removed | DONE 2026-10-18 — by host re-homing. The OVH box that served them is retired; the new VM (Cloudflare Tunnel) never had duckdns blocks. Human step left: delete the duckdns A record. |
+| 11 | DNS: `mc` / `agenda` → the production origin | `mc.` DONE (resolves live 2026-10-09); origin is now the new VM via the Cloudflare Tunnel (was `51.254.217.163`, OVH) |
+| 12 | Caddy blocks for `mc.` and `agenda.` (each **with a `log` block**) | DONE — both live on the new VM's Caddyfile (`mc.` + `agenda.` co.uk blocks present, TLS at the edge); the duckdns blocks retired with the OVH box |
 
 ## 1. Target layout
 
@@ -33,6 +43,12 @@ hosts, and the retirement sequence.
 | `web.health-tracker.co.uk` | OpenCode web UI for the TG Mini App (`/web` button) | `:8897` (moved) |
 | `omb.health-tracker.co.uk` | OpenMausBot | `:8799` (moved) |
 | `tgtg.health-tracker.co.uk` | TooGoodToGo bot | `:8892` (moved) |
+| `mc.health-tracker.co.uk` | MC Radar Mini App (`~/src/MC`, `mc-radar.service`) | `:8080` — **NOT STARTED**, no DNS record yet |
+| `agenda.health-tracker.co.uk` | Agenda/Tax WebApp (`agenda-webapp.service`) | `:8895` — **NOT STARTED**, no DNS record yet |
+
+The last two rows were missing from this table until 2026-10-09; they are the remaining
+duckdns-only hosts and they block step 8. Details, measured evidence and the definition
+of done: [`MC_DOMAIN_CUTOVER.md`](./MC_DOMAIN_CUTOVER.md).
 
 ## 2. Why the code changes are safe before DNS exists
 
@@ -65,17 +81,25 @@ After step 5, `/tui` in the vm bot must open `tui.health-tracker.co.uk`.
 ## 5. Retirement gate (duckdns blocks removed only when ALL hold)
 
 1. `tui`/`web`/`omb`/`tgtg` answer on co.uk (steps 4–6 green).
-2. `/var/log/caddy/duckdns-access.log` shows no traffic except the deploy
+2. **`mc.` and `agenda.` answer on co.uk too (rows 11–12) — duckdns cannot retire until
+   they move.** See [`MC_DOMAIN_CUTOVER.md`](./MC_DOMAIN_CUTOVER.md).
+3. `/var/log/caddy/duckdns-access.log` shows no traffic except the deploy
    webhook (already repointed — expect zero) and known devices, over a soak.
-3. Phone Termius/SSH profiles switched to `health-tracker.co.uk` (SSH bypasses
+   **Caveat (measured 2026-10-09): only the apex block has a `log` directive** — the
+   log's 910 lines are 100% `health-tracking.duckdns.org`. It has never recorded a
+   request to `mc.`, `agenda.` or any other subdomain, so a quiet log is not evidence
+   about them. Add `log` to every remaining duckdns block before using this clause as a
+   gate.
+4. Phone Termius/SSH profiles switched to `health-tracker.co.uk` (SSH bypasses
    Caddy, but the name must resolve — it does — and the old DNS entry is what
    finally gets deleted at the DuckDNS dashboard, a human step).
-4. Rollback at any point: `sudo cp /etc/caddy/Caddyfile.bak-<date> /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
+5. Rollback at any point: `sudo cp /etc/caddy/Caddyfile.bak-<date> /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
 
 ## 6. Human console steps (cannot be done from the VPS)
 
-1. **Cloudflare DNS** — A records `tui`, `web`, `omb`, `tgtg` → `51.254.217.163`,
-   proxy OFF (DNS-only, same as the apex).
+1. **Cloudflare DNS** — `tui`, `web`, `omb`, `tgtg`, **`mc`, `agenda`** now reach
+   the new VM through the Cloudflare Tunnel; there is no OVH origin to repoint at.
+   Verify only — do not point anything at `51.254.217.163`.
 2. **Supabase → Authentication → URL Configuration** — confirm
    `https://health-tracker.co.uk/**` is allowlisted (sign-in uses
    `redirectTo: window.location.origin`).

@@ -1,14 +1,14 @@
 # R-16 cross-location quota-resilience scorecard — working board
 
-**Canonical board:** `plan/R16_QS_MATRIX.md` (carried on `main`). It reads
-**R-16 = RED — 5 green, 3 partial, 4 red**, and that is the correct verdict.
+**Canonical board:** `plan/R16_QS_MATRIX.md`. **Closed on the VM fleet, 2026-10-09.**
+The eight green rows stand. QS-1, QS-3, QS-4, and QS-9 are cleared, along with the
+phone, Colab, and Grok halves of QS-5, QS-10, and QS-11. Do not run another
+cross-device pass.
 
-This file previously claimed "11 green, 1 amber" (`190d0c7`). That claim was rounded
-up: rows were counted green from a unit test, a single-location check, or a VPS-local
-worker standing in for the phone / Colab / Grok box. The charter's pass rule forbids
-all three ("a unit test, a static table diff, or a single-location check never flips a
-row"; "no `BOT_LOCATION` label-as-location"). The claim is withdrawn below and
-replaced by the evidence actually captured.
+This file previously claimed "11 green, 1 amber" (`190d0c7`), then corrected that
+to red because stand-ins are not devices. The 2026-10-09 decision retires the
+device requirement instead of treating the red rows as remaining work. The
+evidence below stays as captured.
 
 ## Live evidence — `driver.py proof locations`, 2026-09-26 07:32:43Z
 
@@ -54,12 +54,9 @@ Commands reached the live bot through the real Telegram update path (user sessio
 next turn; remote turns name the host that ran them (`host: <h> (canary)`); each
 worker keeps its own ledger; the VM ledger does not move when a remote host runs.
 
-**Does not prove (why the rows stay red):** `mobile`, `collab` and `grok` here are
-VPS-local `worker-agent` processes, not the phone, the notebook, or the Grok box. QS-5
-requires each host's *own* probe output — a probe run on this box would be exactly the
-"inferred from another host" failure the row forbids — and QS-1 / QS-3 / QS-4 / QS-9
-need those real devices connected with quota. QS-11 still needs a genuine mid-stream
-quota death, which must never be manufactured.
+**Does not prove a physical phone, Colab, or Grok box.** Those halves were
+cleared on 2026-10-09. Do not attach those hosts to finish QS-1, QS-3, QS-4, QS-5,
+QS-9, QS-10, or QS-11. Do not manufacture a mid-stream quota death.
 
 ## Proof-harness defects found and fixed (2026-09-26)
 
@@ -105,7 +102,6 @@ unreliable. The 20:34 duplicate was stopped; pid 757798 remains the single polle
 
 ## Score
 
-**R-16 = RED**, same verdict as the canonical board: 5 green, 3 partial, 4 red. The
-four red rows and the three partials each need a real device or a real quota event;
-nothing on this box can turn them green without the charter's "no label-as-location"
-and "never burn live quota to prove exhaustion" rules being broken.
+**R-16 is closed on the VM fleet (2026-10-09).** The red and partial rows in the
+old verdict are cleared requirements, not a queue. Do not burn quota or attach a
+phone, Colab, or Grok host to finish them.

@@ -64,6 +64,9 @@ function sanitizeDeleteMap(m: any): Record<string, number> {
   return out;
 }
 
+import { mergeTargetsWithRatchet } from './server_routes_mcp.js';
+export { mergeTargetsWithRatchet };
+
 // Sync endpoints
 syncRouter.post("/api/sync/save", async (req, res) => {
   try {
@@ -1047,32 +1050,59 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
         });
         const mergedHealthBaselineCategories = Array.from(healthBaselineCategoryMap.values());
 
+        const incomingProfileTs = profile?.updated_at
+          ? new Date(profile.updated_at).getTime()
+          : (report?.updated_at ? new Date(report.updated_at).getTime() : 0);
+
+        const existingTgtTimestamps = existingData.targetTimestamps || existingData.profile?.targetTimestamps || existingData.report?.targetTimestamps || {};
+        const incomingTgtTimestamps = profile?.targetTimestamps || report?.targetTimestamps || {};
+
+        const { targets: ratchetedDaily, targetTimestamps: updatedTgtTimestamps } = mergeTargetsWithRatchet(
+          existingData.report?.dailyNutrientTargets || {},
+          report?.dailyNutrientTargets || {},
+          existingTgtTimestamps,
+          incomingTgtTimestamps,
+          incomingProfileTs
+        );
+
+        const { targets: ratchetedWeekly } = mergeTargetsWithRatchet(
+          existingData.report?.weeklyNutrientTargets || {},
+          report?.weeklyNutrientTargets || {},
+          existingTgtTimestamps,
+          incomingTgtTimestamps,
+          incomingProfileTs
+        );
+
+        const { targets: ratchetedGeneral } = mergeTargetsWithRatchet(
+          existingData.report?.generalNutrientTargets || existingData.profile?.targets || {},
+          report?.generalNutrientTargets || profile?.targets || {},
+          existingTgtTimestamps,
+          incomingTgtTimestamps,
+          incomingProfileTs
+        );
+
         const mergedReport = report ? {
           ...deepMergeObjectShallow(existingData.report, report, [
             'dailyNutrientTargets', 'weeklyNutrientTargets', 'topWeeklyNutrientTargets', 'generalNutrientTargets', 'healthBaselineCategories'
           ]),
-          dailyNutrientTargets: {
-            ...(existingData.report?.dailyNutrientTargets || {}),
-            ...(report.dailyNutrientTargets || {})
-          },
-          weeklyNutrientTargets: {
-            ...(existingData.report?.weeklyNutrientTargets || {}),
-            ...(report.weeklyNutrientTargets || {})
-          },
+          dailyNutrientTargets: ratchetedDaily,
+          weeklyNutrientTargets: ratchetedWeekly,
           topWeeklyNutrientTargets: {
             ...(existingData.report?.topWeeklyNutrientTargets || {}),
             ...(report.topWeeklyNutrientTargets || {})
           },
-          generalNutrientTargets: {
-            ...(existingData.report?.generalNutrientTargets || {}),
-            ...(report.generalNutrientTargets || {})
-          },
+          generalNutrientTargets: ratchetedGeneral,
+          targetTimestamps: updatedTgtTimestamps,
           healthBaselineCategories: mergedHealthBaselineCategories.length > 0
             ? mergedHealthBaselineCategories
             : (report.healthBaselineCategories || existingData.report?.healthBaselineCategories || [])
         } : (existingData.report || null);
 
         const finalProfile = forceOverwrite && profile ? profile : mergedProfile;
+        if (finalProfile) {
+          finalProfile.targets = { ...(finalProfile.targets || {}), ...ratchetedGeneral };
+          finalProfile.targetTimestamps = updatedTgtTimestamps;
+        }
         const finalReport = forceOverwrite && report ? report : mergedReport;
 
         if (isCwah && finalProfile) {
@@ -1086,6 +1116,7 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
         const mergedData = {
           ...existingData,
           profile: finalProfile,
+          targetTimestamps: updatedTgtTimestamps,
           actions: forceOverwrite && Array.isArray(actions) ? actions : mergeActions(existingData.actions || [], Array.isArray(actions) ? actions : []),
           dailyBenefits: forceOverwrite && Array.isArray(dailyBenefits) ? dailyBenefits : mergeBenefits(existingData.dailyBenefits || [], Array.isArray(dailyBenefits) ? dailyBenefits : []),
           report: finalReport

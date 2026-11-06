@@ -1,6 +1,6 @@
 ---
 id: PROGRESS-SURFACES-1
-status: nodes-done
+status: closed
 class: L
 edit_mode: patch
 skill: builder
@@ -28,15 +28,11 @@ gate:
 
 # PROGRESS-SURFACES-1 — make the two live surfaces tell one story
 
-## Status: NODES 1, 2 AND THE CODE FOR 3 ARE SHIPPED. Only the Node 3 DECISION is open.
+## Status: CLOSED 2026-10-09. Leave `progressMode` as `gist`.
 
 Nodes 1 and 2 landed (`agent/progress-surfaces`, `30ccf346`). Node 3 shipped as
-a **capability defaulting to off** — `progress.progressMode: 'gist'`. Flipping it
-to `'phase'` is one line of config in `bots/registry.json` and no code edit, so
-the decision is still genuinely the human's. Nothing about the product's
-behaviour has changed.
-
-**The decision:** set `progress.progressMode = 'phase'` per bot, or leave `gist`.
+`progress.progressMode: 'gist'`. On 2026-10-09 the owner left it there. Do not
+set `'phase'`.
 
 ## Why this packet exists
 
@@ -135,14 +131,11 @@ surface:
 - 20-second silent gaps are a real problem, but the fix is a truthful status
   line, not the monologue.
 
-**The options, for whoever decides:**
+**Decided 2026-10-09: keep the gist.** Do not set `progress.progressMode` to `'phase'`.
 
-1. **Phase labels from tool lifecycle** (recommended, and now implemented).
-   Set `progress.progressMode: 'phase'` per bot. True by construction, cannot
-   contradict the answer. tmux keeps full verbatim reasoning.
-2. **Keep the gist** (current default). No change.
-3. **Hide entirely** — not implemented; `progressMode: 'off'` would be the
-   shape if chosen.
+1. Phase labels exist in code and stay unwired.
+2. **Keep the gist.** This is the decision.
+3. Hide entirely was not chosen. `progressMode: 'off'` is not implemented.
 
 **Constraint whatever is chosen:** style it so it cannot be mistaken for the
 answer (lower contrast, subordinate placement), and do **not** put it in an

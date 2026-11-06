@@ -436,6 +436,34 @@ export default function TaskPlaceholderCard({
 
   const isEditMode = isEditJob(job);
 
+  // Self-heal: a still-uploading job past the 3-min red line requeues itself
+  // once per attempt (same update as the manual Retry button). Never fires for
+  // awaiting_user / succeeded / degraded-diet; bounded by maxAttempts.
+  const autoRetriedAttemptRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!elapsedIsLong) return;
+    if (job.status === 'awaiting_user' || effectiveStatus === 'awaiting_user') return;
+    if (effectiveStatus !== 'queued' && effectiveStatus !== 'running' && effectiveStatus !== 'processing') return;
+    if (hasDegradedDietStage(job)) return;
+    if (!/uploading|keep this tab|connection delayed|retrying submit/i.test(String(job.statusMessage || ''))) return;
+    const attempt = job.attemptCount || 1;
+    if (attempt >= (job.maxAttempts || 3)) return;
+    if (autoRetriedAttemptRef.current === attempt) return;
+    autoRetriedAttemptRef.current = attempt;
+    const nextAttempt = attempt + 1;
+    JobStore.updateJob(job.id, {
+      status: 'queued',
+      attemptCount: nextAttempt,
+      retryNotBefore: undefined,
+      error: undefined,
+      clientSubmitPending: false,
+      statusMessage: (t.retryingAnalysisAttempt
+        ? t.retryingAnalysisAttempt.replace('{n}', String(nextAttempt))
+        : `Retrying analysis (Attempt ${nextAttempt})...`),
+    } as any);
+    JobQueueRunner.wake();
+  }, [elapsedIsLong, effectiveStatus, job.id, job.status, job.statusMessage, job.attemptCount]);
+
   const getStatusLabel = () => {
     const queue = JobStore.getAllJobs().filter(j => j.status === 'queued' || j.status === 'running');
     const myIndex = queue.findIndex(j => j.id === job.id);

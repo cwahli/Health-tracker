@@ -14,6 +14,7 @@ import { hasBmiPendingAlert, getProfileFingerprint } from '../utils/biomarkers';
 import type { UserProfile } from '../types';
 import AppTabs from './AppTabs';
 import AppModals from './AppModals';
+import VoiceReceptionistFab from './VoiceReceptionistFab';
 
 import type { AppViewProps } from './AppViewProps';
 export default function AppShell(p: AppViewProps) {
@@ -185,6 +186,8 @@ export default function AppShell(p: AppViewProps) {
     val,
     values
   } = p;
+  // Login vs signup mode of the auth screen (logged-out voice help).
+  const [authMode, setAuthMode] = React.useState<'login' | 'signup'>('login');
 
   if (isAuthChecking) {
     return (
@@ -197,7 +200,19 @@ export default function AppShell(p: AppViewProps) {
     );
   }
   if (!profile) {
-    return <AuthScreen onLogin={handleLogin} />;
+    return (
+      <div className="relative min-h-screen bg-theme-bg text-theme-text font-sans">
+        <AuthScreen onLogin={handleLogin} onAuthModeChange={setAuthMode} />
+        <VoiceReceptionistFab
+          profile={null}
+          setProfile={setProfile}
+          saveAndSync={saveAndSync}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          authMode={authMode}
+        />
+      </div>
+    );
   }
   const isMedicalTabFAB = ['medical', 'insights'].includes(activeTab);
   return (
@@ -375,6 +390,43 @@ export default function AppShell(p: AppViewProps) {
         language={profile?.language || "en"}
         onPlusClick={() => setIsFloatingOpen(!isFloatingOpen)}
         isFloatingOpen={isFloatingOpen}
+      />
+
+      <VoiceReceptionistFab
+        profile={profile}
+        setProfile={setProfile}
+        saveAndSync={saveAndSync}
+        foodLogs={foodLogs}
+        biomarkers={biomarkers}
+        biomarkerHistory={biomarkerHistory}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onLogMeal={() => {
+          const jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          JobStore.createJob({
+            id: jobId,
+            kind: 'food_log',
+            lockedModeFamily: 'A',
+            status: 'draft',
+          });
+          setActiveJobId(jobId);
+        }}
+        onCompareMeal={() => {
+          const jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          JobStore.createJob({
+            id: jobId,
+            kind: 'food_compare',
+            lockedModeFamily: 'D',
+            status: 'draft',
+          });
+          setActiveJobId(jobId);
+        }}
+        onOpenMedical={() => {
+          setIsMedicalChatOpen(true);
+        }}
+        actions={actions}
+        dailyBenefits={dailyBenefits}
+        report={report}
       />
 
       <AppModals {...p} />

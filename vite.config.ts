@@ -33,6 +33,7 @@ export default defineConfig(() => {
         input: {
           main: path.resolve(__dirname, 'index.html'),
           bugs: path.resolve(__dirname, 'bugs.html'),
+          app: path.resolve(__dirname, 'app.html'),
         },
         output: {
           manualChunks(id) {

@@ -97,8 +97,6 @@ export const initializeFetchInterceptor = () => {
             label = 'Food Nutrition Agent';
           } else if (url.includes('/food-idea')) {
             label = 'Food Idea Agent';
-          } else if (url.includes('/daily-recommendation-chat')) {
-            label = 'Daily Recommendation Agent';
           } else if (url.includes('/health-baseline-analyze')) {
             label = 'Health Coach';
           } else if (url.includes('/medical-analyze')) {

@@ -1,0 +1,16 @@
+{
+  "slug": "biomarker-until-d1",
+  "node": "builder-start",
+  "at": "2026-10-28T10:27:57.670Z",
+  "git": {
+    "head": "532706e4dcb1c0c9e4e1b328890b1f2261a74d57",
+    "stashCommit": null
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/biomarker-until-d1.md"
+  ]
+}

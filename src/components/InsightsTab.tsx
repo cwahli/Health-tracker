@@ -2,7 +2,7 @@ import { toYYYYMMDD } from "../utils/dateUtils";
 import React, { useState, useEffect } from 'react';
 import { UserProfile, FoodLog, RecommendationReport } from '../types';
 import { translations } from '../utils/translations';
-import { displayCategoryLabel, displayEthnicityOption, interpolate } from '../utils/i18n';
+import { displayCategoryLabel, displayEthnicityOption, interpolate, pickPlural } from '../utils/i18n';
 import { 
   Brain, Sparkles, AlertCircle, TrendingDown, BookOpen, Clock, Heart, 
   CheckCircle, HelpCircle, Loader, ShieldCheck, Database, Check, X, ArrowRight, Activity, Send, ChevronDown, ChevronUp, Trash2, Lock, Archive, Search, Stethoscope
@@ -505,9 +505,8 @@ export default function InsightsTab({
         customDataReviewBatchKeys,
         setCustomDataReviewBatchKeys,
         setShowCustomDataReviewBatchModal,
-        onOpenDictionary: (key: string) => {
-          setDictionaryPreFillKey(key);
-          setShowDictionaryModal(true);
+        onOpenDictionary: (_key: string) => {
+          // The dictionary modal is gone. Callers keep the callback and open nothing.
         },
         handleApproveBatchStep2
       });
@@ -1383,7 +1382,7 @@ export default function InsightsTab({
       id: 'health_baseline',
       title: t.healthCoach,
       agentType: 'health_baseline',
-      description: t.stepHealthCoachDesc,
+      description: `${t.stepHealthCoachDesc} ${t.stepTestPlannerDesc}`,
       valueProposition: t.stepHealthCoachValue
     },
     {
@@ -1400,7 +1399,7 @@ export default function InsightsTab({
       description: t.stepLiteratureDesc,
       valueProposition: t.stepLiteratureValue
     }
-  ];
+  ].filter((step) => step.id === 'add_health_data' || step.id === 'health_baseline' || step.id === 'agent7');
 
   const getStepStatus = (index: number): 'Not ready' | 'To do' | 'To review' | 'Done' => {
     const step = steps[index];
@@ -1429,8 +1428,9 @@ export default function InsightsTab({
 
     // Gating check: previous required steps must be Done
     const isProjectOrInsight = step.agentType === 'agent4' || step.agentType === 'agent7';
+    const onDemand = step.id === 'health_baseline' || step.id === 'agent7';
 
-    if (!isAdminMode || !isProjectOrInsight) {
+    if (!onDemand && (!isAdminMode || !isProjectOrInsight)) {
       for (let j = 0; j < index; j++) {
         if (j === 0) {
           // Demographics are optional for gating subsequent analytical agents
@@ -1505,7 +1505,10 @@ export default function InsightsTab({
         } else if (Array.isArray(latestAnalysis.result)) {
           count = latestAnalysis.result.length;
         }
-        return interpolate(t.biomarkersExtractedStatus, { count: count || 5, recWord });
+        return interpolate(
+          pickPlural(t, profile.language, count || 5, 'biomarkersExtractedStatusOne', 'biomarkersExtractedStatus'),
+          { count: count || 5, recWord },
+        );
       }
       case 'health_baseline':
         return interpolate(t.precisionDietGenerated, { recWord });
@@ -3049,7 +3052,7 @@ export default function InsightsTab({
           </div>
         </div>
       )}
-      {showDictionaryModal && (
+      {false && showDictionaryModal && (
         <React.Suspense fallback={null}>
         <BiomarkerDictionaryModal
           profile={profile?.email === 'demo@healthcockpit.com' ? { ...profile, agentAnalyses: [] } : profile}

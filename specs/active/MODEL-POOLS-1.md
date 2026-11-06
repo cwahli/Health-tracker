@@ -65,7 +65,7 @@ gate:
 
 # Packet: model pools — three pickers replace `/freemodel`
 
-Agent fills this. Human replies: go | stop | one comment.
+**Closed 2026-10-09.** The code is on main. L18 is cleared. The Cloudflare lane stays off. Do not execute this packet.
 
 ## Journey
 
@@ -369,13 +369,9 @@ the tool as a prompt. So deleting the name outright would turn a typed
    this ID (the tier law text keeps its meaning, with the three names in place of one).
    *Done when:* `grep -rn "freemodel" plan/ROADMAP.md` shows only the history rows and
    the hidden-name note.
-7. **Live proof per location (L18).** On the VM and on the phone, separately:
-   `/model_light_free` → populated light keyboard; tap one; drive a quota hit and
-   read the switch line — it must land on a light lane, or refuse with the light
-   reset. Then `/model_free` and `/model_go` the same way. Screenshots per proof
-   point into Drive "Work done".
-   *Done when:* each pool has a populated capture and one real quota-hit line that
-   did not cross pools.
+7. **Live proof per location (L18). CLEARED 2026-10-09.** Do not run the VM
+   or phone pass. The Cloudflare lane stays off. The code steps above are the
+   close.
 8. **Rollout order** (see Rollout) and the handover bullet.
 
 ## Test plan
@@ -499,7 +495,7 @@ pool rendering only its own rows, and the empty pool are all pinned in
   `/model_free`: the step immediately after it taps the Freebuff button, which is
   a tier-`null` row and therefore renders on the light keyboard only.
 
-**Live proof is NOT claimed.** No L18 pass has been run; Plan step 7 stays open.
+**L18 was cleared on 2026-10-09.** Do not run it. The Cloudflare lane stays off.
 Pre-existing reds, measured on pristine `398389f3` and neither re-pinned nor
 deleted: `assert-allowance-walk` 63/1 (the `planeChoice.models` wiring repair
 owned by #587) and `assert-setup-gaps` 57/6 (this box has no `/home/ubuntu`

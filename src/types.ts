@@ -86,6 +86,9 @@ export interface UserProfile {
   fontSizeSubtitleSmall?: string;
   fontSizeKeyMetric?: string;
   fontSizeXS?: string;
+  /** Global proportional text scale (0.8–1.3, default 1.1): multiplies every
+   *  dynamic font size so the whole site grows or shrinks together. */
+  fontScale?: number;
   fontFamily?: string;
   fontMono?: string;
   marginScale?: 'compact' | 'normal' | 'relaxed';
@@ -180,6 +183,18 @@ export interface UserProfile {
   notUsedBiomarkers?: Record<string, { flaggedAt: number }>;
   deletedNotUsedBiomarkerKeys?: Record<string, number>;
   notUsedInMedicalHistory?: Record<string, { flaggedAt: number }>;
+  /** Ongoing symptom diaries. Cells are addressed by column id. Not a D1 biomarker_logs row. */
+  symptomDiaries?: Array<{
+    id: string;
+    columns: Array<{ id: string; label: string; retiredAt: string | null }>;
+    events: Array<{
+      diaryId: string;
+      observedAt: string;
+      movementNumber: number | null;
+      clientKey: string | null;
+      cells: Array<{ columnId: string; value: string | number | null }>;
+    }>;
+  }>;
   bmiAutoLogged?: boolean;
   pendingObservations?: PendingObservation[];
   approved_agent1_batches?: { [key: string]: boolean };

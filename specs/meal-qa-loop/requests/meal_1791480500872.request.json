@@ -1,0 +1,20 @@
+{
+  "schema": "meal-audit-request/1",
+  "mealId": "meal_1791480500872",
+  "name": "Apple, Mandarin, and 2 other dishes",
+  "provenance": "debug_payload",
+  "photos": [
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791480500872/photos/sha256_da85168e6aa2f5910262a8ead17af33dd192b5135f77efa546521283277d38db.jpg"
+  ],
+  "skeleton": "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791480500872/flow_skeleton.json",
+  "requestedAt": "2026-10-08T18:17:04.877Z",
+  "requestedBy": "meal-audit-loop",
+  "status": "pending",
+  "instructions": [
+    "Audit this meal and produce a ground-truth bundle.",
+    "For each dish: dishName, weightGrams, boundingBox2D (0-1000, required because photos exist), and all 32 nutrient keys.",
+    "Weight must come from the catalog (scripts/meal-audit-assist.mjs api:<query>) or a scale, never an eyeball estimate.",
+    "Run scripts/generate-meal-result.mjs to write meal_result.json, then report the bundle path with `complete`.",
+    "If the catalog cannot source a nutrient, the audit is INCOMPLETE: say so rather than filling zeros."
+  ]
+}

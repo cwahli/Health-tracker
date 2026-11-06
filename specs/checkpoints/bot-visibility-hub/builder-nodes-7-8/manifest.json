@@ -1,0 +1,16 @@
+{
+  "slug": "bot-visibility-hub",
+  "node": "builder-nodes-7-8",
+  "at": "2026-10-15T15:21:31.894Z",
+  "git": {
+    "head": "c5983a8daa35161e82a85253fdfb002fea1d518a",
+    "stashCommit": "9c7efb0558faf27874a402b15d954d5a46757749"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/bot-visibility-hub.md"
+  ]
+}

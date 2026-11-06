@@ -286,6 +286,13 @@ export function useAppProfile(options: UseAppProfileOptions): UseAppProfileRetur
         checkForDbChangesRef.current!(uid, true).catch(err => console.warn("[Auth] Background sync error:", err)).finally(() => {
           setIsInitialDataLoading(false);
         });
+      } else if (!(parsedLocal && typeof parsedLocal.totalFoodsCount === 'number' && parsedLocal.totalFoodsCount > 0)) {
+        // Already synced this session, but the stored bundle carries no meal
+        // total (poisoned save) — a remount would pin history to a few pages.
+        // One background pull re-learns it; the gate resumes skipping after.
+        checkForDbChangesRef.current!(uid, false).catch(err => console.warn("[Auth] Background sync error:", err)).finally(() => {
+          setIsInitialDataLoading(false);
+        });
       } else {
         setSyncState('synced');
         setIsInitialDataLoading(false);

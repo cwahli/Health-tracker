@@ -770,7 +770,10 @@ r2Router.post(['/api/r2/upload-debug', '/api/debug/upload'], async (req, res) =>
 
 r2Router.post('/api/r2/upload-job-result', async (req, res) => {
   try {
-    const { jobId, payload } = req.body;
+    // `payload` is the current field; `result` is accepted so a browser or
+    // service build from before the rename keeps uploading during a deploy.
+    const { jobId, payload: bodyPayload, result: legacyResult } = req.body || {};
+    const payload = bodyPayload ?? legacyResult;
     if (!jobId || !payload) {
       return res.status(400).json({ error: 'Missing jobId or payload' });
     }

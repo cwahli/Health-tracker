@@ -1,7 +1,7 @@
 export interface LLMModel {
   id: string;
   name: string;
-  provider: 'Google' | 'Anthropic' | 'OpenAI';
+  provider: 'Google' | 'Anthropic' | 'OpenAI' | 'OpenCode Go';
   description: string;
   isDefault?: boolean;
 }
@@ -37,5 +37,17 @@ export const AVAILABLE_LLMS: LLMModel[] = [
     name: 'Gemini 2.5 Pro',
     provider: 'Google',
     description: 'Deep clinical reasoning and advanced multimodal evaluation.'
+  },
+  {
+    id: 'opencode-go/deepseek-v4.1-flash',
+    name: 'DeepSeek V4.1 Flash (Go)',
+    provider: 'OpenCode Go',
+    description: 'OpenCode Go subscription. Native vision, OpenAI-compatible. Burns Go quota.'
+  },
+  {
+    id: 'opencode-go/muse-spark-1.3-contributor',
+    name: 'Muse Spark 1.3 (Go)',
+    provider: 'OpenCode Go',
+    description: 'OpenCode Go subscription. Responses API. Burns Go quota.'
   }
 ];

@@ -7,12 +7,18 @@ Communicates with your mobile Telegram app:
 - Multi-Project: /project <url> switches repository inside Colab
 - Model Switching: /switch qwen-3.8 or /switch muse-spark-1.3
 - Auto-shutdown: Shuts down after 20 minutes idle to preserve your 200 compute units
+
+Commits (main goes red without this): every `git commit` you make MUST end with one trailer line
+  Author: <model and version> (<level>) Colab
+e.g. Author: Grok 4.7 (High) Colab. `git pull --rebase origin main` before every push; prefer opening
+a PR over pushing main directly. Landed history is never rewritten, so get it right at commit time.
 """
 
 import os
 import sys
 import time
 import json
+import shutil
 import subprocess
 import requests
 
@@ -57,11 +63,12 @@ except Exception:
 ALLOWED_USER_ID = int(os.environ.get("COLLAB_CHAT_ID", "6218257274"))
 DEFAULT_REPO = "https://github.com/cwahli/Health-tracker.git"
 REPO_DIR = os.environ.get("REPO_DIR", "/content/Health-tracker")
-IDLE_TIMEOUT_MINUTES = 20
+IDLE_TIMEOUT_MINUTES = 45
 
 # Active engine state inside Colab
 CURRENT_ENGINE = "muse-spark-1.3"  # or "qwen-3.8"
 LAST_ACTIVE_TIME = time.time()
+OPENCODE_EXTRA_ARGS = ""  # e.g. "--continue"; set by the Grok chat relay (grok_queue.py) for its turns
 
 def tg_send(chat_id, text):
     if not TELEGRAM_BOT_TOKEN or "YOUR_TELEGRAM" in TELEGRAM_BOT_TOKEN:
@@ -85,12 +92,26 @@ def format_repo_url(url):
         return url.replace("https://", f"https://{GITHUB_TOKEN}@")
     return url
 
+def _run_bounded(cmd, timeout):
+    """Run a shell command with no stdin and a hard timeout; never block, never raise."""
+    try:
+        subprocess.run(cmd, shell=True, stdin=subprocess.DEVNULL, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"  (timed out after {timeout}s: {cmd[:60]})")
+    except Exception as e:
+        print(f"  ({type(e).__name__}: {cmd[:60]})")
+
 def setup_environment():
+    """Idempotent and non-blocking: skip installs when OpenCode is already present."""
     print("Checking development tools...")
-    subprocess.run("curl -fsSL https://opencode.ai/install | bash || true", shell=True)
-    subprocess.run("npm install -g opencode-ai 2>/dev/null || true", shell=True)
-    subprocess.run("git config --global user.name cwahli", shell=True)
-    subprocess.run("git config --global user.email cwahli@users.noreply.github.com", shell=True)
+    os.environ["PATH"] = os.environ.get("PATH", "") + ":/tools/node/bin:/root/.opencode/bin"
+    if shutil.which("opencode"):
+        print("  OpenCode CLI present, skipping install.")
+    else:
+        _run_bounded("curl -fsSL --max-time 90 https://opencode.ai/install | bash", 180)
+        if not shutil.which("opencode"):
+            _run_bounded("npm install -g opencode-ai 2>/dev/null", 240)
+    _run_bounded("git config --global user.name cwahli && git config --global user.email cwahli@users.noreply.github.com", 15)
     print("Environment ready.")
 
 def run_git_sync(repo_url=DEFAULT_REPO):
@@ -130,7 +151,7 @@ def run_agent_turn(chat_id, user_prompt):
             model_id = CURRENT_ENGINE
 
         # Step 3: Run OpenCode agentic loop
-        cmd = f"opencode run --auto --dir {REPO_DIR} -m {model_id} {json.dumps(user_prompt)}"
+        cmd = f"opencode run --auto --dir {REPO_DIR} -m {model_id} {OPENCODE_EXTRA_ARGS} {json.dumps(user_prompt)}"
         res = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=REPO_DIR, timeout=600)
         output = (res.stdout or "").strip()
         if not output and res.stderr:
@@ -237,12 +258,40 @@ def handle_telegram_command(chat_id, text):
     # ANY natural text goes straight to the autonomous AI Agent!
     run_agent_turn(chat_id, t)
 
+def _worker_busy(fresh_s=180):
+    """Queue jobs, opencode/ollama/bake processes, fresh job heartbeats or GPU load count as activity."""
+    import glob
+    now = time.time()
+    try:
+        if subprocess.run("pgrep -f 'opencode run|ollama runner|bake.sh' >/dev/null", shell=True).returncode == 0:
+            return True
+    except Exception:
+        pass
+    home = os.path.expanduser("~")
+    pats = ["/home/colabq/queue/running/*", f"{home}/.grokq.active", f"{home}/.grokq.run/*",
+            f"{home}/jobs/*/run.log", f"{home}/jobs/*/REPORT.md"]
+    for pat in pats:
+        for f in glob.glob(pat):
+            try:
+                if now - os.path.getmtime(f) < fresh_s:
+                    return True
+            except OSError:
+                pass
+    try:
+        u = subprocess.run("nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits",
+                           shell=True, capture_output=True, text=True, timeout=10).stdout.strip()
+        return bool(u) and int(u.splitlines()[0]) > 5
+    except Exception:
+        return False
+
 def polling_loop():
     global LAST_ACTIVE_TIME
     offset = 0
     print("\nColab Telegram polling loop started. Waiting for Telegram commands...")
     
     while True:
+        if _worker_busy():
+            LAST_ACTIVE_TIME = time.time()
         idle_min = (time.time() - LAST_ACTIVE_TIME) / 60
         if idle_min >= IDLE_TIMEOUT_MINUTES:
             gpu_state = get_gpu_info()
@@ -314,4 +363,9 @@ if __name__ == "__main__":
     print("🎉 Colab AI Agent is ONLINE and listening for Telegram commands!")
     print("📱 You can now safely minimize Chrome and work from Telegram.")
     print("=" * 60)
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else "/content/Health-tracker/notebooks")
+        import importlib, grok_queue; importlib.reload(grok_queue); grok_queue.start(tg_token=TELEGRAM_BOT_TOKEN, chat_id=ALLOWED_USER_ID)
+    except Exception as e:
+        print(f"• Grok queue not started: {e}")
     polling_loop()

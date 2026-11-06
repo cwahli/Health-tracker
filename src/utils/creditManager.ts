@@ -21,6 +21,8 @@ export interface AgentCreditsState {
 // Default cost configurations (fallback only)
 export const DEFAULT_AGENT_COSTS = {
   'gemini-3.5-flash-lite': 1,
+  'opencode-go/deepseek-v4.1-flash': 2,
+  'opencode-go/muse-spark-1.3-contributor': 3,
   'default': 20
 };
 

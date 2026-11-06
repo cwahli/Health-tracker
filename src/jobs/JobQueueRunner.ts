@@ -70,6 +70,26 @@ class JobQueueRunnerImpl {
       const queue = JobStore.getQueue();
       const now = new Date();
 
+      // Self-heal: bounded client ownership. LogChat owns the POST for one
+      // submit timeout (45s). If it is still clientSubmitPending after that,
+      // the promise is hung/throttled — release to the runner, which resubmits
+      // once from ImageStore. Preserves inFlightTurnAt/currentTurn/attempts.
+      for (const j of queue) {
+        if (j.clientSubmitPending && (j.status === 'queued' || j.status === 'running' || j.status === 'processing')) {
+          const baseMs = typeof j.inFlightTurnAt === 'number'
+            ? j.inFlightTurnAt
+            : new Date(j.updatedAt || j.createdAt || Date.now()).getTime();
+          if (Date.now() - baseMs > 45000) {
+            JobStore.apply({
+              type: 'ServerStatus',
+              id: j.id,
+              clientSubmitPending: false,
+              statusMessage: 'Connection delayed; background runner retrying submit...',
+            } as any);
+          }
+        }
+      }
+
       const jobToRun = queue.find((job) => {
         if (this.inFlightIds.has(job.id)) return false;
         const retryOk = !job.retryNotBefore || new Date(job.retryNotBefore) <= now;

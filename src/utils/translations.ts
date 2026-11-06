@@ -1,5 +1,5 @@
 // Auto-generated durable i18n translations pack (thin aggregator).
-// Source of truth: English (en). Indonesian (id) maintains key parity.
+// Source of truth: English (en). Indonesian (id), French (fr) and Chinese (zh) maintain key parity.
 //
 // Q-11.8 (milestone 8 of Q-11): the dictionaries themselves now live in
 // `src/utils/translations/<lang>.ts` so no single file has to be transferred

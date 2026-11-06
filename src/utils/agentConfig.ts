@@ -1,6 +1,6 @@
 import { ChatMessage } from '../types';
 
-export type AgentType = 'food' | 'medical' | 'food_idea' | 'daily_recommendation' | 'medical_extract' | 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent7' | 'data_review' | 'health_baseline' | 'front_desk' | 'biomarker_review';
+export type AgentType = 'food' | 'medical' | 'food_idea' | 'medical_extract' | 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent7' | 'data_review' | 'health_baseline' | 'front_desk' | 'biomarker_review';
 
 export interface AgentConfig {
   id: AgentType;
@@ -41,15 +41,6 @@ export const AGENT_REGISTRY: Record<AgentType, AgentConfig> = {
     description: 'Suggests recipes and meals tailored to health goals.',
     capabilities: ['recipe_generation', 'meal_planning'],
     welcomeMessage: 'Hello! Do you have any specific food preferences or cravings today? I will need your location to find the best dining options matching your biomarker goals.',
-    rolloutStatus: 'unified',
-  },
-  daily_recommendation: {
-    id: 'daily_recommendation',
-    category: 'insights',
-    displayName: 'Daily Actions Agent',
-    description: 'Generates daily action plans and tracks progress.',
-    capabilities: ['action_planning', 'insight_card_view'],
-    welcomeMessage: 'Hello! I am your AI Health Coach. Let me look at your clinical biomarkers, daily steps, and latest dietary intake to give you a customized, comprehensive health recommendation today.',
     rolloutStatus: 'unified',
   },
   medical_extract: {

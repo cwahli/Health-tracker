@@ -414,6 +414,20 @@ test('the forge door: initData, or loopback, and nothing else', () => {
   assert.equal(authorizeForge({ remoteAddress: '203.0.113.9', registry, env, allowLocal: true }).ok, false);
 });
 
+test('the forge allowlist admits listed chats only (unset = any verified chat)', () => {
+  const registry = registryFixture();
+  const fresh = String(Math.floor(Date.now() / 1000));
+  const good42 = makeInitData({ auth_date: fresh, user: JSON.stringify({ id: 42 }) });
+  const good7 = makeInitData({ auth_date: fresh, user: JSON.stringify({ id: 7 }) });
+  const listed = { VM_BOT_TOKEN: TOKEN, FORGE_ALLOWED_CHAT_IDS: '42' };
+  assert.equal(authorizeForge({ initData: good42, registry, env: listed }).ok, true);
+  const refused = authorizeForge({ initData: good7, registry, env: listed });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.status, 403);
+  // Loopback stays operator-local with or without the list.
+  assert.equal(authorizeForge({ remoteAddress: '127.0.0.1', registry, env: listed, allowLocal: true }).ok, true);
+});
+
 test('the page posts to the one endpoint and carries initData', () => {
   const html = forgePageHtml();
   assert.match(html, /\/api\/forge/);

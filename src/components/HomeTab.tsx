@@ -19,6 +19,8 @@ import { lazyWithRetry } from '../utils/lazyWithRetry';
 
 const LogChat = lazyWithRetry(() => import('./LogChat'));
 import { JobStore } from '../jobs/JobStore';
+import { homeStrip } from '../utils/homeStrip';
+import { confirmedRecordFacts } from '../utils/recordFacts';
 
 const defaultNutrientTargets: { [key: string]: string } = {
   calories: "1800 kcal",
@@ -146,7 +148,6 @@ export default function HomeTab({
   const [reviewingBiomarkerKey, setReviewingBiomarkerKey] = React.useState<string | null>(null);
   const [reviewHistories, setReviewHistories] = React.useState<{[key: string]: ChatMessage[]}>({});
   const [isFoodIdeaChatOpen, setIsFoodIdeaChatOpen] = React.useState(false);
-  const [isDailyRecommendationChatOpen, setIsDailyRecommendationChatOpen] = React.useState(false);
 
   const [jobs, setJobs] = React.useState(() => JobStore.getAllJobs().filter(j => j.kind === 'food_log' || j.kind === 'food_compare' || j.kind === 'medical' || j.kind === 'front_desk'));
   React.useEffect(() => {
@@ -1185,27 +1186,6 @@ export default function HomeTab({
         );
       })()}
 
-      {/* Daily Recommendation */}
-      <div id="primary-action-card" className="p-2">
-        <div className="flex items-center justify-between bg-theme-bg-card p-4 rounded-2xl border border-theme-border shadow-sm">
-          <div className="space-y-1">
-            <h3 className="text-sm font-bold text-theme-text flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-indigo-500" />
-              {t.dailyRecommendation}
-            </h3>
-            <p className="text-xs text-theme-text-secondary">
-              {t.dailyRecommendationDesc}
-            </p>
-          </div>
-          <button
-            onClick={() => setIsDailyRecommendationChatOpen(true)}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer whitespace-nowrap"
-          >
-            {t.whatsUpToday}
-          </button>
-        </div>
-      </div>
-
       {/* Nutrition Allowance Tracker Dashboard (MOVED UP just above Health Status & BMI) */}
       <div id="dashboard-nutrition-targets" className="space-y-4">
         <div className="flex justify-between items-center pb-2 border-b border-theme-border/50">
@@ -1214,6 +1194,15 @@ export default function HomeTab({
               <Heart className="w-4 h-4 text-indigo-600" />
               {t.topTargets}
             </h3>
+            {(() => {
+              const strip = homeStrip({ facts: confirmedRecordFacts(profile) });
+              if (strip.lines.length === 0) return null;
+              return (
+                <ul id="health-record-strip" className="text-[10px] text-slate-500" aria-label={t.recordStrip}>
+                  {strip.lines.map((line) => <li key={line}>{line}</li>)}
+                </ul>
+              );
+            })()}
             {/* Quick Timeframe Switcher */}
             <div className="flex items-center bg-slate-100 dark:bg-slate-800/80 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700/60">
               <button
@@ -1225,7 +1214,13 @@ export default function HomeTab({
                     : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
-                {t.viewTimeframeToday || 'Today'}
+                {(() => {
+                  const parts = String(todayStr || '').split('-');
+                  if (parts.length !== 3) return t.viewTimeframeToday || 'Today';
+                  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                  if (isNaN(d.getTime())) return t.viewTimeframeToday || 'Today';
+                  return d.toLocaleDateString(profile?.language || 'en', { month: 'short', day: 'numeric' });
+                })()}
               </button>
               <button
                 type="button"
@@ -1240,9 +1235,6 @@ export default function HomeTab({
               </button>
             </div>
           </div>
-          <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
-            <Calendar className="w-3 h-3" /> {viewTimeframe === '1' ? todayStr : (t.rolling7Day || 'Rolling 7-Day')}
-          </span>
         </div>
 
         {/* Live progress bars comparing actual todaysTotals vs targets */}
@@ -2344,23 +2336,6 @@ export default function HomeTab({
           />
         )}
 
-        {isDailyRecommendationChatOpen && (
-          <LogChat 
-            type="daily_recommendation"
-            isOpen={isDailyRecommendationChatOpen}
-            onClose={() => setIsDailyRecommendationChatOpen(false)}
-            profile={profile}
-            foodLogs={activeFoodLogs}
-            biomarkers={biomarkers}
-            biomarkerHistory={activeHistory}
-            report={report}
-            actions={actions}
-            googleSteps={googleSteps}
-            selectedModelId={selectedModelId}
-            onChangeModelId={onChangeModelId}
-            autoSendMessage={t.whatsUpTodayAction}
-          />
-        )}
       </React.Suspense>
 
       {/* Flagged Biomarkers & Telemetry Error Management Modal */}

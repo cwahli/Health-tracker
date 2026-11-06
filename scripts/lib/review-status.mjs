@@ -3,7 +3,9 @@
  *
  * Responsibility:
  * 1. Read tab 'current' from the PM spreadsheet and project the rows whose
- *    Status is `review` (set by the agent when work is ready for human eyes).
+ *    Status is `review` (set by the agent when work is ready for human eyes)
+ *    or `Need info` (agent asked a question in the Additional question
+ *    column and is blocked on the owner's answer).
  * 2. Resolve each item's proof screenshots from Drive folder "Work done"
  *    (one subfolder per ticket key, possibly several images).
  * 3. Human verdicts, written back to the sheet through the one Google client
@@ -21,6 +23,8 @@ import { pmSheetId } from './pm-sheet.mjs';
 export const REVIEW_TAB = 'current';
 export const ARCHIVE_TAB = 'archive_done';
 export const REVIEW_STATUS = 'review';
+/** Agent is blocked on the owner: the row carries a question, the human's answer unblocks it. */
+export const NEED_INFO_STATUS = 'need info';
 export const FALLBACK_SHEET_ID = '10oPI9AsHaKpb9xRR8XcTm6JyH1gYyykUFBNqeqg2SM0';
 /** Drive folder "Work done" — one subfolder per ticket key holds proof shots. */
 export const PROOF_DRIVE_FOLDER = '1G7dhvqRy7iOmRg7AfN9a6g8cbIhz14yS';
@@ -41,6 +45,16 @@ let proofFolderCache = { cachedAt: 0, map: new Map() };
 /** True when a Status cell means "awaiting human review". */
 export function isReviewStatus(status) {
   return String(status || '').trim().toLowerCase() === REVIEW_STATUS;
+}
+
+/** True when a Status cell means "agent asked, owner answer owed". */
+export function isNeedInfoStatus(status) {
+  return String(status || '').trim().toLowerCase() === NEED_INFO_STATUS;
+}
+
+/** True for every row the review queue shows: review-ready or awaiting answers. */
+export function isQueueStatus(status) {
+  return isReviewStatus(status) || isNeedInfoStatus(status);
 }
 
 /** Header row is the first of the top five rows containing a `key` cell. */
@@ -78,6 +92,7 @@ export function mapReviewRow(vals, header, rowNumber) {
     proof: get('Completion proof'),
     gate: get('Completion gate'),
     lastActivity: get('last_activity'),
+    question: get('Additional question'),
   };
 }
 
@@ -110,6 +125,7 @@ export function buildArchiveRow(archiveHeader, fields, nowIso) {
     'status': 'Done',
     'completion proof': fields.proof || '',
     'completion gate': fields.gate || '',
+    'additional question': fields.question || '',
     'id': '',
     'key': fields.key || '',
     'kind': '',
@@ -230,7 +246,9 @@ export async function listProofImages(ctx, key, { deps = _deps } = {}) {
 }
 
 /**
- * Every item awaiting human review: Status `review`, with proof images.
+ * Every item awaiting the human: Status `review`, or `Need info` (agent
+ * asked a question in the Additional question column — the owner's answer
+ * unblocks it). Proof images attached as before.
  * No Google identity → empty queue (the gateway still serves the shell).
  */
 export async function getReviewItems({ env = process.env, root = null, refresh = false, deps = _deps } = {}) {
@@ -241,7 +259,7 @@ export async function getReviewItems({ env = process.env, root = null, refresh =
   const items = [];
   for (const { rowNumber, vals } of current.numbered) {
     const item = mapReviewRow(vals, current.header, rowNumber);
-    if (!item.key || !isReviewStatus(item.status)) continue;
+    if (!item.key || !isQueueStatus(item.status)) continue;
     const listed = await listProofImages(ctx, item.key, { deps });
     items.push({
       ...item,
@@ -269,7 +287,7 @@ export async function approveReviewItem(key, { env = process.env, deps = _deps, 
   });
   if (!found) return { ok: false, error: 'item not found on current tab' };
   const fields = mapReviewRow(found.vals, current.header, found.rowNumber);
-  if (!isReviewStatus(fields.status)) return { ok: false, error: `item is ${fields.status || 'not awaiting review'}, not review` };
+  if (!isQueueStatus(fields.status)) return { ok: false, error: `item is ${fields.status || 'not awaiting review'}, not review` };
 
   const nowIso = new Date(now).toISOString();
   const archRes = await deps.readTab(ctx.sheetId, ARCHIVE_TAB, ctx.token, { range: `${ARCHIVE_TAB}!1:1` });
@@ -309,7 +327,7 @@ export async function commentReviewItem(key, text, target, { env = process.env, 
   const found = current.numbered.find(({ vals }) => mapReviewRow(vals, current.header, 0).key === k);
   if (!found) return { ok: false, error: 'item not found on current tab' };
   const fields = mapReviewRow(found.vals, current.header, found.rowNumber);
-  if (!isReviewStatus(fields.status)) return { ok: false, error: `item is ${fields.status || 'not awaiting review'}, not review` };
+  if (!isQueueStatus(fields.status)) return { ok: false, error: `item is ${fields.status || 'not awaiting review'}, not review` };
 
   const colIdx = current.header.indexOf(colName);
   const actIdx = current.header.indexOf('last_activity');
@@ -374,7 +392,7 @@ export async function answerReviewItem(key, payload, { env = process.env, deps =
   const found = current.numbered.find(({ vals }) => mapReviewRow(vals, current.header, 0).key === k);
   if (!found) return { ok: false, error: 'item not found on current tab' };
   const fields = mapReviewRow(found.vals, current.header, found.rowNumber);
-  if (!isReviewStatus(fields.status)) return { ok: false, error: `item is ${fields.status || 'not awaiting review'}, not review` };
+  if (!isQueueStatus(fields.status)) return { ok: false, error: `item is ${fields.status || 'not awaiting review'}, not review` };
 
   const at = new Date(now).toISOString();
   const stamp = formatHumanStamp(now);
@@ -428,8 +446,42 @@ export async function answerReviewItem(key, payload, { env = process.env, deps =
   };
 }
 
-/** Verify a Drive file id belongs to a ticket's proof folder (anti-open-proxy). */
-export async function verifyProofFile(ctx, key, fileId, { deps = _deps } = {}) {
+/**
+ * ❓ Question answer: the owner answers the agent's Additional question
+ * from the review page. The stamped answer is appended to the same cell,
+ * so the Q&A thread stays in one place and the agent reading the row can
+ * continue the work. The gateway fires the answer wake-up afterwards, so
+ * triage re-runs on the newly unblocked row.
+ */
+export async function answerQuestion(key, text, { env = process.env, deps = _deps, now = Date.now() } = {}) {
+  const k = String(key || '').trim();
+  const body = String(text || '').trim();
+  if (!k) return { ok: false, error: 'missing key' };
+  if (!body) return { ok: false, error: 'empty answer' };
+  if (body.length > REVIEW_COMMENT_MAX) return { ok: false, error: `answer over ${REVIEW_COMMENT_MAX} chars` };
+  const ctx = await getReviewContext({ env, deps });
+  if (!ctx.ok) return { ok: false, error: ctx.reason };
+  const current = await readCurrentRows(ctx, { refresh: true, deps });
+  if (!current.ok) return { ok: false, error: current.reason };
+  const found = current.numbered.find(({ vals }) => mapReviewRow(vals, current.header, 0).key === k);
+  if (!found) return { ok: false, error: 'item not found on current tab' };
+  const fields = mapReviewRow(found.vals, current.header, found.rowNumber);
+  if (!isQueueStatus(fields.status)) return { ok: false, error: `item is ${fields.status || 'not awaiting review'}, not review` };
+  const colIdx = current.header.indexOf('additional question');
+  const actIdx = current.header.indexOf('last_activity');
+  if (colIdx < 0) return { ok: false, error: 'column Additional question missing' };
+  const stamped = `${formatHumanStamp(now)} ${body}`;
+  const merged = fields.question ? `${fields.question}\n${stamped}` : stamped;
+  const wrote = await deps.updateValues(ctx.sheetId, `${REVIEW_TAB}!${colLetter(colIdx)}${found.rowNumber}`, [[merged]], ctx.token);
+  if (!wrote.ok) return { ok: false, error: wrote.error || 'answer write failed' };
+  if (actIdx >= 0) {
+    await deps.updateValues(ctx.sheetId, `${REVIEW_TAB}!${colLetter(actIdx)}${found.rowNumber}`, [[formatLastActivity(now)]], ctx.token);
+  }
+  reviewCache = { cachedAt: 0, rows: [] };
+  return { ok: true, key: k, stamped };
+}
+
+/** Verify a Drive file id belongs to a ticket's proof folder (anti-open-proxy). */export async function verifyProofFile(ctx, key, fileId, { deps = _deps } = {}) {
   const listed = await listProofImages(ctx, key, { deps });
   if (!listed.ok) return listed;
   const hit = listed.images.find((im) => im.id === String(fileId));

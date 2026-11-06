@@ -37,6 +37,7 @@ import { buildFoodAnalyzeInstruction, buildModeAReviewInstruction, buildModeAEdi
 import { ensureFoodCatalogSchema, resetFoodCatalogSchemaEnsure } from "./server_food_catalog_schema.js";
 import { ensureD1Schema } from "./server_d1_schema.js";
 import { reconcileIngredientsToComponents } from './server_vision_scout.js';
+import { toJsonSchema } from './src/server/food/server_food_analyze_schema.js';
 import { resolveInternalFood, resolveDishCache, upsertFoodItemCandidate, upsertFoodAlias, upsertDishCacheCandidate, recordFoodObservation, recordSyncEvent, normalizeFoodKey, normalizeDishKey, getCatalogSyncStatus, mergeFoodCatalogItems, quarantineAtwaterFailures, checkAtwaterValidity, getFallbackCategoryProfile } from './server_food_catalog.js';
 import { sanitizeDishTitle, isGroceryBrandSync, isUnofficialOrCompositeDish } from './serverBrandMenu.js';
 import {
@@ -81,6 +82,7 @@ import fs from "fs";
 
 export const SINGLE_STAPLE_RE = /\b(croissant|croissants|baguette|bread|toast|muffin|scone|cookie|cupcake|biscuit|pancake|waffle|pastry|doughnut|donut|bun|roll|brioche)\b/i;
 import path from "path";
+import http from "node:http";
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { submitServerJob, recoverInterruptedServerJobs } from './serverJobs';
 import { biomarkerRouter } from './server_routes_biomarkers.js';
@@ -93,6 +95,10 @@ import { r2Router, getS3Client, CLOUDFLARE_R2_BUCKET_NAME, CLOUDFLARE_R2_PUBLIC_
 import { medicalGeminiRouter } from './server_routes_medical_gemini.js';
 import { foodAnalyzeRouter } from './server_routes_food_analyze.js';
 import { scorecardRouter } from './server_routes_scorecard.js';
+import { whatsappRouter } from './server_whatsapp.js';
+import { mcpAuthRouter } from './server_routes_mcp_auth.js';
+import { mcpRouter } from './server_routes_mcp.js';
+import { setupGeminiLiveWebSocket } from './server_gemini_live_ws.js';
 
 export const BEVERAGE_RAW_PATTERN = /\b(beverage|drink|water|juice|beer|wine|soda|cola|tea|coffee|cappuccino|espresso|latte|mocha|macchiato|boba|smoothie|shake|milk|oat\s*milk|oatmilk|almond\s*milk|almondmilk|soy\s*milk|soymilk|coconut\s*milk|dairy|yogurt|fruit|melon|watermelon|apple|orange|banana|berry|berries|grape|citrus|salad|raw|fresh|broth|soup)\b/i;
 
@@ -1305,12 +1311,14 @@ JSON SCHEMA STRICT REQUIREMENT:
 
 
 const app = express();
+app.set('trust proxy', 1);
 
 // Global CORS & preflight middleware for cross-origin, sandboxed iframes, and local development
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD");
   res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Session-ID, X-Requested-With, Accept, Origin");
+  res.header("Access-Control-Expose-Headers", "WWW-Authenticate, Content-Type, Authorization");
   res.header("Access-Control-Max-Age", "86400");
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
@@ -1320,6 +1328,9 @@ app.use((req, res, next) => {
 
 app.use(compression());
 app.use(express.static(path.join(process.cwd(), 'public')));
+// WhatsApp webhook needs the RAW body for HMAC verification — mount before
+// the JSON parser, path-scoped so nothing else changes shape.
+app.use('/api/auth/whatsapp/webhook', express.raw({ type: 'application/json', limit: '1mb' }));
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 app.use(biomarkerRouter);
@@ -1332,6 +1343,9 @@ app.use(healthConnectRouter);
 app.use(medicalGeminiRouter);
 app.use(foodAnalyzeRouter);
 app.use(scorecardRouter);
+app.use(whatsappRouter);
+app.use(mcpAuthRouter);
+app.use(mcpRouter);
 
 // Nutrient table demo page
 app.get('/nutrient-table', (req, res) => {
@@ -1484,14 +1498,18 @@ app.use((req, res, next) => {
     }
   });
 
-// Robust API key resolver supporting standard GEMINI_API_KEY, Google Cloud GOOGLE_API_KEY, or API_KEY
+// Robust API key resolver supporting standard GEMINI_API_KEY, Google Cloud GOOGLE_API_KEY, or API_KEY.
+// All candidates pass through cleanEnvValue (src/utils/envKey.ts): deploy .env files
+// quote secrets and systemd/dotenv strip the quotes, but any other loader (or a
+// copy-paste with spaces) must never hand a quoted key to Google (Oct-13 lesson).
 export const getGeminiApiKey = (): string => {
+  const multi = (process.env.GEMINI_API_KEYS || '')
+    .split(',')
+    .map((k) => cleanEnvValue(k))
+    .find((k) => k) || '';
   return (
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.API_KEY ||
-    process.env.GEMINI_API_KEYS?.split(',')[0]?.trim() ||
-    ''
+    firstEnvValue(['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'API_KEY']) ||
+    multi
   );
 };
 
@@ -1500,6 +1518,7 @@ export const getGeminiApiKey = (): string => {
 // the awaiting pipeline stage via takeUnifiedUsage (single-flight per stage).
 // (Store lives in src/utils/unifiedUsage.ts — leaf module, no import cycles.)
 import { recordUnifiedUsage, recordUnifiedTiming } from './src/utils/unifiedUsage.js';
+import { cleanEnvValue, firstEnvValue } from './src/utils/envKey.js';
 
 // Initialize Gemini SDK with telemetry header
 export const getGeminiClient = () => {
@@ -1822,6 +1841,275 @@ async function callUnifiedLLMInternal({
     const parsed = parseImageItem(imagePayload);
     if (parsed && parsed.data && parsed.data.length > 0) {
       normalizedImagePayloads.push(parsed);
+    }
+  }
+
+  // 0. OpenCode Go models (subscription gateway, OpenAI-compatible HTTP).
+  // Go requires client identification headers; without User-Agent +
+  // x-opencode-session the gateway 403s (verified 2026-10-18).
+  if (normalizedModelId.includes("opencode-go/")) {
+    const opencodeKey = firstEnvValue(['OPENCODE_API_KEY', 'OPENCODE_GO_API_KEY']);
+    if (!opencodeKey) {
+      throw new Error(`API key is not configured for ${rawModelStr}. Set OPENCODE_API_KEY (OpenCode Go subscription) or try another model.`);
+    }
+    const goStageTag = logStagePrefix ? `:${logStagePrefix}` : '';
+    const apiModel = rawModelStr.includes('/') ? rawModelStr.split('/').slice(1).join('/').split('#')[0] : rawModelStr;
+    const goHeaders = {
+      "Authorization": `Bearer ${opencodeKey}`,
+      "Content-Type": "application/json",
+      "User-Agent": "health-tracker/1.0",
+      "x-opencode-session": String(explicitSessionId || logStagePrefix || 'health-tracker'),
+    };
+    const goBase = "https://opencode.ai/zen/go/v1";
+    console.log(`[UnifiedLLM] Calling OpenCode Go API: ${apiModel}`);
+    _localAddDebugLog(`[UnifiedLLM${goStageTag}] Dispatching prompt to model: "${apiModel}" via OpenCode Go. Attaching ${normalizedImagePayloads.length} image part(s).`);
+    const logGoUsage = (usage: any) => {
+      try {
+        const p = Number(usage?.prompt_tokens ?? usage?.input_tokens) || 0;
+        const c = Number(usage?.completion_tokens ?? usage?.output_tokens) || 0;
+        const t = Number(usage?.total_tokens ?? usage?.totalTokens) || (p + c);
+        if (!t) return;
+        const stage = (logStagePrefix || '').replace(/^:/, '') || 'unknown';
+        recordUnifiedUsage(stage, { promptTokens: p, candidatesTokens: c, totalTokens: t });
+        _localAddDebugLog(`[UnifiedLLM-Usage:${stage}] prompt=${p} completion=${c} total=${t}`);
+      } catch { /* usage logging must never break generation */ }
+    };
+    const emitGoStream = (text: string, isThought: boolean) => {
+      if (!onStream || !text) return;
+      try { onStream(text, isThought); } catch { /* renderer errors must never kill the run */ }
+    };
+    // SSE delta streaming for Go endpoints. Forwards live deltas to onStream
+    // (reasoning → isThought=true, matching the Gemini thought path) and
+    // returns the completed payload + any stashed usage for the parsers.
+    const streamGoSse = async (url: string, body: any): Promise<{ completedResp: any; completedMsg: any; usage: any; streamed: string }> => {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { ...goHeaders, "Accept": "text/event-stream" },
+        body: JSON.stringify({ ...body, stream: true }),
+      });
+      if (!res.ok || !res.body) {
+        const errMsg = !res.ok ? await res.text() : "empty stream body";
+        throw new Error(`OpenCode Go API returned ${res.status}: ${String(errMsg).slice(0, 300)}. Please try another model.`);
+      }
+      const reader = (res.body as any).getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let completedResp: any = null;
+      let completedMsg: any = null;
+      let usage: any = null;
+      let streamed = "";
+      const handleEvent = (ev: any) => {
+        if (!ev || typeof ev !== "object") return;
+        if (ev.usage) usage = ev.usage;
+        const t = typeof ev.type === "string" ? ev.type : "";
+        if (t === "response.completed" || t === "response.incomplete" || t === "response.failed") {
+          if (ev.response) completedResp = ev.response;
+          return;
+        }
+        if (ev.choices && Array.isArray(ev.choices)) {
+          const d = ev.choices[0]?.delta || {};
+          if (typeof d.reasoning_content === "string" && d.reasoning_content) emitGoStream(d.reasoning_content, true);
+          if (typeof d.content === "string" && d.content) {
+            streamed += d.content;
+            emitGoStream(d.content, false);
+          }
+          const msg = ev.choices[0]?.message;
+          if (msg && typeof msg.content === "string") completedMsg = msg;
+          return;
+        }
+        if (t.endsWith(".delta")) {
+          const s = [ev.delta, ev.content, ev.text].find((v) => typeof v === "string" && v) || "";
+          if (s) {
+            const thought = /reasoning|thought/i.test(t);
+            if (!thought) streamed += s;
+            emitGoStream(s, thought);
+          }
+        }
+      };
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          for (const line of raw.split("\n")) {
+            const s = line.trim();
+            if (!s.startsWith("data:")) continue;
+            const payload = s.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try { handleEvent(JSON.parse(payload)); } catch { /* keep-alive noise */ }
+          }
+        }
+      }
+      return { completedResp, completedMsg, usage, streamed };
+    };
+    const extractGoResponseText = (output: any): string => {
+      const chunks: string[] = [];
+      const walk = (node: any): void => {
+        if (node == null || typeof node === "string") return;
+        if (Array.isArray(node)) { node.forEach(walk); return; }
+        if (typeof node === "object") {
+          if ((node.type === "output_text" || node.type === "input_text") && typeof node.text === "string") chunks.push(node.text);
+          Object.values(node).forEach(walk);
+        }
+      };
+      walk(output);
+      return chunks.join("");
+    };
+    // Native schema enforcement for Go models: convert the caller's
+    // Gemini-typed responseSchema to JSON Schema and send it as json_schema
+    // (chat) / text.format json_schema (responses). Falls back to plain
+    // json_object if the gateway rejects it, so an enforcement failure
+    // never fails the meal outright.
+    let goUseSchema = Boolean(isJson && responseSchema);
+    const goSchemaName = ((logStagePrefix || "response").replace(/^:/, "") || "response").slice(0, 64);
+    const goJsonSchemaDoc = (): any => {
+      if (!goUseSchema) return null;
+      try {
+        return toJsonSchema(responseSchema);
+      } catch (e: any) {
+        _localAddDebugLog(`[UnifiedLLM] Go schema convert failed (${e?.message}), using plain JSON mode.`);
+        goUseSchema = false;
+        return null;
+      }
+    };
+    const applyGoJsonMode = (body: any, kind: "responses" | "chat") => {
+      if (!isJson) return body;
+      const js = goJsonSchemaDoc();
+      if (kind === "responses") {
+        body.text = js
+          ? { format: { type: "json_schema", name: goSchemaName, schema: js, strict: false } }
+          : { format: { type: "json_object" } };
+      } else {
+        body.response_format = js
+          ? { type: "json_schema", json_schema: { name: goSchemaName, schema: js, strict: false } }
+          : { type: "json_object" };
+      }
+      return body;
+    };
+    const isGoSchemaRejection = (err: any) => {
+      const m = String(err?.message || "");
+      return /^OpenCode Go API returned 400/.test(m) && /json_schema|response_format|invalid.schema|schema/i.test(m);
+    };
+    // POST with one schema-strip retry: gateway 400 on json_schema rebuilds
+    // the body in plain JSON mode and tries once more.
+    const postGoJson = async (url: string, buildBody: () => any): Promise<any> => {
+      let res = await fetch(url, { method: "POST", headers: goHeaders, body: JSON.stringify(buildBody()) });
+      if (!res.ok && goUseSchema) {
+        const t = await res.text();
+        if (res.status === 400 && /json_schema|response_format|invalid.schema|schema/i.test(t)) {
+          _localAddDebugLog(`[UnifiedLLM] Go gateway rejected json_schema (${t.slice(0, 120)}), retrying plain JSON mode.`);
+          goUseSchema = false;
+          res = await fetch(url, { method: "POST", headers: goHeaders, body: JSON.stringify(buildBody()) });
+        }
+      }
+      if (!res.ok) {
+        const errMsg = await res.text();
+        throw new Error(`OpenCode Go API returned ${res.status}: ${errMsg.slice(0, 300)}. Please try another model.`);
+      }
+      return res.json();
+    };
+    const parseResponsesStream = (s: { completedResp: any; usage: any; streamed: string }) => {
+      const resJson = s.completedResp || {};
+      logGoUsage(resJson?.usage || s.usage);
+      return extractGoResponseText(resJson?.output) || (resJson as any)?.output_text || s.streamed;
+    };
+    try {
+      if (apiModel.includes("muse-spark")) {
+        // Responses API (OpenAI Responses shape): images are input_image parts.
+        const inputContent: any[] = [{ type: "input_text", text: promptText }];
+        for (const img of normalizedImagePayloads) {
+          inputContent.push({ type: "input_image", image_url: `data:${img.mimeType};base64,${img.data}` });
+        }
+        const resBody: any = {
+          model: apiModel,
+          input: [{ role: "user", content: inputContent }],
+        };
+        if (typeof maxOutputTokens === "number") resBody.max_output_tokens = maxOutputTokens;
+        const buildResBody = () => {
+          const b: any = { ...resBody, input: resBody.input };
+          applyGoJsonMode(b, "responses");
+          if (onStream) b.reasoning = { summary: "auto" };
+          return b;
+        };
+        if (onStream) {
+          try {
+            const outText = parseResponsesStream(await streamGoSse(`${goBase}/responses`, buildResBody()));
+            return outText || "{}";
+          } catch (streamErr: any) {
+            if (isGoSchemaRejection(streamErr)) {
+              goUseSchema = false;
+              _localAddDebugLog(`[UnifiedLLM] Go stream rejected json_schema, retrying stream plain.`);
+              try {
+                const outText = parseResponsesStream(await streamGoSse(`${goBase}/responses`, buildResBody()));
+                return outText || "{}";
+              } catch (e2: any) {
+                _localAddDebugLog(`[UnifiedLLM] Go stream failed (${e2?.message}), falling back to unary.`);
+              }
+            } else {
+              _localAddDebugLog(`[UnifiedLLM] Go stream failed (${streamErr?.message}), falling back to unary.`);
+            }
+          }
+        }
+        const resJson: any = await postGoJson(`${goBase}/responses`, buildResBody);
+        logGoUsage(resJson?.usage);
+        const outText = extractGoResponseText(resJson?.output) || (resJson as any)?.output_text || "";
+        if (onStream && outText) onStream(outText, false);
+        return outText || "{}";
+      }
+      // Chat Completions API (DeepSeek V4.1 Flash et al, OpenAI-compatible).
+      // Images belong in the user message only (system + image = 400).
+      const userContent: any[] = [{ type: "text", text: promptText }];
+      for (const img of normalizedImagePayloads) {
+        userContent.push({ type: "image_url", image_url: { url: `data:${img.mimeType};base64,${img.data}` } });
+      }
+      const chatBody: any = {
+        model: apiModel,
+        messages: [
+          ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
+          { role: "user", content: userContent },
+        ],
+      };
+      if (typeof maxOutputTokens === "number") chatBody.max_tokens = maxOutputTokens;
+      if (typeof temperature === "number") chatBody.temperature = temperature;
+      const buildChatBody = () => {
+        const b: any = { ...chatBody, messages: chatBody.messages };
+        applyGoJsonMode(b, "chat");
+        return b;
+      };
+      if (onStream) {
+        try {
+          const s = await streamGoSse(`${goBase}/chat/completions`, { ...buildChatBody(), stream_options: { include_usage: true } });
+          logGoUsage(s.completedResp?.usage || s.usage);
+          const outText = s.completedMsg?.content || s.streamed;
+          return outText || "{}";
+        } catch (streamErr: any) {
+          if (isGoSchemaRejection(streamErr)) {
+            goUseSchema = false;
+            _localAddDebugLog(`[UnifiedLLM] Go stream rejected json_schema, retrying stream plain.`);
+            try {
+              const s2 = await streamGoSse(`${goBase}/chat/completions`, { ...buildChatBody(), stream_options: { include_usage: true } });
+              logGoUsage(s2.completedResp?.usage || s2.usage);
+              const outText2 = s2.completedMsg?.content || s2.streamed;
+              return outText2 || "{}";
+            } catch (e2: any) {
+              _localAddDebugLog(`[UnifiedLLM] Go stream failed (${e2?.message}), falling back to unary.`);
+            }
+          } else {
+            _localAddDebugLog(`[UnifiedLLM] Go stream failed (${streamErr?.message}), falling back to unary.`);
+          }
+        }
+      }
+      const chatJson: any = await postGoJson(`${goBase}/chat/completions`, buildChatBody);
+      logGoUsage(chatJson?.usage);
+      const outText = chatJson?.choices?.[0]?.message?.content || "";
+      if (onStream && outText) onStream(outText, false);
+      return outText || "{}";
+    } catch (err: any) {
+      if (/^OpenCode Go API returned/.test(String(err?.message || ""))) throw err;
+      throw new Error(`Error connecting to OpenCode Go: ${err.message || err}. Please try another model.`);
     }
   }
 
@@ -2506,70 +2794,6 @@ app.get("/api/status", (req, res) => {
 // Food Analyze and Vision Scout pipeline endpoints are mounted via foodAnalyzeRouter in server_routes_food_analyze.ts
 
 // Gemini Medical, Biomarker, and Diagnostic routes are mounted via medicalGeminiRouter in server_routes_medical_gemini.ts
-
-app.post("/api/gemini/daily-recommendation-chat", async (req, res) => {
-  addDebugLog('[DailyRecommendation] Starting daily recommendation chat process.');
-  try {
-    const { message, userProfile, engine, history, foodLogs, biomarkers, report, actions, steps, location, thisMonthTrends } = req.body;
-
-    const cleanProfile: any = {
-      age: userProfile?.age,
-      gender: userProfile?.gender,
-      ethnicity: userProfile?.ethnicity,
-      bloodType: userProfile?.bloodType,
-      weight: userProfile?.weight,
-      height: userProfile?.height,
-      timezone: userProfile?.timezone
-    };
-    Object.keys(cleanProfile).forEach((key) => {
-      if (cleanProfile[key] === undefined || cleanProfile[key] === null) {
-        delete cleanProfile[key];
-      }
-    });
-    
-    const systemInstruction = `You are a personalized AI Health Coach. 
-Your goal is to look at the user's data (biomarkers, food logs, goals, daily steps, etc.) and provide an actionable, friendly, and clinical daily recommendation or answer their questions.
-
-### User Data Context
-Profile: ${JSON.stringify(cleanProfile)}
-Report/Nutrient Targets: ${JSON.stringify(report?.dailyNutrientTargets || {})}
-Biomarkers: ${JSON.stringify(biomarkers || {})}
-Clinical Actions: ${JSON.stringify(actions || {})}
-Recent Food Logs (titles & dates): ${JSON.stringify((foodLogs || []).slice(-15).map((f) => ({name: f.name, date: f.date})))}
-Today's Steps: ${steps || 'Unknown'}
-Location: ${JSON.stringify(location || 'Unknown')}
-This Month Trends (Daily Nutrient Intakes and Steps): ${JSON.stringify(thisMonthTrends || {})}
-
-### Guidelines
-1. Be encouraging, precise, friendly, and clinically sound.
-2. If this is the start of the chat (e.g. user says "What's up today?"), analyze their performance trends for top nutrients (calories, protein, saturated fat, sodium, carbs, total fat) this month and their daily steps. Tell them what they have achieved so far and give 1-2 highly practical, personalized recommendations for today based on their goals and biomarkers.
-3. If the user asks a question, answer it professionally and warmly, drawing on their real dietary trends and health logs.
-4. Use markdown formatting (bolding, lists, headers) to make the coach recommendation beautifully readable.
-5. Do NOT output JSON. Output pure markdown text.`;
-
-    let historyText = "";
-    if (history && Array.isArray(history)) {
-      historyText = history.map((m) => `${m.role === 'user' ? 'User' : 'Model'}: ${m.content}`).join('\n');
-    }
-    
-    const promptText = `Chat History:\n${historyText}\n\nUser's latest message: "${message}"`;
-    
-    const textOutput = await callUnifiedLLM({
-      modelId: (typeof engine === 'object' ? engine?.name || engine?.model : engine),
-      systemInstruction,
-      promptText,
-      responseMimeType: "text/plain"
-    });
-    
-    res.json({
-      text: textOutput.trim(),
-      apiCalls: [{ type: 'gemini', label: `Daily Recommendation Agent (${engine || 'gemini-3.5-flash-lite'})` }]
-    });
-  } catch (error) {
-    console.error("[Daily Recommendation Error]:", error);
-    res.status(500).json({ error: "Failed to generate recommendation: " + error.message });
-  }
-});
 
 app.post("/api/gemini/food-idea", async (req, res) => {
   addDebugLog(`[FoodIdea] Starting food-idea suggestion process.`);
@@ -3702,8 +3926,15 @@ async function startServer() {
         }
       }
     }));
-    // Explicit 404 for missing hashed assets to prevent SPA fallback serving index.html as JS/CSS
+    // Explicit 404 for missing hashed assets to prevent SPA fallback serving index.html as JS/CSS.
+    // STALE_CHUNK (2026-11-06): a missing chunk must NEVER be cached. The 2026-11-05
+    // deploy 404'd new hashes mid-build and the Cloudflare edge cached the misses,
+    // looping HomeTab on fresh profiles until edge expiry. no-store on all layers,
+    // including the Cloudflare-specific header.
     app.use('/assets', (req, res) => {
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      res.setHeader('CDN-Cache-Control', 'no-store');
+      res.setHeader('Cloudflare-CDN-Cache-Control', 'no-store');
       res.status(404).type('text/plain').send('Asset not found');
     });
     app.get("*", (req, res) => {
@@ -3739,7 +3970,9 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const httpServer = http.createServer(app);
+  setupGeminiLiveWebSocket(httpServer);
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`[Health Cockpit App] Full-Stack server running on port ${PORT}`);
   });
 }

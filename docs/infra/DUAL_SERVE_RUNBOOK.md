@@ -1,5 +1,12 @@
 # Dual-serve runbook — new URL alongside the old, then retire on evidence
 
+> **SUPERSEDED 2026-10-18 — kept as history.** This runbook covers the
+> is-a.dev + duckdns dual-serve era on the OVH box (`51.254.217.163`,
+> "vps-france"), which is retired: production was re-homed to the current VM
+> (`standar-c3r3a-1845`) behind a Cloudflare Tunnel, and the canonical domain is
+> `health-tracker.co.uk`. Current record: `docs/infra/DOMAINS.md` and
+> `docs/infra/COUK_MIGRATION.md`. Do not run these steps.
+
 **Goal:** `health-tracker.is-a.dev` and `health-tracking.duckdns.org` serve the same app
 simultaneously, then the old one is removed **only when measured traffic says it is safe**.
 

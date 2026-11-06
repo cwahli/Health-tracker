@@ -4,20 +4,23 @@
  *
  * A data move is only safe if someone can prove nothing was dropped, so these
  * tests pin the dictionary itself rather than trusting the diff:
- *   1. key parity between `en` and `id` (the two complete packs),
+ *   1. key parity between `en` and every complete pack (`REQUIRED_COMPLETE_LOCALES`),
  *   2. the total key count can only go up, never down,
  *   3. every value is a non-empty string,
- *   4. the frozen digest of both packs, so a silent copy edit fails here,
- *   5. the `fr`/`zh` per-key English fallback the aggregator still provides.
+ *   4. the frozen digest of each complete pack, so a silent copy edit fails here,
+ *   5. placeholder tokens identical across packs, and zh Simplified-only,
+ *   6. translated fr/zh copy served, with the English fallback kept for unknown keys.
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { en } from './translations/en';
 import { id } from './translations/id';
+import { fr } from './translations/fr';
+import { zh } from './translations/zh';
 import { localePacks, translations } from './translations';
 
-/** Baseline recorded when the packs were split out (both packs held 1,980 keys). */
-const BASELINE_TOTAL_KEYS = 3960;
+/** Baseline recorded when the packs were split out (both packs held 1,980 keys). Lowered once for the L-5 follow-up orphan prune (16 provably-unused keys removed from all four packs; en+id now 1,977 each) — deliberate, sensor-visible, not silent. Raised by one for the ICU pilot sibling key (biomarkersExtractedStatusOne); en+id now 1,978 each. */
+const BASELINE_TOTAL_KEYS = 3956;
 /**
  * sha256 of the sorted `[key, value]` pairs, first 16 hex chars.
  *
@@ -36,8 +39,29 @@ const BASELINE_TOTAL_KEYS = 3960;
  * BugBoard.tsx, and `dispositionLabel()`'s second argument exists so they stop
  * being. Still growth only — no existing copy value was edited, which is the
  * rule this digest is for.
+ *
+ * Re-recorded for the L-5 follow-up orphan prune (2026-10-12): 16 keys with
+ * zero textual consumers anywhere outside the packs removed from all four
+ * packs (agentCreditsLeftTitle, alreadyRanThisFingerprint, bugKpiDeclined,
+ * carbohydratesLabel, clickToManuallySync, comparisonSentenceLabel, dueDate,
+ * hasNewAttemptSinceLastLoop, maxIterations, omitAccept, parentDish,
+ * pipelineRuns, previousFingerprints, syncLabelPrefix, syncReady,
+ * transportFailed). Structural removal only — no surviving copy value edited.
+ *
+ * Re-recorded for the ICU pilot sibling (biomarkersExtractedStatusOne, all
+ * four packs): one key added for one/other routing via Intl.PluralRules.
+ *
+ * Re-recorded for WA-3 (2026-10-12): seven WhatsApp-login keys added to all
+ * four packs (continueWithWhatsApp, waCancel, waExpired, waOpenWhatsApp,
+ * waUnavailable, waVerifyDesc, waWaiting). Growth only — no existing copy
+ * value edited.
+ *
+ * Re-recorded for the portion-mixup fix (2026-10-14): four staged-portion
+ * keys added to all four packs (applyPortions, portionsSelected,
+ * selectAllPortionsHint, stagedBadge) for the composite-dish Apply bar.
+ * Growth only — no existing copy value edited.
  */
-const FROZEN_DIGESTS = { en: 'e382604d4ed04cd6', id: '39a1785088c34a73' } as const;
+const FROZEN_DIGESTS = { en: '8f67b6a431e1ab39', id: 'f0fe4be58077f598', fr: '2f996389d041f12c', zh: '8be15e8d619ef213' } as const;
 
 const stablePairs = (pack: Record<string, unknown>) =>
   JSON.stringify(Object.keys(pack).sort().map((key) => [key, pack[key]]));
@@ -46,10 +70,11 @@ const digestOf = (pack: Record<string, unknown>) =>
   createHash('sha256').update(stablePairs(pack)).digest('hex').slice(0, 16);
 
 describe('translations split (Q-11.8)', () => {
-  it('keeps en and id key sets identical', () => {
+  it('keeps every complete pack keyed identically to en', () => {
     const enKeys = Object.keys(en).sort();
-    const idKeys = Object.keys(id).sort();
-    expect(idKeys).toEqual(enKeys);
+    for (const [locale, pack] of Object.entries({ id, fr, zh })) {
+      expect(Object.keys(pack).sort(), `${locale} key drift vs en`).toEqual(enKeys);
+    }
     expect(enKeys.length).toBeGreaterThan(0);
   });
 
@@ -59,7 +84,7 @@ describe('translations split (Q-11.8)', () => {
   });
 
   it('has a string value for every key in every complete pack', () => {
-    for (const [locale, pack] of Object.entries({ en, id }) as [string, Record<string, unknown>][]) {
+    for (const [locale, pack] of Object.entries({ en, id, fr, zh }) as [string, Record<string, unknown>][]) {
       const notStrings = Object.entries(pack).filter(([, value]) => typeof value !== 'string');
       expect(notStrings, `${locale} has non-string values`).toEqual([]);
       // `adviceNeutral` is intentionally blank in both packs (the agent fills it in at
@@ -72,7 +97,12 @@ describe('translations split (Q-11.8)', () => {
   });
 
   it('has not silently changed any copy since the split', () => {
-    expect({ en: digestOf(en as unknown as Record<string, unknown>), id: digestOf(id as unknown as Record<string, unknown>) }).toEqual(
+    expect({
+      en: digestOf(en as unknown as Record<string, unknown>),
+      id: digestOf(id as unknown as Record<string, unknown>),
+      fr: digestOf(fr as unknown as Record<string, unknown>),
+      zh: digestOf(zh as unknown as Record<string, unknown>),
+    }).toEqual(
       FROZEN_DIGESTS,
     );
   });
@@ -83,11 +113,33 @@ describe('translations split (Q-11.8)', () => {
     expect(localePacks.id).toBe(id);
   });
 
-  it('falls back to English per key for packs that are not translated yet', () => {
-    const sampleKey = Object.keys(en)[0] as keyof typeof en;
-    expect((translations.fr as Record<string, string>)[sampleKey]).toBe(en[sampleKey]);
-    expect((translations.zh as Record<string, string>)[sampleKey]).toBe(en[sampleKey]);
+  it('keeps every placeholder token identical across all complete packs', () => {
+    const tokens = (s: unknown) => (typeof s === 'string' ? s.match(/\{[^}]*\}/g) || [] : []);
+    for (const [locale, pack] of Object.entries({ id, fr, zh }) as [string, Record<string, unknown>][]) {
+      for (const key of Object.keys(en)) {
+        expect(tokens((pack as Record<string, unknown>)[key]), `${locale}.${key} placeholder drift`).toEqual(
+          tokens((en as unknown as Record<string, unknown>)[key]),
+        );
+      }
+    }
+  });
+
+  it('keeps zh Simplified-only', () => {
+    const traditionalOnly = '這們為麼發裡後點開關門問聽說語讓時會還過對麵髮來進遠運帳設隱緩權驗際連軟盤標籤頁網郵龍鳳龜';
+    for (const [key, value] of Object.entries(zh)) {
+      for (const ch of traditionalOnly) {
+        expect((value as string).includes(ch), `${key} contains Traditional-only ${ch}`).toBe(false);
+      }
+    }
+  });
+
+  it('serves translated fr/zh copy, falling back to English only for unknown keys', () => {
+    expect((translations.fr as Record<string, string>).sendToAdmin).toBe(fr.sendToAdmin);
+    expect((translations.zh as Record<string, string>).sendToAdmin).toBe(zh.sendToAdmin);
+    expect(fr.sendToAdmin).not.toBe(en.sendToAdmin);
+    expect(zh.sendToAdmin).not.toBe(en.sendToAdmin);
     // Unknown keys keep returning the key itself (previous behaviour).
     expect((translations.fr as Record<string, string>).__notAKey__).toBe('__notAKey__');
+    expect((translations.zh as Record<string, string>).__notAKey__).toBe('__notAKey__');
   });
 });

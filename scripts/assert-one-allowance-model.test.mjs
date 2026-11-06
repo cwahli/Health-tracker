@@ -541,8 +541,10 @@ try {
   check('the header counts rows with no ledger row separately', /with no ledger row/.test(botSrc));
   // The titles are keyboard heading rows now, not a line of body text, and the
   // current lane is not printed at all — there is nowhere to print it.
+  // (The thinking-levels reply carries its own `current:` line outside this
+  // function, so the negative below is scoped to fmBody for exactly that reason.)
   check('/freemodel titles the Standard/Light groups as heading rows, not as a body line',
-    /buttons\.push\(\{\s*text:\s*headingWidth\(.*freemodelDisplayTier\(g\.tier/.test(botSrc) && !/current: \$\{current/.test(botSrc));
+    /buttons\.push\(\{\s*text:\s*headingWidth\(.*freemodelDisplayTier\(g\.tier/.test(botSrc) && !/current: \$\{current/.test(fmBody));
   check('/freemodel never prints the old location brief', !/Free models\$\{location0\}/.test(botSrc));
   // The reason a row cannot be used is on the row's own button — the ❌ mark and
   // the compact reset countdown — rather than in a footer that listed the same
@@ -588,8 +590,10 @@ try {
   check('every free-lanes helper bot-host calls is imported', (() => {
     // The import region, checked by name rather than by parsing the statement: the
     // multi-line import block is easy to mis-parse, and a false negative here is the
-    // same failure this check exists to catch.
-    const region = botSrc.split('\n').slice(0, 130).join('\n');
+    // same failure this check exists to catch. (Window 130 → 160 on 2026-10-11:
+    // pool + turn-store imports pushed stampCooldown past line 130; the rule —
+    // every called helper imported — is unchanged.)
+    const region = botSrc.split('\n').slice(0, 160).join('\n');
     const imported = new Set((region.match(/[A-Za-z_][A-Za-z0-9_]*/g) || []));
     const helpers = ['buildAllowanceTextForBots', 'formatCompactAllowanceChat', 'canonicalAllowanceLanes', 'groupRowsByTier',
       'rowWidth', 'headingWidth', 'shortModelName', 'projectLanes', 'loadFreeLaneLedger', 'withCatalogLanes', 'escHtml', 'planCodeForLane',

@@ -27,6 +27,7 @@ import {
   Minimize2,
   Clock,
   Play,
+  Menu,
 } from 'lucide-react';
 import { FlagIssueForm, CATEGORY_OPTIONS, saveBugTrackerCache } from '../FlagIssueModal';
 import { BugCategory } from '../../utils/issueBacklog';
@@ -80,6 +81,11 @@ export type BugBoardProps = ReturnType<typeof useBugBoard> & {
   onClose: () => void;
   onViewJob?: (jobId: string) => void;
   language?: string;
+  // Shell tab: render inline (no portal overlay). Modal default unchanged.
+  embedded?: boolean;
+  // Shell tab: Mini Apps drawer toggle, rendered as the first item inside
+  // this header (in-flow, never floating). Absent everywhere else.
+  onMenu?: () => void;
 };
 
 export function BugBoard({
@@ -205,14 +211,29 @@ export function BugBoard({
   onClose,
   onViewJob,
   language,
+  embedded,
+  onMenu,
 }: BugBoardProps) {
-  return (
-    <>
-      {createPortal(
-        <div className="fixed inset-0 z-[10050] bg-[#0b1220] flex flex-col w-full h-full p-0 text-[#f8fafc] font-sans antialiased overflow-hidden select-text">
-          {/* Top Header */}
-          <header className="px-3 sm:px-5 py-2.5 flex items-center justify-between gap-3 bg-[#111827]/80 backdrop-blur shrink-0 border-b border-white/5">
+  const frameClass = embedded
+    ? 'flex flex-col w-full h-full min-h-0 p-0 text-[#f8fafc] font-sans antialiased overflow-hidden select-text bg-[#0b1220]'
+    : 'fixed inset-0 z-[10050] bg-[#0b1220] flex flex-col w-full h-full p-0 text-[#f8fafc] font-sans antialiased overflow-hidden select-text';
+  const frame = (
+        <div className={frameClass}>
+          {/* Top Header — the shell's burger lives here, first inside the
+              header (in-flow with the title, never floating over it). */}
+          <header className="px-3 sm:px-5 py-2.5 flex items-center justify-between gap-x-3 gap-y-2 flex-wrap bg-[#111827]/80 backdrop-blur shrink-0 border-b border-white/5">
             <div className="flex items-center gap-2 min-w-0">
+              {onMenu && (
+                <button
+                  type="button"
+                  onClick={onMenu}
+                  aria-label="Menu"
+                  title="Mini apps menu"
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/80 transition-colors cursor-pointer shrink-0"
+                >
+                  <Menu className="w-4 h-4" />
+                </button>
+              )}
               <div className="min-w-0">
                 <h1 className="text-base font-bold tracking-tight flex items-center gap-1.5">
                   <span>Bug queue</span>
@@ -248,7 +269,7 @@ export function BugBoard({
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
               {lastUpdated && (
-                <span className="text-[10px] font-mono text-white/50 whitespace-nowrap" title={`Last refreshed. Showing ${sortedQueueTags.length} of ${bugTags.length} cards under filter ${statusFilter} / ${activeTab} — switch to All Statuses to see done cards. Snapshot ${snapshotIdentity || '…'}`}>
+                <span className="hidden min-[420px]:inline text-[10px] font-mono text-white/50 whitespace-nowrap" title={`Last refreshed. Showing ${sortedQueueTags.length} of ${bugTags.length} cards under filter ${statusFilter} / ${activeTab} — switch to All Statuses to see done cards. Snapshot ${snapshotIdentity || '…'}`}>
                   {lastUpdated} · {sortedQueueTags.length}/{bugTags.length} · {statusFilter}{snapshotIdentity ? ` · ${snapshotIdentity}` : ''}
                 </span>
               )}
@@ -263,7 +284,8 @@ export function BugBoard({
                 <Plus className="w-4 h-4" />
               </button>
 
-              {/* Close Button */}
+              {/* Close Button (modal only — the shell tab has nowhere to close back to) */}
+              {!embedded && (
               <button
                 type="button"
                 onClick={onClose}
@@ -272,6 +294,7 @@ export function BugBoard({
               >
                 <X className="w-4 h-4" />
               </button>
+              )}
             </div>
           </header>
 
@@ -1447,9 +1470,7 @@ export function BugBoard({
               </div>
             </div>
           )}
-        </div>,
-        document.body
-      )}
-    </>
+        </div>
   );
+  return <>{embedded ? frame : createPortal(frame, document.body)}</>;
 }

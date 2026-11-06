@@ -5,7 +5,7 @@ export const SUPPORTED_LOCALES = ['en', 'id', 'fr', 'zh'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 /** Locales that must have every English key. Add a code here when a language is no longer English-fallback. */
-export const REQUIRED_COMPLETE_LOCALES = ['en', 'id'] as const;
+export const REQUIRED_COMPLETE_LOCALES = ['en', 'id', 'fr', 'zh'] as const;
 export type RequiredCompleteLocale = (typeof REQUIRED_COMPLETE_LOCALES)[number];
 
 const LOCALE_NAMES: Record<SupportedLocale, string> = {
@@ -56,7 +56,7 @@ export function agentOutputLanguageBlock(lang: unknown): string {
     'Keep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.',
   ];
   if (locale !== 'en') {
-    lines.push(`Do not reply in English unless the user wrote this turn in English and is clearly asking for English.`);
+    lines.push(`Do not reply in English unless the user wrote this turn in English.`);
   }
   return lines.join('\n');
 }
@@ -91,6 +91,24 @@ export function interpolate(template: string, vars: Record<string, string | numb
     out = out.split(`{${k}}`).join(String(v));
   }
   return out;
+}
+
+/**
+ * Minimal plural routing (ICU pilot, L-5 follow-up): picks the `one` vs
+ * `other` pack string via the platform's own CLDR rules — no dependency.
+ * Only one/other categories are routed (en/id/fr/zh never need more);
+ * id/zh packs mirror the `other` form where the language marks no plural.
+ * Add a `<key>One` sibling next to any new count-sensitive key.
+ */
+export function pickPlural(
+  dict: Record<string, string>,
+  lang: unknown,
+  count: number,
+  oneKey: string,
+  otherKey: string,
+): string {
+  const category = new Intl.PluralRules(normalizeLocale(lang)).select(count);
+  return dict[category === 'one' ? oneKey : otherKey] ?? dict[otherKey];
 }
 
 const STATUS_LABEL_KEYS: Record<string, TranslationKey> = {

@@ -442,6 +442,16 @@ else
   # the write offline). A packet READ cannot be queued — fail fast (exit 2).
   # ---------------------------------------------------------------
   TICKET="${TICKET#\#}"
+  # Pre-flight: refuse LOUDLY (exit 2) when writes could not land — off-box
+  # BASE with no token (guaranteed 401+queue) or a dead route. bugctl queues
+  # failed writes with exit 0, so without this the dispatcher would report
+  # "filed" forever while nothing happened. See scripts/bug-write-preflight.mjs.
+  PREFLIGHT="${REPO_DIR}/scripts/bug-write-preflight.mjs"
+  if ! PREFLIGHT_OUT=$(node "$PREFLIGHT" 2>&1); then
+    echo "[Dispatcher] ticket #$TICKET: bug-write pre-flight refused (writes would queue, not land):" >&2
+    echo "$PREFLIGHT_OUT" >&2
+    exit 2
+  fi
   PACKET_FILE=$(mktemp "${TMPDIR:-/tmp}/dispatch_packet_${TICKET}.XXXXXX")
   if ! node "$BUGCTL" packet --id "$TICKET" --json >"$PACKET_FILE" 2>/dev/null; then
     echo "[Dispatcher] ticket #$TICKET: packet read failed (ticket mode needs a live API read; the offline queue only replays writes). Use --task= for the legacy path." >&2

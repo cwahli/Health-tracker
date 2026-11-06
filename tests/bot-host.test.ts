@@ -1175,7 +1175,9 @@ describe('pickers', () => {
     const agents = agentKeyboard([{ name: 'build', type: 'primary' }]);
     expect(agents.inline_keyboard[0][0]).toEqual({ text: 'build (primary)', callback_data: 'a:build' });
     const variants = variantKeyboard(['low', 'high']);
-    expect(variants.inline_keyboard[1][0]).toEqual({ text: 'high', callback_data: 'v:high' });
+    expect(variants.inline_keyboard[0][1]).toEqual({ text: 'high', callback_data: 'v:high' });
+    const marked = variantKeyboard(['low', 'high'], { selected: 'high' });
+    expect(marked.inline_keyboard[0][1]).toEqual({ text: '✅ high', callback_data: 'v:high' });
     expect(decodeCallback('m:5')).toEqual({ kind: 'm', value: '5' });
     expect(decodeCallback('noop')).toEqual({ kind: 'noop', value: undefined });
   });
@@ -3831,9 +3833,12 @@ describe('TG ping turns leave no scaffolding in the chat transcript', () => {
     expect(src.indexOf('isPingTurn = true;')).toBeGreaterThan(declAt);
   });
 
-  it('ping turns force a fresh session and never bind back', () => {
+  it('ping turns run in the chat session and never bind back', () => {
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    expect(src).toContain('if (isPingTurn) turnSessionId = null;');
+    // FINAL 2026-10-14 (bot-visibility-hub node 6): throwaway sessions minted
+    // one orphan per greeting and split Telegram from the web UI — pings run
+    // where the UI reads, and binding back the same id stays skipped.
+    expect(src).not.toContain('if (isPingTurn) turnSessionId = null;');
     expect(src).toContain('if (result.sessionID && !isPingTurn) {');
   });
 });
@@ -3999,24 +4004,20 @@ describe('TG TUI failproof sync — no split sessions, no false same-session cla
     expect(exitAt).toBeLessThan(tmuxAt);
   });
 
-  it('/tui offers no button when the chat has no session to attach to', () => {
-    // Live 2026-10-05: /new deleted the chat's session row, /tui ran 20s later,
-    // wrote tui-open.json with sessionId: null and sent the button anyway, and
-    // the tap printed the attach script's refusal on a phone. The gate has to sit
-    // BEFORE the snapshot write (a null session recorded looks like a fact about
-    // the chat) and before the button.
+  it('bare /tui answers status plus a web pointer and offers no terminal button', () => {
+    // Web-only 2026-10-11: the terminal moved to the browser shell. Bare
+    // /tui answers the pane status and a pointer — it never writes
+    // tui-open.json and never sends an Open-the-TUI button. status/off/
+    // refresh above are unchanged.
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    const gateAt = src.indexOf('if (!tuiCanOpen)');
-    const snapshotAt = src.indexOf("'tui-open.json'");
-    const buttonAt = src.indexOf("text: '⌨️ Open the TUI'");
-    expect(gateAt).toBeGreaterThan(-1);
-    expect(snapshotAt).toBeGreaterThan(gateAt);
-    expect(buttonAt).toBeGreaterThan(gateAt);
-    // It answers in the chat and stops there — a `return` before the write.
-    expect(src.slice(gateAt, snapshotAt)).toContain('return;');
-    expect(src.slice(gateAt, snapshotAt)).toContain('tuiNoSessionAdvice');
-    // The advice names the action that fixes it, once, for all three answers
-    // that used to promise a terminal.
+    expect(src).not.toContain("text: '⌨️ Open the TUI'");
+    expect(src).not.toContain("'tui-open.json'");
+    expect(src).toContain('tuiStatusLine(config.id, tuiSessionId)');
+    expect(src).toContain('https://app.health-tracker.co.uk/app/');
+    // The web UI link minter stays: opencode lanes still get a fresh link.
+    expect(src).toContain('personalWebUiLink');
+    expect(src).toContain('freshWebLink');
+    // Pane management keeps its honest advice for sessionless chats.
     expect(src).toContain('const tuiNoSessionAdvice =');
     expect(src).toMatch(/tuiNoSessionAdvice = 'Send me any message first/);
     // The predicate is the shared decision, not a private re-implementation, and
@@ -4032,10 +4033,10 @@ describe('TG TUI failproof sync — no split sessions, no false same-session cla
     // conditionals on the one predicate: nothing to refresh, and pane closed.
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
     expect(src.match(/tuiCanOpen\s*\?/g)?.length).toBe(2);
-    // Both conditionals fall back to the same honest advice, and so does the
-    // /tui gate: the const plus its four call sites, and no fifth promise.
-    // (The fourth site is the sessionless-open guard on the /tui open path.)
-    expect(src.match(/tuiNoSessionAdvice/g)?.length).toBe(5);
+    // Both conditionals fall back to the same honest advice, and so does one
+    // refresh branch: the const plus its two call sites, and no third promise.
+    // (The open-path guard and its duplicate left with the web-only strip.)
+    expect(src.match(/tuiNoSessionAdvice/g)?.length).toBe(3);
   });
 
   it('/new stops promising a terminal it cannot open yet', () => {
@@ -4764,9 +4765,12 @@ describe('TG ping turns leave no scaffolding in the chat transcript', () => {
     expect(src.indexOf('isPingTurn = true;')).toBeGreaterThan(declAt);
   });
 
-  it('ping turns force a fresh session and never bind back', () => {
+  it('ping turns run in the chat session and never bind back', () => {
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    expect(src).toContain('if (isPingTurn) turnSessionId = null;');
+    // FINAL 2026-10-14 (bot-visibility-hub node 6): throwaway sessions minted
+    // one orphan per greeting and split Telegram from the web UI — pings run
+    // where the UI reads, and binding back the same id stays skipped.
+    expect(src).not.toContain('if (isPingTurn) turnSessionId = null;');
     expect(src).toContain('if (result.sessionID && !isPingTurn) {');
   });
 });
@@ -4811,5 +4815,176 @@ describe('TG TUI — a kept pane with no lease stays closeable', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('BOT-10 queued media follow-ups', () => {
+  it('queueFollowup holds text plus Telegram file refs, capped at MAX_FOLLOWUPS', async () => {
+    const { queueFollowup, shiftFollowup, queuedFollowups, clearFollowups, MAX_FOLLOWUPS } =
+      await import('../scripts/bot-host.mjs');
+    const chat = `mediaq-text-${Date.now()}`;
+    try {
+      const pos = queueFollowup(chat, 'second photo', [{ fileId: 'file-1', name: 'photo.jpg', kind: 'photo' }]);
+      expect(pos).toBe(1);
+      const held = queuedFollowups(chat);
+      expect(held).toHaveLength(1);
+      expect(held[0]).toEqual({ text: 'second photo', media: [{ fileId: 'file-1', name: 'photo.jpg', kind: 'photo' }] });
+      const next = shiftFollowup(chat);
+      expect(next).toEqual({ text: 'second photo', media: [{ fileId: 'file-1', name: 'photo.jpg', kind: 'photo' }] });
+      expect(queuedFollowups(chat)).toHaveLength(0);
+      for (let i = 0; i < MAX_FOLLOWUPS; i++) queueFollowup(chat, `t${i}`);
+      expect(queueFollowup(chat, 'overflow')).toBeNull();
+    } finally {
+      clearFollowups(chat);
+    }
+  });
+
+  it('messageWithQueuedMedia carries refs in _batchMedia and drops the finished turn media', async () => {
+    const { messageWithQueuedMedia, collectMediaItems, queueFollowup, clearFollowups } = await import('../scripts/bot-host.mjs');
+    const chat = `mediaq-msg-${Date.now()}`;
+    try {
+      queueFollowup(chat, '', [{ fileId: 'queued-photo', name: 'photo.jpg', kind: 'photo' }]);
+      const { shiftFollowup } = await import('../scripts/bot-host.mjs');
+      const entry = shiftFollowup(chat);
+      // The finished turn's own message carried a different photo: it must not leak into the follow-up.
+      const base = { message_id: 1, chat: { id: 7 }, photo: [{ file_id: 'stale-photo' }], text: 'old turn' };
+      const msg = messageWithQueuedMedia(base, entry);
+      expect(msg.text).toBe('');
+      expect(msg.caption).toBeUndefined();
+      expect(msg.photo).toBeUndefined();
+      expect(msg._batchMedia).toEqual([{ fileId: 'queued-photo', name: 'photo.jpg', kind: 'photo' }]);
+      expect(collectMediaItems(msg)).toEqual([{ fileId: 'queued-photo', name: 'photo.jpg', kind: 'photo' }]);
+      // Text-only follow-up after a photo turn carries no media.
+      const plain = messageWithQueuedMedia(base, { text: 'thanks', media: [] });
+      expect(plain._batchMedia).toEqual([]);
+      expect(collectMediaItems(plain)).toEqual([]);
+    } finally {
+      clearFollowups(chat);
+    }
+  });
+
+  it('messageWithQueuedMedia restores an uncompressed document by filename', async () => {
+    const { messageWithQueuedMedia, collectMediaItems } = await import('../scripts/bot-host.mjs');
+    const msg = messageWithQueuedMedia(
+      { message_id: 2, chat: { id: 7 } },
+      { text: 'meal scan', media: [{ fileId: 'doc-9', name: 'meal.png', kind: 'document' }] },
+    );
+    expect(collectMediaItems(msg)).toEqual([{ fileId: 'doc-9', name: 'meal.png', kind: 'document' }]);
+  });
+
+  it('collectMediaItems merges batch refs with message media and dedupes', async () => {
+    const { collectMediaItems } = await import('../scripts/bot-host.mjs');
+    const msg = {
+      photo: [{ file_id: 'p1' }],
+      _batchMedia: [
+        { fileId: 'p1', name: 'photo.jpg', kind: 'photo' },
+        { fileId: 'p2', name: 'photo.jpg', kind: 'photo' },
+      ],
+    };
+    expect(collectMediaItems(msg)).toEqual([
+      { fileId: 'p1', name: 'photo.jpg', kind: 'photo' },
+      { fileId: 'p2', name: 'photo.jpg', kind: 'photo' },
+    ]);
+  });
+});
+
+describe('BOT-11 send tray and album grouping', () => {
+  it('tray stash/read/clear round-trips refs and notes with a cap', async () => {
+    const { stashTrayRefs, readTray, clearTray, TRAY_MAX_ITEMS } = await import('../scripts/bot-host.mjs');
+    const bot = `tray-test-${Date.now()}`;
+    const chat = `chat-${Date.now()}`;
+    try {
+      expect(readTray(bot, chat)).toEqual({ items: [], notes: [] });
+      expect(stashTrayRefs(bot, chat, [{ fileId: 'a1', name: 'photo.jpg', kind: 'photo' }], 'labs')).toBe(1);
+      expect(stashTrayRefs(bot, chat, [{ fileId: 'a2', name: 'm.png', kind: 'document' }], '')).toBe(2);
+      expect(readTray(bot, chat)).toEqual({
+        items: [
+          { fileId: 'a1', name: 'photo.jpg', kind: 'photo' },
+          { fileId: 'a2', name: 'm.png', kind: 'document' },
+        ],
+        notes: ['labs'],
+      });
+      const fillers = Array.from({ length: TRAY_MAX_ITEMS }, (_, i) => ({ fileId: `f${i}`, name: 'p.jpg', kind: 'photo' }));
+      expect(stashTrayRefs(bot, chat, fillers, '')).toBeNull();
+    } finally {
+      clearTray(bot, chat);
+      expect(readTray(bot, chat)).toEqual({ items: [], notes: [] });
+    }
+  });
+
+  it('resolveAlbumAction stashes a /send album and replays an ordinary one in order', async () => {
+    const { resolveAlbumAction } = await import('../scripts/bot-host.mjs');
+    const photoMsg = (id, fileId) => ({ message_id: id, photo: [{ file_id: fileId }] });
+    const stash = resolveAlbumAction([
+      { message: photoMsg(30, 'c'), route: null, cmd: null },
+      { message: photoMsg(28, 'a'), route: null, cmd: null },
+      { message: { ...photoMsg(29, 'b'), caption: '/send labs' }, route: 'send', cmd: { name: 'send', args: 'labs' } },
+    ]);
+    expect(stash.action).toBe('stash');
+    expect(stash.note).toBe('labs');
+    expect(stash.refs.map((r) => r.fileId)).toEqual(['a', 'b', 'c']);
+    const replay = resolveAlbumAction([
+      { message: photoMsg(2, 'y'), route: null, cmd: null },
+      { message: photoMsg(1, 'x'), route: null, cmd: null },
+    ]);
+    expect(replay.action).toBe('replay');
+    expect(replay.ordered.map((p) => p.message.message_id)).toEqual([1, 2]);
+  });
+
+  it('albumKey scopes buffers per chat and group', async () => {
+    const { albumKey } = await import('../scripts/bot-host.mjs');
+    expect(albumKey(7, 'grp')).not.toBe(albumKey(8, 'grp'));
+    expect(albumKey(7, 'g1')).not.toBe(albumKey(7, 'g2'));
+  });
+});
+
+describe('BOT-12 album flush carries full turn ctx', () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  it('replay re-enters handleMessage with api and config (live crash: config.telegram read)', async () => {
+    const { bufferAlbumPart, flushAlbum, albumKey, ALBUM_WINDOW_MS } = await import('../scripts/bot-host.mjs');
+    const seen = [];
+    const fakeApi = { sendMessage: async () => {} };
+    const fakeConfig = { id: 'ctx-test', telegram: { allowedUserIds: [7] } };
+    const ctx = {
+      api: fakeApi, config: fakeConfig, handleMessage: async (args) => { seen.push(args); },
+      busy: new Set(),
+    };
+    const chatId = `album-ctx-${Date.now()}`;
+    const key = albumKey(chatId, 'grp1');
+    const part = (id, fid) => ({ message_id: id, chat: { id: 7 }, photo: [{ file_id: fid }], media_group_id: 'grp1' });
+    bufferAlbumPart({ ctx, chatId, key }, part(11, 'r1'), null, null);
+    bufferAlbumPart({ ctx, chatId, key }, part(12, 'r2'), null, null);
+    await sleep(ALBUM_WINDOW_MS + 400);
+    expect(seen).toHaveLength(2);
+    for (const call of seen) {
+      expect(call.api).toBe(fakeApi);
+      expect(call.config).toBe(fakeConfig);
+      expect(call.message._albumFlushed).toBe(true);
+    }
+    expect(seen.map((c) => c.message.message_id)).toEqual([11, 12]);
+  });
+
+  it('stash flush writes tray refs and confirms, without waking a turn', async () => {
+    const { bufferAlbumPart, readTray, clearTray, albumKey, ALBUM_WINDOW_MS } = await import('../scripts/bot-host.mjs');
+    const sent = [];
+    const bot = `tray-flush-${Date.now()}`;
+    const ctx = {
+      api: { sendMessage: async (_chat, text) => { sent.push(String(text)); } },
+      config: { id: bot, telegram: { allowedUserIds: [7] } },
+      handleMessage: async () => { throw new Error('stash must not start a turn'); },
+      busy: new Set(),
+    };
+    const chatId = `chat-${Date.now()}`;
+    const key = albumKey(chatId, 'grp9');
+    const part = (id, fid) => ({ message_id: id, chat: { id: 7 }, photo: [{ file_id: fid }], media_group_id: 'grp9' });
+    bufferAlbumPart({ ctx, chatId, key }, { ...part(21, 's1'), caption: '/send labs' }, 'send', { name: 'send', args: 'labs' });
+    bufferAlbumPart({ ctx, chatId, key }, part(22, 's2'), null, null);
+    await sleep(ALBUM_WINDOW_MS + 400);
+    const tray = readTray(bot, chatId);
+    expect(tray.items.map((i) => i.fileId)).toEqual(['s1', 's2']);
+    expect(tray.notes).toEqual(['labs']);
+    expect(sent.some((t) => /Stashed 2 photos/.test(t))).toBe(true);
+    clearTray(bot, chatId);
   });
 });

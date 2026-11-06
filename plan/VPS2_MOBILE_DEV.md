@@ -128,7 +128,7 @@ Internet → (optional Cloudflare orange-cloud DNS)
         → 127.0.0.1:3000  node dist/server.cjs   (systemd Restart=always)
 ```
 
-Env on the VM: `NODE_ENV=production`, `PORT=3000`, `INTERNAL_BASE_URL=http://127.0.0.1:3000`, Gemini, R2, D1, Firebase — copy from Render, never into git. Supabase env is leftover (Track D); not a second source of truth. Do not install SQLite as production in Track V — that is [DATA_PLANE.md](./DATA_PLANE.md) **D-5** after V-16.
+Env on the VM: `NODE_ENV=production`, `PORT=3000`, `INTERNAL_BASE_URL=http://127.0.0.1:3000`, Gemini, R2, D1, Firebase — copy from the runtime env, never into git. Supabase env is leftover. Do not install SQLite. D-5 was cleared on 2026-10-09 ([DATA_PLANE.md](./DATA_PLANE.md): keep D1).
 
 | ID | What | Done when | Do not |
 |---|---|---|---|
@@ -144,7 +144,7 @@ Env on the VM: `NODE_ENV=production`, `PORT=3000`, `INTERNAL_BASE_URL=http://127
 | ID | What | Done when | Do not |
 |---|---|---|---|
 | **V-17** | Delete the Render service. Remove Render URL from Firebase Authorized Domains, R2 CORS, scorecard `live_origin`, any hardcoded `onrender.com`. | `https://health-tracker-backend-64gt.onrender.com` is dead; docs and gates use the VPS host. | Leaving Render “as backup” forever |
-| **V-18** | Confirm Cloudflare extra URL / Containers still parked. Do not buy Workers Paid. Mac can stay as a laptop; it is no longer the agent host. Optional: snapshot / OVH backup verified. | This file’s Runbook matches production. GCP Cloud Run plan stays superseded. | Starting Cloud Run “as well” |
+| **V-18** | **CLEARED 2026-10-09.** Containers and Cloud Run stay off. Do not buy Workers Paid. | — | Starting Cloud Run or Workers Paid |
 
 ### Phase 6 — Autonomous Journey QA Fleet & Orchestrator Self-Healing Loop
 
@@ -262,7 +262,7 @@ Safe order (do NOT `ufw allow` before step 1):
 ## Invariants
 
 1. GitHub is source of truth. The VM is a working tree + (later) the Node origin.
-2. Cloudflare stays **R2 + D1 + optional DNS** until Track D D-6 says otherwise. It does not run meal analyze (`sharp`, in-memory jobs, loopback SSE).
+2. Cloudflare stays **R2 + D1 + optional DNS**. D-6 decided keep D1 on 2026-10-09. It does not run meal analyze (`sharp`, in-memory jobs, loopback SSE).
 3. Gemini stays the vision model. Firebase stays login. SQL stays D1 for the whole of Track V.
 4. One coding CLI at a time. Hermes may wrap it; Hermes is not a second writer in the same tree.
 5. No Docker for the site. Dockerfile remains for history / a future host; systemd runs `node dist/server.cjs`.

@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
@@ -94,15 +95,20 @@ export function vmSessionRows(rows, { now = Date.now() } = {}) {
     } catch {
       modelId = String(r.model || '').trim();
     }
-    if (!modelId) return null;
+    // Headless `opencode run` workers (triage/worker children) never get a
+    // model recorded on the session row, so the model gate below would hide
+    // them forever. A titled sheet-todo child shows as a worker row with
+    // the ticket key in the task; untitled model-less rows stay dropped.
     const dir = String(r.directory || '').trim();
     const title = String(r.title || '').trim();
+    const isTodoChild = !modelId && title.toLowerCase().startsWith('sheet-todo ');
+    if (!modelId && !isTodoChild) return null;
     const label = title && title.toLowerCase() !== 'none' ? title : (dir.split('/').pop() || dir);
     const streaming = String(r.lastType || '') === 'assistant' && (r.lastCompleted === null || r.lastCompleted === undefined);
     const working = streaming || String(r.lastType || '') === 'user';
     return {
       location: 'VM',
-      agent: `opencode/${modelId}`,
+      agent: modelId ? `opencode/${modelId}` : 'worker',
       status: working ? 'working' : 'idle',
       lastPhase: working ? 'working' : 'idle',
       task: label,
@@ -114,10 +120,76 @@ export function vmSessionRows(rows, { now = Date.now() } = {}) {
   }).filter(Boolean);
 }
 
+/**
+ * Terminal-picker rows for live VM opencode CLI sessions: bare sessions with
+ * no ttyd route (this box's own agent runs). The picker's ttyd rows are keyed
+ * per bot, so these carry their own `opencode:<sessionId>` ids — one row per
+ * session, never merged into the VM bot row. `url` is the public web UI root
+ * the picker opens for the session (same gateway door, token appended by the
+ * client); the row itself is what makes the session visible in one place with
+ * the collab and VM-bot terminals.
+ */
+export function vmPickerEntries(rawRows, { now = Date.now(), webUrl = '' } = {}) {
+  const out = [];
+  for (const r of (Array.isArray(rawRows) ? rawRows : [])) {
+    const mapped = vmSessionRows([r], { now })[0];
+    if (!mapped) continue;
+    const sid = String(r?.id || '').trim();
+    if (!sid) continue;
+    out.push({
+      id: `opencode:${sid}`,
+      kind: 'opencode',
+      bot: 'vm',
+      sessionId: sid,
+      agent: mapped.agent,
+      title: mapped.task,
+      status: mapped.status,
+      updatedAt: mapped.updatedAt,
+      url: String(webUrl || ''),
+    });
+  }
+  return out;
+}
+
+/** Read + map in one call for the terminal picker (best-effort, never throws). */
+export function readVmPickerEntries({ home = os.homedir(), now = Date.now(), windowMs = VM_OPENCODE_WINDOW_MS, dbPath = null, webUrl = '' } = {}) {
+  return vmPickerEntries(
+    readVmOpencodeSessions({ home, now, windowMs, dbPath }),
+    { now, webUrl },
+  );
+}
+
+/**
+ * Attach target for one bare VM session: the session id plus the workspace
+ * directory the viewer terminal must start in. Only sessions the picker
+ * itself would list (fresh, model-bearing) resolve — anything else is a 404
+ * upstream, never a `null` the viewer would turn into a fresh session.
+ * The directory stays server-side (target file + attach argv); picker rows
+ * never carry it.
+ */
+export function findVmSessionTarget(rawRows, sessionId, { now = Date.now() } = {}) {
+  const sid = String(sessionId || '').trim();
+  if (!/^ses_[A-Za-z0-9]+$/.test(sid)) return null;
+  const row = (Array.isArray(rawRows) ? rawRows : []).find((r) => String(r?.id || '') === sid);
+  if (!row) return null;
+  if (!vmSessionRows([row], { now })[0]) return null;
+  const directory = String(row.directory || '').trim();
+  if (!directory) return null;
+  return { sessionId: sid, directory, title: String(row.title || '').trim() };
+}
+
 /** Recent unarchived opencode sessions from the local opencode.db (best-effort).
  * Freshness is the latest activity of either clock: the session row
  * (moves on step completion) or its message stream (moves while a turn is
- * still generating). A long streaming turn must not vanish mid-turn. */
+ * still generating). A long streaming turn must not vanish mid-turn.
+ *
+ * WARNING — never call this on the gateway request path. The scan is
+ * synchronous: on a busy box (430MB+ db, hot WAL, constant writers) the
+ * correlated subqueries below stall the event loop for 20–120s+, wedging
+ * EVERY route (fleet page, heartbeats, state) until they return, with retry
+ * storms piling more scans behind them (2026-11-06 fleet outage). Request
+ * paths must use getVmSessionRows / readVmSessionRowsFresh instead, which
+ * run this same scan in a child process and serve a TTL cache. */
 export function readVmOpencodeSessions({ home = os.homedir(), now = Date.now(), windowMs = VM_OPENCODE_WINDOW_MS, dbPath = null } = {}) {
   try {
     const DatabaseSync = sqliteDriver();
@@ -126,15 +198,46 @@ export function readVmOpencodeSessions({ home = os.homedir(), now = Date.now(), 
     if (!fs.existsSync(db)) return [];
     const conn = new DatabaseSync(db, { readOnly: true });
     try {
-      const rows = conn.prepare(
-        `select s.model, s.directory, s.title, s.time_updated as timeUpdated,
-          (select m.type from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastType,
-          (select m.data from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastData,
-          (select max(m.time_created) from session_message m where m.session_id = s.id) as lastMsgMs
-        from session_v2 s where s.time_archived is null order by s.time_updated desc limit 10`
+      // Sessions first (session_v2 is tiny), then ONE pass over
+      // session_message with a window function. The previous shape — 3
+      // correlated subqueries per session, i.e. 30 full scan+sorts — stalled
+      // the loop for a minute+ on a busy box and wedged every gateway route
+      // (2026-11-06 fleet outage). Same rows out, ~100x faster in.
+      const sessions = conn.prepare(
+        `select id, model, directory, title, time_updated as timeUpdated
+         from session_v2 where time_archived is null order by time_updated desc limit 10`
       ).all();
+      const byId = new Map();
+      for (const s of sessions) {
+        byId.set(String(s.id), {
+          id: String(s.id),
+          model: s.model ?? null,
+          directory: s.directory ?? '',
+          title: s.title ?? '',
+          timeUpdated: Number(s.timeUpdated || 0),
+          lastType: null,
+          lastData: null,
+          lastMsgMs: null,
+        });
+      }
+      const ids = [...byId.keys()];
+      if (ids.length) {
+        const q = `select session_id as sid, type as lastType, data as lastData, mx as lastMsgMs from (
+          select m.session_id, m.type, m.data, m.time_created,
+            row_number() over (partition by m.session_id order by m.time_created desc) as rn,
+            max(m.time_created) over (partition by m.session_id) as mx
+          from session_message m where m.session_id in (${ids.map(() => '?').join(',')})
+        ) where rn = 1`;
+        for (const m of conn.prepare(q).all(...ids)) {
+          const row = byId.get(String(m.sid));
+          if (!row) continue;
+          row.lastType = m.lastType ?? null;
+          row.lastData = typeof m.lastData === 'string' ? m.lastData : null;
+          row.lastMsgMs = m.lastMsgMs ?? null;
+        }
+      }
       const fresh = [];
-      for (const r of rows) {
+      for (const r of byId.values()) {
         try {
           const d = typeof r.lastData === 'string' ? JSON.parse(r.lastData) : null;
           r.lastCompleted = d && d.time ? (d.time.completed ?? null) : null;
@@ -154,6 +257,131 @@ export function readVmOpencodeSessions({ home = os.homedir(), now = Date.now(), 
   } catch {
     return [];
   }
+}
+
+/**
+ * Non-blocking VM session reads (2026-11-06 fleet outage fix).
+ *
+ * The scan above is synchronous and slow on a live box; running it in a
+ * request handler wedges the whole gateway. This wrapper runs the identical
+ * scan in a short-lived child process (the event loop stays free), caches
+ * the rows with a TTL, and singleflights concurrent refreshes:
+ * - getVmSessionRows(): sync, for hot paths (getFleetNodes). Returns the
+ *   last good rows instantly (possibly empty on cold start) and triggers a
+ *   background refresh when stale. Never waits, never blocks.
+ * - readVmSessionRowsFresh(): async, for rare operator paths (terminal
+ *   picker). Awaits one bounded refresh, then returns cache. The wait is
+ *   off-loop (child), so other routes keep serving.
+ * A failed/slow child never wipes good cache: stale rows stay until a
+ * refresh succeeds, with a short cooldown between attempts.
+ */
+export const VM_SESSIONS_TTL_MS = 60_000;
+export const VM_SESSIONS_TIMEOUT_MS = 10_000;
+const VM_SESSIONS_COOLDOWN_MS = 15_000;
+// One cache entry per database (prod uses the default home db; tests and the
+// VM_OPENCODE_DB_PATH seam use others). Sharing rows across different dbs
+// would leak one box's sessions into another's pane — and across tests.
+const vmSessionsCaches = new Map();
+function vmCacheFor(db, windowMs) {
+  const key = `${String(db)}::${Number(windowMs) || 0}`;
+  let entry = vmSessionsCaches.get(key);
+  if (!entry) {
+    entry = { at: 0, rows: [], inflight: null, coolUntil: 0 };
+    vmSessionsCaches.set(key, entry);
+  }
+  return entry;
+}
+
+function resolveVmDbPath({ home, dbPath, vmOpencodeDb } = {}) {
+  const p = dbPath || vmOpencodeDb || path.join(home || os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
+  return String(p);
+}
+
+function readVmSessionsInChild({ db, windowMs, now, timeoutMs }) {
+  return new Promise((resolve) => {
+    const done = (ok, rows) => resolve({ ok, rows: Array.isArray(rows) ? rows : [] });
+    try {
+      const modUrl = pathToFileURLString();
+      const src = 'const[,u,d,w,n]=process.argv;const m=await import(u);process.stdout.write(JSON.stringify(m.readVmOpencodeSessions({dbPath:d||null,windowMs:Number(w)||0,now:Number(n)||Date.now()})??[]))';
+      execFile(
+        process.execPath,
+        ['--input-type=module', '-e', src, modUrl, String(db), String(windowMs), String(now)],
+        { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 },
+        (err, stdout) => {
+          if (err) return done(false, []);
+          try {
+            done(true, JSON.parse(String(stdout || '[]')));
+          } catch {
+            done(false, []);
+          }
+        },
+      );
+    } catch {
+      done(false, []);
+    }
+  });
+}
+
+function pathToFileURLString() {
+  return new URL(import.meta.url).href;
+}
+
+/** Refresh the VM session cache in a child process (singleflight, bounded). */
+export function refreshVmSessionRows({ home, now, windowMs, dbPath, vmOpencodeDb, timeoutMs = VM_SESSIONS_TIMEOUT_MS } = {}) {
+  const db = resolveVmDbPath({ home, dbPath, vmOpencodeDb });
+  const wm = Number(windowMs) > 0 ? Number(windowMs) : VM_OPENCODE_WINDOW_MS;
+  const cache = vmCacheFor(db, wm);
+  if (cache.inflight) return cache.inflight;
+  const t = typeof now === 'number' ? now : Date.now();
+  if (t < cache.coolUntil) return Promise.resolve({ ok: false, rows: cache.rows });
+  const to = Number(timeoutMs) > 0 ? Number(timeoutMs) : VM_SESSIONS_TIMEOUT_MS;
+  if (!fs.existsSync(db)) {
+    cache.at = Date.now();
+    cache.rows = [];
+    return Promise.resolve({ ok: true, rows: [] });
+  }
+  const p = readVmSessionsInChild({ db, windowMs: wm, now: t, timeoutMs: to }).then(({ ok, rows }) => {
+    if (ok) {
+      cache.at = Date.now();
+      cache.rows = rows;
+    } else {
+      cache.coolUntil = Date.now() + VM_SESSIONS_COOLDOWN_MS;
+    }
+    if (cache.inflight === p) cache.inflight = null;
+    return { ok, rows: cache.rows };
+  });
+  cache.inflight = p;
+  return p;
+}
+
+/** Sync cache read for hot paths: instant rows, background refresh when stale. */
+export function getVmSessionRows({ home, now, windowMs, dbPath, vmOpencodeDb, ttlMs = VM_SESSIONS_TTL_MS, timeoutMs } = {}) {
+  const db = resolveVmDbPath({ home, dbPath, vmOpencodeDb });
+  const wm = Number(windowMs) > 0 ? Number(windowMs) : VM_OPENCODE_WINDOW_MS;
+  const cache = vmCacheFor(db, wm);
+  const t = typeof now === 'number' ? now : Date.now();
+  const ttl = Number(ttlMs) > 0 ? Number(ttlMs) : VM_SESSIONS_TTL_MS;
+  if (t - cache.at > ttl && t >= cache.coolUntil && !cache.inflight) {
+    try {
+      const r = refreshVmSessionRows({ home, now: t, windowMs: wm, dbPath, vmOpencodeDb, timeoutMs });
+      // Never let a synchronous throw escape the hot path; the background
+      // refresh still warms the cache for the next call.
+      if (r && typeof r.catch === 'function') r.catch(() => {});
+    } catch {}
+  }
+  return cache.rows;
+}
+
+/** Bounded fresh rows for rare operator paths (terminal picker/viewer). */
+export async function readVmSessionRowsFresh({ home, now, windowMs, dbPath, vmOpencodeDb, timeoutMs } = {}) {
+  const r = await refreshVmSessionRows({ home, now, windowMs, dbPath, vmOpencodeDb, timeoutMs });
+  return r.rows;
+}
+
+/** Picker entries with a bounded off-loop refresh (never blocks the loop). */
+export async function readVmPickerEntriesFresh({ home = os.homedir(), now = Date.now(), windowMs = VM_OPENCODE_WINDOW_MS, dbPath = null, webUrl = '', timeoutMs } = {}) {
+  const rows = await readVmSessionRowsFresh({ home, now, windowMs, dbPath, timeoutMs });
+  return vmPickerEntries(rows, { now, webUrl });
 }
 
 /** Record a distributed heartbeat from a machine/agent pane. */
@@ -194,9 +422,447 @@ export function recordFleetHeartbeat(data, { now = Date.now() } = {}) {
 }
 
 /** Explicit mapping table: one pane per ticket, no loose substring overlap. */
+export const FLEET_SNAPSHOT_STALE_MS = 90 * 1000;
+export const MAC_REPORTER_OFFLINE_SEC = 20;
+
+let fleetSnapshotCache = { at: 0, data: null };
+let macPendingActions = [];
+
+export function normalizeMacTelemetry(mac) {
+  if (!mac || typeof mac !== 'object') return null;
+  const switches = Array.isArray(mac.switches)
+    ? mac.switches
+        .filter((s) => s && typeof s === 'object')
+        .map((s) => ({
+          id: snapshotText(s.id || '', 60),
+          label: snapshotText(s.label || s.id || '', 120),
+          on: Boolean(s.on),
+          detail: snapshotText(s.detail || '', 200),
+          toggleable: s.toggleable !== false,
+        }))
+    : [];
+  const res = mac.resources && typeof mac.resources === 'object' ? mac.resources : {};
+  const mem = res.memory && typeof res.memory === 'object' ? res.memory : {};
+  const disk = res.disk && typeof res.disk === 'object' ? res.disk : {};
+  const loadAvg = Array.isArray(res.loadAvg) ? res.loadAvg.slice(0, 3).map((n) => Number(n) || 0) : [];
+  const processes = Array.isArray(mac.processes)
+    ? mac.processes
+        .filter((p) => p && typeof p === 'object' && Number.isInteger(Number(p.pid)))
+        .slice(0, 25)
+        .map((p) => ({
+          pid: Number(p.pid),
+          name: snapshotText(p.name || '', 80),
+          command: snapshotText(p.command || p.name || '', 220),
+          cpuPct: Number(p.cpuPct) || 0,
+          memPct: Number(p.memPct) || 0,
+          rssMb: Number(p.rssMb) || 0,
+          killable: p.killable !== false,
+        }))
+    : [];
+
+  return {
+    hostname: snapshotText(mac.hostname || 'Mac', 80),
+    collectedAt: snapshotText(mac.collectedAt || '', 60),
+    reporterOnline: mac.reporterOnline !== false,
+    switches,
+    resources: {
+      cpuCount: Number(res.cpuCount) || 0,
+      loadAvg,
+      memory: {
+        totalGb: Number(mem.totalGb) || 0,
+        usedGb: Number(mem.usedGb) || 0,
+        wiredGb: Number(mem.wiredGb) || 0,
+        compressedGb: Number(mem.compressedGb) || 0,
+        freeGb: Number(mem.freeGb) || 0,
+        usedPct: Number(mem.usedPct) || 0,
+        swapUsedMb: Number(mem.swapUsedMb) || 0,
+      },
+      disk: {
+        totalGib: Number(disk.totalGib) || 0,
+        usedGib: Number(disk.usedGib) || 0,
+        availGib: Number(disk.availGib) || 0,
+        usedPct: Number(disk.usedPct) || 0,
+      },
+    },
+    processes,
+    lastActionResult: mac.lastActionResult && typeof mac.lastActionResult === 'object'
+      ? {
+          id: snapshotText(mac.lastActionResult.id || '', 60),
+          ok: Boolean(mac.lastActionResult.ok),
+          message: snapshotText(mac.lastActionResult.message || '', 220),
+          at: snapshotText(mac.lastActionResult.at || '', 60),
+        }
+      : null,
+  };
+}
+
+export function queueMacAction(action, { now = Date.now() } = {}) {
+  if (!action || typeof action !== 'object') return { ok: false, error: 'invalid action' };
+  const type = String(action.type || '').trim();
+  if (type !== 'toggle_switch' && type !== 'kill_pid' && type !== 'send_message') {
+    return { ok: false, error: 'unsupported action type' };
+  }
+  if (type === 'send_message') {
+    const tool = String(action.tool || '').trim();
+    if (tool !== 'opencode' && tool !== 'commandcode' && tool !== 'vscode') {
+      return { ok: false, error: 'send is only supported for opencode, commandcode, and vscode' };
+    }
+    const sessionId = String(action.sessionId || '').trim();
+    if (!/^[A-Za-z0-9_-]{4,40}$/.test(sessionId)) return { ok: false, error: 'invalid session id' };
+    const message = String(action.message || '').replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '').trim();
+    if (!message || message.length > 2000) return { ok: false, error: 'message must be 1-2000 characters' };
+    const item = {
+      id: `act-${now}-${Math.random().toString(36).slice(2, 7)}`,
+      type,
+      tool,
+      sessionId,
+      message,
+      requestedAt: new Date(now).toISOString(),
+    };
+    macPendingActions.push(item);
+    if (macPendingActions.length > 20) macPendingActions = macPendingActions.slice(-20);
+    return { ok: true, action: { id: item.id, type, tool, sessionId, requestedAt: item.requestedAt }, pending: macPendingActions.length };
+  }
+  if (type === 'toggle_switch') {
+    const target = String(action.target || '').trim();
+    const allowed = new Set(['fleetd', 'fleet_snapshot', 'fleet_status_srv', 'sage_sync', 'http_servers']);
+    if (!allowed.has(target)) return { ok: false, error: `unknown switch: ${target}` };
+    const state = String(action.state || '').trim().toLowerCase();
+    if (state !== 'on' && state !== 'off') return { ok: false, error: 'state must be on or off' };
+    const item = {
+      id: `act-${now}-${Math.random().toString(36).slice(2, 7)}`,
+      type,
+      target,
+      state,
+      requestedAt: new Date(now).toISOString(),
+    };
+    macPendingActions.push(item);
+    if (macPendingActions.length > 20) macPendingActions = macPendingActions.slice(-20);
+    return { ok: true, action: item, pending: macPendingActions.length };
+  }
+  const pid = Number(action.pid);
+  if (!Number.isInteger(pid) || pid <= 100) {
+    return { ok: false, error: 'invalid pid' };
+  }
+  const item = {
+    id: `act-${now}-${Math.random().toString(36).slice(2, 7)}`,
+    type,
+    pid,
+    requestedAt: new Date(now).toISOString(),
+  };
+  macPendingActions.push(item);
+  if (macPendingActions.length > 20) macPendingActions = macPendingActions.slice(-20);
+  return { ok: true, action: item, pending: macPendingActions.length };
+}
+
+export function drainMacActions() {
+  const out = macPendingActions.slice();
+  macPendingActions = [];
+  return out;
+}
+
+export function getPendingMacActions() {
+  return macPendingActions.slice();
+}
+
+const SNAPSHOT_STATUS = new Map([
+  ['working', 'working'],
+  ['running', 'working'],
+  ['busy', 'working'],
+  ['available', 'available'],
+  ['avail', 'available'],
+  ['idle', 'available'],
+  ['depleted', 'depleted'],
+  ['down', 'down'],
+  ['disconnected', 'down'],
+  ['unreachable', 'down'],
+  ['offline', 'down'],
+  ['disabled', 'disabled'],
+  ['stale', 'stale'],
+  ['unknown', 'unknown'],
+  ['error', 'error'],
+  ['failed', 'error'],
+]);
+
+function snapshotText(value, max = 240) {
+  const s = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+/** Agent output keeps its line breaks; the newest end is kept when it is too long. */
+function snapshotOutput(value, max = 4000) {
+  const s = String(value ?? '').replace(/\r/g, '').trim();
+  return s.length > max ? `…${s.slice(-(max - 1))}` : s;
+}
+
+/** Recent brief/working-on changes for one session, newest first; entries without a time are dropped. */
+function snapshotHistory(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries.slice(0, 8).map((h) => ({
+    at: snapshotActivityIso(h?.at),
+    brief: snapshotText(h?.brief || '', 400),
+    workingOn: snapshotOutput(h?.working_on || '', 600),
+    model: snapshotText(h?.model || '', 120),
+  })).filter((h) => h.at);
+}
+
+export function snapshotStatus(raw) {
+  return SNAPSHOT_STATUS.get(String(raw ?? '').trim().toLowerCase()) || 'idle';
+}
+
+/** Epoch seconds (or ms, or a date string) to ISO; null when there is no real activity. */
+export function snapshotActivityIso(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  const ms = Number.isFinite(n) ? (n > 1e12 ? n : n * 1000) : Date.parse(String(value));
+  return Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : null;
+}
+
+/** The thread title a channel card embeds as `thread <title>` (not `thread state 3m`). */
+export function snapshotThreadTitle(detail) {
+  const m = String(detail || '').match(/\bthread (?!state\b)([^·]+)/i);
+  return m ? snapshotText(m[1], 180) : '';
+}
+
+function snapshotAgentFor(row, agents) {
+  const id = String(row?.id || '').toLowerCase();
+  const short = id.slice(0, 8);
+  const threadId = /^[0-9a-f]{8}-/.test(id);
+  const tool = String(row?.tool || '').toLowerCase();
+  const model = String(row?.model_name || row?.model || '').toLowerCase();
+  return (Array.isArray(agents) ? agents : []).find((a) => {
+    if (threadId && short && String(a?.agent || '').toLowerCase().includes(short)) return true;
+    if (!tool || String(a?.tool || '').toLowerCase() !== tool) return false;
+    if (model && String(a?.model_name || '').toLowerCase() === model) return true;
+    return false;
+  }) || null;
+}
+
+/**
+ * The current task for one resource. Channel cards only carry prose, so this
+ * reads the richer fields the same document already publishes: the thread
+ * title in `detail`, the per-thread `agents[].now`, and the lane probes.
+ * A blank task is honest; never a process command pretending to be work.
+ */
+export function snapshotTask(row, agents, lanes) {
+  if (row?.task) return snapshotText(row.task, 180);
+  const tool = String(row?.tool || '').toLowerCase();
+  const title = snapshotThreadTitle(row?.detail);
+  const agent = snapshotAgentFor(row, agents);
+  const lane = (name) => (lanes && typeof lanes === 'object' ? lanes[name] || {} : {});
+
+  if (tool === 'freebuff') {
+    if (title) return title;
+    const now = snapshotText(agent?.now, 180);
+    if (now && now !== '-' && !/pm-wait\.py|not dispatched by tracker/i.test(now)) return now;
+  }
+  if (tool === 'cmd') {
+    const m = String(agent?.last || '').match(/last assistant:\s*(.+)$/i);
+    if (m) return snapshotText(m[1], 180);
+  }
+  if (tool === 'opencode/cline') {
+    const moc = lane('mac_opencode');
+    const active = snapshotText(moc.active_task || agent?.now, 180);
+    // The Cline hub daemon is the process, not the task it is doing.
+    if (active && /\.cline\b/i.test(active)) return 'Cline hub daemon';
+    if (active && active !== '-') return active;
+    const tail = snapshotText(moc.last_log_tail || agent?.last, 180);
+    if (tail && tail !== '-' && !/\[exit\]/i.test(tail)) return tail;
+  }
+  if (tool === 'opencode') {
+    const voc = lane('vps_opencode');
+    if (voc.last_text) return snapshotText(voc.last_text, 180);
+  }
+  if (tool === 'colab' || tool === 'colab-gpu') {
+    const now = snapshotText(agent?.now, 180);
+    if (now && now !== '-') return now;
+    const col = lane('colab');
+    if (col.last_text) return snapshotText(col.last_text, 180);
+  }
+  if (tool === 'claude') {
+    const last = snapshotText(agent?.last, 180);
+    if (last && last !== '-') return last === 'app open' ? 'Outside reviewer (app open)' : last;
+  }
+  const now = snapshotText(agent?.now, 180);
+  if (now && now !== '-') return now;
+  if (title) return title;
+  // Last resort: the card's first sentence is still the task it reports.
+  return snapshotText(String(row?.detail || '').split(' · ')[0], 180);
+}
+
+/** Freebuff rows share the daily allowance: what is left and when it renews. */
+export function snapshotAllowance(row, quota) {
+  const tool = String(row?.tool || '').toLowerCase();
+  // Watcher rows come from local session data; the Freebuff quota is a separate, older source.
+  if (String(row?.id || '').startsWith('watch:')) return { text: '—', renewAt: null, stale: false };
+  if (tool !== 'freebuff') return { text: '—', renewAt: null, stale: false };
+  const q = quota && typeof quota === 'object' ? quota : {};
+  const weight = snapshotText(row?.weight || '', 12);
+  const free = weight === '0×' || weight === '0x' || weight === '0';
+  const remaining = q.remaining_h;
+  const left = remaining === null || remaining === undefined
+    ? 'unknown'
+    : `${Number(remaining).toFixed(1).replace(/\.0$/, '')} h left`;
+  return {
+    text: free ? `${weight || '0×'} free` : `${weight ? `${weight} · ` : ''}${left}`,
+    renewAt: q.resets_at || row?.resets_at || null,
+    stale: Boolean(q.stale),
+  };
+}
+
+function snapshotQuota(payload) {
+  const q = payload?.quota && typeof payload.quota === 'object' ? payload.quota : {};
+  return {
+    remaining_h: q.remaining_h ?? null,
+    as_of: q.as_of ?? null,
+    resets_at: q.resets_at ?? null,
+    resets_in: q.resets_in ?? null,
+    stale: Boolean(q.stale),
+  };
+}
+
+/**
+ * Normalise one dashboard status.json into the flat rows the Fleet table
+ * renders. Pure and tolerant: an unknown channel/status still becomes a row,
+ * so one new tool on the Mac shows up without a deploy.
+ */
+export function normalizeFleetSnapshot(payload, { now = Date.now() } = {}) {
+  if (!payload || typeof payload !== 'object') return null;
+  const channels = Array.isArray(payload.channels) ? payload.channels : null;
+  if (!channels) return null;
+  const agents = Array.isArray(payload.agents) ? payload.agents : [];
+  const lanes = payload.lanes && typeof payload.lanes === 'object' ? payload.lanes : {};
+  const quota = snapshotQuota(payload);
+  const receivedAt = new Date(now).toISOString();
+  const rows = [];
+  const channelRows = [];
+
+  for (const channel of channels) {
+    if (!channel || typeof channel !== 'object') continue;
+    const location = snapshotText(channel.name || channel.channel || 'Unknown', 80);
+    const resources = Array.isArray(channel.resources) ? channel.resources : [];
+    channelRows.push({
+      name: location,
+      host: snapshotText(channel.host || '', 180),
+      counts: channel.counts && typeof channel.counts === 'object' ? { ...channel.counts } : {},
+      resources: resources.length,
+    });
+    for (const row of resources) {
+      if (!row || typeof row !== 'object') continue;
+      const status = snapshotStatus(row.state);
+      rows.push({
+        id: snapshotText(row.id || '', 120),
+        location,
+        tool: snapshotText(row.tool || '—', 40),
+        model: snapshotText(row.model_name || row.model || '—', 120),
+        modelId: snapshotText(row.model || '', 120),
+        status,
+        task: snapshotTask(row, agents, lanes),
+        brief: snapshotText(row.brief || row.task || '', 400),
+        workingOn: snapshotOutput(row.working_on || ''),
+        history: snapshotHistory(row.history),
+        lastActivity: snapshotActivityIso(row.last_activity),
+        allowance: snapshotAllowance(row, quota),
+        weight: snapshotText(row.weight || '', 12),
+        role: snapshotText(row.role || 'worker', 20),
+        enabled: row.enabled !== false,
+        source: snapshotText(row.source || '', 40),
+        age: snapshotText(row.age || '', 20),
+        detail: snapshotText(row.detail || '', 440),
+        updatedAt: receivedAt,
+      });
+    }
+  }
+
+  return {
+    project: snapshotText(payload.project || '', 120),
+    reportedAt: snapshotText(payload.updated || '', 80),
+    receivedAt,
+    channels: channelRows,
+    rows,
+    quota,
+    allowance: payload.allowance && typeof payload.allowance === 'object'
+      ? {
+          remaining: payload.allowance.remaining ?? null,
+          total: payload.allowance.total ?? null,
+          burn: payload.allowance.burn ?? 0,
+          projected: payload.allowance.projected ?? null,
+          as_of: payload.allowance.as_of ?? null,
+          stale: Boolean(payload.allowance.stale),
+        }
+      : null,
+    warnings: (Array.isArray(payload.warnings_all) ? payload.warnings_all : (Array.isArray(payload.warnings) ? payload.warnings : []))
+      .slice(0, 12)
+      .map((w) => snapshotText(w, 240)),
+    mac: normalizeMacTelemetry(payload.mac),
+  };
+}
+
+/** Store the newest pushed snapshot. Returns the normalised payload handed to clients. */
+export function recordFleetSnapshot(payload, { now = Date.now(), persistPath = '' } = {}) {
+  const data = normalizeFleetSnapshot(payload, { now });
+  if (!data) return { ok: false, error: 'invalid snapshot: channels[] required' };
+  fleetSnapshotCache = { at: now, data };
+  if (persistPath) {
+    try {
+      fs.mkdirSync(path.dirname(persistPath), { recursive: true });
+      fs.writeFileSync(persistPath, JSON.stringify(fleetSnapshotCache), 'utf8');
+    } catch {
+      // Best-effort offline cache on disk
+    }
+  }
+  return { ok: true, snapshot: withSnapshotAge(data, now) };
+}
+
+function withSnapshotAge(data, now) {
+  const ageMs = Math.max(0, now - fleetSnapshotCache.at);
+  const ageSec = Math.round(ageMs / 1000);
+  const stale = ageMs > FLEET_SNAPSHOT_STALE_MS;
+  let mac = data.mac ? { ...data.mac } : null;
+  if (mac) {
+    const reporterOnline = ageSec <= MAC_REPORTER_OFFLINE_SEC && mac.reporterOnline !== false;
+    mac.reporterOnline = reporterOnline;
+    if (Array.isArray(mac.switches)) {
+      mac.switches = mac.switches.map((sw) => {
+        if (sw.id === 'fleet_snapshot' && !reporterOnline) {
+          return {
+            ...sw,
+            on: false,
+            detail: sw.on === false && sw.detail ? sw.detail : `Stopped / offline (last push ${ageSec}s ago)`,
+          };
+        }
+        return sw;
+      });
+    }
+  }
+  return {
+    ...data,
+    mac,
+    ageSec,
+    stale,
+  };
+}
+
+/** The newest pushed snapshot, aged at read time; null before the first push. */
+export function getFleetSnapshot({ now = Date.now(), persistPath = '' } = {}) {
+  if (!fleetSnapshotCache.data && persistPath) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(persistPath, 'utf8'));
+      if (raw && typeof raw.at === 'number' && raw.data && Array.isArray(raw.data.rows)) {
+        fleetSnapshotCache = { at: raw.at, data: raw.data };
+      }
+    } catch {
+      // Ignore missing or unreadable disk cache
+    }
+  }
+  if (!fleetSnapshotCache.data) return null;
+  return withSnapshotAge(fleetSnapshotCache.data, now);
+}
+
+/** Explicit mapping table: one pane per ticket, no loose substring overlap. */
 export const LOCATION_OWNER_KEYS = {
   'mac': ['mac', 'darwin'],
-  'vm': ['vm', 'vps', 'vps-france'],
+  'vm': ['vm', 'vps', 'vps-id', 'vps-france'],
   'grok vm': ['grok', 'grok-vps'],
   'collab': ['collab', 'colab'],
   'mobile': ['mobile', 'termux', 'phone', 'android'],
@@ -222,7 +888,7 @@ export function matchesLocation(locationName, ownerStr) {
     if (tokens.includes('grok-vps') || tokens.includes('grok') || hostPart.includes('grok')) {
       return false;
     }
-    return tokens.includes('vm') || tokens.includes('vps') || tokens.includes('vps-france') || hostPart === 'vm' || hostPart === 'vps' || hostPart === 'vps-france';
+    return tokens.includes('vm') || tokens.includes('vps') || tokens.includes('vps-id') || tokens.includes('vps-france') || hostPart === 'vm' || hostPart === 'vps' || hostPart === 'vps-id' || hostPart === 'vps-france';
   }
   if (loc === 'mac') {
     return tokens.includes('mac') || tokens.includes('darwin') || hostPart === 'mac';
@@ -430,9 +1096,12 @@ export function getFleetNodes(opts = {}) {
     // VM is one pane but many agents: every live opencode session is its own
     // row (one agent per row), never an aggregate sentence. The sheet claim
     // attaches to the first row so the ticket chip still links the pane.
+    // The session rows come from a TTL cache refreshed in a child process:
+    // reading the live opencode.db synchronously here would stall the event
+    // loop for a minute+ per /state call and wedge every route (2026-11-06).
     if (loc === 'VM' && !beat) {
       const sessionRows = vmSessionRows(
-        readVmOpencodeSessions({ home: opts.home || os.homedir(), now, dbPath: opts.vmOpencodeDb || null }),
+        getVmSessionRows({ home: opts.home || os.homedir(), now, dbPath: opts.vmOpencodeDb || null, timeoutMs: opts.timeoutMs }),
         { now }
       );
       if (sessionRows.length) {
@@ -819,4 +1488,8 @@ export function formatFleetStatusTable(rows, { chatId, via } = {}) {
 export function resetFleetState() {
   fleetTicketsCache = { cachedAt: 0, rows: [] };
   fleetNodeHeartbeats.clear();
+  fleetSnapshotCache = { at: 0, data: null };
+  vmSessionsCaches.clear();
+  macPendingActions = [];
+
 }

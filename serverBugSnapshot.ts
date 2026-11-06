@@ -85,17 +85,42 @@ export function bugWriteGuard(req: Request, res: Response, next: NextFunction) {
   return res.status(401).json({ error: 'unauthorized: X-Bug-Api-Token required' });
 }
 
-async function loadJobTape(jobId: string): Promise<{ logText: string; foodLog: any; scout: any }> {
+export async function loadJobTape(jobId: string): Promise<{ logText: string; foodLog: any; scout: any }> {
   let logText = '';
   let foodLog: any = null;
   let scout: any = null;
+  // D-0: server-side direct R2 reads first. The client helpers below fetch
+  // relative /api/* URLs, which throw ("Failed to parse URL") under Node, so
+  // server-side the R2 half of the tape was always empty (measured on #50:
+  // R2 holds result.scoutItems + result.pendingFoodLog, yet reanalyze 409'd
+  // "No frozen scout"). Same Direct pattern as the JobsDebug route.
+  try {
+    const { fetchLogsFromR2Direct, fetchDebugPayloadFromR2Direct } = await import('./server_routes_r2.js');
+    if (!logText && typeof fetchLogsFromR2Direct === 'function') {
+      const directLogs = await fetchLogsFromR2Direct(jobId);
+      if (directLogs) logText = directLogs;
+    }
+    if ((!foodLog || !scout) && typeof fetchDebugPayloadFromR2Direct === 'function') {
+      const directPayload = await fetchDebugPayloadFromR2Direct(jobId);
+      if (directPayload) {
+        if (!foodLog) foodLog = directPayload.pendingFoodLog || directPayload.result?.pendingFoodLog || null;
+        if (!scout) scout = directPayload.scoutItems || directPayload.result?.scoutItems || null;
+      }
+    }
+  } catch {
+    /* Direct R2 unavailable (e.g. no creds) — fall through to client/D1 paths */
+  }
   const { fetchLogsFromR2, fetchDebugPayloadFromR2 } = await import('./src/utils/r2Storage.js');
-  const logs = await fetchLogsFromR2(jobId);
-  if (logs) logText = logs;
-  const payload = await fetchDebugPayloadFromR2(jobId);
-  if (payload) {
-    foodLog = payload.pendingFoodLog || payload.result?.pendingFoodLog || null;
-    scout = payload.scoutItems || payload.result?.scoutItems || null;
+  if (!logText) {
+    const logs = await fetchLogsFromR2(jobId);
+    if (logs) logText = typeof logs === 'string' ? logs : JSON.stringify(logs);
+  }
+  if (!foodLog || !scout) {
+    const payload = await fetchDebugPayloadFromR2(jobId);
+    if (payload) {
+      if (!foodLog) foodLog = payload.pendingFoodLog || payload.result?.pendingFoodLog || null;
+      if (!scout) scout = payload.scoutItems || payload.result?.scoutItems || null;
+    }
   }
   if (!foodLog || !scout) {
     // D-2: D1-only fallback (agent_jobs.clean_result is JSON text; d1GetJob parses).

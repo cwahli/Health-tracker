@@ -37,26 +37,24 @@ for (const s of [
   ok(!home.includes(s), 'P0:A1', `Home still contains "${s}"`);
 }
 
-// P0 (A2)
-for (const s of [
-  'Auto-Calibrate',
-  'Auto-Fill Defaults',
-  'Quick Approve',
-  'Approve Selected',
-  'Save & Approve',
-]) {
-  ok(!dict.includes(s), 'P0:A2', `Dictionary still contains "${s}"`);
-}
+// P0 (A2) and P0 (A4) retired with the dictionary modal. The modal file may remain.
+// Call sites moved out of App.tsx. Do not stuff the strings back into App.tsx.
+
+const callers = [
+  'src/hooks/useBiomarkerActions.ts',
+  'src/hooks/useJobRuntime.ts',
+  'src/components/LogChat.tsx',
+  'src/components/AppModals.tsx',
+  'src/components/AgentResultTable.tsx',
+  'src/utils/agentResultRowsFallback.ts',
+].map(read).join('\n');
 
 // P0 (A3)
 ok(life.includes('export function buildReviewCommandsFromHistory'), 'P0:A3', 'missing buildReviewCommandsFromHistory');
 ok(life.includes('export function enrichReviewModificationCommands'), 'P0:A3', 'missing enrichReviewModificationCommands');
 ok(logChat.includes('enrichReviewModificationCommands'), 'P0:A3', 'LogChat does not call enrich');
-ok(app.includes('enrichReviewModificationCommands'), 'P0:A3', 'App does not call enrich');
+ok(callers.includes('enrichReviewModificationCommands'), 'P0:A3', 'product callers do not call enrich');
 ok(server.includes('enrichReviewModificationCommands'), 'P0:A3', 'server.ts does not call enrich');
-
-// P0 (A4)
-ok(dict.includes('isPendingCatalogApproval'), 'P0:A4', 'Dictionary does not use isPendingCatalogApproval');
 
 // P0 (A6) — lock convert numbers
 for (const n of ['1.293', '1.411', '3.362', '79.56', '13.68']) {
@@ -66,7 +64,7 @@ for (const n of ['1.293', '1.411', '3.362', '79.56', '13.68']) {
 // P1 — Review apply captures observationMeta & populates rawValue
 ok(life.includes('observationMeta'), 'P1', 'biomarkerLifecycle.ts missing observationMeta tracking');
 ok(lifeTest.includes('observationMeta?.hdl?.rawValue') && lifeTest.includes('older SI rows remain unchanged'), 'P1', 'lifecycle test missing observationMeta capture test');
-ok(app.includes('collectCatalogUnitMap'), 'P1', 'App.tsx does not use collectCatalogUnitMap');
+ok(callers.includes('collectCatalogUnitMap'), 'P1', 'product callers do not use collectCatalogUnitMap');
 
 // P2 — Catalog Hygiene
 ok(life.includes('export function cleanupInventedBiomarkerCatalog'), 'P2', 'missing cleanupInventedBiomarkerCatalog in biomarkerLifecycle.ts');
@@ -75,7 +73,8 @@ ok(sanitizeUtils.includes('cleanupInventedBiomarkerCatalog'), 'P2', 'dataSanitiz
 // master (or tombstone) on both load paths, never across different units.
 const audit = read('src/utils/biomarkerAuditEngine.ts');
 ok(audit.includes('export function mergeParallelAliasGroups'), 'P2', 'missing mergeParallelAliasGroups in biomarkerAuditEngine.ts');
-const dedupeSites = (app.match(/mergeParallelAliasGroups\(/g) || []).length;
+const sync = read('src/hooks/useAppSync.ts');
+const dedupeSites = (sync.match(/mergeParallelAliasGroups\(/g) || []).length;
 ok(dedupeSites >= 2, 'P2', `parallel-key fold wired at ${dedupeSites} load paths, want >= 2 (auth load + sync merge)`);
 ok(audit.includes('masterUnit !== loserUnit'), 'P2', 'parallel-key fold missing unit-mismatch guard');
 
@@ -92,8 +91,15 @@ ok(lifeTest.includes('runs calibrator for 25-yo female'), 'P4', 'missing calibra
 // P4b — B7.5 Silent Calibrator product path: every full-profile write routes
 // through the fingerprint-guarded helper (Header, Dictionary updates,
 // front-desk ×3, sync merge, conflict resolve, sanitize apply).
-ok(app.includes('maybeRecalibrateDemographicOverlays'), 'P4', 'App does not route profile writes through the silent calibrator');
-const recalSites = (app.match(/maybeRecalibrateDemographicOverlays\(profile, /g) || []).length;
+const recalFiles = [
+  'src/hooks/useFoodLogActions.ts',
+  'src/hooks/useAppSync.ts',
+  'src/components/AppModals.tsx',
+  'src/components/AppTabs.tsx',
+  'src/components/AppShell.tsx',
+].map(read).join('\n');
+ok(recalFiles.includes('maybeRecalibrateDemographicOverlays'), 'P4', 'product paths do not route profile writes through the silent calibrator');
+const recalSites = (recalFiles.match(/maybeRecalibrateDemographicOverlays\(profile, /g) || []).length;
 ok(recalSites >= 6, 'P4', `silent calibrator covers ${recalSites} product paths, want >= 6`);
 ok(!app.includes('profile?.age !== updatedProfile.age'), 'P4', 'raw demographic diff still present (must be fingerprint diff)');
 
@@ -121,8 +127,9 @@ for (const [src, id] of [[app, 'App.tsx'], [logChat, 'LogChat.tsx'], [insights, 
   const stamps = (src.match(/needsApproval:\s*true/g) || []).length;
   ok(stamps === 0, 'P8', `${id} stamps needsApproval:true onto the bag (${stamps}x)`);
 }
-ok(app.includes('pushPendingObservation') && logChat.includes('pushTransientPending'), 'P8', 'pending push helpers missing');
-ok(dict.includes('approvePendingObservation') && dict.includes('dismissPendingObservation'), 'P8', 'Dictionary does not approve/dismiss from the pending store');
+const modals = read('src/components/AppModals.tsx');
+ok(modals.includes('pushPendingObservation') && logChat.includes('pushTransientPending'), 'P8', 'pending push helpers missing');
+// Dictionary approve/dismiss half of P8 retired with the modal. The needsApproval stamp ban stays.
 
 if (failed) {
   console.error(`\nM31 assert failed: ${failed} check(s)`);

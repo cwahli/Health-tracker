@@ -1,0 +1,20 @@
+{
+  "schema": "meal-audit-request/1",
+  "mealId": "meal_1791393746245",
+  "name": "Crunchy Korean Chicken Wrap, Seeded Chicken, and Cabbage Slaw, Peas and Grains",
+  "provenance": "debug_payload",
+  "photos": [
+    "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791393746245/photos/sha256_a0fa585521f87ec49444c5adc6309c4e71b50e48e0d58ebba31f909024163681.jpg"
+  ],
+  "skeleton": "/home/ubuntu/src/Health-tracker/artifacts/meal_audits/loop/meal_1791393746245/flow_skeleton.json",
+  "requestedAt": "2026-10-08T11:17:04.350Z",
+  "requestedBy": "meal-audit-loop",
+  "status": "pending",
+  "instructions": [
+    "Audit this meal and produce a ground-truth bundle.",
+    "For each dish: dishName, weightGrams, boundingBox2D (0-1000, required because photos exist), and all 32 nutrient keys.",
+    "Weight must come from the catalog (scripts/meal-audit-assist.mjs api:<query>) or a scale, never an eyeball estimate.",
+    "Run scripts/generate-meal-result.mjs to write meal_result.json, then report the bundle path with `complete`.",
+    "If the catalog cannot source a nutrient, the audit is INCOMPLETE: say so rather than filling zeros."
+  ]
+}

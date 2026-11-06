@@ -2,6 +2,23 @@
  * R2 Storage utility for uploading and deleting assets/payloads via API endpoints.
  */
 
+/**
+ * Resolve an API path against the current origin.
+ *
+ * In the browser relative URLs are correct. On the server (Node) `fetch`
+ * rejects them outright — the job pipeline runs inside the same process as
+ * Express, and a bare fetch('/api/r2/upload-job-result') threw "Failed to
+ * parse URL" behind every successful meal, so the full result never reached
+ * R2. INTERNAL_BASE_URL points the process at its own listener.
+ */
+export function resolveApiUrl(path: string): string {
+  const p = path.startsWith('/') ? path : `/${path}`;
+  if (typeof window !== 'undefined') return p;
+  const env = typeof process !== 'undefined' && process.env ? process.env : undefined;
+  const base = (env && (env.INTERNAL_BASE_URL || env.API_BASE_URL)) || 'http://127.0.0.1:3000';
+  return `${String(base).replace(/\/+$/, '')}${p}`;
+}
+
 export async function uploadPhotoToR2(
   photoDataOrId: string | Blob,
   optionsOrData?: { prefix?: string; filename?: string } | string,
@@ -12,7 +29,7 @@ export async function uploadPhotoToR2(
       const id = photoDataOrId;
       const base64 = optionsOrData;
       const filename = `${id}${typeof index === 'number' && index > 0 ? `_${index}` : ''}.jpg`;
-      const res = await fetch('/api/upload', {
+      const res = await fetch(resolveApiUrl('/api/upload'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -30,7 +47,7 @@ export async function uploadPhotoToR2(
 
     const photoData = photoDataOrId;
     const options = optionsOrData as { prefix?: string; filename?: string } | undefined;
-    const res = await fetch('/api/upload', {
+    const res = await fetch(resolveApiUrl('/api/upload'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -65,7 +82,7 @@ export async function uploadPhotosToR2(
 
 export async function uploadDebugPayloadToR2(jobId: string, payload: any): Promise<string> {
   try {
-    const res = await fetch('/api/debug/upload', {
+    const res = await fetch(resolveApiUrl('/api/debug/upload'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jobId, payload })
@@ -83,7 +100,7 @@ export async function uploadDebugPayloadToR2(jobId: string, payload: any): Promi
 export async function deleteDebugPayloadFromR2(jobIdOrUrl: string, userId?: string): Promise<boolean> {
   if (!jobIdOrUrl) return false;
   try {
-    const res = await fetch('/api/debug/delete', {
+    const res = await fetch(resolveApiUrl('/api/debug/delete'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ target: jobIdOrUrl, userId })
@@ -97,7 +114,7 @@ export async function deleteDebugPayloadFromR2(jobIdOrUrl: string, userId?: stri
 
 export async function uploadLogsToR2(key: string, data: any): Promise<boolean> {
   try {
-    const res = await fetch('/api/r2/upload-logs', {
+    const res = await fetch(resolveApiUrl('/api/r2/upload-logs'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, data })
@@ -111,7 +128,7 @@ export async function uploadLogsToR2(key: string, data: any): Promise<boolean> {
 
 export async function fetchLogsFromR2(key: string): Promise<any> {
   try {
-    const res = await fetch(`/api/r2/logs?key=${encodeURIComponent(key)}`);
+    const res = await fetch(resolveApiUrl(`/api/r2/logs?key=${encodeURIComponent(key)}`));
     if (res.ok) return await res.json();
   } catch (err) {
     console.warn('[r2Storage] fetchLogsFromR2 error:', err);
@@ -121,7 +138,7 @@ export async function fetchLogsFromR2(key: string): Promise<any> {
 
 export async function fetchDebugPayloadFromR2(jobIdOrUrl: string): Promise<any> {
   try {
-    const res = await fetch(`/api/debug/load?jobId=${encodeURIComponent(jobIdOrUrl)}`);
+    const res = await fetch(resolveApiUrl(`/api/debug/load?jobId=${encodeURIComponent(jobIdOrUrl)}`));
     if (res.ok) return await res.json();
   } catch (err) {
     console.warn('[r2Storage] fetchDebugPayloadFromR2 error:', err);
@@ -129,23 +146,34 @@ export async function fetchDebugPayloadFromR2(jobIdOrUrl: string): Promise<any> 
   return null;
 }
 
-export async function uploadJobResultToR2(jobId: string, result: any): Promise<boolean> {
+/**
+ * Persist a finished job result to R2 and return its public URL, or '' when
+ * the upload fails. serverJobs persists this URL as the `r2_url` of the D1
+ * pointer, so the return value is part of the contract (it used to return a
+ * bare boolean, which left `r2_url: true` unreachable).
+ *
+ * The route reads `payload`; `result` is also sent so an older route build
+ * that still reads `result` keeps working during a rolling deploy.
+ */
+export async function uploadJobResultToR2(jobId: string, result: any): Promise<string> {
   try {
-    const res = await fetch('/api/r2/upload-job-result', {
+    const res = await fetch(resolveApiUrl('/api/r2/upload-job-result'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId, result })
+      body: JSON.stringify({ jobId, payload: result, result })
     });
-    return res.ok;
+    if (!res.ok) return '';
+    const data = await res.json().catch(() => ({}));
+    return data.url || data.r2_url || '';
   } catch (err) {
     console.warn('[r2Storage] uploadJobResultToR2 error:', err);
-    return false;
+    return '';
   }
 }
 
 export async function fetchJobResultFromR2(jobId: string): Promise<any> {
   try {
-    const res = await fetch(`/api/r2/job-result?jobId=${encodeURIComponent(jobId)}`);
+    const res = await fetch(resolveApiUrl(`/api/r2/job-result?jobId=${encodeURIComponent(jobId)}`));
     if (res.ok) return await res.json();
   } catch (err) {
     console.warn('[r2Storage] fetchJobResultFromR2 error:', err);
@@ -155,7 +183,7 @@ export async function fetchJobResultFromR2(jobId: string): Promise<any> {
 
 export async function deleteR2ObjectByKey(key: string): Promise<boolean> {
   try {
-    const res = await fetch('/api/r2/delete-object', {
+    const res = await fetch(resolveApiUrl('/api/r2/delete-object'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key })

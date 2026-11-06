@@ -36,8 +36,9 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const HOST = '51.254.217.163';
-const USER = 'ubuntu';
+const HOST = '103.147.32.117';
+const USER = 'root';
+const PORT = '20133';
 const DOC = join(ROOT, 'docs', 'agent', 'WORKTREES.md');
 
 /**
@@ -50,6 +51,7 @@ export function sshArgs(command = 'uname -n') {
     '-o', 'BatchMode=yes',
     '-o', 'ConnectTimeout=10',
     '-o', 'StrictHostKeyChecking=accept-new',
+    '-p', PORT,
     `${USER}@${HOST}`,
     command,
   ];
@@ -149,9 +151,9 @@ if (process.argv.includes('--live')) {
   }
   const [hostname = '', countRaw = ''] = out.trim().split('\n');
   const units = Number.parseInt(countRaw.trim(), 10);
-  console.log(`  route: ssh ${USER}@${HOST}`);
+  console.log(`  route: ssh ${USER}@${HOST} -p ${PORT}`);
   check('the route answers', code === 0, out.trim().slice(0, 200));
-  check('it is the fleet box', hostname.trim().startsWith('vps-'), JSON.stringify(hostname));
+  check('it is the fleet box', /^(vps-|standar-)/.test(hostname.trim()), JSON.stringify(hostname));
   check('bots are running there (>= 1 bot-host unit)',
     Number.isFinite(units) && units >= 1, `units=${countRaw.trim()}`);
   if (code !== 0) {

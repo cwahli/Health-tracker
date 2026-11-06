@@ -18,7 +18,6 @@ export const WelcomeCard: React.FC<WelcomeCardProps> = (props) => {
   const t = translations[language || "en"] || translations.en;
   const activeType = agentType || type;
   const isFoodIdea = activeType === 'food_idea';
-  const isDailyRec = activeType === 'daily_recommendation';
   const isFood = activeType === 'food';
 
   return (
@@ -31,16 +30,6 @@ export const WelcomeCard: React.FC<WelcomeCardProps> = (props) => {
           className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md flex items-center gap-1.5"
         >
           {t.surpriseMe}
-        </button>
-      )}
-      {isDailyRec && (
-        <button
-          type="button"
-          onClick={() => handleSend(t.whatsUpTodayAction)}
-          disabled={isAnalyzing}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md flex items-center gap-1.5"
-        >
-          {t.whatsUpToday}
         </button>
       )}
       {/* Handled consistently at bottom action row instead of inline welcoming stream */}

@@ -123,15 +123,38 @@ export function parseOcrLabel(rawLabel: any, targetWeight: number, defaultR: num
     ocrServingGrams = Math.round(targetWeight / Number(rawLabel.servingsPerContainer || rawLabel.jumlahSajianPerKemasan || rawLabel.servings_per_container));
   }
 
+  // Dual-column labels ("17.4g per 100g, 28.5g per half pack") with a
+  // per-serving servingSize: first-number parsing grabs the per-100g figure
+  // while ocrScale uses the serving basis — understating ~servingGrams/100 x
+  // (live job_1792364272052: 164g serving read 135 kcal as 352 not 578).
+  // When value strings name an explicit per-100 column but the serving basis
+  // is per-serving, pin both parsing and scale to per-100g.
+  const hasPer100Column = rawLabel && typeof rawLabel === 'object' && Object.values(rawLabel).some(
+    (v) => typeof v === 'string' && /per\s*100/i.test(v)
+  );
+  let usePer100Values = false;
+  if (hasPer100Column && !(isPer100gFlag || ocrServingGrams === 100)) {
+    usePer100Values = true;
+    ocrServingGrams = 100;
+  }
+  const per100Figure = (rawVal: unknown): number | null => {
+    if (typeof rawVal !== 'string') return null;
+    const m = rawVal.match(/([\d]+(?:\.\d+)?)\s*(?:g|mg|mcg|kcal|kj|kkal|kal|%)?\s*(?:per|\/)\s*100\s*(?:g|ml)?\b/i);
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    return Number.isFinite(n) ? n : null;
+  };
+
   // Order matters: an explicit kcal field must beat the bare energy field. On
   // UK/EU tables `energy` is kilojoules (live job_1791222829174_c2oveqa1n read a
   // McDonald's menu board showing "1,558 kJ/371 kcal"), so preferring `energy`
   // over `energyKcal` read 1558 kJ as 1558 kcal — a 4.2x overdose on the meal.
   // Bare `energy` is only trusted as kcal once no explicit kcal field is present.
   const rawCalStr = rawLabel.calories ?? rawLabel.energyKcal ?? rawLabel.kcal ?? rawLabel.kcalori ?? rawLabel.energy ?? rawLabel.energiTotal ?? rawLabel.energi;
+  const ocrCalPer100 = usePer100Values ? per100Figure(rawCalStr) : null;
   const ocrCal = typeof rawCalStr === 'number'
     ? rawCalStr
-    : (rawCalStr ? parseFloat(String(rawCalStr).replace(/[^0-9.]/g, '')) : NaN);
+    : (rawCalStr ? (ocrCalPer100 ?? parseFloat(String(rawCalStr).replace(/[^0-9.]/g, ''))) : NaN);
 
   // Sanity check: if ocrServingGrams is small (<= 15) and targetWeight > ocrServingGrams
   // If calorie density exceeds pure fat (> 9.2 kcal/g), ocrServingGrams was parsed as a serving COUNT (e.g. 2.25 or 2.5 servings in container), NOT grams.
@@ -237,7 +260,10 @@ export function parseOcrLabel(rawLabel: any, targetWeight: number, defaultR: num
     }
     if (rawVal !== undefined && rawVal !== null) {
       const isPercent = typeof rawVal === 'string' && /%|\bakg\b|\bdv\b/i.test(rawVal);
-      const parsedNum = typeof rawVal === 'number' ? rawVal : parseFloat(String(rawVal).replace(/[^0-9.]/g, ''));
+      // Dual-column guard: prefer the explicit per-100 figure when the label
+      // mixes columns, so the number always matches the per-100g scale.
+      const per100Val = usePer100Values ? per100Figure(rawVal) : null;
+      const parsedNum = typeof rawVal === 'number' ? rawVal : (per100Val ?? parseFloat(String(rawVal).replace(/[^0-9.]/g, '')));
       if (Number.isFinite(parsedNum)) {
         let metricValue = parsedNum;
         if (isPercent && DAILY_VALUE_REFERENCE[normKey]) {

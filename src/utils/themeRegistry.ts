@@ -23,23 +23,23 @@ export interface ThemeTokenItem {
 }
 
 export const auditColors: ThemeColorItem[] = [
-  { key: 'background', label: 'App Background', defaultValue: '#0f172a', category: 'Base' },
-  { key: 'bgCard', label: 'Card Background', defaultValue: '#1e293b', category: 'Base' },
-  { key: 'border', label: 'Border / Divider', defaultValue: '#334155', category: 'Base' },
-  { key: 'text', label: 'Primary Text (Light)', defaultValue: '#f8fafc', category: 'Typography' },
-  { key: 'textSecondary', label: 'Secondary Text (Light)', defaultValue: '#94a3b8', category: 'Typography' },
-  { key: 'textDarkPrimary', label: 'Primary Text (Dark)', defaultValue: '#f8fafc', category: 'Typography' },
-  { key: 'textDarkSecondary', label: 'Secondary Text (Dark)', defaultValue: '#94a3b8', category: 'Typography' },
-  { key: 'textAccent', label: 'Accent Highlight', defaultValue: '#6366f1', category: 'Typography' },
-  { key: 'textMuted', label: 'Muted Hint', defaultValue: '#64748b', category: 'Typography' },
-  { key: 'button', label: 'Button Accent', defaultValue: '#4f46e5', category: 'Interactive' },
-  { key: 'neutralSetting', label: 'Neutral Element', defaultValue: '#64748b', category: 'Base' },
-  { key: 'success', label: 'Success Highlight', defaultValue: '#10b981', category: 'Feedback' },
-  { key: 'textSuccess', label: 'Success Text', defaultValue: '#059669', category: 'Feedback' },
-  { key: 'warning', label: 'Severe Warning', defaultValue: '#f43f5e', category: 'Feedback' },
-  { key: 'textError', label: 'Error Text', defaultValue: '#e11d48', category: 'Feedback' },
-  { key: 'caution', label: 'Caution Alert', defaultValue: '#f59e0b', category: 'Feedback' },
-  { key: 'info', label: 'Information Blue', defaultValue: '#3b82f6', category: 'Feedback' },
+  { key: 'background', label: 'App Background', defaultValue: '#0a1118', category: 'Base' },
+  { key: 'bgCard', label: 'Card Background', defaultValue: '#111c26', category: 'Base' },
+  { key: 'border', label: 'Border / Divider', defaultValue: '#54687c', category: 'Base' },
+  { key: 'text', label: 'Primary Text (Light)', defaultValue: '#eaf2f8', category: 'Typography' },
+  { key: 'textSecondary', label: 'Secondary Text (Light)', defaultValue: '#b9c9d6', category: 'Typography' },
+  { key: 'textDarkPrimary', label: 'Primary Text (Dark)', defaultValue: '#eaf2f8', category: 'Typography' },
+  { key: 'textDarkSecondary', label: 'Secondary Text (Dark)', defaultValue: '#b9c9d6', category: 'Typography' },
+  { key: 'textAccent', label: 'Accent Highlight', defaultValue: '#6fc3ff', category: 'Typography' },
+  { key: 'textMuted', label: 'Muted Hint', defaultValue: '#b9c9d6', category: 'Typography' },
+  { key: 'button', label: 'Button Accent', defaultValue: '#0d4f96', category: 'Interactive' },
+  { key: 'neutralSetting', label: 'Neutral Element', defaultValue: '#a3b6c9', category: 'Base' },
+  { key: 'success', label: 'Success Highlight', defaultValue: '#34d399', category: 'Feedback' },
+  { key: 'textSuccess', label: 'Success Text', defaultValue: '#5eeab8', category: 'Feedback' },
+  { key: 'warning', label: 'Severe Warning', defaultValue: '#ffa3a3', category: 'Feedback' },
+  { key: 'textError', label: 'Error Text', defaultValue: '#ffa3a3', category: 'Feedback' },
+  { key: 'caution', label: 'Caution Alert', defaultValue: '#fcd34d', category: 'Feedback' },
+  { key: 'info', label: 'Information Blue', defaultValue: '#6fc3ff', category: 'Feedback' },
   { key: 'nutrientCalories', label: 'Calories Bar', defaultValue: '#6366f1', category: 'Nutrients' },
   { key: 'nutrientProtein', label: 'Protein Bar', defaultValue: '#10b981', category: 'Nutrients' },
   { key: 'nutrientCarbs', label: 'Carbs Bar', defaultValue: '#0ea5e9', category: 'Nutrients' },
@@ -187,3 +187,98 @@ export const auditDesignTokens: ThemeTokenItem[] = [
 
 export const auditComponents: any[] = [];
 export const auditElements: any[] = [];
+
+/**
+ * Deep Sea (Accessible) — WCAG AAA dark theme (all text pairs >= 7:1).
+ * This is the default theme: the auditColors defaults above match it, so any
+ * profile without an explicit palette renders Deep Sea. Pair with the AAA
+ * type scale (root 'large' = 18px, titles 24-26px bold, body 18px, min 16px).
+ */
+export const deepSeaThemePalette: Record<string, string> = {
+  background: '#0a1118',
+  bgCard: '#111c26',
+  border: '#54687c',
+  text: '#eaf2f8',
+  textSecondary: '#b9c9d6',
+  textDarkPrimary: '#eaf2f8',
+  textDarkSecondary: '#b9c9d6',
+  textAccent: '#6fc3ff',
+  textMuted: '#b9c9d6',
+  button: '#0d4f96',
+  neutralSetting: '#a3b6c9',
+  success: '#34d399',
+  textSuccess: '#5eeab8',
+  warning: '#ffa3a3',
+  textError: '#ffa3a3',
+  caution: '#fcd34d',
+  info: '#6fc3ff',
+};
+
+export const deepSeaFontSettings: Record<string, string> = {
+  fontSize: 'large',
+  fontSizeTitle: 'xxl',
+  fontSizeSubtitle: 'xl',
+  fontSizeDescription: 'large',
+  fontSizeBody: 'large',
+  fontSizeBodySmall: 'normal',
+  fontSizeSubtitleSmall: 'normal',
+  fontSizeKeyMetric: '4xl',
+  fontSizeXS: 'small',
+};
+
+export const deepSeaSystemPreset = {
+  name: 'Deep Sea (Accessible)',
+  isSystem: true,
+  profileUpdate: {
+    fontFamily: 'Inter',
+    ...deepSeaFontSettings,
+    themePalette: { ...deepSeaThemePalette },
+    themeOverrides: [],
+  },
+};
+
+/**
+ * Classic (Current) — the pre-Deep-Sea default look. Selecting it restores
+ * the previous palette and type scale exactly, for users who prefer it.
+ */
+export const classicSystemPreset = {
+  name: 'Classic (Current)',
+  isSystem: true,
+  profileUpdate: {
+    fontFamily: 'Inter',
+    fontSize: 'normal',
+    fontSizeTitle: 'xxl',
+    fontSizeSubtitle: 'large',
+    fontSizeBody: 'normal',
+    fontSizeBodySmall: 'tiny',
+    fontSizeSubtitleSmall: 'small',
+    fontSizeKeyMetric: '4xl',
+    fontSizeXS: 'tiny',
+    themePalette: {
+      background: '#0f172a',
+      bgCard: '#1e293b',
+      border: '#334155',
+      text: '#f8fafc',
+      textSecondary: '#94a3b8',
+      textDarkPrimary: '#f8fafc',
+      textDarkSecondary: '#94a3b8',
+      textAccent: '#6366f1',
+      textMuted: '#64748b',
+      button: '#4f46e5',
+      neutralSetting: '#64748b',
+      success: '#10b981',
+      textSuccess: '#059669',
+      warning: '#f43f5e',
+      textError: '#e11d48',
+      caution: '#f59e0b',
+      info: '#3b82f6',
+      nutrientCalories: '#6366f1',
+      nutrientProtein: '#10b981',
+      nutrientCarbs: '#0ea5e9',
+      nutrientFat: '#f59e0b',
+      nutrientSatFat: '#f43f5e',
+      nutrientSodium: '#eab308',
+    },
+    themeOverrides: [],
+  },
+};

@@ -19,6 +19,7 @@ const BugTrackerModal = lazyWithRetry(() => import('./BugTrackerModal'));
 import BugSnapshotFab from './BugSnapshotFab';
 import { canFileBugForProfile } from '../utils/bugSnapshot';
 import ProfileModal from './ProfileModal';
+import GeminiMcpConnectCard from './GeminiMcpConnectCard';
 import DbInteractionsOverlay from './DbInteractionsOverlay';
 import ThemeCustomizerScreen from './ThemeCustomizerScreen';
 import { useThemeCustomizer } from '../hooks/useThemeCustomizer';
@@ -578,24 +579,27 @@ export default function Header({
 
       {/* Editing Dialog for Profile Parameters (Q-11.7: extracted to ProfileModal) */}
       {isEditing && (
-        <ProfileModal
-          profile={profile}
-          setProfile={setProfile}
-          onSaveProfile={onSaveProfile}
-          hideSensitive={hideSensitive}
-          setHideSensitive={setHideSensitive}
-          onSignOut={onSignOut}
-          onClose={() => setIsEditing(false)}
-          onOpenTheme={() => {
-            setIsEditing(false);
-            setShowThemeScreen(true);
-          }}
-          onOpenAdmin={() => {
-            setIsEditing(false);
-            setDbOverlayViewMode('admin');
-            setShowDbInteractionsOverlay(true);
-          }}
-        />
+        <>
+          <ProfileModal
+            profile={profile}
+            setProfile={setProfile}
+            onSaveProfile={onSaveProfile}
+            hideSensitive={hideSensitive}
+            setHideSensitive={setHideSensitive}
+            onSignOut={onSignOut}
+            onClose={() => setIsEditing(false)}
+            onOpenTheme={() => {
+              setIsEditing(false);
+              setShowThemeScreen(true);
+            }}
+            onOpenAdmin={() => {
+              setIsEditing(false);
+              setDbOverlayViewMode('admin');
+              setShowDbInteractionsOverlay(true);
+            }}
+          />
+          <GeminiMcpConnectCard language={profile.language} />
+        </>
       )}
 
       {/* Theme Customizer Screen + inspector portals (Q-11.12: extracted to ThemeCustomizerScreen, move-only) */}

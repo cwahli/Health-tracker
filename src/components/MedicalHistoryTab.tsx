@@ -11,13 +11,12 @@ import { biomarkerDefinitions, getBiomarkerStatus, getBiomarkerColor, getBiomark
 import { getAgentCalibration, getAllAgentCalibrationRecords, formatOptimalTargetValue } from '../utils/agentCalibration';
 import { getDuplicateAliasGroups } from '../utils/biomarkerAuditEngine';
 import { handleUnitChange } from '../utils/biomarkerLifecycle';
+import { acceptedRiskLabel, projectHistoryScreen, skipsLaboratoryRatio, type Diary } from '../utils/healthRecord';
 
 const getBiomarkerDef = (key: string) => biomarkerDefinitions.find(d => d.key === key);
 
 import { BiomarkerExpandedSection } from './BiomarkerExpandedSection';
 import CombineBiomarkersModal from './CombineBiomarkersModal';
-import { lazyWithRetry } from '../utils/lazyWithRetry';
-const BiomarkerDictionaryModal = lazyWithRetry(() => import('./BiomarkerDictionaryModal'));
 import NotUsedBiomarkersModal from './NotUsedBiomarkersModal';
 import DataSanitizeApprovalModal from './DataSanitizeApprovalModal';
 import TaskPlaceholderCard from './TaskPlaceholderCard';
@@ -234,16 +233,7 @@ export default function MedicalHistoryTab({
   const [searchQuery, setSearchQuery] = useState('');
   const [reviewHistories, setReviewHistories] = useState<{[key: string]: ChatMessage[]}>({});
   const [openSubCategories, setOpenSubCategories] = useState<{ [category: string]: boolean }>({});
-  const [showDictionaryModal, setShowDictionaryModal] = useState(false);
   const [showNotUsedLocalModal, setShowNotUsedLocalModal] = useState(false);
-
-  useEffect(() => {
-    const handleOpenConsolidation = () => {
-      setShowDictionaryModal(true);
-    };
-    window.addEventListener('open-dictionary-consolidation', handleOpenConsolidation);
-    return () => window.removeEventListener('open-dictionary-consolidation', handleOpenConsolidation);
-  }, []);
 
   const toggleSubCategory = (cat: string) => {
     setOpenSubCategories(prev => ({
@@ -391,7 +381,9 @@ export default function MedicalHistoryTab({
       return {
         ...def,
         needsApproval,
-        riskCategories: meta.riskCategories,
+        riskCategories: (meta.riskCategories || [])
+          .map((label: string) => acceptedRiskLabel(label))
+          .filter((label: string | null): label is string => label !== null),
         standardMedicalGrouping: meta.standardMedicalGrouping,
         potentialMedicalConditions: meta.potentialMedicalConditions
       };
@@ -609,9 +601,21 @@ export default function MedicalHistoryTab({
     document.body.removeChild(link);
   };
 
-  const totalUniqueBiomarkers = useMemo(() => {
-    return allDefinitions.length;
-  }, [allDefinitions]);
+  const historyScreen = useMemo(() => {
+    const notUsed = [
+      ...Object.keys(profile?.notUsedBiomarkers || {}),
+      ...Object.keys(profile?.notUsedInMedicalHistory || {}),
+    ];
+    return projectHistoryScreen({
+      current: biomarkers,
+      history: activeHistory,
+      notUsed,
+      hiddenAliases: [...aliasKeysToHide],
+      diaries: (profile.symptomDiaries || []) as Diary[],
+    });
+  }, [biomarkers, activeHistory, profile?.notUsedBiomarkers, profile?.notUsedInMedicalHistory, profile.symptomDiaries, aliasKeysToHide]);
+
+  const totalUniqueBiomarkers = historyScreen.tracked;
 
   // PERF: compute the flagged-telemetry key set exactly ONCE per render.
   // isBiomarkerNeedingReview() is called once per biomarker at multiple
@@ -623,7 +627,7 @@ export default function MedicalHistoryTab({
   }, [biomarkers, profile, activeHistory, allDefinitions]);
 
   const flaggedTelemetryKeys = useMemo(() => {
-    return new Set(flaggedTelemetryList.map(f => f.key));
+    return new Set(flaggedTelemetryList.map(f => f.key).filter(key => !skipsLaboratoryRatio(key)));
   }, [flaggedTelemetryList]);
 
   // PERF: parse `batch_analysis_results` from localStorage exactly ONCE per
@@ -908,9 +912,9 @@ export default function MedicalHistoryTab({
             }}
             className="w-full px-2.5 py-1.5 text-xs font-semibold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-theme-border rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none transition-all cursor-pointer shadow-sm"
           >
-            {BIOMARKER_GROUPING_OPTIONS.map(opt => (
+            {BIOMARKER_GROUPING_OPTIONS.filter(opt => opt.value === 'risk').map(opt => (
               <option key={opt.value} value={opt.value}>
-                {opt.value === 'risk' ? t.byRiskCategories : opt.value === 'practice' ? t.byMedicalPractice : t.byMedicalConditions}
+                {t.byRiskCategories}
               </option>
             ))}
           </select>
@@ -1242,6 +1246,19 @@ export default function MedicalHistoryTab({
         }))}
       </div>
 
+      {historyScreen.symptomRows.length > 0 && (
+        <div id="symptom-diary-list" className="mt-6 border-t border-theme-border/80">
+          {historyScreen.symptomRows.map((row) => (
+            <div key={row.id} className="px-4 py-3">
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{row.observedAt}</span>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                {row.cells.map((cell) => `${cell.label}: ${cell.value}`).join(' · ')}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="mt-8 pt-6 border-t border-theme-border/80 flex flex-col sm:flex-row items-center justify-between gap-4 px-4">
         <div className="flex flex-wrap items-center gap-6 text-xs text-theme-text-secondary font-medium">
           <div className="flex items-center gap-2">
@@ -1250,22 +1267,13 @@ export default function MedicalHistoryTab({
           </div>
           <div className="flex items-center gap-2">
             <BrainCircuit className="w-4 h-4 text-indigo-500" />
-            <span id="download-logs-csv-btn" onClick={exportLogEntriesToCSV} className="cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors" title={t.downloadAsCsv}>{t.totalLogEntries}: <strong className="text-slate-800 dark:text-slate-200 font-bold">{activeHistory.reduce((sum, h) => sum + Object.keys(h.biomarkers).length, 0)}</strong></span>
+            <span id="download-logs-csv-btn" onClick={exportLogEntriesToCSV} className="cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors" title={t.downloadAsCsv}>{t.totalLogEntries}: <strong className="text-slate-800 dark:text-slate-200 font-bold">{historyScreen.logEntries}</strong></span>
           </div>
         </div>
       </div>
 
       <div className="mt-6 flex flex-col items-center gap-3 pb-8">
         <div className="flex flex-wrap items-center justify-center gap-3">
-          <button
-            id="open-biomarker-dictionary-btn"
-            onClick={() => setShowDictionaryModal(true)}
-            className="px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-bold text-xs rounded-xl border border-indigo-100 dark:border-indigo-800/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer flex items-center gap-2"
-          >
-            <ClipboardList className="w-4 h-4" />
-            {t.openBiomarkerDictionary}
-          </button>
-
           {onApplyDataSanitize && (
             <button
               type="button"
@@ -1317,34 +1325,6 @@ export default function MedicalHistoryTab({
           onSaveCombine={onCombineBiomarkers}
           onReviewWithAgent={onReviewWithAgent}
         />
-      )}
-
-      {showDictionaryModal && onLogMedical && (
-        <React.Suspense fallback={null}>
-        <BiomarkerDictionaryModal
-          profile={profile?.email === 'demo@healthcockpit.com' ? { ...profile, agentAnalyses: [] } : profile}
-          biomarkers={profile?.email === 'demo@healthcockpit.com' ? {} : biomarkers}
-          biomarkerHistory={profile?.email === 'demo@healthcockpit.com' ? [] : activeHistory}
-          onClose={() => {
-            setShowDictionaryModal(false);
-          }}
-          onReviewWithAgent={onReviewWithAgent}
-          onUpdateProfile={onUpdateProfile ? (updates) => onUpdateProfile(updates) : (updates) => onLogMedical({}, updates, undefined, undefined, undefined, true)}
-          onDeleteBiomarker={onDeleteBiomarker}
-          onFlagNotUsed={onFlagNotUsed}
-          onRestoreNotUsedGlobal={onRestoreNotUsedGlobal}
-          onDeleteMultipleBiomarkers={onDeleteMultipleBiomarkers}
-          onCombineBiomarkers={onCombineBiomarkers!}
-          onBatchCombineBiomarkers={onBatchCombineBiomarkers}
-          onBatchConsolidate={onBatchConsolidate}
-          onStandardizeUnits={onStandardizeUnits}
-          onLogMedical={onLogMedical}
-          onAgentAnalysisSaved={onAgentAnalysisSaved}
-          onDeleteAnalysis={onDeleteAnalysis}
-          selectedModelId={selectedModelId}
-          onChangeModelId={onChangeModelId}
-        />
-        </React.Suspense>
       )}
 
       {/* LOCAL NOT USED BIOMARKERS MODAL FOR MEDICAL HISTORY */}

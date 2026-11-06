@@ -94,11 +94,6 @@ const ALL_AGENT_DEFS: AgentDef[] = [
     test: (l) => l.includes('agenttype: food_idea') || l.includes('agenttype:food_idea') || l.includes('culinary ideation agent') || l.includes('[food_idea]')
   },
   {
-    id: 'daily_recommendation',
-    name: 'Daily Actions Agent',
-    test: (l) => l.includes('agenttype: daily_recommendation') || l.includes('agenttype:daily_recommendation') || l.includes('daily actions agent') || l.includes('[daily_recommendation]')
-  },
-  {
     id: 'medical',
     name: 'Medical Diagnostics Agent',
     test: (l) => l.includes('agenttype: medical') || l.includes('agenttype:medical') || l.includes('medical diagnostics agent') || l.includes('[medical]')
@@ -232,13 +227,6 @@ export const AGENT_COLOR_MAP: Record<string, {
     bgBadge: 'bg-orange-950/70 text-orange-300 border-orange-500/40',
     dotColor: 'bg-orange-400',
     name: 'Culinary Ideation Agent'
-  },
-  daily_recommendation: {
-    textColor: 'text-green-300 dark:text-green-300',
-    borderColor: 'border-green-500/40',
-    bgBadge: 'bg-green-950/70 text-green-300 border-green-500/40',
-    dotColor: 'bg-green-400',
-    name: 'Daily Actions Agent'
   },
   medical: {
     textColor: 'text-cyan-300 dark:text-cyan-300',

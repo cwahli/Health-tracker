@@ -119,6 +119,7 @@ export async function d1UpsertFoods(foods: D1FoodRow[]): Promise<{ success: bool
         chat_transcript = excluded.chat_transcript,
         source_meal_id = excluded.source_meal_id,
         updated_at = excluded.updated_at
+      WHERE excluded.updated_at >= coalesce(food_logs.updated_at, '')
     `;
 
     const res = await d1Query(sql, params);
@@ -162,6 +163,39 @@ export async function d1GetFoodDetail(logId: string, possibleUids: string[]): Pr
     scout_items: safeJsonParse(row.scout_items, []),
     chat_transcript: safeJsonParse(row.chat_transcript, [])
   };
+}
+
+export async function d1GetFullFoodRecord(logId: string, possibleUids: string[]): Promise<any | null> {
+  if (!isD1Configured() || !logId) return null;
+  const placeholders = possibleUids.map(() => '?').join(', ');
+  const sql = `SELECT * FROM food_logs WHERE id = ? AND firebase_uid IN (${placeholders}) LIMIT 1`;
+  const res = await d1Query(sql, [logId, ...possibleUids]);
+  if (!res.success || !res.results || res.results.length === 0) return null;
+  const row = res.results[0];
+  return {
+    ...row,
+    nutrients: safeJsonParse(row.nutrients, {}),
+    items_breakdown: safeJsonParse(row.items_breakdown, []),
+    scout_items: safeJsonParse(row.scout_items, []),
+    image_urls: safeJsonParse(row.image_urls, []),
+    chat_transcript: safeJsonParse(row.chat_transcript, [])
+  };
+}
+
+export async function d1QueryFoods(possibleUids: string[], limit: number = 500): Promise<any[]> {
+  if (!isD1Configured() || !possibleUids || possibleUids.length === 0) return [];
+  const placeholders = possibleUids.map(() => '?').join(', ');
+  const sql = `SELECT * FROM food_logs WHERE firebase_uid IN (${placeholders}) ORDER BY date DESC, id DESC LIMIT ?`;
+  const res = await d1Query<any>(sql, [...possibleUids, limit]);
+  if (!res.success || !res.results) return [];
+  return res.results.map((r: any) => ({
+    ...r,
+    nutrients: safeJsonParse(r.nutrients, {}),
+    items_breakdown: safeJsonParse(r.items_breakdown, []),
+    scout_items: safeJsonParse(r.scout_items, []),
+    image_urls: safeJsonParse(r.image_urls, []),
+    chat_transcript: safeJsonParse(r.chat_transcript, [])
+  }));
 }
 
 // ==========================================
@@ -217,6 +251,7 @@ export async function d1UpsertBiomarkers(bios: D1BiomarkerRow[]): Promise<{ succ
         summary = excluded.summary,
         tests = excluded.tests,
         updated_at = excluded.updated_at
+      WHERE excluded.updated_at >= coalesce(biomarker_logs.updated_at, '')
     `;
 
     const res = await d1Query(sql, params);
@@ -245,6 +280,19 @@ export async function d1DeleteBiomarkers(ids: string[]): Promise<{ success: bool
     }
   }
   return { success: true };
+}
+
+export async function d1QueryBiomarkers(possibleUids: string[], limit: number = 200): Promise<any[]> {
+  if (!isD1Configured() || !possibleUids || possibleUids.length === 0) return [];
+  const placeholders = possibleUids.map(() => '?').join(', ');
+  const sql = `SELECT * FROM biomarker_logs WHERE firebase_uid IN (${placeholders}) ORDER BY date DESC, id DESC LIMIT ?`;
+  const res = await d1Query<any>(sql, [...possibleUids, limit]);
+  if (!res.success || !res.results) return [];
+  return res.results.map((r: any) => ({
+    ...r,
+    biomarkers: safeJsonParse(r.biomarkers, {}),
+    tests: safeJsonParse(r.tests, [])
+  }));
 }
 
 // ==========================================
@@ -365,11 +413,17 @@ export async function d1PullSync(opts: D1PullOptions): Promise<{
   const countFoodSql = `SELECT count(*) as cnt FROM food_logs WHERE firebase_uid IN (${uidPlaceholders})`;
   const countBioSql = `SELECT count(*) as cnt FROM biomarker_logs WHERE firebase_uid IN (${uidPlaceholders})`;
 
-  // Execute concurrently
-  const [foodRes, bioRes, profRes, countFoodRes, countBioRes] = await Promise.all([
+  // Execute in two waves, never one burst of 5 (class ALWAYS_COUNT_FALLBACK):
+  // on slow mobile links the Cloudflare D1 HTTP API drops queries out of a
+  // 5-way burst, and the count(*) queries are the ones that starve — the
+  // response then carries a page-sized slice with no total and history
+  // collapses to ~2 pages with no recovery. Data rows first, counts after.
+  const [foodRes, bioRes, profRes] = await Promise.all([
     d1Query<any>(foodSql, foodParams),
     d1Query<any>(bioSql, bioParams),
     d1Query<any>(profSql, profParams),
+  ]);
+  const [countFoodRes, countBioRes] = await Promise.all([
     d1Query<any>(countFoodSql, possibleUids),
     d1Query<any>(countBioSql, possibleUids)
   ]);
@@ -500,9 +554,83 @@ export interface D1JobRecord {
   updated_at?: string;
 }
 
-export async function d1UpsertJob(job: D1JobRecord): Promise<{ success: boolean; error?: string }> {
+// Keys that mean a job row already carries a real analysis result. The client
+// re-posts its local JobStore snapshot to /api/jobs/upsert on every store
+// change, and that snapshot is still a welcome/live skeleton while the realtime
+// status row (succeeded / awaiting_user) can arrive before the result payload.
+// The blind ON CONFLICT overwrite then erased the server-authored clean_result,
+// photo_url and status_message — meals showed "Analysis complete" in the UI
+// while the row became an empty shell (meal-result loss, Nov 5).
+const JOB_RESULT_PAYLOAD_KEYS = [
+  'pendingFoodLog', 'items', 'mealBuild', 'portionClarify', 'scoutItems',
+  'verdict', 'clinicalAdvice', 'comparisonData', 'foodData', 'report',
+  'agentResult', 'needsPortionClarify', 'is_r2',
+] as const;
+
+// text/message also carry results, but a status placeholder ("Analysis
+// complete") is short. Only substantial prose counts as a payload.
+const JOB_RESULT_TEXT_KEYS = ['text', 'message'] as const;
+const JOB_RESULT_TEXT_MIN_LENGTH = 40;
+
+export function cleanResultHasJobPayload(value: any): boolean {
+  if (value == null) return false;
+  let parsed = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return false;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') return false;
+  for (const key of JOB_RESULT_PAYLOAD_KEYS) {
+    const v = (parsed as any)[key];
+    if (Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== '') return true;
+  }
+  for (const key of JOB_RESULT_TEXT_KEYS) {
+    const v = (parsed as any)[key];
+    if (typeof v === 'string' && v.trim().length >= JOB_RESULT_TEXT_MIN_LENGTH) return true;
+  }
+  return false;
+}
+
+export interface D1JobUpsertOptions {
+  /**
+   * 'client' applies the thin-snapshot guard: a payload with no result may not
+   * replace a stored result, its photo, or the completion state. 'server'
+   * writes (job start / finish) are trusted as-is. Default 'server'.
+   */
+  source?: 'client' | 'server';
+}
+
+export async function d1UpsertJob(
+  job: D1JobRecord,
+  options: D1JobUpsertOptions = {}
+): Promise<{ success: boolean; error?: string }> {
   if (!isD1Configured()) return { success: false, error: 'D1 not configured' };
   if (!job || !job.id || !job.user_id) return { success: false, error: 'Missing job.id or job.user_id' };
+
+  // Client snapshots carry local state only. Read the stored row so a thinner
+  // snapshot cannot erase a result the server already wrote (the overwrite
+  // bug above); server writes stay trusted for retry/new-turn resets.
+  const protectStoredResult = options.source === 'client';
+  let existing: any = null;
+  if (protectStoredResult) {
+    const existingRes = await d1Query<any>(
+      'SELECT status, progress_percent, status_message, photo_url, debug_url, clean_result FROM agent_jobs WHERE id = ? LIMIT 1',
+      [job.id]
+    );
+    if (existingRes.success && existingRes.results && existingRes.results.length > 0) {
+      existing = existingRes.results[0];
+    }
+  }
+  const preserveStoredResult = protectStoredResult
+    && cleanResultHasJobPayload(existing?.clean_result)
+    && !cleanResultHasJobPayload(job.clean_result);
+
+  let status = job.status || 'queued';
+  let progressPercent = typeof job.progress_percent === 'number' ? job.progress_percent : 0;
+  let statusMessage = job.status_message || null;
 
   // Guard clean_result size: if clean_result is large and lacks is_r2 pointer, stringify safely
   let cleanResultStr = '{}';
@@ -512,6 +640,16 @@ export async function d1UpsertJob(job: D1JobRecord): Promise<{ success: boolean;
     } else {
       cleanResultStr = String(job.clean_result);
     }
+  }
+
+  if (preserveStoredResult) {
+    status = existing.status || status;
+    progressPercent = typeof existing.progress_percent === 'number' ? existing.progress_percent : progressPercent;
+    statusMessage = existing.status_message ?? statusMessage;
+    cleanResultStr = typeof existing.clean_result === 'string'
+      ? existing.clean_result
+      : JSON.stringify(existing.clean_result ?? {});
+    console.warn(`[D1 Job Upsert] Preserved stored result for ${job.id} — client snapshot carried no meal payload`);
   }
 
   const now = new Date().toISOString();
@@ -539,11 +677,11 @@ export async function d1UpsertJob(job: D1JobRecord): Promise<{ success: boolean;
     job.user_id,
     job.kind || 'food',
     job.mode || 'review',
-    job.status || 'queued',
-    typeof job.progress_percent === 'number' ? job.progress_percent : 0,
-    job.status_message || null,
-    job.photo_url || null,
-    job.debug_url || null,
+    status,
+    progressPercent,
+    statusMessage,
+    job.photo_url || existing?.photo_url || null,
+    job.debug_url || existing?.debug_url || null,
     cleanResultStr,
     typeof job.current_turn === 'number' ? job.current_turn : 1,
     job.created_at || now,

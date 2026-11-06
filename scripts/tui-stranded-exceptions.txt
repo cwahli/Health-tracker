@@ -77,4 +77,5 @@ befe83e9  tui-lifecycle session/workspace binding: fully upstream in evolved for
 # file after the squash (refusal timing, connect timing). Landing the branch
 # would revert those later edits. The branches stay: agent/model-pools is a
 # named hold. One sha covers both branches.
+
 02bba992  origin/agent/model-pools and origin/agent/model-pools-bin-fallback: #614 squash a1d9ef7c already has the /model_free sentence in tui-attach.sh; later main edits moved the file, so the pre-squash sha is stranded, waived 2026-10-09

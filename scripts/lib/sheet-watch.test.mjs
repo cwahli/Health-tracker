@@ -55,7 +55,7 @@ test('a dirty fingerprint is written once, after 20 minutes, and never as Done',
 });
 
 test('startup card names the sheet writer and the VM', () => {
-  const card = buildStartupCard({ hostname: 'box', location: 'vps-france', commits: ['abc fix'] });
+  const card = buildStartupCard({ hostname: 'box', location: 'vps-id', commits: ['abc fix'] });
   assert.match(card, /You are already on the VM/);
   assert.match(card, /sheet_row\.rb/);
   assert.match(card, /never set sheet Status to Done/);

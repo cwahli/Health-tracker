@@ -232,8 +232,9 @@ try {
   // property form — went red on correct code, and stayed red because this gate is
   // not one CI runs. The rule is the WIRING, not the shape: the chain is
   // laneChoice.models (never failoverModels alone) and the walk receives exactly
-  // that expression.
-  const chainVar = (src.match(/const (\w+) = laneChoice\.models\.length \? laneChoice\.models/) || [])[1] || '';
+  // that expression. (#599) ping turns narrow the chain first, so the declaration
+  // may read `pingModels || (...)` — same rule, both shapes accepted.
+  const chainVar = (src.match(/const (\w+) = (?:pingModels \|\| \()?laneChoice\.models\.length \? laneChoice\.models/) || [])[1] || '';
   check('the chain comes from laneChoice.models', /laneChoice\.models\.length \? laneChoice\.models/.test(src));
   check('and the walk is handed that chain, not failoverModels alone', chainVar
     ? new RegExp(`models: ${chainVar}\\b`).test(src)

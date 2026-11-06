@@ -12,6 +12,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -31,6 +33,9 @@ import {
 import {
   recordFleetHeartbeat as recordStatusBeat,
   getFleetNodes as getStatusNodes,
+  getVmSessionRows as getStatusVmRows,
+  readVmSessionRowsFresh as readStatusVmRowsFresh,
+  refreshVmSessionRows as refreshStatusVmRows,
   getFleetTickets as getStatusTickets,
   getFleetBots as getStatusBots,
   driveFileIdFrom,
@@ -217,9 +222,15 @@ test('gateway /fleet routes: landing, auth, app, state, and heartbeat', async ()
     assert.equal(appRes.status, 200);
     const appHtml = await appRes.text();
     assert.ok(appHtml.includes('Fleet Status'));
+    assert.ok(appHtml.includes('id="table-fleet"'));
+    assert.ok(appHtml.includes('id="body-fleet"'));
     assert.ok(appHtml.includes('id="table-tickets"'));
-    assert.ok(appHtml.includes('id="table-terms"'));
     assert.ok(appHtml.includes('id="table-bots"'));
+    assert.ok(appHtml.includes('>Brief<'));
+    assert.ok(appHtml.includes('>Status &amp; working on<'));
+    assert.ok(appHtml.includes('>Model<'));
+    assert.ok(appHtml.includes('>Last activity<'));
+    assert.ok(appHtml.includes('>Allowance<'));
 
     // 4. POST /fleet/api/heartbeat records heartbeat
     const beatRes = await fetch(`${base}/fleet/api/heartbeat`, {
@@ -524,21 +535,41 @@ test('VM pane shows one row per live opencode session with model and working mar
   // Row clock stale but the message stream is fresh: a turn still generating.
   ins.run('ses_stream', JSON.stringify({ id: 'stream-model', providerID: 'opencode' }), '/home/ubuntu', 'Slow stream', t0 - 40 * 60 * 1000, null);
   msg.run('ses_stream', 'assistant', t0 - 2 * 60 * 1000, JSON.stringify({ time: { created: 1, streamed: 2 } }));
+  // Headless worker child: no model recorded, but a sheet-todo title names
+  // the ticket — visible as a worker row. Untitled model-less rows stay out.
+  ins.run('ses_worker', null, '/home/ubuntu', 'sheet-todo worker card:tag_x', t0 - 3 * 60 * 1000, null);
+  msg.run('ses_worker', 'assistant', t0 - 60 * 1000, JSON.stringify({ time: { created: 1, streamed: 2 } }));
+  ins.run('ses_junk', null, '/home/ubuntu', '', t0 - 3 * 60 * 1000, null);
   db.close();
 
   // One row per session: no aggregate sentence, each row carries its own model.
+  // Cold cache first: the hot path never scans synchronously (2026-11-06
+  // outage), so it renders the idle VM row and warms the cache off-loop.
+  // (migrate tip uses vps-france; main uses vps-id — both match the VM pane.)
   const tickets = [{ id: 'spec:vm-claim', owner: 'Some Agent @ vps-france', status: 'In progress' }];
+  const cold = getFleetNodes({ now: t0, home: tmpHome, vmOpencodeDb: dbPath, tickets });
+  assert.ok(cold.some((n) => n.location === 'VM'), 'VM pane still rendered on cold cache');
+  // A bounded off-loop refresh populates the session rows; afterwards the
+  // hot path serves them synchronously.
+  const fresh = await readStatusVmRowsFresh({ home: tmpHome, dbPath, now: t0, timeoutMs: 15000 });
+  // Raw rows include the untitled model-less junk row; the pane mapping
+  // (vmSessionRows) drops it, so the dashboard still shows exactly 4.
+  assert.equal(fresh.length, 5);
+  assert.ok(fresh.some((r) => r.id === 'ses_junk'));
   const nodes = getFleetNodes({ now: t0, home: tmpHome, vmOpencodeDb: dbPath, tickets });
   const vmRows = nodes.filter((n) => n.location === 'VM');
-  assert.equal(vmRows.length, 3);
-  assert.equal(vmRows[0].agent, 'opencode/space-bunny-free');
-  assert.equal(vmRows[0].status, 'working');
-  assert.equal(vmRows[0].task, 'Meal QA audit');
-  assert.equal(vmRows[1].agent, 'opencode/muse-spark');
-  assert.equal(vmRows[1].status, 'idle');
-  assert.equal(vmRows[1].task, 'Health-tracker');
-  assert.equal(vmRows[2].agent, 'opencode/stream-model');
-  assert.equal(vmRows[2].status, 'working');
+  assert.equal(vmRows.length, 4);
+  const byAgent = (a) => vmRows.find((r) => r.agent === a);
+  assert.equal(byAgent('opencode/space-bunny-free').status, 'working');
+  assert.equal(byAgent('opencode/space-bunny-free').task, 'Meal QA audit');
+  assert.equal(byAgent('opencode/muse-spark').status, 'idle');
+  assert.equal(byAgent('opencode/muse-spark').task, 'Health-tracker');
+  assert.equal(byAgent('opencode/stream-model').status, 'working');
+  const worker = byAgent('worker');
+  assert.ok(worker, 'titled model-less worker child shows');
+  assert.equal(worker.status, 'working');
+  assert.equal(worker.task, 'sheet-todo worker card:tag_x');
+  assert.ok(!vmRows.some((r) => String(r.task || '') === ''), 'untitled model-less rows stay out');
   assert.ok(!vmRows.some((r) => r.task.includes('working:')));
   assert.ok(!vmRows.some((r) => r.task.includes('old-model') || r.task.includes('archived-model')));
 
@@ -633,3 +664,127 @@ test('a row projects from either current-tab layout, not just the curated one', 
   assert.equal(b.proofFileId, '');
   assert.equal(b.completionProof, '—');
 });
+
+// 2026-11-06 fleet outage: a synchronous SQLite scan of the live opencode.db
+// (readVmOpencodeSessions on the gateway event loop) wedged every route for
+// 20-120s+ per /fleet/api/state call whenever no VM beat was present.
+// The hot path must serve from an off-loop TTL cache instead.
+//
+// This is the load-bearing sensor: the FIFO below exists, so existsSync
+// passes, but opening it blocks forever — exactly what the live 430MB db
+// does under writer churn. The OLD code called the sync reader here and
+// wedged the loop indefinitely (this test hangs on it); the fixed path
+// must answer instantly with the event loop still ticking.
+test('outage 2026-11-06: getFleetNodes never blocks the loop on a wedged VM db', async (t) => {
+  resetFleetStateForTest();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-home-'));
+  const fifo = path.join(home, 'hung.db');
+  try {
+    execFileSync('mkfifo', [fifo]);
+  } catch {
+    t.skip('mkfifo unavailable on this platform');
+    fs.rmSync(home, { recursive: true, force: true });
+    return;
+  }
+  let ticks = 0;
+  const iv = setInterval(() => { ticks++; }, 25);
+  try {    // No VM beat anywhere (fresh HOME leases, no VM beat file): the request
+    // path must still answer instantly instead of scanning the wedged db.
+    const t0 = Date.now();
+    const nodes = getStatusNodes({ home, vmOpencodeDb: fifo, now: Date.now(), timeoutMs: 1200 });
+    const elapsed = Date.now() - t0;
+    // Let the loop prove itself alive while the background refresh is still
+    // blocked on the FIFO open in its child.
+    await new Promise((r) => setTimeout(r, 300));
+    const vm = nodes.filter((n) => n.location === 'VM');
+    assert.ok(vm.length >= 1, 'VM pane still rendered');
+    assert.equal(vm[0].status, 'idle');
+    assert.ok(elapsed < 2000, `getFleetNodes blocked ${elapsed}ms on a wedged db`);
+    assert.ok(ticks >= 4, `event loop stalled during getFleetNodes (ticks=${ticks})`);
+    // The bounded background refresh fails closed (child killed on timeout)
+    // without throwing and without wiping anything.
+    const rows = await readStatusVmRowsFresh({ home, dbPath: fifo, timeoutMs: 1200 });
+    assert.deepEqual(rows, []);
+  } finally {
+    clearInterval(iv);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('outage 2026-11-06: getFleetNodes fails closed fast on a missing VM db', () => {
+  resetFleetStateForTest();
+  // A db path that can never resolve: the request path must still answer
+  // instantly with the standard idle row instead of scanning.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-home-'));
+  try {
+    const t0 = Date.now();
+    const nodes = getStatusNodes({
+      home,
+      vmOpencodeDb: path.join(home, 'no-such-dir', 'opencode.db'),
+      now: Date.now(),
+    });
+    const elapsed = Date.now() - t0;
+    const vm = nodes.filter((n) => n.location === 'VM');
+    assert.ok(vm.length >= 1, 'VM pane still rendered');
+    assert.equal(vm[0].status, 'idle');
+    assert.ok(elapsed < 2000, `getFleetNodes blocked ${elapsed}ms on the db path`);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('outage 2026-11-06: session refresh runs off-loop and tolerates a missing db', async () => {
+  resetFleetStateForTest();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-home-'));
+  try {
+    const missing = path.join(home, 'no-such-dir', 'opencode.db');
+    const rows = await readStatusVmRowsFresh({ home, dbPath: missing, timeoutMs: 8000 });
+    assert.deepEqual(rows, []);
+    // Singleflight: concurrent refreshes against a real (if unreadable) file
+    // share one child instead of spawning per caller.
+    const dud = path.join(home, 'dud.db');
+    fs.writeFileSync(dud, 'not a database', 'utf8');
+    const a = refreshStatusVmRows({ home, dbPath: dud });
+    const b = refreshStatusVmRows({ home, dbPath: dud });
+    assert.equal(a, b);
+    await a;
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('outage 2026-11-06: child reader maps a real sqlite db end to end', async () => {
+  resetFleetStateForTest();
+  const { DatabaseSync } = await import('node:sqlite');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-db-'));
+  try {
+    const dbPath = path.join(dir, 'opencode.db');
+    const db = new DatabaseSync(dbPath);
+    const now = Date.now();
+    db.exec('CREATE TABLE session_v2 (id TEXT PRIMARY KEY, model TEXT, directory TEXT, title TEXT, time_updated INTEGER, time_archived INTEGER)');
+    db.exec('CREATE TABLE session_message (session_id TEXT, type TEXT, data TEXT, time_created INTEGER)');
+    db.prepare('INSERT INTO session_v2 VALUES (?, ?, ?, ?, ?, ?)').run(
+      'ses_test123', JSON.stringify({ id: 'test-model' }), '/tmp/work', 'test task', now, null,
+    );
+    db.prepare('INSERT INTO session_message VALUES (?, ?, ?, ?)').run(
+      'ses_test123', 'assistant', JSON.stringify({ time: {} }), now,
+    );
+    db.close();
+    const rows = await readStatusVmRowsFresh({ dbPath, timeoutMs: 15000 });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, 'ses_test123');
+    // The cached rows flow into the VM pane on the hot path (sync, fast).
+    const t0 = Date.now();
+    const nodes = getStatusNodes({ vmOpencodeDb: dbPath, now: Date.now() });
+    assert.ok(Date.now() - t0 < 2000, 'getFleetNodes blocked on cached rows');
+    const vmRows = nodes.filter((n) => n.location === 'VM' && n.agent === 'opencode/test-model');
+    assert.equal(vmRows.length, 1);
+    assert.equal(vmRows[0].status, 'working');
+    assert.equal(vmRows[0].task, 'test task');
+    // Sync accessor serves the same cache without spawning.
+    assert.deepEqual(getStatusVmRows({ dbPath }), rows);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+

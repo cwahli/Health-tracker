@@ -21,7 +21,7 @@ export function shouldRunHandoffAutoSend(opts: {
   if (agent === 'data_review' || agent === 'biomarker_review') {
     return { run: false, reason: 'prefill_only' };
   }
-  if (type === 'medical' || type === 'front_desk' || agent === 'health_baseline' || agent === 'medical' || agent === 'daily_recommendation') {
+  if (type === 'medical' || type === 'front_desk' || agent === 'health_baseline' || agent === 'medical') {
     return { run: true, reason: 'handoff' };
   }
   return { run: false, reason: 'not_handoff_surface' };

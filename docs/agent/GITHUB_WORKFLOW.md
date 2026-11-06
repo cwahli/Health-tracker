@@ -122,6 +122,11 @@ These are **UI/API only** — a committed file cannot turn them on. Repository
 5. When `claim-guard` is red, do not "fix" it by widening scope — read the
    other PR, coordinate, and reduce your PR to its area.
 6. Merge **sequentially**: one PR at a time, rebase the rest.
+7. **Never merge from the CLI.** `gh pr merge --squash` without `--body` lands
+   the branch commit texts instead of the PR title+body, so the landed message
+   loses the `## Summary/Status/Left` handover (and the trailer) and reds main
+   on the backstop gate — specimens #764, #768. Let the merge bot merge (it uses
+   title+body), or pass `--body "$(...)"` explicitly with the full handover.
 
 ---
 

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { NutrientPieChart } from './NutrientPieChart';
-import { auditColors, auditDesignTokens } from '../utils/themeRegistry';
+import { auditColors, auditDesignTokens, deepSeaSystemPreset, classicSystemPreset } from '../utils/themeRegistry';
 import type { ThemeCustomizerApi } from '../hooks/useThemeCustomizer';
 
 const sizeMap: Record<string, string> = {
@@ -939,7 +939,8 @@ export default function ThemeCustomizerScreen({ theme }: ThemeCustomizerScreenPr
                               fontSizeSubtitleSmall: undefined,
                               fontSizeKeyMetric: undefined,
                               fontSizeXS: undefined,
-                              fontSizeBody: undefined
+                              fontSizeBody: undefined,
+                              fontScale: undefined
                             })}
                             className="px-4 py-2 bg-slate-150 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold cursor-pointer transition-all shadow-sm"
                           >
@@ -996,6 +997,41 @@ export default function ThemeCustomizerScreen({ theme }: ThemeCustomizerScreenPr
                       {value: 'Courier New', label: 'Courier New'}
                     ]} onChange={(val) => setProfile({ ...profile, fontMono: val })} />
                   </div>
+                </div>
+              )}
+
+              {/* GLOBAL TEXT SIZE — proportional scale for every dynamic font */}
+              {themeActiveSection === 'fonts' && (
+                <div className="mt-3 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 shadow-sm">
+                  <span className="block text-[11px] font-bold text-slate-800 dark:text-slate-100 text-center">Text Size</span>
+                  <div className="flex items-center justify-center gap-4 mt-2">
+                    <button
+                      type="button"
+                      aria-label="Decrease text size"
+                      onClick={() => {
+                        const cur = Number.isFinite(Number(profile.fontScale)) ? Number(profile.fontScale) : 1.1;
+                        setProfile({ ...profile, fontScale: Math.max(0.8, Math.round((cur - 0.05) * 100) / 100) });
+                      }}
+                      className="w-11 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xl font-bold cursor-pointer transition-all"
+                    >
+                      −
+                    </button>
+                    <span className="text-sm font-bold text-slate-800 dark:text-slate-100 w-14 text-center">
+                      {Math.round((Number.isFinite(Number(profile.fontScale)) ? Number(profile.fontScale) : 1.1) * 100)}%
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Increase text size"
+                      onClick={() => {
+                        const cur = Number.isFinite(Number(profile.fontScale)) ? Number(profile.fontScale) : 1.1;
+                        setProfile({ ...profile, fontScale: Math.min(1.3, Math.round((cur + 0.05) * 100) / 100) });
+                      }}
+                      className="w-11 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xl font-bold cursor-pointer transition-all"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 text-center mt-2">Scales all text up or down together</p>
                 </div>
               )}
 
@@ -1267,6 +1303,8 @@ export default function ThemeCustomizerScreen({ theme }: ThemeCustomizerScreenPr
                       {(() => {
                         const systemPresetsList = [
                           { name: "System Default", isSystem: true, profileUpdate: { marginScale: undefined, paddingScale: undefined, cornerRadius: undefined, shadowScale: undefined, themePalette: undefined, fontSize: undefined, fontFamily: undefined, fontMono: undefined, fontSizeTitle: undefined, fontSizeSubtitle: undefined, fontSizeDescription: undefined, fontSizeBodySmall: undefined, fontSizeSubtitleSmall: undefined, fontSizeKeyMetric: undefined, fontSizeXS: undefined, fontSizeBody: undefined, themeOverrides: [] } },
+                          deepSeaSystemPreset,
+                          classicSystemPreset,
                           { name: "Accessible High Contrast (Light)", isSystem: true, profileUpdate: { fontFamily: 'Inter', themePalette: { background: '#ffffff', bgCard: '#ffffff', button: '#0f172a', text: '#0f172a', textSecondary: '#1e293b', border: '#0f172a', textAccent: '#1e40af', textMuted: '#334155', textSuccess: '#166534', textError: '#991b1b', warning: '#9a3412', caution: '#854d0e', success: '#166534', info: '#1e40af', neutralSetting: '#1e293b' } } },
                           { name: "Midnight Blue (Dark)", isSystem: true, profileUpdate: { fontFamily: 'Space Grotesk', themePalette: { background: '#000000', bgCard: '#0f172a', button: '#2563eb', text: '#f8fafc', textSecondary: '#cbd5e1', border: '#1e293b', textAccent: '#a5b4fc', textMuted: '#94a3b8', textSuccess: '#4ade80', textError: '#f87171', warning: '#fb7185', caution: '#fbbf24', success: '#34d399', info: '#60a5fa', neutralSetting: '#cbd5e1' } } },
                           { name: "Emerald Forest (Dark)", isSystem: true, profileUpdate: { fontFamily: 'Outfit', themePalette: { background: '#000000', bgCard: '#06231a', button: '#047857', text: '#ecfdf5', textSecondary: '#a7f3d0', border: '#0f3527', textAccent: '#a5b4fc', textMuted: '#a7f3d0', textSuccess: '#4ade80', textError: '#f87171', warning: '#fb7185', caution: '#fbbf24', success: '#34d399', info: '#60a5fa', neutralSetting: '#d1fae5' } } },
@@ -1357,16 +1395,16 @@ export default function ThemeCustomizerScreen({ theme }: ThemeCustomizerScreenPr
                               const effectiveUpdate = profile.systemPresetOverrides?.[preset.name] ? { ...preset.profileUpdate, ...profile.systemPresetOverrides[preset.name] } : preset.profileUpdate;
                               const active = isPresetActive(effectiveUpdate);
                               return (
-                                <div key={idx} className={`flex justify-between items-center p-3 rounded-xl border shadow-sm transition-all ${active ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-400 dark:border-indigo-500 ring-2 ring-indigo-500/30' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'}`}>
-                                  <div className="flex items-center gap-2 flex-1 truncate mr-2">
+                                <div key={idx} className={`flex flex-col gap-2 p-3 rounded-xl border shadow-sm transition-all ${active ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-400 dark:border-indigo-500 ring-2 ring-indigo-500/30' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'}`}>
+                                  <div className="flex items-center gap-2 w-full">
                                     {active && (
                                       <span className="w-4 h-4 rounded-full bg-emerald-600 dark:bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-xs" title="Preset Applied">
                                         <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                                       </span>
                                     )}
-                                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{preset.name}</span>
+                                    <span className="text-sm font-bold text-slate-800 dark:text-slate-200 break-words">{preset.name}</span>
                                   </div>
-                                  <div className="flex gap-2 items-center shrink-0">
+                                  <div className="flex gap-2 items-center flex-wrap">
                                     <button title="Export" onClick={() => {
                                       const exportPayload = buildExportPayload(effectiveUpdate, preset.name);
                                       const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' });

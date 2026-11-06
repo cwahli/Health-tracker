@@ -43,16 +43,21 @@ export function pruneLocalStorageToFreeSpace(): void {
 
 export async function safeSaveToLocalStorage(key: string, data: any): Promise<void> {
   try {
+    // Count durability (ALWAYS_COUNT_FALLBACK): a bundle save without a
+    // total must never wipe a previously persisted good total — every
+    // remount re-reads this value, and losing it pins history to a few
+    // pages until a lucky pull.
+    const merged = await preserveBundleFoodTotalStored(key, data);
     // Save to IndexedDB first
-    await set(key, data);
+    await set(key, merged);
     // Also mirror to localStorage if space permits
     try {
-      localStorage.setItem(key, JSON.stringify(data));
+      localStorage.setItem(key, JSON.stringify(merged));
     } catch (e: any) {
       if (e?.name === 'QuotaExceededError') {
         pruneLocalStorageToFreeSpace();
         try {
-          localStorage.setItem(key, JSON.stringify(data));
+          localStorage.setItem(key, JSON.stringify(merged));
         } catch {
           // Keep in IDB only
         }
@@ -61,6 +66,47 @@ export async function safeSaveToLocalStorage(key: string, data: any): Promise<vo
   } catch (err) {
     console.error(`[storageUtils] Error saving data for key "${key}":`, err);
   }
+}
+
+/**
+ * Carry over a previously stored meal total when the incoming bundle does
+ * not bring one. Only applies to app-data bundles (foodLogs array present);
+ * a bundle that already carries a positive total always wins, and a missing
+ * stored total changes nothing. Pure (IDB read happens in the caller).
+ */
+export function preserveBundleFoodTotal(incoming: any, stored: any): any {
+  if (!incoming || typeof incoming !== 'object' || !Array.isArray(incoming.foodLogs)) return incoming;
+  const incomingTotal = incoming.totalFoodsCount;
+  if (typeof incomingTotal === 'number' && incomingTotal > 0) return incoming;
+  const storedTotal = stored && typeof stored === 'object' ? stored.totalFoodsCount : undefined;
+  if (typeof storedTotal === 'number' && storedTotal > 0) {
+    return { ...incoming, totalFoodsCount: storedTotal };
+  }
+  return incoming;
+}
+
+async function preserveBundleFoodTotalStored(key: string, data: any): Promise<any> {
+  if (!data || typeof data !== 'object' || !Array.isArray(data.foodLogs)) return data;
+  if (typeof data.totalFoodsCount === 'number' && data.totalFoodsCount > 0) return data;
+  try {
+    const stored = await get(key);
+    return preserveBundleFoodTotal(data, stored);
+  } catch {
+    return data;
+  }
+}
+
+/**
+ * Highest known meal total across live state and the stored bundle.
+ * The live value wins ties-or-better; a stored good value heals a missing
+ * live one. Returns undefined when neither side knows a positive total.
+ * Used to persist the max so remounts never regress (ALWAYS_COUNT_FALLBACK).
+ */
+export function healedBundleTotal(liveTotal: unknown, storedTotal: unknown): number | undefined {
+  const live = typeof liveTotal === 'number' && liveTotal > 0 ? Math.floor(liveTotal) : 0;
+  const stored = typeof storedTotal === 'number' && storedTotal > 0 ? Math.floor(storedTotal) : 0;
+  const best = Math.max(live, stored);
+  return best > 0 ? best : undefined;
 }
 
 export async function getAggregatedAppData(email?: string | null): Promise<any> {

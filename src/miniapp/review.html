@@ -76,6 +76,26 @@
                 background: #000; border-radius: 8px; border: 1px solid #1e293b; }
   .answer figcaption { font-size: 13px; color: #e2e8f0; margin-top: 5px; white-space: pre-wrap; }
   .answer figcaption.where { font-size: 10.5px; color: #64748b; }
+  /* The Request tab is the point of truth: the request first, then the
+     result screenshot directly below it, so the reader never has to hold
+     the words in memory while swiping. Same image bytes as the stage. */
+  .result { margin: 14px 0 0; position: relative; }
+  .result img { width: 100%; max-height: 52vh; object-fit: contain; display: block;
+                background: #000; border-radius: 8px; border: 1px solid #1e293b; }
+  /* The point of truth carries its own Done: the same heart as the stage,
+     pinned to the result screenshot, so a review can finish where it starts. */
+  .result .heart { position: absolute; right: 10px; bottom: 10px; }
+  .result .stage.req { flex: none; height: 52vh; border-radius: 8px; border: 1px solid #1e293b; }
+  /* --- agent question: the Need-info thread lives where the review starts,
+     so the owner answers without tab-hopping. -------------------------- */
+  .qa { margin: 14px 0 0; border: 1px solid #b45309; border-radius: 8px; padding: 10px 12px; background: #1c1410; }
+  .qa .colname { color: #fbbf24; }
+  .qa .thread { white-space: pre-wrap; font-size: 14px; margin: 6px 0 10px; }
+  .qa textarea { width: 100%; box-sizing: border-box; background: #0b1220; color: #f8fafc;
+    border: 1px solid #334155; border-radius: 6px; padding: 8px; font: 14px system-ui; resize: vertical; }
+  .qa button.send { margin-top: 8px; background: #b45309; color: #fff; border: 0; border-radius: 6px;
+    padding: 8px 14px; font: 600 14px system-ui; }
+  .view .none { color: #64748b; font-size: 13px; }
 
   /* --- image stage: pinch, pan, swipe, all gestures are ours --------- */
   .stage { position: relative; flex: 1 1 auto; min-height: 0; background: #000; overflow: hidden; }
@@ -158,11 +178,15 @@
   .empty { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
            justify-content: center; text-align: center; color: #64748b; padding: 24px; }
   .empty .big { font-size: 38px; }
+  /* META-1 shell: the burger lives here, first inside this masthead
+     (in-flow with the title, never floating over it). Framed in the shell
+     it opens the shell drawer; top-level it returns to the shell. */
 </style>
 </head>
 <body>
 <div class="masthead">
   <div class="title-group">
+    <button id="shell-burger" aria-label="Menu" title="Mini apps menu" style="background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:6px;width:28px;height:28px;font-size:15px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;">&#x2630;</button>
     <span class="live-dot" id="live-indicator" title="Connected"></span>
     <h1>Review</h1>
     <button id="btn-refresh" class="btn-refresh" title="Refresh queue" aria-label="Refresh queue">🔄</button>
@@ -212,7 +236,7 @@
     }
   } catch (e) {}
 
-  var state = { items: [], idx: 0, tab: 'proof', infoOpen: false, target: 'left', busy: false, pending: null };
+  var state = { items: [], idx: 0, tab: 'request', infoOpen: false, target: 'left', busy: false, pending: null };
   var query = location.search || '';
   var builtKey = null;      // item key currently in the DOM — the blink guard
   var view = null;          // per-item picture view: slides, zoom, gestures
@@ -511,9 +535,31 @@
       + '<div class="kv"><h3>Proof</h3><p>' + (proofs.length ? proofs.map(function (p) { return esc(p.name); }).join('\n') : 'none filed') + '</p></div>'
       + '</div>';
     // The two column tabs name the sheet column they show, so a reader can
-    // never be guessing which cell is on screen.
+    // never be guessing which cell is on screen. Request is the point of
+    // truth: the request text first, then the result screenshots directly
+    // below it — the SAME multi-shot swipe component as the proof stage
+    // (every proof, swipeable, zoomable), so there is exactly one picture
+    // component to learn. See the request and see the result, no tab-hopping.
     views += '<div class="view scroll text" data-view="request">'
-      + '<div class="colname">Original request</div><div id="pane-request">' + esc(it.originalRequest) + '</div></div>';
+      + '<div class="colname">Original request</div><div id="pane-request">' + esc(it.originalRequest) + '</div>'
+      + (proofs.length
+        ? '<figure class="result"><div class="colname">Result</div>'
+          + '<div class="stage req"><div class="track">'
+          + proofs.map(function (p, i) {
+              var src = proofUrl(it.key, p.id);
+              return '<div class="slide"><div class="zoom"><img src="' + src + '" alt="result screenshot ' + (i + 1) + ' of ' + proofs.length + '" loading="lazy"></div></div>';
+            }).join('')
+          + '</div></div>'
+          + (proofs.length > 1 ? '<div class="count">swipe · 1/' + proofs.length + '</div>' : '')
+          + '<button class="heart" data-heart="result" title="Done — archive" aria-label="Mark done and archive">🤍</button></figure>'
+        : '<p class="none">No proof screenshots filed.</p>')
+      + (it.question
+        ? '<div class="qa"><div class="colname">Agent asks — answer to unblock</div>'
+          + '<div class="thread" id="qa-thread">' + esc(it.question) + '</div>'
+          + '<textarea id="qa-answer" rows="2" placeholder="Type your answer…"></textarea>'
+          + '<button class="send" id="qa-send">Send answer</button></div>'
+        : '')
+      + '</div>';
     views += '<div class="view scroll text" data-view="todo">'
       + '<div class="colname">What\u2019s left to do</div><div id="pane-todo">'
       + (it.whatsLeft ? esc(it.whatsLeft) : '<span style="color:#475569">the What\u2019s left to do column is empty</span>')
@@ -556,7 +602,16 @@
     panel.innerHTML = views + '<div class="view on" data-view="proof">' + stage + '</div>';
 
     view = proofs.length ? new PictureView(document.getElementById('track'), document.getElementById('imgcount')) : null;
-    document.getElementById('heart').addEventListener('click', onHeart);
+    var reqFigure = document.querySelector('[data-view="request"] .result');
+    var reqTrack = reqFigure && reqFigure.querySelector('.stage.req .track');
+    if (reqTrack) new PictureView(reqTrack, reqFigure.querySelector('.count'));
+    // Every heart archives the same item: the stage's and the result's are
+    // bound by class (ids stay unique), so Done works where the review starts.
+    document.querySelectorAll('#panel .heart').forEach(function (btn) {
+      btn.addEventListener('click', function () { onHeart(btn); });
+    });
+    var qaSend = document.getElementById('qa-send');
+    if (qaSend) qaSend.addEventListener('click', sendQuestionAnswer);
     document.getElementById('composer').hidden = false;
     setInfo(false);
   }
@@ -570,7 +625,7 @@
       infoView.classList.toggle('on', state.infoOpen);
       infoView.hidden = !state.infoOpen;
     }
-    var stage = document.querySelector('.stage');
+    var stage = document.querySelector('[data-view="proof"] .stage');
     if (stage) stage.classList.toggle('full', !state.infoOpen);
     document.querySelectorAll('#tabs button').forEach(function (b) {
       b.classList.toggle('on', state.infoOpen && b.getAttribute('data-tab') === 'info');
@@ -579,7 +634,7 @@
 
   function showProof() {
     var proof = document.querySelector('[data-view="proof"]');
-    var stage = document.querySelector('.stage');
+    var stage = document.querySelector('[data-view="proof"] .stage');
     if (stage) stage.hidden = false;
     document.querySelectorAll('#panel .view').forEach(function (v) {
       if (v !== proof) v.classList.remove('on');
@@ -595,7 +650,7 @@
     state.tab = name;
     state.infoOpen = false;
     var proof = document.querySelector('[data-view="proof"]');
-    var stage = document.querySelector('.stage');
+    var stage = document.querySelector('[data-view="proof"] .stage');
     var infoView = document.querySelector('#panel .view[data-view="info"]');
     if (infoView) { infoView.classList.remove('on'); infoView.hidden = true; }
     if (stage) { stage.hidden = true; stage.classList.add('full'); }
@@ -703,12 +758,12 @@
     fr.readAsDataURL(f);
   }
 
-  function onHeart() {
-    var btn = document.getElementById('heart');
+  function onHeart(btn) {
+    var heart = btn || document.getElementById('heart');
     var it = state.items[state.idx];
-    if (!it || !btn || state.busy) return;
+    if (!it || !heart || state.busy) return;
     state.busy = true;
-    btn.textContent = '…';
+    heart.textContent = '…';
     api('/review/api/approve', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: it.key }),
@@ -720,10 +775,34 @@
         if (state.idx >= state.items.length) state.idx = Math.max(0, state.items.length - 1);
         render();
       } else {
-        btn.textContent = '🤍';
-        toast('Approve failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
+        heart.textContent = '🤍';
+        toast(r.status === 401 ? 'Session expired — reload the page, then tap again' : 'Approve failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
       }
-    }).catch(function () { state.busy = false; btn.textContent = '🤍'; toast('Approve failed: network'); });
+    }).catch(function () { state.busy = false; heart.textContent = '🤍'; toast('Approve failed: network'); });
+  }
+
+  function sendQuestionAnswer() {
+    var box = document.getElementById('qa-answer');
+    var it = state.items[state.idx];
+    if (!it || !box || state.busy) return;
+    var text = box.value.trim();
+    if (!text) { toast('Type your answer first'); return; }
+    state.busy = true;
+    api('/review/api/question', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: it.key, text: text }),
+    }).then(function (r) {
+      state.busy = false;
+      if (r.body && r.body.ok) {
+        var thread = document.getElementById('qa-thread');
+        if (thread) thread.textContent = (thread.textContent || '') + '\n' + r.body.stamped;
+        box.value = '';
+        it.question = (it.question || '') + '\n' + r.body.stamped;
+        toast('Answer sent \u2192 the agent continues');
+      } else {
+        toast(r.status === 401 ? 'Session expired — reload the page, then send again' : 'Send failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
+      }
+    }).catch(function () { state.busy = false; toast('Send failed: network'); });
   }
 
   /** Read the picked file as base64 (no data: prefix) for the answer endpoint. */
@@ -795,7 +874,7 @@
         }
         toast(r.body.uploaded ? 'Answer sent \u2192 the agent\u2019s folder' : 'Sent \u2192 ' + (state.target === 'left' ? 'To do' : 'Request'));
       } else {
-        toast('Send failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
+        toast(r.status === 401 ? 'Session expired — reload the page, then send again' : 'Send failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status)));
       }
     }).catch(function (e) {
       state.busy = false;
@@ -820,7 +899,9 @@
     }
     var it = state.items[state.idx];
     if (builtKey !== it.key) { clearAttachment(); build(it); }
-    showProof();
+    // Land on Request: the request plus the result screenshot below it is
+    // the point of truth every review starts from.
+    showText('request');
   }
 
   document.getElementById('btn-prev').addEventListener('click', function () {
@@ -835,32 +916,76 @@
     setTimeout(function () { document.getElementById('btn-refresh').classList.remove('spinning'); }, 600);
   });
 
+  // Cursor-preserving apply: shared by the poll fetch and the SSE push so a
+  // live update never steals the item under review.
+  function applyItems(items) {
+    var cur = state.items[state.idx] && state.items[state.idx].key;
+    state.items = items || [];
+    var at = -1;
+    for (var i = 0; i < state.items.length; i++) { if (state.items[i].key === cur) { at = i; break; } }
+    state.idx = at >= 0 ? at : Math.min(state.idx, Math.max(0, state.items.length - 1));
+    document.getElementById('live-indicator').style.background = '#10b981';
+    render();
+  }
+
   function fetchState(isRefresh) {
     var q = isRefresh ? (query ? query + '&refresh=1' : '?refresh=1') : query;
     fetch('/review/api/state' + q, { headers: { Accept: 'application/json' } })
       .then(function (res) { return res.json(); })
       .then(function (data) {
-        if (data && data.ok) {
-          var cur = state.items[state.idx] && state.items[state.idx].key;
-          state.items = data.items || [];
-          var at = -1;
-          for (var i = 0; i < state.items.length; i++) { if (state.items[i].key === cur) { at = i; break; } }
-          state.idx = at >= 0 ? at : Math.min(state.idx, Math.max(0, state.items.length - 1));
-          document.getElementById('live-indicator').style.background = '#10b981';
-          render();
-        }
+        if (data && data.ok) applyItems(data.items);
       })
       .catch(function () {
         document.getElementById('live-indicator').style.background = '#ef4444';
       });
   }
 
+  // Live push: same `state` shape as /review/api/state, applied through the
+  // same cursor-preserving path. The 30s poll below stays as the fallback.
+  var sse = null;
+  function connectSse() {
+    try { if (sse) sse.close(); } catch (e) {}
+    sse = null;
+    if (document.visibilityState !== 'visible') return;
+    if (typeof EventSource === 'undefined') return;
+    try {
+      sse = new EventSource('/review/api/events' + query);
+      sse.addEventListener('state', function (e) {
+        try {
+          var data = JSON.parse(e.data);
+          if (data && (Array.isArray(data.items) || data.ok !== false)) applyItems(data.items || []);
+        } catch (err) {}
+      });
+      sse.onerror = function () {
+        document.getElementById('live-indicator').style.background = '#f59e0b';
+      };
+      sse.onopen = function () {
+        document.getElementById('live-indicator').style.background = '#10b981';
+      };
+    } catch (e) { sse = null; }
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') { connectSse(); fetchState(false); }
+    else { try { if (sse) sse.close(); } catch (e) {} sse = null; }
+  });
+
   setTarget('left');
   fetchState(false);
+  connectSse();
   setInterval(function () {
     if (document.visibilityState === 'visible') fetchState(false);
   }, 30000);
 })();
 </script>
+<script>(function(){
+var b=document.getElementById("shell-burger");if(!b)return;
+function q(k){try{return new URLSearchParams(window.location.search||"").get(k)||""}catch(e){return""}}
+b.addEventListener("click",function(){
+try{if(window.self!==window.top){window.parent.postMessage({type:"shell:menu"},"*");return}}catch(e){}
+var init="";try{init=(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initData)||""}catch(e){}
+if(init){var bot=q("bot")||"vm";window.location.href="/app/?bot="+encodeURIComponent(bot)+"&initData="+encodeURIComponent(init);return}
+var t=q("token");window.location.href=t?("/app/app?token="+encodeURIComponent(t)+"&tab=review"):("/app/login?tab=review");
+});
+})();</script>
 </body>
 </html>

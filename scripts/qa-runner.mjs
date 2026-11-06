@@ -63,6 +63,7 @@ async function run() {
 
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 }, // iPhone 12/13 mobile viewport
+    colorScheme: 'dark', // app's dark: variants follow prefers-color-scheme; QA defaults to dark theme
     userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148'
   });
 
@@ -342,6 +343,7 @@ async function captureBefore(filePath) {
     });
     const context = await browser.newContext({
       viewport: { width: 390, height: 844 },
+      colorScheme: 'dark', // app's dark: variants follow prefers-color-scheme; QA defaults to dark theme
       userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
     });
     const page = await context.newPage();

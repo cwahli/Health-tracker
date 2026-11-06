@@ -11,17 +11,17 @@ An agent working on the Mac is **not** on this box, so none of the paths above
 exist locally. Reach it first:
 
 ```bash
-ssh -o BatchMode=yes ubuntu@51.254.217.163
+ssh -o BatchMode=yes -p 20133 root@103.147.32.117
 ```
 
-- Host `vps-0a61fae6`, user `ubuntu`, default key (`~/.ssh/id_ed25519`). No
+- Host `standar-c3r3a-1845`, user `root`, port `20133`, key `~/.ssh/moshi_vps`. No
   `~/.ssh/config` entry, no password, no sudo.
 - `-o BatchMode=yes` fails fast instead of hanging on a key or host prompt, so
   testing the route costs about a second.
 - One command on the box, through the same door (heredocs work too):
 
   ```bash
-  ssh -o BatchMode=yes ubuntu@51.254.217.163 'uname -n; systemctl list-units "bot-host@*" --no-legend --state=running | wc -l'
+  ssh -o BatchMode=yes -p 20133 root@103.147.32.117 'uname -n; systemctl list-units "bot-host@*" --no-legend --state=running | wc -l'
   ```
 
 - The helper `~/dev/new-worktree.sh` is **on the box**, not on the Mac; run it

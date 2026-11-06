@@ -8,9 +8,10 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { closedRowsFromRoadmap } from './lib/closed-rows.mjs';
 
-export function buildStartupCard({ hostname, location, commits } = {}) {
-  const onVm = location === 'vps-france' || location === 'vm';
+export function buildStartupCard({ hostname, location, commits, closedRows } = {}) {
+  const onVm = location === 'vps-id' || location === 'vps-france' || location === 'vm';
   const lines = [
     `You are on this machine: ${hostname || 'unknown'}.`,
     location ? `Location file: ${location}.` : 'Location file: (none).',
@@ -24,7 +25,12 @@ export function buildStartupCard({ hostname, location, commits } = {}) {
     'Uncommitted work with no sheet row: node scripts/sheet-watcher.mjs (print-only; --write once, after 20 minutes on the same fingerprint).',
     'Code in a new worktree: node scripts/agent-worktree.mjs new <slug>',
     'Hub files, one agent at a time: scripts/bot-host.mjs, scripts/lib/free-lanes.mjs, scripts/lib/work-session.mjs',
+    'A packet whose own gate is already true is go for the files that gate names. Do not ask the user to type go. An open PR blocks only the files it lists. A cleared or COMPLETE phase is not an earlier open phase.',
   ];
+  if (closedRows?.length) {
+    lines.push('Closed on the roadmap. Do not reopen these. A plan header, a card procedure, or an AI_HANDOVER bullet that still says one of them is open is history:');
+    for (const row of closedRows) lines.push(`- ${row} COMPLETE`);
+  }
   if (commits?.length) {
     lines.push('Last commits on origin/main:');
     for (const commit of commits) lines.push(`- ${commit}`);
@@ -39,6 +45,15 @@ function readLocation() {
     return fs.readFileSync(path.join(os.homedir(), '.agents', 'location'), 'utf8').trim().split(/\s+/)[0];
   } catch {
     return '';
+  }
+}
+
+function readClosedRows(repo) {
+  try {
+    const text = fs.readFileSync(path.join(repo, 'plan', 'ROADMAP.md'), 'utf8');
+    return closedRowsFromRoadmap(text);
+  } catch {
+    return [];
   }
 }
 
@@ -64,5 +79,6 @@ if (isMain) {
     hostname: os.hostname(),
     location: readLocation(),
     commits: readCommits(repo),
+    closedRows: readClosedRows(repo),
   }));
 }

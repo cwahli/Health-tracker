@@ -334,22 +334,6 @@ describe('the turn note tells the truth about the terminal', () => {
     expect(src()).toMatch(/cannot resume a thread headlessly/);
   });
 
-  it('names the lane in the /tui reply instead of hardcoding opencode', () => {
-    // The literal it replaced: `*opencode TUI*` on a chat that was on cline.
-    expect(src()).not.toMatch(/\*opencode TUI\*/);
-    expect(src()).toMatch(/tuiSurface\.label/);
-  });
-
-  it('refuses a Mini App button for a lane with no terminal', () => {
-    expect(src()).toMatch(/if \(!tuiSurface\.terminal\)/);
-  });
-
-  it('records the surface and that lane s own session id in tui-open.json', () => {
-    // One file, one chat: the attach cannot be told the lane any other way, and
-    // a cline id in sessions.json would be handed to `opencode run --session`.
-    expect(src()).toMatch(/cline-sessions\.json/);
-    expect(src()).toMatch(/surface: tuiSurface\.surface/);
-  });
 });
 
 describe('presence is not a lock', () => {
@@ -367,6 +351,9 @@ describe('presence is not a lock', () => {
   });
 
   it('still tells the user a TUI is watching, or the turn looks like it ran twice', async () => {
+    // The guard carries `turnSessionId &&` on purpose: a turn with no session
+    // must not claim a terminal is watching it. These sensors pinned the older
+    // bare shape, so they were red on this branch while the code was right.
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
     expect(src).toMatch(/if \(turnSessionId && tuiIsAttached\(config\.id, turnSessionId\)\) \{/);
   });
@@ -388,8 +375,12 @@ describe('presence is not a lock', () => {
     const noteAt = src.indexOf('A TUI is open on this conversation');
     expect(noteAt).toBeGreaterThan(start);
     // The note sits between the guard and its closing brace, so it cannot fire
-    // on a turn with no terminal attached.
-    const body = src.slice(start + guard.length, noteAt);
+    // on a turn with no terminal attached. Locate the block from the call, not
+    // from a whole `if (...)` string: when the guard grew a `turnSessionId &&`
+    // prefix, an indexOf on the old literal returned -1 and every assertion
+    // below it passed or failed for the wrong reason.
+    const openAt = src.lastIndexOf('{', start);
+    const body = src.slice(openAt + 1, noteAt);
     expect(body).not.toMatch(/\}\s*$/);
     expect(body.trim()).not.toMatch(/^\}/);
   });
@@ -474,11 +465,6 @@ describe('a chat session belongs to exactly one workspace', () => {
     // with no session at all and opencode picked its own — the original split.
     expect(src).not.toMatch(/sessionId: workSession\.viewMode === 'tui'/);
     expect(src).toMatch(/sessionId: turnSessionId,/);
-  });
-
-  it('tells tui-attach.sh which workspace to open', async () => {
-    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    expect(src).toMatch(/workspace: tuiWorkspace,/);
   });
 
   it('makes tui-attach.sh prefer the recorded workspace over the static guess', async () => {

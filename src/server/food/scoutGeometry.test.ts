@@ -101,6 +101,33 @@ describe('q-9 Node3 scoutGeometry parity (verbatim extract, hypothesis 2)', () =
     expect(clustered[1].originalName).toBe('Plum');
   });
 
+  it('does not fold an unlabeled item into a labeled branded pack (live job_1792364272052)', () => {
+    // Gammon 328g with printed label + tomatoes 100g without: boxes overlap
+    // heavily (overlap 0.71, IoU 0.32) but merging applies the gammon label
+    // to the union weight, understating nutrients ~1.64x.
+    const gammon: any = {
+      originalName: 'Lidl Slow Cooked Gammon Shanks',
+      keyword: 'gammon',
+      estimatedWeightGrams: 328,
+      sourceImageIndex: 0,
+      boundingBox2D: [280, 110, 900, 920],
+      rawNutritionLabel: { calories: '135 kcal', servingSize: 'per half pack 164g' },
+      nutrients: { protein: 57, totalFat: 9.2, saturatedFat: 3.2, carbohydrates: 32.2, sodium: 2360 },
+    };
+    const tomatoes: any = {
+      originalName: 'Baby Plum Tomatoes',
+      keyword: 'tomatoes',
+      estimatedWeightGrams: 100,
+      sourceImageIndex: 0,
+      boundingBox2D: [140, 130, 620, 670],
+      nutrients: { protein: 0.7, totalFat: 0.2, carbohydrates: 3.9, sodium: 5 },
+    };
+    const clustered = clusterSpatialCompositeDishes([gammon, tomatoes], () => {});
+    expect(clustered).toHaveLength(2);
+    expect(clustered[0].estimatedWeightGrams).toBe(328);
+    expect(clustered[1].estimatedWeightGrams).toBe(100);
+  });
+
   // card-19: clustering unions boxes onto the composite (correct) but never
   // copied each component's own box, destroying it. Boxes: job_1790784359089_kvt6r0c0g.
   type Box = [number, number, number, number];

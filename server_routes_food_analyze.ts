@@ -119,7 +119,7 @@ foodAnalyzeRouter.get("/api/gemini/instruction-preview", async (req, res) => {
 
 // Gemini Food Analyze Endpoint
 
-import { callReceptionistAgent } from './src/server/receptionist/index.js';
+import { callReceptionistAgent, normalizePageContext } from './src/server/receptionist/index.js';
 import { runBiomarkerPipeline } from './src/server/biomarkers/pipeline.js';
 
 // Health Preparation & Receptionist Agent
@@ -138,6 +138,7 @@ foodAnalyzeRouter.post("/api/gemini/front-desk", async (req, res) => {
       existingMemory,
       existingActivitiesAndTasks,
       specialistContainers,
+      pageContext,
     } = req.body;
     
     let targetModel = typeof engine === 'object' ? engine?.name || engine?.model || "gemini-3.5-flash-lite" : (engine || "gemini-3.5-flash-lite");
@@ -209,6 +210,7 @@ foodAnalyzeRouter.post("/api/gemini/front-desk", async (req, res) => {
       existingMemory: existingMemory || null,
       existingActivitiesAndTasks: existingActivitiesAndTasks || null,
       language: profile?.language || null,
+      pageContext: normalizePageContext(pageContext, req.body?.userId, existingUserProfile),
       biomarkers: Object.keys(synchronizedBiomarkers).length > 0 ? synchronizedBiomarkers : null,
       foodLogs: foodLogs || null,
       biomarkerHistory: biomarkerHistory || null,
@@ -355,7 +357,56 @@ foodAnalyzeRouter.post("/api/gemini/front-desk", async (req, res) => {
   }
 });
 
+// Direct Gemini Voice Transcription Endpoint (universal fallback for Web Speech API)
+foodAnalyzeRouter.post("/api/gemini/voice-transcribe", async (req, res) => {
+  try {
+    const { audio, mimeType, language } = req.body;
+    if (!audio) {
+      return res.status(400).json({ error: "Missing audio payload" });
+    }
 
+    let base64Data = audio;
+    let actualMime = mimeType || "audio/webm";
+    if (typeof audio === 'string' && audio.startsWith("data:")) {
+      const parts = audio.split(";base64,");
+      const match = parts[0].match(/data:(.*)/);
+      if (match) actualMime = match[1];
+      base64Data = parts[1];
+    }
+
+    const ai = getGeminiClient();
+    const langPrompt = language ? ` The audio language is likely ${language}.` : "";
+    const prompt = `Transcribe the spoken words in this audio recording accurately.${langPrompt} Return ONLY the verbatim transcribed text, without commentary, markdown headers, or quotes. If there is no speech or only background noise, return an empty string.`;
+
+    const response = await withGeminiRetry(() =>
+      ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                inlineData: {
+                  data: base64Data,
+                  mimeType: actualMime,
+                },
+              },
+              {
+                text: prompt,
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    const text = (response.text || "").trim();
+    return res.json({ text });
+  } catch (err: any) {
+    console.error("[VoiceTranscribe] Error:", err);
+    return res.status(500).json({ error: err.message || "Failed to transcribe audio" });
+  }
+});
 
 foodAnalyzeRouter.post("/api/gemini/food-analyze", (req, res) => {
   return runFoodAnalyze(req, res);

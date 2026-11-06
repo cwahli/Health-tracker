@@ -896,6 +896,27 @@ describe("server_dish_finalize", () => {
     expect(ocrNutrients.calories).toBe(3620);
   });
 
+  it('reads dual-column labels ("17.4g per 100g, 28.5g per half pack") on the per-100g basis (live job_1792364272052)', () => {
+    // Before the fix: first-number parsing grabbed the per-100g figure while
+    // ocrScale used the 164g serving basis — 135 kcal read as 352 not 443.
+    const { ocrNutrients, lockedKeys } = parseOcrLabel({
+      servingSize: 'per half pack approx. 164g** - This pack contains 2 servings',
+      calories: '135 kcal',
+      protein: '17.4g per 100g, 28.5g per half pack',
+      totalFat: '2.8g per 100g, 4.6g per half pack',
+      saturatedFat: '1.0g per 100g, 1.6g per half pack',
+      carbohydrates: '9.8g per 100g, 16.1g per half pack',
+      salt: '1.80g per 100g, 2.95g per half pack',
+    }, 328, 2);
+    expect(ocrNutrients.calories).toBe(443);
+    expect(ocrNutrients.protein).toBe(57.1);
+    expect(ocrNutrients.totalFat).toBe(9.2);
+    expect(ocrNutrients.saturatedFat).toBe(3.3);
+    expect(ocrNutrients.carbohydrates).toBe(32.1);
+    expect(ocrNutrients.sodium).toBe(2360);
+    expect(lockedKeys).toContain('protein');
+  });
+
   it('finalizes a 70g labeled serving at 90 kcal, not 6300', async () => {
     const ledger = await finalizeDishLedger({
       item: {

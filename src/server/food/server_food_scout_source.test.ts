@@ -25,7 +25,7 @@ import {
   runScoutRetryLoop,
   countCompareExtracted,
 } from './server_food_scout_source';
-import { visionScoutResponseSchema } from './server_food_analyze_schema';
+import { visionScoutResponseSchema, toJsonSchema } from './server_food_analyze_schema';
 
 describe('F-8.10 shard 9 — scout item sourcing', () => {
   it('inherits finalized items from the active meal for edits', () => {
@@ -307,7 +307,24 @@ describe('F-8.10 shard 11 — scout result handling', () => {
     expect(() => buildScoutFailureError({ message: 'fetch failed' }, 'en')).toThrow(/503/);
     expect(() => buildScoutFailureError({ message: 'Stream stalled: Vision Scout' }, 'en')).toThrow(/503/);
     expect(() => buildScoutFailureError({ message: 'Vision Scout Corrupted output' }, 'en')).toThrow();
-    expect(() => buildScoutFailureError({ message: 'weird' }, 'en')).toThrow(/re-upload/);
+    expect(() => buildScoutFailureError({ message: 'weird' }, 'en')).toThrow(/Couldn't analyze this meal/);
+  });
+
+  it('F1: never embeds raw API JSON / key-validity text in the thrown error', () => {
+    const leak = 'Vision Scout Failed: boom (Details: {"error": {"code":400,"message":"API key not valid. Please pass a valid API key."}})';
+    let thrown = '';
+    try {
+      buildScoutFailureError({ message: leak }, 'en');
+    } catch (e: any) {
+      thrown = String(e?.message || '');
+    }
+    expect(thrown).not.toMatch(/Details:/);
+    expect(thrown).not.toMatch(/API key/);
+    expect(thrown).not.toMatch(/\{/);
+    expect(thrown).not.toMatch(/image/i);
+    const quota = (() => { try { buildScoutFailureError({ message: '429 RESOURCE_EXHAUSTED' }, 'en'); } catch (e: any) { return String(e?.message || ''); } return ''; })();
+    expect(quota).not.toMatch(/Details:/);
+    expect(quota).not.toMatch(/\{/);
   });
 
   it('applies scout state with source defaulting and mode overrides', () => {
@@ -819,5 +836,36 @@ describe('preserveLabelTruth', () => {
   it('is a no-op on empty inputs', () => {
     expect(preserveLabelTruth({}).restored).toEqual([]);
     expect(preserveLabelTruth({ priorItems: [{ dishName: 'X', rawNutritionLabel: LABEL }], nextItems: [] }).restored).toEqual([]);
+  });
+});
+
+describe('toJsonSchema (Go native schema enforcement)', () => {
+  it('lowercases Gemini Type enums and unions nullable', () => {
+    const out = toJsonSchema({
+      type: 'OBJECT',
+      properties: {
+        name: { type: 'STRING' },
+        weight: { type: 'NUMBER', nullable: true },
+        tags: { type: 'ARRAY', items: { type: 'STRING' }, nullable: true },
+      },
+      required: ['name'],
+    });
+    expect(out.type).toBe('object');
+    expect(out.properties.name.type).toBe('string');
+    expect(out.properties.weight.type).toEqual(['number', 'null']);
+    expect(out.properties.tags.type).toEqual(['array', 'null']);
+    expect(out.properties.tags.items.type).toBe('string');
+    expect(out.required).toEqual(['name']);
+    expect(JSON.stringify(out)).not.toMatch(/nullable/);
+  });
+
+  it('converts the scout schema without nullable or uppercase types', () => {
+    const out = toJsonSchema(visionScoutResponseSchema);
+    const flat = JSON.stringify(out);
+    expect(flat).not.toMatch(/"type":"[A-Z]+"/);
+    expect(flat).not.toMatch(/nullable/);
+    expect(out.required).toEqual(['contentType', 'diningEnvironment', 'dishes']);
+    expect(out.properties.dishes.items.properties.dishName.type).toBe('string');
+    expect(out.properties.dishes.items.required).toContain('boundingBox2D');
   });
 });

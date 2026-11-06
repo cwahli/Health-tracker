@@ -16,12 +16,14 @@ import { mergeFoodLogsDeduped, foodLogFingerprint, isLineageLinked } from '../ut
 import { findMasterMeal, propagateDownstream } from '../utils/savedMealLineage';
 import PreviousMealThumbnail from './PreviousMealThumbnail';
 import { fetchFoodLogDetail } from '../utils/syncUtils';
+import { getAggregatedAppData, getStorageKey, healedBundleTotal, safeSaveToLocalStorage } from '../utils/storageUtils';
+import { missingFoodPages, shouldProbeFoodTotal } from '../utils/foodPagination';
 import { resolveMealVerdict } from '../utils/verdictUtils';
 
 /** B13 — only this many history rows mount image sliders at once */
 export const FOOD_HISTORY_PAGE_SIZE = 15;
 import { NutrientPieChart } from './NutrientPieChart';
-import { NutrientTargetRow } from './NutrientTargetRow';
+import { MealAllowanceRings } from './MealAllowanceRings';
 import { NutritionLabelTable } from './chat-cards/NutritionLabelTable';
 import { MealPortionController } from './chat-cards/MealPortionController';
 import { scaleMealPortion, scaleSingleDishPortion } from '../utils/portionUtils';
@@ -33,6 +35,69 @@ import { CroppedFoodImage, isValidBoundingBox, getFoodImageUrl, resolveHistorica
 import { ZoomableImage } from './ZoomableImage';
 import { buildDebugMarkdownReport } from '../utils/debugPayload';
 import { calculateMealDebugRetentionStatus } from '../utils/debugLogRetention';
+
+/** Row action buttons shared between the collapsed header, the expanded
+ *  serving-size row and the expanded card bottom — one source, no copies. */
+function MealDownloadButton({ log, retentionStatusMap, onDownload, title }: any) {
+  const retention = retentionStatusMap.get(log.id);
+  const hasExplicitDebug = Boolean(log.debugUrl || (log as any).backendLogs || (log as any).jobId);
+  if (!(retention ? retention.kept : hasExplicitDebug)) return null;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onDownload(log);
+      }}
+      className="p-4 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800"
+      title={title || 'Download Debug Log'}
+    >
+      <Download className="w-4 h-4" />
+    </button>
+  );
+}
+
+function MealEditButton({ log, onEdit, title }: any) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onEdit(log);
+      }}
+      className="p-4 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800"
+      title={title}
+    >
+      <Edit2 className="w-4 h-4" />
+    </button>
+  );
+}
+
+function MealDeleteButton({ logId, onDelete, title }: any) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onDelete(logId);
+      }}
+      className="p-4 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+      title={title}
+    >
+      <Trash2 className="w-4 h-4" />
+    </button>
+  );
+}
+
+function MealVerdictBadge({ log, language, getColorClass, fullWidth }: any) {
+  const v = resolveMealVerdict(log, language);
+  if (!v?.label) return null;
+  return (
+    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize tracking-wide ${getColorClass(v.label, v.level)}${fullWidth ? ' block w-full text-left' : ''}`}>
+      {v.label}
+    </span>
+  );
+}
 
 interface FoodHistoryTabProps {
   profile: UserProfile;
@@ -747,11 +812,19 @@ export default function FoodHistoryTab({
     if (targetPage < 1 || targetPage > totalPages) return;
     if (targetPage === currentPage) return;
 
-    const neededIndex = (targetPage - 1) * itemsPerPage;
-    if (!searchTerm && onFetchMoreFoods && neededIndex >= filteredLogs.length && filteredLogs.length < totalItemsCount) {
+    // Food-space fill (COMBINED_LIST_PAGINATION): the list mixes job cards
+    // with saved meals but the server pages meals only — measure against
+    // loaded meals, and fill every missing meal page up to the target so
+    // job-card padding or a skipped page can never leave an empty page.
+    const missing = !searchTerm && onFetchMoreFoods
+      ? missingFoodPages(activeFoodLogs.length, targetPage, itemsPerPage, totalFoodsCount)
+      : [];
+    if (missing.length > 0) {
       setIsLoadingMoreFoods(true);
       try {
-        await onFetchMoreFoods(targetPage);
+        for (const page of missing) {
+          await onFetchMoreFoods(page);
+        }
       } finally {
         setIsLoadingMoreFoods(false);
       }
@@ -784,15 +857,65 @@ export default function FoodHistoryTab({
     onClearInitiallyExpandedFoodId?.();
   }, [initiallyExpandedFoodId, combinedItems, filteredLogs, itemsPerPage, currentPage, searchTerm, onClearInitiallyExpandedFoodId]);
 
-  // Smooth scroll into view when expandedLogId or currentPage updates
+  // Smooth scroll into view when expandedLogId or currentPage updates.
+  // Page turns start at the top of the list; only an expanded meal that is
+  // actually on the new page keeps the viewport on itself.
+  const prevPageRef = useRef(currentPage);
+  useEffect(() => {
+    if (prevPageRef.current === currentPage) return;
+    prevPageRef.current = currentPage;
+    if (expandedLogId && document.getElementById(`food-log-item-${expandedLogId}`)) return;
+    const top = document.getElementById('food-history-list-top');
+    if (top) top.scrollIntoView({ behavior: 'auto', block: 'start' });
+  }, [expandedLogId, currentPage]);
+
+  // Unknown-total self-heal (ALWAYS_COUNT_FALLBACK): if a full window is
+  // loaded but the server never reported a total, prefetch the next window
+  // once — its response carries the count and heals pagination. Throttled
+  // and mount-scoped; the page-2 fetch doubles as useful prefetched data.
+  const totalProbeAtRef = useRef<number>(0);
+  useEffect(() => {
+    if (searchTerm || !onFetchMoreFoods) return;
+    if (!shouldProbeFoodTotal({ totalFoods: totalFoodsCount, loadedFoods: activeFoodLogs.length, pageSize: itemsPerPage, lastProbeAtMs: totalProbeAtRef.current, nowMs: Date.now() })) return;
+    const pages = missingFoodPages(activeFoodLogs.length, currentPage + 1, itemsPerPage, totalFoodsCount);
+    if (pages.length === 0) return;
+    totalProbeAtRef.current = Date.now();
+    onFetchMoreFoods(pages[0]).catch(() => {});
+  }, [activeFoodLogs.length, totalFoodsCount, searchTerm, currentPage, itemsPerPage, onFetchMoreFoods]);
+
+  // Heal a poisoned stored total (ALWAYS_COUNT_FALLBACK): sync bundles can
+  // be written with a stale low count, and every remount re-reads it. When
+  // live state learns a higher total, persist the max so remounts never
+  // regress. Monotonic by design, matching the ratchet on live state.
+  useEffect(() => {
+    if (typeof totalFoodsCount !== 'number' || totalFoodsCount <= 0) return;
+    const email = profile?.email;
+    if (!email) return;
+    let cancelled = false;
+    getAggregatedAppData(email)
+      .then((cur) => {
+        if (cancelled) return;
+        const best = healedBundleTotal(totalFoodsCount, cur?.totalFoodsCount);
+        if (best != null && best !== cur?.totalFoodsCount) {
+          safeSaveToLocalStorage(getStorageKey(email), { ...(cur || {}), totalFoodsCount: best }).catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [totalFoodsCount, profile?.email]);
+
   useEffect(() => {
     if (!expandedLogId) return;
     const timer = setTimeout(() => {
-      const el = document.getElementById(`food-log-item-${expandedLogId}`);
+      // Land on the Reduce link (below the rings, above the detail panel),
+      // not the vertical center of the tall expanded card.
+      const reduceEl = document.getElementById(`food-log-reduce-${expandedLogId}`);
+      const rowEl = document.getElementById(`food-log-item-${expandedLogId}`);
+      const el = reduceEl || rowEl;
       if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
-    }, 250);
+    }, 300);
     return () => clearTimeout(timer);
   }, [expandedLogId, currentPage]);
 
@@ -989,9 +1112,10 @@ export default function FoodHistoryTab({
   return (
     <div className="space-y-4 pb-40 animation-fade-in max-w-md mx-auto px-0 mt-4 font-sans text-theme-text">
       
-      {/* Search Input and Manual Entry Link */}
+      {/* Search Input */}
       <div className="space-y-2 px-4">
-        <div className="relative">
+        <div className="flex flex-col gap-2">
+          <div className="relative w-full">
           <Search className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-400" />
           <input
             id="food-search-input"
@@ -999,15 +1123,9 @@ export default function FoodHistoryTab({
             placeholder={t.searchFoodPlaceholder}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-theme-bg-card border border-theme-border/80 rounded-2xl pl-10 pr-28 py-3 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
+            className="w-full bg-theme-bg-card border border-theme-border/80 rounded-2xl pl-10 pr-3 py-3 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
           />
-          <button
-            type="button"
-            onClick={() => setIsManualEntryOpen(true)}
-            className="absolute right-2.5 top-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold transition-all cursor-pointer"
-          >
-            {t.manualEntry}
-          </button>
+          </div>
         </div>
       </div>
 
@@ -1042,7 +1160,7 @@ export default function FoodHistoryTab({
 
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4 text-left">
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">{t.foodNameRequired}</label>
                   <input
@@ -1065,7 +1183,7 @@ export default function FoodHistoryTab({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">{t.weightGramsLabel}</label>
                   <input
@@ -1374,7 +1492,7 @@ export default function FoodHistoryTab({
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div id="food-history-list-top" className="space-y-4">
           {filteredLogs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item) => {
             if (item.type === 'job') {
               const job = item.data;
@@ -1836,74 +1954,34 @@ export default function FoodHistoryTab({
                     </div>
                   ) : (
                     <>
-                      <div className="flex justify-between items-start">
-                        <div className="min-w-0 flex-1 text-left">
-                          <h3 className="font-bold text-theme-text text-sm truncate">
-                            {log.name}
-                          </h3>
-                          
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
+                      {isExpanded ? (
+                        <>
+                          <div className="min-w-0 text-left">
+                            <h3 className="font-bold text-theme-text text-sm">
+                              {log.name}
+                            </h3>
+                            <div className="text-[10px] font-mono text-slate-400 mt-1">
                               {formatLogDateTime(log.date, (log as any).updated_at, profile?.timezone)}
-                            </span>
-                            {(() => {
-                              const v = resolveMealVerdict(log, profile?.language);
-                              if (!v?.label) return null;
-                              return (
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize tracking-wide ${getRecommendationColorClass(v.label, v.level)}`}>
-                                  {v.label}
-                                </span>
-                              );
-                            })()}
+                            </div>
                           </div>
-                        </div>
+                          <div className="mt-1">
+                            <MealVerdictBadge log={log} language={profile?.language} getColorClass={getRecommendationColorClass} fullWidth />
+                          </div>
+                        </>
+                      ) : (
+                      <div className="min-w-0 flex-1 text-left">
+                        <h3 className="font-bold text-theme-text text-sm">
+                          {log.name}
+                        </h3>
 
-                        <div className="flex items-center gap-2">
-                          {(() => {
-                            const retention = retentionStatusMap.get(log.id);
-                            const hasExplicitDebug = Boolean(log.debugUrl || (log as any).backendLogs || (log as any).jobId);
-                            const isAvailable = retention ? retention.kept : hasExplicitDebug;
-                            if (!isAvailable) return null;
-                            return (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDownloadDebugLog(log);
-                                }}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800"
-                                title={t.downloadDebugLog || 'Download Debug Log'}
-                              >
-                                <Download className="w-4 h-4" />
-                              </button>
-                            );
-                          })()}
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleStartEdit(log);
-                            }}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800"
-                            title={t.editFoodLog}
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteFoodLog(log.id);
-                            }}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
-                            title={t.deleteEntry}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
+                            {formatLogDateTime(log.date, (log as any).updated_at, profile?.timezone)}
+                          </span>
+                          <MealVerdictBadge log={log} language={profile?.language} getColorClass={getRecommendationColorClass} />
                         </div>
                       </div>
+                      )}
 
                       {/* AI Diagnostic Summary */}
                       {(() => {
@@ -1917,9 +1995,9 @@ export default function FoodHistoryTab({
                       })()}
                       
 
-                      {/* Calories Badge & Top Targets & Expand Indicator */}
-                      <div className="flex flex-wrap items-center justify-between pt-1 gap-2">
-                        <NutrientTargetRow
+                      {/* Meal allowance rings: Home top-nutrient list vs daily targets (swipe for more) */}
+                      <div className="pt-1">
+                        <MealAllowanceRings
                           nutrients={log.nutrients}
                           report={report}
                           profile={profile}
@@ -1927,29 +2005,29 @@ export default function FoodHistoryTab({
                           logDate={log.date}
                           logId={log.id}
                         />
-
-                        {/* Reduce link shown below top nutrients when card is expanded */}
-                        {isExpanded && (
-                          <div className="pt-2 text-left">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setExpandedLogId(null);
-                              }}
-                              className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 underline cursor-pointer inline-flex items-center gap-1"
-                            >
-                              <span>{t.reduce}</span>
-                            </button>
-                          </div>
-                        )}
                       </div>
+
+                      {/* Reduce link sits below the rings row (rings may grow past 3) */}
+                      {isExpanded && (
+                        <div id={`food-log-reduce-${log.id}`} className="pt-2 text-left scroll-mt-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedLogId(null);
+                            }}
+                            className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 underline cursor-pointer inline-flex items-center gap-1"
+                          >
+                            <span>{t.reduce}</span>
+                          </button>
+                        </div>
+                      )}
 
                       {/* Detailed 30 Nutrients Panel & AI Diagnostics */}
                       {isExpanded && (
                         <div className="space-y-4 pt-3 border-t border-theme-border/60 animation-slide-down">
                           {/* Weight & Portion Details inside Show-Hide */}
-                          <div className="flex flex-wrap items-center gap-3 text-xs bg-slate-50 dark:bg-slate-900/40 rounded-xl p-3 text-left">
+                          <div className="flex flex-wrap items-center gap-3 text-xs bg-slate-50 dark:bg-slate-900/40 rounded-xl py-3 text-left">
                             <span className="text-theme-text-secondary font-medium">{t.weightColon}</span>
                             <span className="font-semibold text-slate-850 dark:text-slate-200">{log.weightGrams}g</span>
                             {log.quantity && (
@@ -1966,6 +2044,10 @@ export default function FoodHistoryTab({
                                 <span className="font-semibold text-emerald-600 dark:text-emerald-400">{log.consumedAmount}x</span>
                               </>
                             )}
+                            <span className="flex-1" />
+                            <MealDownloadButton log={log} retentionStatusMap={retentionStatusMap} onDownload={handleDownloadDebugLog} title={t.downloadDebugLog} />
+                            <MealEditButton log={log} onEdit={handleStartEdit} title={t.editFoodLog} />
+                            <MealDeleteButton logId={log.id} onDelete={onDeleteFoodLog} title={t.deleteEntry} />
                           </div>
 
                           {/* Interactive Meal Composition Gallery & Breakdown */}
@@ -2003,7 +2085,7 @@ export default function FoodHistoryTab({
                             if (scoutItemsList.length === 0 && !effectiveComposition) return null;
 
                             return (
-                              <div className="bg-slate-50 dark:bg-slate-900/40 rounded-xl p-3 text-left space-y-2.5 border border-slate-200/50 dark:border-slate-800/50">
+                              <div className="bg-slate-50 dark:bg-slate-900/40 rounded-xl py-3 text-left space-y-2.5 border border-slate-200/50 dark:border-slate-800/50">
                                 <div className="flex items-center justify-between gap-2">
                                   <span className="text-[10.5px] font-bold text-indigo-500 dark:text-indigo-400 flex items-center gap-1">
                                     🔍 {t.mealComposition} {scoutItemsList.length > 0 ? `(${scoutItemsList.length})` : ''}
@@ -2021,7 +2103,7 @@ export default function FoodHistoryTab({
                                       const isSelectedLabel = openLabelLogMap[log.id] === i;
 
                                       return (
-                                        <div key={i} className="flex flex-col items-center gap-1 shrink-0 relative group w-[95px] sm:w-[110px]">
+                                        <div key={i} className="flex flex-col items-center gap-1 shrink-0 relative group w-[142px] sm:w-[165px]">
                                           <div className="relative w-full">
                                             <div 
                                               className="w-full aspect-square rounded-xl overflow-hidden cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-sm bg-slate-100 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700/50"
@@ -2100,7 +2182,7 @@ export default function FoodHistoryTab({
                             );
                           })()}
 
-                          <div className="space-y-4 py-2 bg-slate-50 dark:bg-slate-900/40 rounded-2xl px-3.5">
+                          <div className="space-y-4 py-2 bg-slate-50 dark:bg-slate-900/40 rounded-2xl">
                             <div>
                               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 pb-0.5 border-b border-slate-200/50 dark:border-slate-800/50">{t.coreNutrients11}</div>
                               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono">
@@ -2173,7 +2255,7 @@ export default function FoodHistoryTab({
 
                               {Array.isArray(effectiveItemsBreakdown) && effectiveItemsBreakdown.length > 0 && (
                                 <div className="border border-theme-border/80 rounded-xl overflow-hidden bg-theme-bg-card shadow-sm">
-                                  <div className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800/60 border-b border-theme-border">
+                                  <div className="py-1.5 bg-slate-50 dark:bg-slate-800/60 border-b border-theme-border">
                                     <span className="text-[10px] font-bold text-theme-text-secondary uppercase tracking-wider">
                                       📊 {t.componentContribution}
                                     </span>

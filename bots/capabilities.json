@@ -187,6 +187,8 @@
         "model_go": true,
         "allowance": true,
         "thinking": true,
+        "stop": false,
+        "model_cc": false,
         "models": false,
         "free": false,
         "agent": false,
@@ -211,6 +213,7 @@
         "forge": false,
         "fleet": false,
         "review": false,
+        "app": false,
         "skills": false,
         "routerOnly": ["switch", "unlock"],
         "aliases": ["think", "freemodel", "model"]

@@ -1,5 +1,29 @@
 import { Type } from '@google/genai';
 
+/** Convert a Gemini-typed schema literal (Type.OBJECT etc.) into plain
+ *  JSON Schema for OpenAI-compatible endpoints (Go chat/completions
+ *  json_schema, Responses text.format json_schema). Gemini-only `nullable`
+ *  becomes a standard type union; everything else passes through. */
+export function toJsonSchema(node: any): any {
+  if (Array.isArray(node)) return node.map(toJsonSchema);
+  if (!node || typeof node !== "object") return node;
+  const out: any = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "type" && typeof value === "string") {
+      out.type = value.toLowerCase();
+    } else if (key === "nullable") {
+      out.nullable = value;
+    } else {
+      out[key] = toJsonSchema(value);
+    }
+  }
+  if (out.nullable === true && typeof out.type === "string") {
+    out.type = [out.type, "null"];
+  }
+  delete out.nullable;
+  return out;
+}
+
 /**
  * F-8.10 shard 3 — dietitian response schema, extracted verbatim from
  * runFoodAnalyze. Static literal: Level-2 estimate `required` lists P/C/F

@@ -948,8 +948,8 @@ import {
   getFleetNodes as getFleetNodesStatus,
   getFleetBots as getFleetBotsStatus,
   resetFleetState as resetFleetStateStatus,
-  readVmPickerEntries as readVmPickerEntriesStatus,
-  readVmOpencodeSessions as readVmOpencodeSessionsStatus,
+  readVmPickerEntriesFresh as readVmPickerEntriesFreshStatus,
+  readVmSessionRowsFresh as readVmSessionRowsFreshStatus,
   findVmSessionTarget as findVmSessionTargetStatus,
   FLEET_CACHE_TTL_MS,
 } from './lib/fleet-status.mjs';
@@ -1977,7 +1977,10 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       // Every entry is listed (the picker is also the session viewer); the
       // client hides entries the status call reports no backend memory for.
       // memMiB annotates the rare exclusive-backend entry in place.
-      const listBare = readVmPickerEntriesStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) });
+      // The session rows refresh in a child process with a TTL cache: the
+      // live opencode.db scan must never run on the event loop (2026-11-06
+      // outage — a synchronous scan wedged every route for a minute+).
+      const listBare = await readVmPickerEntriesFreshStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) });
       const listMem = await collectBareSessionMem({
         sessions: listBare.map((e) => e && e.sessionId).filter(Boolean),
       });
@@ -2118,7 +2121,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         if (Number.isInteger(hit.idleMs) && hit.idleMs >= 0) row.idleMs = hit.idleMs;
         if (hit.agent) row.agent = hit.agent;
       }
-      const bareEntries = readVmPickerEntriesStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) });
+      const bareEntries = await readVmPickerEntriesFreshStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null, webUrl: webPublicUrl(env) });
       const bareMem = await collectBareSessionMem({
         sessions: bareEntries.map((e) => e && e.sessionId).filter(Boolean),
       });
@@ -2190,7 +2193,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         return res.end(JSON.stringify({ ok: false, error: 'unknown terminal' }));
       }
       const target = findVmSessionTargetStatus(
-        readVmOpencodeSessionsStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null }),
+        await readVmSessionRowsFreshStatus({ dbPath: env.VM_OPENCODE_DB_PATH || null }),
         hit[1],
       );
       if (!target) {

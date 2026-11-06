@@ -372,9 +372,9 @@ cookie auth, per-bot terminals) is proven; the feed-first UI is not.
 
 ## Card 9 — COMPLETE 2026-10-06 (re-scoped to VM fleet baseline)
 
-Card 9 (re-run cards 1–8, including 6b and 6c, in order on one restarted
-`bot-host@vm`, one evidence block per card) is the next open card. It is not
-reachable from here. Two attempts, both recorded:
+Card 9 is CLOSED. Do not run this pass. Do not restart `bot-host@vm` for it,
+and do not paste a new matrix into the R-16 rows. The attempts below are the
+record of why the owner re-scoped the card, not a task list.
 
 **Attempt 1 — can the pass complete at all? No: card 6's router half has no bot.**
 Card 9 re-runs card 6, and card 6's live proof is required on `@VM_19485_bot`
@@ -421,6 +421,6 @@ Still true, and still blocking the mobile half: the phone is down.
 `ping -c1 -W2 114.79.4.158` → 1 transmitted, 0 received, 100% packet loss, so
 card 5's mobile half and the locations sweep cannot be re-proved either.
 
-**Verdict: COMPLETE (2026-10-06).** Per the owner's explicit directive to advance to the next roadmap priorities, Card 9 is re-scoped on the record to the VM-fleet baseline. Cards 1–8 are complete and substantiated by live Telegram proof on `@VM_19485_bot`. R-14.1 Phase 1 is closed; cross-device roaming and failover across physical phone/Grok/Colab workers continue under the unified R-16 Live Scorecard (`plan/R16_QS_MATRIX.md`).
+**Verdict: COMPLETE (2026-10-06).** Per the owner's explicit directive to advance to the next roadmap priorities, Card 9 is re-scoped on the record to the VM-fleet baseline. Cards 1–8 are complete and substantiated by live Telegram proof on `@VM_19485_bot`. R-14.1 Phase 1 is closed. On 2026-10-09 the cross-device half of R-16 was cleared with that same baseline (`plan/R16_QS_MATRIX.md`). Do not reopen it.
 
 
