@@ -26,6 +26,7 @@ import { getSessionLog } from '../jobs/sessionLog';
 import { mergeFoodEditMessages, shouldMergeFoodEditTurn } from '../jobs/mergeFoodEditMessages';
 import { saveAgentRequestLog } from '../utils/agentLogsTracker';
 import { pullAuthHeaders } from '../utils/syncUtils';
+import { preserveR2StubInlineFields } from '../utils/r2Storage';
 import { translations } from '../utils/translations';
 import { compressImage } from '../utils/imageCompressor';
 import { collectCatalogUnitMap, enrichReviewModificationCommands } from '../utils/biomarkerLifecycle';
@@ -472,16 +473,26 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
 
                   // Direct R2 fallback fetch from client if server failed/delayed transparent R2 fetching
                   if (serverJob.clean_result && (serverJob.clean_result as any).is_r2 && (serverJob.clean_result as any).r2_url) {
-                     try {
-                        const directRes = await fetch((serverJob.clean_result as any).r2_url);
-                        if (directRes.ok) {
-                           const directData = await directRes.json();
-                           if (directData && !directData.is_r2) {
-                              serverJob.clean_result = directData;
+                     // Same-origin first: the raw r2_url is a public URL on a
+                     // private bucket (B11d), so it 401s on other devices. The
+                     // server route reads via its S3 client instead.
+                     const directCandidates = [
+                        `/api/r2/job-result?jobId=${encodeURIComponent(job.id)}`,
+                        (serverJob.clean_result as any).r2_url,
+                     ];
+                     for (const candidate of directCandidates) {
+                        try {
+                           const directRes = await fetch(candidate);
+                           if (directRes.ok) {
+                              const directData = await directRes.json();
+                              if (directData && !directData.is_r2) {
+                                 serverJob.clean_result = directData;
+                                 break;
+                              }
                            }
+                        } catch (directErr) {
+                           console.warn('[JobQueueRunner] Failed to fetch clean_result directly from R2 URL:', directErr);
                         }
-                     } catch (directErr) {
-                        console.warn('[JobQueueRunner] Failed to fetch clean_result directly from R2 URL:', directErr);
                      }
                   }
 
@@ -491,15 +502,14 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
                      r2RetryCount++;
                      if (r2RetryCount > 5) {
                         console.warn(`[JobQueueRunner] Job ${job.id} is ${serverJob.status} but full result from R2 timed out after 5 retries. Falling back to simple status message.`);
-                        serverJob.clean_result = {
-                           message: serverJob.status_message || 'Analysis complete',
-                           text: serverJob.status_message || 'Analysis complete',
-                           scoutItems: [],
-                           pendingFoodLog: {
-                              name: 'Meal',
-                              nutrients: { calories: 0, protein: 0, carbohydrates: 0, fat: 0 }
-                           }
-                        };
+                        // HOLLOW_RESULT guard: keep the stub's inline fields
+                        // (portionClarify, scoutItems, message, photoUrl) so the
+                        // card keeps its question + names + photo; only fill
+                        // pieces that are genuinely absent.
+                        serverJob.clean_result = preserveR2StubInlineFields(
+                           serverJob.clean_result,
+                           serverJob.status_message
+                        );
                      } else {
                         console.warn(`[JobQueueRunner] Job ${job.id} is ${serverJob.status} but full result from R2 is not yet ready. Retrying (${r2RetryCount}/5)...`);
                         await new Promise(r => setTimeout(r, 2000));
