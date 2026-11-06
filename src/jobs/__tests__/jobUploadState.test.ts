@@ -18,4 +18,10 @@ describe('isJobSafeToLeave', () => {
   it('does not treat a leftover https photo from a previous meal as uploaded', () => {
     expect(isJobSafeToLeave({ photoUrl: 'https://cdn.example/photo.jpg' } as any)).toBe(false);
   });
+
+  it('stays unsafe while the Uploading banner is up even if serverSubmittedAt was pre-stamped', () => {
+    expect(
+      isJobSafeToLeave({ serverSubmittedAt: Date.now(), statusMessage: 'Uploading to server… Keep this tab open' })
+    ).toBe(false);
+  });
 });

@@ -131,4 +131,26 @@ describe('JobQueueRunner', () => {
     expect(JobStore.getJob('f_executor')?.status).toBe('failed');
     expect(JobStore.getJob('f_executor')?.error?.message).toContain('Invalid JSON from model');
   });
+
+  it('releases a stale clientSubmitPending upload and runs it', async () => {
+    JobStore.createJob({
+      id: 'stale-upload-1',
+      status: 'queued',
+      clientSubmitPending: true,
+      inFlightTurnAt: Date.now() - 60_000,
+      statusMessage: 'Uploading to server… Keep this tab open',
+      inputSnapshot: { text: 'Analyze this meal photo.', imageRefs: ['img'], mode: 'review' },
+    } as any);
+
+    let runCount = 0;
+    JobQueueRunner.setExecutor(async () => {
+      runCount++;
+    });
+
+    JobQueueRunner.start();
+    await new Promise(r => setTimeout(r, 400));
+
+    expect(runCount).toBeGreaterThan(0);
+    expect(JobStore.getJob('stale-upload-1')?.clientSubmitPending).toBe(false);
+  });
 });
