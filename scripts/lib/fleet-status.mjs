@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
@@ -182,7 +183,15 @@ export function findVmSessionTarget(rawRows, sessionId, { now = Date.now() } = {
 /** Recent unarchived opencode sessions from the local opencode.db (best-effort).
  * Freshness is the latest activity of either clock: the session row
  * (moves on step completion) or its message stream (moves while a turn is
- * still generating). A long streaming turn must not vanish mid-turn. */
+ * still generating). A long streaming turn must not vanish mid-turn.
+ *
+ * WARNING — never call this on the gateway request path. The scan is
+ * synchronous: on a busy box (430MB+ db, hot WAL, constant writers) the
+ * correlated subqueries below stall the event loop for 20–120s+, wedging
+ * EVERY route (fleet page, heartbeats, state) until they return, with retry
+ * storms piling more scans behind them (2026-11-06 fleet outage). Request
+ * paths must use getVmSessionRows / readVmSessionRowsFresh instead, which
+ * run this same scan in a child process and serve a TTL cache. */
 export function readVmOpencodeSessions({ home = os.homedir(), now = Date.now(), windowMs = VM_OPENCODE_WINDOW_MS, dbPath = null } = {}) {
   try {
     const DatabaseSync = sqliteDriver();
@@ -191,15 +200,46 @@ export function readVmOpencodeSessions({ home = os.homedir(), now = Date.now(), 
     if (!fs.existsSync(db)) return [];
     const conn = new DatabaseSync(db, { readOnly: true });
     try {
-      const rows = conn.prepare(
-        `select s.id as id, s.model, s.directory, s.title, s.time_updated as timeUpdated,
-          (select m.type from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastType,
-          (select m.data from session_message m where m.session_id = s.id order by m.time_created desc limit 1) as lastData,
-          (select max(m.time_created) from session_message m where m.session_id = s.id) as lastMsgMs
-        from session_v2 s where s.time_archived is null order by s.time_updated desc limit 10`
+      // Sessions first (session_v2 is tiny), then ONE pass over
+      // session_message with a window function. The previous shape — 3
+      // correlated subqueries per session, i.e. 30 full scan+sorts — stalled
+      // the loop for a minute+ on a busy box and wedged every gateway route
+      // (2026-11-06 fleet outage). Same rows out, ~100x faster in.
+      const sessions = conn.prepare(
+        `select id, model, directory, title, time_updated as timeUpdated
+         from session_v2 where time_archived is null order by time_updated desc limit 10`
       ).all();
+      const byId = new Map();
+      for (const s of sessions) {
+        byId.set(String(s.id), {
+          id: String(s.id),
+          model: s.model ?? null,
+          directory: s.directory ?? '',
+          title: s.title ?? '',
+          timeUpdated: Number(s.timeUpdated || 0),
+          lastType: null,
+          lastData: null,
+          lastMsgMs: null,
+        });
+      }
+      const ids = [...byId.keys()];
+      if (ids.length) {
+        const q = `select session_id as sid, type as lastType, data as lastData, mx as lastMsgMs from (
+          select m.session_id, m.type, m.data, m.time_created,
+            row_number() over (partition by m.session_id order by m.time_created desc) as rn,
+            max(m.time_created) over (partition by m.session_id) as mx
+          from session_message m where m.session_id in (${ids.map(() => '?').join(',')})
+        ) where rn = 1`;
+        for (const m of conn.prepare(q).all(...ids)) {
+          const row = byId.get(String(m.sid));
+          if (!row) continue;
+          row.lastType = m.lastType ?? null;
+          row.lastData = typeof m.lastData === 'string' ? m.lastData : null;
+          row.lastMsgMs = m.lastMsgMs ?? null;
+        }
+      }
       const fresh = [];
-      for (const r of rows) {
+      for (const r of byId.values()) {
         try {
           const d = typeof r.lastData === 'string' ? JSON.parse(r.lastData) : null;
           r.lastCompleted = d && d.time ? (d.time.completed ?? null) : null;
@@ -219,6 +259,131 @@ export function readVmOpencodeSessions({ home = os.homedir(), now = Date.now(), 
   } catch {
     return [];
   }
+}
+
+/**
+ * Non-blocking VM session reads (2026-11-06 fleet outage fix).
+ *
+ * The scan above is synchronous and slow on a live box; running it in a
+ * request handler wedges the whole gateway. This wrapper runs the identical
+ * scan in a short-lived child process (the event loop stays free), caches
+ * the rows with a TTL, and singleflights concurrent refreshes:
+ * - getVmSessionRows(): sync, for hot paths (getFleetNodes). Returns the
+ *   last good rows instantly (possibly empty on cold start) and triggers a
+ *   background refresh when stale. Never waits, never blocks.
+ * - readVmSessionRowsFresh(): async, for rare operator paths (terminal
+ *   picker). Awaits one bounded refresh, then returns cache. The wait is
+ *   off-loop (child), so other routes keep serving.
+ * A failed/slow child never wipes good cache: stale rows stay until a
+ * refresh succeeds, with a short cooldown between attempts.
+ */
+export const VM_SESSIONS_TTL_MS = 60_000;
+export const VM_SESSIONS_TIMEOUT_MS = 10_000;
+const VM_SESSIONS_COOLDOWN_MS = 15_000;
+// One cache entry per database (prod uses the default home db; tests and the
+// VM_OPENCODE_DB_PATH seam use others). Sharing rows across different dbs
+// would leak one box's sessions into another's pane — and across tests.
+const vmSessionsCaches = new Map();
+function vmCacheFor(db, windowMs) {
+  const key = `${String(db)}::${Number(windowMs) || 0}`;
+  let entry = vmSessionsCaches.get(key);
+  if (!entry) {
+    entry = { at: 0, rows: [], inflight: null, coolUntil: 0 };
+    vmSessionsCaches.set(key, entry);
+  }
+  return entry;
+}
+
+function resolveVmDbPath({ home, dbPath, vmOpencodeDb } = {}) {
+  const p = dbPath || vmOpencodeDb || path.join(home || os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
+  return String(p);
+}
+
+function readVmSessionsInChild({ db, windowMs, now, timeoutMs }) {
+  return new Promise((resolve) => {
+    const done = (ok, rows) => resolve({ ok, rows: Array.isArray(rows) ? rows : [] });
+    try {
+      const modUrl = pathToFileURLString();
+      const src = 'const[,u,d,w,n]=process.argv;const m=await import(u);process.stdout.write(JSON.stringify(m.readVmOpencodeSessions({dbPath:d||null,windowMs:Number(w)||0,now:Number(n)||Date.now()})??[]))';
+      execFile(
+        process.execPath,
+        ['--input-type=module', '-e', src, modUrl, String(db), String(windowMs), String(now)],
+        { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 },
+        (err, stdout) => {
+          if (err) return done(false, []);
+          try {
+            done(true, JSON.parse(String(stdout || '[]')));
+          } catch {
+            done(false, []);
+          }
+        },
+      );
+    } catch {
+      done(false, []);
+    }
+  });
+}
+
+function pathToFileURLString() {
+  return new URL(import.meta.url).href;
+}
+
+/** Refresh the VM session cache in a child process (singleflight, bounded). */
+export function refreshVmSessionRows({ home, now, windowMs, dbPath, vmOpencodeDb, timeoutMs = VM_SESSIONS_TIMEOUT_MS } = {}) {
+  const db = resolveVmDbPath({ home, dbPath, vmOpencodeDb });
+  const wm = Number(windowMs) > 0 ? Number(windowMs) : VM_OPENCODE_WINDOW_MS;
+  const cache = vmCacheFor(db, wm);
+  if (cache.inflight) return cache.inflight;
+  const t = typeof now === 'number' ? now : Date.now();
+  if (t < cache.coolUntil) return Promise.resolve({ ok: false, rows: cache.rows });
+  const to = Number(timeoutMs) > 0 ? Number(timeoutMs) : VM_SESSIONS_TIMEOUT_MS;
+  if (!fs.existsSync(db)) {
+    cache.at = Date.now();
+    cache.rows = [];
+    return Promise.resolve({ ok: true, rows: [] });
+  }
+  const p = readVmSessionsInChild({ db, windowMs: wm, now: t, timeoutMs: to }).then(({ ok, rows }) => {
+    if (ok) {
+      cache.at = Date.now();
+      cache.rows = rows;
+    } else {
+      cache.coolUntil = Date.now() + VM_SESSIONS_COOLDOWN_MS;
+    }
+    if (cache.inflight === p) cache.inflight = null;
+    return { ok, rows: cache.rows };
+  });
+  cache.inflight = p;
+  return p;
+}
+
+/** Sync cache read for hot paths: instant rows, background refresh when stale. */
+export function getVmSessionRows({ home, now, windowMs, dbPath, vmOpencodeDb, ttlMs = VM_SESSIONS_TTL_MS, timeoutMs } = {}) {
+  const db = resolveVmDbPath({ home, dbPath, vmOpencodeDb });
+  const wm = Number(windowMs) > 0 ? Number(windowMs) : VM_OPENCODE_WINDOW_MS;
+  const cache = vmCacheFor(db, wm);
+  const t = typeof now === 'number' ? now : Date.now();
+  const ttl = Number(ttlMs) > 0 ? Number(ttlMs) : VM_SESSIONS_TTL_MS;
+  if (t - cache.at > ttl && t >= cache.coolUntil && !cache.inflight) {
+    try {
+      const r = refreshVmSessionRows({ home, now: t, windowMs: wm, dbPath, vmOpencodeDb, timeoutMs });
+      // Never let a synchronous throw escape the hot path; the background
+      // refresh still warms the cache for the next call.
+      if (r && typeof r.catch === 'function') r.catch(() => {});
+    } catch {}
+  }
+  return cache.rows;
+}
+
+/** Bounded fresh rows for rare operator paths (terminal picker/viewer). */
+export async function readVmSessionRowsFresh({ home, now, windowMs, dbPath, vmOpencodeDb, timeoutMs } = {}) {
+  const r = await refreshVmSessionRows({ home, now, windowMs, dbPath, vmOpencodeDb, timeoutMs });
+  return r.rows;
+}
+
+/** Picker entries with a bounded off-loop refresh (never blocks the loop). */
+export async function readVmPickerEntriesFresh({ home = os.homedir(), now = Date.now(), windowMs = VM_OPENCODE_WINDOW_MS, dbPath = null, webUrl = '', timeoutMs } = {}) {
+  const rows = await readVmSessionRowsFresh({ home, now, windowMs, dbPath, timeoutMs });
+  return vmPickerEntries(rows, { now, webUrl });
 }
 
 /** Record a distributed heartbeat from a machine/agent pane. */
@@ -1119,9 +1284,12 @@ export function getFleetNodes(opts = {}) {
     // VM is one pane but many agents: every live opencode session is its own
     // row (one agent per row), never an aggregate sentence. The sheet claim
     // attaches to the first row so the ticket chip still links the pane.
+    // The session rows come from a TTL cache refreshed in a child process:
+    // reading the live opencode.db synchronously here would stall the event
+    // loop for a minute+ per /state call and wedge every route (2026-11-06).
     if (loc === 'VM' && !beat) {
       const sessionRows = vmSessionRows(
-        readVmOpencodeSessions({ home: opts.home || os.homedir(), now, dbPath: opts.vmOpencodeDb || null }),
+        getVmSessionRows({ home: opts.home || os.homedir(), now, dbPath: opts.vmOpencodeDb || null, timeoutMs: opts.timeoutMs }),
         { now }
       );
       if (sessionRows.length) {
@@ -1601,5 +1769,6 @@ export function resetFleetState() {
   fleetTicketsCache = { cachedAt: 0, rows: [] };
   fleetNodeHeartbeats.clear();
   fleetSnapshotCache = { at: 0, data: null };
+  vmSessionsCaches.clear();
   defaultMacActionQueue.replace([]);
 }
