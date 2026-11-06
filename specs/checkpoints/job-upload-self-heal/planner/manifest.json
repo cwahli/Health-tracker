@@ -1,0 +1,16 @@
+{
+  "slug": "job-upload-self-heal",
+  "node": "planner",
+  "at": "2026-11-06T01:09:57.101Z",
+  "git": {
+    "head": "fbcbde8f6d93935ce1b27c7f51a8ef7848323d39",
+    "stashCommit": null
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/job-upload-self-heal.md"
+  ]
+}
