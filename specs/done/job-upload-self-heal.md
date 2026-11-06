@@ -1,6 +1,6 @@
 ---
 id: job-upload-self-heal
-status: locked
+status: done
 skill: sync-jobs
 edit_mode: patch
 allowed_files:
