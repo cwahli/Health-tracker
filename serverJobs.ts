@@ -914,11 +914,16 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
           }
 
           if (isD1Configured()) {
-            await d1UpdateJob(jobId, {
+            // Mirror the succeeded path: a D1-served portion card needs the
+            // server photo or it renders NO IMAGE (d1UpdateJob only sets keys
+            // present, so an empty photoUrl leaves the stored value alone).
+            const portionUpdate: any = {
               status: 'awaiting_user',
               status_message: finalData.message || 'Please clarify portion sizes.',
               clean_result: lightweightFinalData,
-            });
+            };
+            if (photoUrl) portionUpdate.photo_url = photoUrl;
+            await d1UpdateJob(jobId, portionUpdate);
           }
         }
         return;
