@@ -340,7 +340,7 @@ describe('getBiomarkerEffectiveRisk — tag-aligned category scoring (score = -5
     expect(risk.severity).toBe(2);
     expect(risk.tag).toBe('At risk');
     expect(risk.bg).toBe('bg-amber-500');
-    expect(risk.text).toBe('text-white');
+    expect(risk.text).toBe('text-slate-950');
   });
 
   it('caps the uncalibrated fallback magnitude at 3 even for a large single-sided exceedance (not ER-critical)', () => {
@@ -384,7 +384,7 @@ describe('getBiomarkerEffectiveRisk — tag-aligned category scoring (score = -5
     expect(risk.score).toBe(0);
     expect(risk.severity).toBe(0);
     expect(risk.tag.toLowerCase()).toMatch(/normal|optimal/);
-    expect(risk.bg).toBe('bg-emerald-600');
+    expect(risk.bg).toBe('bg-emerald-700');
   });
 
   it('returns No Data with score -Infinity (sorts below every real severity, including Normal\'s 0) for empty or missing values', () => {

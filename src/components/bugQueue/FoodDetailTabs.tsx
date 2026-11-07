@@ -323,7 +323,7 @@ export const FoodDetailTabs: React.FC<FoodDetailTabsProps> = ({
               <button
                 type="button"
                 onClick={onAddDish}
-                className="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-600 hover:bg-amber-500 text-white cursor-pointer"
+                className="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-700 hover:bg-amber-800 text-white cursor-pointer"
               >
                 + Add Dish
               </button>

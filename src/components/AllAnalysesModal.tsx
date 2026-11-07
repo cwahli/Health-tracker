@@ -405,7 +405,7 @@ export function AllAnalysesModal({
           {readyJobs.length > 0 && (
             <button
               onClick={handleSaveAllReady}
-              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950/50 border border-emerald-400/40 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white shadow-lg shadow-emerald-950/50 border border-emerald-400/40 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
               title="Save all unsaved completed analyses to your history"
             >
               <CheckCheck className="w-4 h-4" />
@@ -487,7 +487,7 @@ export function AllAnalysesModal({
             onClick={() => setActiveTab('ready')}
             className={`px-3.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
               activeTab === 'ready'
-                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950/40'
+                ? 'bg-emerald-700 text-white shadow-md shadow-emerald-950/40'
                 : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
             }`}
           >
@@ -965,7 +965,7 @@ function AnalysisCard({
             <button
               onClick={onSave}
               disabled={isSaving}
-              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold border border-emerald-400/40 shadow-lg shadow-emerald-950/50 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+              className="px-3.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold border border-emerald-400/40 shadow-lg shadow-emerald-950/50 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
             >
               {isSaving ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -977,7 +977,7 @@ function AnalysisCard({
           ) : isFailed ? (
             <button
               onClick={onRetry}
-              className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+              className="px-3 py-1.5 rounded-xl bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Retry</span>

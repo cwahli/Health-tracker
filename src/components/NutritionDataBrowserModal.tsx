@@ -1355,7 +1355,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                             type="button"
                             onClick={saveChainSource}
                             disabled={busy}
-                            className="text-[10px] font-bold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40 flex items-center gap-1"
+                            className="text-[10px] font-bold px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-40 flex items-center gap-1"
                           >
                             {busy && <RefreshCw className="w-3 h-3 animate-spin" />}
                             {t.save}
@@ -1861,7 +1861,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                               type="button"
                               disabled={busy || !(pasteDrafts[key] || '').trim()}
                               onClick={() => pasteAndSave(key)}
-                              className="text-[10px] font-bold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40 flex items-center gap-1"
+                              className="text-[10px] font-bold px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-40 flex items-center gap-1"
                             >
                               {busy && <RefreshCw className="w-3 h-3 animate-spin shrink-0" />}
                               {busy ? t.browserSavingBtn : t.browserPasteAddBtn}
