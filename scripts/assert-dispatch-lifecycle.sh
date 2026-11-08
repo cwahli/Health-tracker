@@ -107,6 +107,12 @@ chmod +x "$TELEGRAM_SCRIPT"
 DISPATCH_PROFILE="assert"
 BUG_ID="#ASSERT"
 START_TIME=$(( $(date +%s) - 60 ))
+# The typing loop is opt-in since owner id 1345 (quiet is the default), but THIS
+# test is about the loop's lifecycle — that it starts, and that it is reaped. So
+# it opts in explicitly. Without this the loop is correctly silent and assertion 1
+# fails for the wrong reason: it would be measuring the notify default, not the
+# leak it exists to catch.
+export DISPATCH_NOTIFY=1
 tg_msg() { :; }                       # the heartbeat's Telegram ping
 clean_workspace() { :; }
 export TELEGRAM_SCRIPT DISPATCH_PROFILE BUG_ID START_TIME
