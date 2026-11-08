@@ -38,19 +38,30 @@ AUDIT_LOG="${HERMES_DIR}/dispatch_audit.log"
 TELEGRAM_SCRIPT="${TELEGRAM_SCRIPT_OVERRIDE:-${TELEGRAM_SCRIPT:-${REPO_DIR}/scripts/telegram-send.sh}}"
 
 # Every notice this script sends goes through tg_send() below, and every tg_send
-# goes through this switch. `--no-notify` (or DISPATCH_NOTIFY=0) is how a caller
-# that is not a real dispatch — a test driving this script to prove its refusals,
-# a dry run, a batch replay — stops posting to the operator's chat.
+# goes through this switch.
+#
+# QUIET BY DEFAULT (owner id 1345, 2026-11-08). The operator's chat was carrying a
+# stream of `🚫 [Orchestrator] Dispatch refused for #tag_…` lines — four in one
+# message, each one a guard doing exactly its job. A refusal is STATE, not an
+# incident: the card already records it and dispatch_audit.log already has the
+# row. So the chat hop is now opt-in:
+#
+#   --notify      (or DISPATCH_NOTIFY=1)  speak to the operator's chat
+#   --no-notify   (or DISPATCH_NOTIFY=0)  explicit silence; also the default
+#
+# Silence must never become permissiveness. Every refusal still exits with its
+# original code (1/2/3) and still writes its stderr line; only the Telegram hop
+# is gated. A quiet dispatcher that stopped refusing would be a worse bug than
+# the noise it fixed.
 #
 # The tests in src/utils/bugPackFixtures.test.ts shell out to THIS script with a
-# deliberately vague `--task` to prove packCheck rejects it. Before the switch
-# existed, each run of that file posted real "[Orchestrator] Dispatch rejected
-# for BUG-TEST" messages to the live chat, which is what that chat was showing.
-DISPATCH_NOTIFY="${DISPATCH_NOTIFY:-1}"
+# deliberately vague `--task` to prove packCheck rejects it, and pass --no-notify
+# so a test never reaches the operator's chat.
+DISPATCH_NOTIFY="${DISPATCH_NOTIFY:-0}"
 
 # The single sender. Every telegram-send.sh call in this file is routed here.
 tg_send() {
-  [ "${DISPATCH_NOTIFY:-1}" = "1" ] || return 0
+  [ "${DISPATCH_NOTIFY:-0}" = "1" ] || return 0
   bash "$TELEGRAM_SCRIPT" "$@" 2>/dev/null || true
 }
 DISPATCH_LOCK_DIR="${HERMES_DIR}/dispatch_locks"
@@ -326,7 +337,7 @@ TICKET_ATTEMPT_OPEN=0
 for arg in "$@"; do
   case $arg in
     --help|-h)
-      echo "Usage: $0 [--no-notify] [--work-item=JSON|FILE] [--ticket=#n] [--page=...] [--observed=...] [--expected=...] [--screenshot=...] [--criteria=...] [--bug-id='...'] [--category='...'] [--tool=auto|opencode|cline|grok|agy] [--model=...] [--thinking=high|low|none|auto] [--cascade] [--verify=true|false|auto] [--profile=orchestrator] [--area=name] [--files=a,b] [--foreground] [--print-plan]"
+      echo "Usage: $0 [--notify|--no-notify] [--work-item=JSON|FILE] [--ticket=#n] [--page=...] [--observed=...] [--expected=...] [--screenshot=...] [--criteria=...] [--bug-id='...'] [--category='...'] [--tool=auto|opencode|cline|grok|agy] [--model=...] [--thinking=high|low|none|auto] [--cascade] [--verify=true|false|auto] [--profile=orchestrator] [--area=name] [--files=a,b] [--foreground] [--print-plan]"
       echo ""
       echo "  --ticket=#n   V-30.4 packet-driven dispatch: the packed card packet is the"
       echo "                prompt source (plan posted first, attempt rows at start/end,"
@@ -363,6 +374,7 @@ for arg in "$@"; do
     --worktree=*)                DISPATCH_WORKTREE="${arg#*=}" ;; # advanced: reuse an existing checkout
     --foreground)                FOREGROUND=1 ;;
     --print-plan)                PRINT_PLAN=1 ;;
+    --notify)                    DISPATCH_NOTIFY=1 ;; # opt in to the operator's chat (id 1345: quiet is the default)
     --no-notify)                 DISPATCH_NOTIFY=0 ;;
     *)
       if [ -z "$TASK" ]; then TASK="$arg"; fi
@@ -988,7 +1000,7 @@ start_heartbeat() {
     # Continuous typing action loop in background to display 3 loading dots in Telegram chat header
     (
       while true; do
-        [ "${DISPATCH_NOTIFY:-1}" = "1" ] && bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
+        [ "${DISPATCH_NOTIFY:-0}" = "1" ] && bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
         sleep 4
       done
     ) &
@@ -1879,7 +1891,7 @@ Fix pushed to main. Awaiting CI/CD deploy (~45s)."
     # Pulse Telegram typing indicator during deploy wait so 3 dots are shown
     (
       for i in $(seq 1 11); do
-        [ "${DISPATCH_NOTIFY:-1}" = "1" ] && bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
+        [ "${DISPATCH_NOTIFY:-0}" = "1" ] && bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
         sleep 4
       done
     ) &
