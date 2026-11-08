@@ -37,6 +37,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath, URL } from 'node:url';
 import { tmuxNameFor } from './tui-bot-plumbing.mjs';
 import { collectTmuxSessions, listTmuxNames, collectUnattributedMem, collectBareSessionMem } from './lib/tmux-session-mem.mjs';
@@ -602,13 +603,16 @@ async function proxyPass(req, res, target, { headers: extraHeaders = null, resHe
     if (extraHeaders) {
       for (const [k, v] of Object.entries(extraHeaders)) headers[k] = v;
     }
-    const chunks = [];
-    for await (const c of req) chunks.push(c);
-    const body = Buffer.concat(chunks);
+    // Stream the request body instead of buffering (2026-11-08): a 6MB base64
+    // image previously sat in a chunks array + Buffer.concat while the host
+    // was swapping, adding seconds and memory spikes before the upstream ever
+    // saw the first byte. GET/HEAD have no body; Content-Length: 0 is empty.
+    const hasBody = !['GET', 'HEAD'].includes(String(req.method || '').toUpperCase())
+      && req.headers?.['content-length'] !== '0';
     const up = await fetch(String(target), {
       method: req.method,
       headers,
-      body: ['GET', 'HEAD'].includes(String(req.method)) || body.length === 0 ? undefined : body,
+      body: hasBody ? Readable.toWeb(req) : undefined,
       duplex: 'half',
     });
     const outHeaders = { 'cache-control': 'no-store' };
@@ -707,13 +711,16 @@ async function proxyWebUi(req, res, url, env, { ttlSec = 900 } = {}) {
       headers[k] = v;
     }
     headers.authorization = auth;
-    const chunks = [];
-    for await (const c of req) chunks.push(c);
-    const body = Buffer.concat(chunks);
+    // Stream the request body instead of buffering (2026-11-08): a 6MB base64
+    // image previously sat in a chunks array + Buffer.concat while the host
+    // was swapping, adding seconds and memory spikes before the upstream ever
+    // saw the first byte. GET/HEAD have no body; Content-Length: 0 is empty.
+    const hasBody = !['GET', 'HEAD'].includes(String(req.method || '').toUpperCase())
+      && req.headers?.['content-length'] !== '0';
     const up = await fetch(target, {
       method: req.method,
       headers,
-      body: ['GET', 'HEAD'].includes(String(req.method)) || body.length === 0 ? undefined : body,
+      body: hasBody ? Readable.toWeb(req) : undefined,
       duplex: 'half',
     });
     const ct = up.headers.get('content-type') || '';
@@ -770,13 +777,16 @@ async function proxyHostUpstream(req, res, url, upstream, downError, { stripPref
       if (['host', 'connection', 'content-length'].includes(String(k).toLowerCase())) continue;
       headers[k] = v;
     }
-    const chunks = [];
-    for await (const c of req) chunks.push(c);
-    const body = Buffer.concat(chunks);
+    // Stream the request body instead of buffering (2026-11-08): a 6MB base64
+    // image previously sat in a chunks array + Buffer.concat while the host
+    // was swapping, adding seconds and memory spikes before the upstream ever
+    // saw the first byte. GET/HEAD have no body; Content-Length: 0 is empty.
+    const hasBody = !['GET', 'HEAD'].includes(String(req.method || '').toUpperCase())
+      && req.headers?.['content-length'] !== '0';
     const up = await fetch(target, {
       method: req.method,
       headers,
-      body: ['GET', 'HEAD'].includes(String(req.method)) || body.length === 0 ? undefined : body,
+      body: hasBody ? Readable.toWeb(req) : undefined,
       duplex: 'half',
     });
     const outHeaders = { 'cache-control': 'no-store' };
