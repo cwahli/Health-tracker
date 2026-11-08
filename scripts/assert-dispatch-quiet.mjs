@@ -27,14 +27,16 @@
  *
  *  1. **Behaviour, measured.** A stub `telegram-send.sh` stands in for the real
  *     one, the dispatcher is run twice against a payload it must refuse, and the
- *     number of messages that reached the stub is compared. Without `--no-notify`
- *     it speaks; with it, it is silent. The refusal itself still happens either
- *     way — exit code 1 — because a quiet dispatcher must not become a permissive
- *     one.
+ *     number of messages that reached the stub is compared. With no flag it is
+ *     SILENT (the default since owner id 1345); with `--notify` it speaks. The
+ *     refusal itself still happens either way — exit code 1 — because a quiet
+ *     dispatcher must not become a permissive one.
  *  2. **The callers.** Every `execFileSync('bash', [dispatchScript, …])` in the
  *     fixture test must pass `--no-notify`. This half is what stops the next
  *     person adding a fourth invocation without the flag, which the behavioural
  *     half would not notice until the next CI run reached the operator's chat.
+ *     The flag is explicit rather than relying on the new default: a test that
+ *     depends on a default is one config change away from posting again.
  *
  * `TELEGRAM_SCRIPT_OVERRIDE` is the seam: the dispatcher already reads its sender
  * from one variable, so a sensor can point that at a stub without touching the
@@ -98,18 +100,27 @@ console.log('assert-dispatch-quiet:');
 
 // 1. The dispatcher still refuses the vague payload — with and without the flag.
 //    Silence must not turn into permissiveness.
-const loud = runDispatcher(['--task=Fix X', '--bug-id=BUG-TEST']);
-check('a vague payload is still refused with exit 1 (notifying run)', loud.code === 1, `got ${loud.code}`);
-check('the refusal names the cause', /failed packCheck/.test(loud.stderr || ''), (loud.stderr || '').slice(0, 120));
-check('the notifying run really did post to the chat', sentCount() > 0, `${sentCount()} message(s)`);
+//
+//    The default is SILENT (owner id 1345: the operator's chat was carrying a
+//    refusal per guard hit). `--notify` is the opt-in, and it is what proves the
+//    switch still works in both directions.
+const quietDefault = runDispatcher(['--task=Fix X', '--bug-id=BUG-TEST']);
+check('a vague payload is still refused with exit 1 (default run)', quietDefault.code === 1, `got ${quietDefault.code}`);
+check('the refusal names the cause', /failed packCheck/.test(quietDefault.stderr || ''), (quietDefault.stderr || '').slice(0, 120));
+check('the default run posts NOTHING to the chat', sentCount() === 0, `${sentCount()} message(s) reached the sender`);
+
+fs.rmSync(log, { force: true });
+const loud = runDispatcher(['--task=Fix X', '--bug-id=BUG-TEST', '--notify']);
+check('--notify still refuses with exit 1', loud.code === 1, `got ${loud.code}`);
+check('--notify really does post to the chat', sentCount() > 0, `${sentCount()} message(s)`);
 
 fs.rmSync(log, { force: true });
 const quiet = runDispatcher(['--task=Fix X', '--bug-id=BUG-TEST', '--no-notify']);
 check('the same payload is still refused with exit 1 (quiet run)', quiet.code === 1, `got ${quiet.code}`);
 check('--no-notify posts nothing to the chat', sentCount() === 0, `${sentCount()} message(s) reached the sender`);
 
-// 2. The env seam is honoured too, so a caller that cannot pass a flag (a cron
-//    wrapper, a batch replay) still has a way to be quiet.
+// 2. The env seam is honoured in both directions, so a caller that cannot pass a
+//    flag (a cron wrapper, a batch replay) still has a way to choose.
 fs.rmSync(log, { force: true });
 const viaEnv = (() => {
   try {
@@ -126,6 +137,25 @@ const viaEnv = (() => {
   return sentCount();
 })();
 check('DISPATCH_NOTIFY=0 is honoured as well', viaEnv === 0, `${viaEnv} message(s)`);
+
+//    ...and DISPATCH_NOTIFY=1 is the opt-in that still reaches the chat, so the
+//    switch is proven to work in both directions rather than being stuck off.
+fs.rmSync(log, { force: true });
+const viaEnvLoud = (() => {
+  try {
+    execFileSync('bash', [DISPATCH, '--task=Fix X', '--bug-id=BUG-TEST'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: 120000,
+      env: { ...process.env, TELEGRAM_SCRIPT_OVERRIDE: sender, HOME: tmp, DISPATCH_NOTIFY: '1' },
+    });
+  } catch {
+    /* refused, as it must be */
+  }
+  return sentCount();
+})();
+check('DISPATCH_NOTIFY=1 opts back in to the chat', viaEnvLoud > 0, `${viaEnvLoud} message(s)`);
 
 // 3. Every telegram-send.sh call in the dispatcher passes the switch. One
 //    unguarded call left behind reopens the hole on a path this sensor never
@@ -154,17 +184,20 @@ const helperEnd = helperStart === -1 ? -1 : (() => {
 })();
 const inHelperRange = (i) => helperStart !== -1 && i > helperStart && i < helperEnd;
 check('tg_send is the shared, guarded helper', helperStart !== -1
-  && /\[ "\$\{DISPATCH_NOTIFY:-1\}" = "1" \] \|\| return 0/.test(allLines[helperStart + 1] || '')
+  && /\[ "\$\{DISPATCH_NOTIFY:-0\}" = "1" \] \|\| return 0/.test(allLines[helperStart + 1] || '')
   && allLines.slice(helperStart, helperEnd).some((l) => l.includes('bash "$TELEGRAM_SCRIPT"')));
-const guarded = (l) => /\[ "\$\{DISPATCH_NOTIFY:-1\}" = "1" \] &&/.test(l);
+const guarded = (l) => /\[ "\$\{DISPATCH_NOTIFY:-0\}" = "1" \] &&/.test(l);
 const unguarded = allLines
   .map((l, i) => ({ l, i }))
   .filter(({ l, i }) => l.includes('bash "$TELEGRAM_SCRIPT"') && !guarded(l) && !inHelperRange(i))
   .map(({ l }) => l.trim().slice(0, 70));
 check('every telegram-send.sh call passes the switch', unguarded.length === 0, unguarded.join(' | '));
 check('no bare $DISPATCH_NOTIFY anywhere (the script runs set -u)',
-  !/[^:]"\$DISPATCH_NOTIFY"/.test(code), 'use ${DISPATCH_NOTIFY:-1}');
+  !/[^:]"\$DISPATCH_NOTIFY"/.test(code), 'use ${DISPATCH_NOTIFY:-0}');
 check('--no-notify is a real flag, not just an env var', /--no-notify\)\s+DISPATCH_NOTIFY=0/.test(code));
+check('--notify is the opt-in, and it is a real flag too', /--notify\)\s+DISPATCH_NOTIFY=1/.test(code));
+check('the default is silence, not noise (owner id 1345)',
+  /DISPATCH_NOTIFY="\$\{DISPATCH_NOTIFY:-0\}"/.test(code), 'the default must be 0');
 
 // 4. The callers. This is what catches the NEXT invocation added without the flag.
 const fixture = fs.readFileSync(FIXTURE, 'utf8');
