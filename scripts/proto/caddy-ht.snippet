@@ -1,0 +1,27 @@
+# Health-tracker proto preview (2026-11-09, PROTO_FIRST)
+# The Sage-prototypes Pages site still owns proto.health-tracker.co.uk/ via
+# 127.0.0.1:8790. Health-tracker previews live under /ht/* on the same
+# subdomain, via this snippet. Add to /etc/caddy/Caddyfile and reload:
+#   sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+#   sudo systemctl reload caddy
+#
+# Precondition: ht-proto-preview.service running on 127.0.0.1:3100
+# (see scripts/proto/ht-proto-preview.service). Build the branch first:
+#   node scripts/proto-deploy.mjs  (local) or build + copy dist/ on the VPS.
+
+http://proto.health-tracker.co.uk {
+	log {
+		output file /var/log/caddy/health-tracker-couk-access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+	}
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	encode gzip zstd
+	handle /ht/* {
+		reverse_proxy 127.0.0.1:3100
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8790
+	}
+}

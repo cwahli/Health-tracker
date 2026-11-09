@@ -137,7 +137,7 @@
       "asked": "repeated",
       "files_must_contain": {
         "docs/agent/JOURNEY.md": [
-          "Builder ≠ Tier-3 scorer",
+          "Builder \u2260 Tier-3 scorer",
           "frozen ground-truth scorecard"
         ],
         "plan/RELIABILITY.md": [
@@ -286,7 +286,7 @@
     },
     {
       "id": "i18n_a11y_soak_hygiene",
-      "label": "I18N-A11Y soak: ariaSnapshot only; playwright --list before soak; restore i18n from known-good git (no invent); current/a11y artifacts; incomplete checklist ≠ complete; no mid-soak helper self-edit",
+      "label": "I18N-A11Y soak: ariaSnapshot only; playwright --list before soak; restore i18n from known-good git (no invent); current/a11y artifacts; incomplete checklist \u2260 complete; no mid-soak helper self-edit",
       "asked": "2026-09-14",
       "files_must_contain": {
         "golden/scorecard/instruction/i18n/GATE_I18N_A11Y_TREE.md": [
@@ -370,6 +370,23 @@
           "hasInputMarker",
           "citesJob",
           "citesReplayTarget"
+        ]
+      }
+    },
+    {
+      "id": "proto_first_gate",
+      "label": "Proto-first gate: user-visible work is proven on proto.health-tracker.co.uk/ht/ and only go-for-dev promotes to dev (health-tracker.co.uk via main)",
+      "asked": "2026-11-09",
+      "files_must_contain": {
+        "docs/agent/PROTO_FIRST.md": [
+          "proto.health-tracker.co.uk",
+          "go for dev"
+        ],
+        "AGENTS.md": [
+          "PROTO_FIRST"
+        ],
+        "scripts/assert-proto-first.test.mjs": [
+          "assert-proto-first"
         ]
       }
     }
