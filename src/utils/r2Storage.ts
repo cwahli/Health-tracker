@@ -181,6 +181,34 @@ export async function fetchJobResultFromR2(jobId: string): Promise<any> {
   return null;
 }
 
+/**
+ * HOLLOW_RESULT guard: when an is_r2 pointer cannot be resolved (R2 outage,
+ * private-bucket block, missing route), the poller must NOT replace the stub
+ * wholesale — portion stubs inline the question (portionClarify), dish names
+ * (scoutItems) and the message the card renders. Keep every inline field and
+ * only fill pieces that are genuinely absent. The is_r2/r2_url pointer fields
+ * are dropped (this attempt exhausted them; the server's transparent resolve
+ * re-resolves on its own poll cadence, so a recovered R2 still heals).
+ */
+export function preserveR2StubInlineFields(stub: any, statusMessage?: string | null): any {
+  const src = stub && typeof stub === 'object' ? stub : {};
+  const message = src.message || src.text || statusMessage || 'Analysis complete';
+  const { is_r2, r2_url, ...inline } = src;
+  const out: any = {
+    ...inline,
+    message,
+    text: src.text || message,
+  };
+  if (!Array.isArray(out.scoutItems)) out.scoutItems = [];
+  if (!out.pendingFoodLog) {
+    out.pendingFoodLog = {
+      name: 'Meal',
+      nutrients: { calories: 0, protein: 0, carbohydrates: 0, fat: 0 },
+    };
+  }
+  return out;
+}
+
 export async function deleteR2ObjectByKey(key: string): Promise<boolean> {
   try {
     const res = await fetch(resolveApiUrl('/api/r2/delete-object'), {
