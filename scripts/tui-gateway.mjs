@@ -717,15 +717,24 @@ async function proxyWebUi(req, res, url, env, { ttlSec = 900 } = {}) {
       duplex: 'half',
     });
     const ct = up.headers.get('content-type') || '';
-    const outHeaders = { 'cache-control': 'no-store' };
+    const outHeaders = {};
     if (ct) outHeaders['content-type'] = ct;
     if (setCookie) outHeaders['set-cookie'] = setCookie;
     if (/text\/html/i.test(ct)) {
+      outHeaders['cache-control'] = 'no-store';
       const raw = Buffer.from(await up.arrayBuffer()).toString('utf8');
       const injected = injectWebAuthShim(raw, COOKIE_NAME, ttlSec);
-      outHeaders['clear-site-data'] = '"cache"';
       res.writeHead(up.status, outHeaders);
       return res.end(injected);
+    }
+    if (isWebStatic(url.pathname)) {
+      for (const h of ['cache-control', 'etag', 'last-modified', 'content-encoding', 'content-length', 'vary', 'accept-ranges']) {
+        const v = up.headers.get(h);
+        if (v != null) outHeaders[h] = v;
+      }
+      if (!outHeaders['cache-control']) outHeaders['cache-control'] = 'no-store';
+    } else {
+      outHeaders['cache-control'] = 'no-store';
     }
     res.writeHead(up.status, outHeaders);
     if (up.body) {
@@ -934,9 +943,7 @@ import {
   recordFleetSnapshot as recordFleetSnapshotStatus,
   getFleetSnapshot as getFleetSnapshotStatus,
   queueMacAction as queueMacActionStatus,
-  createMacActionQueue as createMacActionQueueStatus,
-  getDispatchableMacActions as getDispatchableMacActionsStatus,
-  acknowledgeMacAction as acknowledgeMacActionStatus,
+  drainMacActions as drainMacActionsStatus,
   getPendingMacActions as getPendingMacActionsStatus,
   getFleetNodes as getFleetNodesStatus,
   getFleetBots as getFleetBotsStatus,
@@ -1490,20 +1497,8 @@ function cookieValue(req, name) {
   return '';
 }
 
-function publicMacAction(action) {
-  if (action?.type !== 'send_message') return action;
-  const { message, ...safeAction } = action;
-  return { ...safeAction, messageLength: typeof message === 'string' ? message.length : 0 };
-}
-
-const MAX_MAC_ACTION_BYTES = 16 * 1024;
-
 export function createGateway({ env = process.env, log = () => {}, forge = null } = {}) {
   const secret = env.TUI_GATEWAY_SECRET || '';
-  const isTestAuth = String(env.FLEET_TEST_AUTH || '').trim() === '1';
-  const actionQueuePath = String(env.FLEET_MAC_ACTION_QUEUE_PATH || '').trim() ||
-    (isTestAuth ? '' : path.join(REPO_ROOT, '.cache', 'fleet-mac-actions.json'));
-  const macActionQueue = createMacActionQueueStatus({ filePath: actionQueuePath });
   const ttl = Number(env.TUI_SESSION_TTL_SEC || 900);
   // How long past its own expiry a correctly-signed token may still be RENEWED.
   // 0 disables renewal entirely, which restores the old hard cliff.
@@ -2496,7 +2491,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       ]);
       const terminals = getFleetNodes({ tickets });
       const fleet = getFleetSnapshotStatus({ persistPath });
-      const pendingMacActions = getPendingMacActionsStatus({ queue: macActionQueue }).map(publicMacAction);
+      const pendingMacActions = getPendingMacActionsStatus();
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(JSON.stringify({ ok: true, tickets, terminals, bots, fleet, pendingMacActions, generatedAt: new Date().toISOString() }));
     }
@@ -2676,42 +2671,21 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
       }
       let body = '';
-      let bodyBytes = 0;
-      let tooLarge = false;
-      req.on('data', (chunk) => {
-        bodyBytes += chunk.length;
-        if (bodyBytes > MAX_MAC_ACTION_BYTES) {
-          tooLarge = true;
-          return;
-        }
-        body += chunk;
-      });
+      req.on('data', (chunk) => { body += chunk; });
       req.on('end', () => {
-        if (tooLarge) {
-          res.writeHead(413, { 'content-type': 'application/json' });
-          return res.end(JSON.stringify({ ok: false, error: 'action payload is too large' }));
-        }
-        let parsed;
         try {
-          parsed = JSON.parse(body || '{}');
-        } catch {
-          res.writeHead(400, { 'content-type': 'application/json' });
-          return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
-        }
-        try {
-          const queued = queueMacActionStatus(parsed, { queue: macActionQueue });
+          const parsed = JSON.parse(body || '{}');
+          const queued = queueMacActionStatus(parsed);
           if (!queued.ok) {
             res.writeHead(400, { 'content-type': 'application/json' });
             return res.end(JSON.stringify(queued));
           }
-          const safeQueued = { ...queued, action: publicMacAction(queued.action) };
-          broadcastFleetEvent('mac_action', safeQueued);
+          broadcastFleetEvent('mac_action', queued);
           res.writeHead(200, { 'content-type': 'application/json' });
-          return res.end(JSON.stringify(safeQueued));
+          return res.end(JSON.stringify(queued));
         } catch (err) {
-          log(`Fleet action queue persistence failed: ${err.message}`);
-          res.writeHead(500, { 'content-type': 'application/json' });
-          return res.end(JSON.stringify({ ok: false, error: 'Fleet action could not be persisted' }));
+          res.writeHead(400, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
         }
       });
       return;
@@ -2732,14 +2706,8 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       let body = '';
       req.on('data', (chunk) => { body += chunk; });
       req.on('end', () => {
-        let parsed;
         try {
-          parsed = JSON.parse(body || '{}');
-        } catch {
-          res.writeHead(400, { 'content-type': 'application/json' });
-          return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
-        }
-        try {
+          const parsed = JSON.parse(body || '{}');
           const rawStatus = parsed && parsed.status && typeof parsed.status === 'object' ? parsed.status : parsed;
           const status = rawStatus && typeof rawStatus === 'object' && parsed.mac && !rawStatus.mac
             ? { ...rawStatus, mac: parsed.mac }
@@ -2749,16 +2717,8 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
             res.writeHead(400, { 'content-type': 'application/json' });
             return res.end(JSON.stringify(saved));
           }
-          const actionResult = saved.snapshot?.mac?.lastActionResult;
-          if (actionResult?.id) {
-            const acknowledged = acknowledgeMacActionStatus(actionResult.id, { queue: macActionQueue });
-            if (acknowledged) {
-              broadcastFleetEvent('mac_actions_acknowledged', [publicMacAction(acknowledged)]);
-            }
-          }
           broadcastFleetEvent('snapshot', saved.snapshot);
-          const pendingActions = getDispatchableMacActionsStatus({ queue: macActionQueue }).map(publicMacAction);
-          const pendingActionIds = getPendingMacActionsStatus({ queue: macActionQueue }).map((action) => action.id);
+          const pendingActions = drainMacActionsStatus();
           res.writeHead(200, { 'content-type': 'application/json' });
           return res.end(JSON.stringify({
             ok: true,
@@ -2766,12 +2726,10 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
             receivedAt: saved.snapshot.receivedAt,
             stale: saved.snapshot.stale,
             pendingActions,
-            pendingActionIds,
           }));
         } catch (err) {
-          log(`Fleet action queue persistence failed: ${err.message}`);
-          res.writeHead(500, { 'content-type': 'application/json' });
-          return res.end(JSON.stringify({ ok: false, error: 'Fleet action queue could not be persisted' }));
+          res.writeHead(400, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
         }
       });
       return;

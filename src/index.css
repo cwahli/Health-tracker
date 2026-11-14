@@ -7,6 +7,11 @@
    captures and light-OS browsers render the light theme despite the .dark class. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* App is dark-first: <html class="dark"> is the source of truth for `dark:` styles.
+   Without this, Tailwind v4 falls back to prefers-color-scheme media, so headless
+   captures and light-OS browsers render the light theme despite the .dark class. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Space Grotesk", sans-serif;
