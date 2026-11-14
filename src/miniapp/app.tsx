@@ -2,7 +2,7 @@ import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { enabledMiniApps, miniAppById, type MiniAppDef } from './miniapp-registry';
 import { tabUrl } from './shell-nav';
-import { statusKeyMaps, lookForRow, sortByMem, filterBareRows, applyRouteAgents, activityKeyMaps, type RowLook, type TmuxEntry, type ActivityBadge, type ActivityEntry } from './shell-session';
+import { statusKeyMaps, lookForRow, sortByMem, filterBareRows, applyRouteAgents, activityKeyMaps, attachedKeyMaps, type RowLook, type TmuxEntry, type ActivityBadge, type ActivityEntry } from './shell-session';
 import { BugBoard } from '../components/bug-board/BugBoard';
 import { useBugBoard } from '../components/bug-board/useBugBoard';
 import '../index.css';
@@ -777,6 +777,9 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
   const [mem, setMem] = useState<Record<string, number>>({});
   const [idle, setIdle] = useState<Record<string, number>>({});
   const [act, setAct] = useState<Record<string, ActivityBadge>>({});
+  // Every session the hub knows (working, held AND idle): attached rows
+  // never hide, like the session the operator is in between turns.
+  const [attached, setAttached] = useState<Set<string>>(new Set());
   // Raw tmux tracking rows (routeless sessions only): view-less, Kill by
   // session name. Refreshed with the status call, same as the maps above.
   const [tmuxRows, setTmuxRows] = useState<TtyRoute[]>([]);
@@ -853,6 +856,7 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     setMem(boxOk ? { ...maps.mem, 'box:other': box.otherMiB as number } : maps.mem);
     setIdle(maps.idle);
     setAct(activityKeyMaps(rawActivity).act);
+    setAttached(attachedKeyMaps(rawActivity).attached);
     if (boxOk) {
       const n = typeof box.otherProcs === 'number' ? box.otherProcs : 0;
       setBoxRow({
@@ -901,11 +905,13 @@ function TerminalTab({ def, bot, inTelegram, onMenu, onAuthDead }: { def: MiniAp
     );
   }
 
-  // Heaviest first so kill candidates surface. Bare rows without backend
-  // memory hide once status truth arrives (fail-open before that); doors,
-  // tty, tmux and box rows always show.
+  // Heaviest first so kill candidates surface. Unattached bare rows without
+  // backend memory hide once status truth arrives (fail-open before that);
+  // doors, tty, tmux and box rows always show. Attached rows — every hub
+  // session plus the picked row — never hide, mem or not.
+  const keepAttached = new Set<string>([...attached, picked].filter(Boolean));
   const displayRoutes = routes
-    ? sortByMem(filterBareRows([...routes, ...tmuxRows, ...(boxRow ? [boxRow] : [])], mem, statusOk), mem)
+    ? sortByMem(filterBareRows([...routes, ...tmuxRows, ...(boxRow ? [boxRow] : [])], mem, statusOk, keepAttached), mem)
     : routes;
   const pickedRoute = (displayRoutes || []).find((r) => ttyRowId(r) === picked);
   const pickedLabel = pickedRoute
