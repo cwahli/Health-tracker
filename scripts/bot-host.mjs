@@ -691,6 +691,16 @@ export function formatProviderFailure({ surface, model, lastError, stderr } = {}
       stderr: '',
     };
   }
+  // A missing lane binary otherwise reaches the chat as a raw errno
+  // ("spawn cmd ENOENT", live VM3 2026-11-06). Name the install + login
+  // and the way to keep chatting; the raw text stays in stderr for logs.
+  if (surface === 'commandcode' && /spawn\s+\S*\s*ENOENT|ENOENT|Command not found|not installed|no such file/i.test(combined)) {
+    return {
+      message:
+        'Command Code CLI (`cmd`) is not installed on this host — install it and run `cmd login` (or set COMMAND_CODE_API_KEY), then resend. Nothing was spent; pick a /model_free lane to keep chatting meanwhile.',
+      stderr: String(stderr || lastError || ''),
+    };
+  }
   const detail = extractEmbeddedMessage(lastError)
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -7295,7 +7305,11 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         onSpawn: (child) => running.set(chatId, { child, aborted: false, serverUrl: workSession.serverUrl, opencodeSessionId: workSession.opencodeSessionId }),
         onAbort: () => abortOpencodeSession({ serverUrl: workSession.serverUrl, sessionId: workSession.opencodeSessionId }).catch(() => false),
         extraArgs,
-        env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+        // Connectivity pings must prove the chain alive as cheaply as possible:
+        // no skills, no browser MCP. The prompt already says "no tools", but the
+        // env booted Playwright/Chrome anyway — that scaffolding is what made a
+        // bare `hi` take 21s (live VM3 2026-11-06). Work turns keep everything.
+        env: { ...opencodeEnv(isPingTurn ? { ...config, agent: { ...config.agent, sharedSkills: [], playwrightOutputDir: undefined } } : config), ...chatEnv(api, chatId) },
         envMode: turnEnvMode,
       });
     };
@@ -7496,7 +7510,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       // instruction, so the refusal names that pool's reset and the way out of it
       // rather than quietly answering on the other one (decision D3).
       const poolBit = laneChoice.pool
-        ? ` ${poolDisplayName(laneChoice.pool, location)} is the pool this chat asked to stay in, so no other pool was tried — \`/model\` clears it.`
+        ? ` ${poolDisplayName(laneChoice.pool, location)} is the pool this chat asked to stay in, so no other pool was tried — pick another pool command (e.g. \`/model_free\`) to leave it.`
         : '';
       await api.sendMessage(
         chatId,
