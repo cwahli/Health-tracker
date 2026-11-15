@@ -1,10 +1,14 @@
-# Photo URL rewrite — proposal (NOT EXECUTED)
+# Photo URL rewrite — applied 2026-11-16 (owner-approved)
 
-**Status:** awaiting owner approval. Nothing in this file has been run against
-production data.
+**Status:** **APPLIED** to production `food_logs` on 2026-11-16T19:03Z, with owner
+approval. 252 rows / 437 refs rewritten; re-verified 0 dead refs and 472/472
+photo keys rendering `200 image/jpeg`.
+**Snapshot:** `/home/agentuser/.opencode-work/food_logs_image_urls_snapshot_20261115T190321Z.json`
+(316 rows, chmod 600) — full pre-migration `id` + `image_urls`.
 **Prepared:** 2026-11-16
-**Related:** PR #899 (`agent/photo-failfast`) — code fix that makes the current
-stored URLs load again through the same-origin proxy.
+**Related:** PR #899 — code fix that made the stored URLs load again; this
+migration removes the dead host from stored data so nothing depends on the
+client rewrite.
 
 ---
 
@@ -35,7 +39,7 @@ from the private bucket. Verified: all 437 keys render through
 `https://health-tracker.co.uk/photos/{key}` (437/437 `200 image/jpeg`, 0
 failures). **No data migration is required to make the app work again.**
 
-## 3. The migration (proposal only)
+## 3. The migration (APPLIED 2026-11-16)
 
 Preferred shape — canonicalise to the proxy path the client already prefers,
 which removes the public host from stored data entirely:
@@ -68,18 +72,29 @@ WHERE EXISTS (
       );
 ```
 
-Guardrails, if approved:
+### What was run (2026-11-16)
 
-1. Take a snapshot first:
-   `pg_dump` of `food_logs`, or `COPY (SELECT id, image_urls FROM food_logs) TO …`.
-2. Run the `SELECT` above and confirm it lists **252** rows.
-3. Run **one** `UPDATE`, then re-run the same `SELECT` and confirm **0** rows.
-4. Re-check 437/437 keys through `/photos/{key}`.
-5. Writes are only needed once: the client rewrite means the app is already
-   correct, so this is hygiene, not a fix.
+Host-only rewrite was chosen (smaller diff, keeps absolute URLs resolvable by
+anything that reads the row directly, not just this app).
 
-**Not proposed:** touching the D1 mirror or the exported backups. Those carry
-`/photos/` paths already (339 refs) and are not affected.
+1. **Snapshot:** all 316 rows' `id` + `image_urls` written to
+   `food_logs_image_urls_snapshot_20261115T190321Z.json` before any write.
+2. **Preview:** read back 316 rows; confirmed **252** rows hold **437** refs to
+   `pub-d17eecca….r2.dev`. Predicate matched the documented SQL exactly
+   (`EXISTS (... LIKE '%pub-d17eecca….r2.dev%')`).
+3. **Apply:** 252 row-level `PATCH`es (`image_urls` array per row, replaced array
+   wholesale from the snapshot, host substituted). **252 applied, 0 failed.**
+4. **Verify:** re-read all 316 rows → **0** dead refs, **472** refs on the live
+   host `pub-2ae421….r2.dev` (437 migrated + 35 that were already live).
+5. **Re-check:** **472/472** unique photo keys render `200 image/jpeg` through
+   `https://health-tracker.co.uk/photos/{key}` (one flaky `000` on the first
+   sweep re-ran clean three times; final sweep 472/472, 0 failures).
+
+Rollback: every pre-migration array is in the snapshot file, keyed by row `id`;
+re-`PATCH` `food_logs?id=eq.<id>` with `{"image_urls": <snapshot array>}`.
+
+**Not touched:** the D1 mirror and exported backups. They already carry
+`/photos/` paths (339 refs) and were never affected.
 
 ## 4. Item 1 (apex DNS re-point) — WITHDRAWN as unnecessary
 
