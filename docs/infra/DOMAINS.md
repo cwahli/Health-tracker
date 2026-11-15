@@ -1,6 +1,6 @@
 # Domain Architecture & Production Endpoints
 
-**Updated:** 2026-10-18
+**Updated:** 2026-11-16
 
 ---
 
@@ -11,16 +11,29 @@
 * **Registrar:** Cloudflare Registrar (owned directly by Chiwah).
 * **Target Host:** the re-homed production VM (`standar-c3r3a-1845`, public IP
   `103.147.32.117`). No OVH host serves the site any more. It is published
-  through a **Cloudflare Tunnel** (`cloudflared`, tunnel
-  `85b56df3-da06-4521-9b4d-d90c593e3846`, ingress `health-tracker.co.uk` +
+  through a **Cloudflare Tunnel** (`cloudflared-id-vps`, tunnel
+  `d9f81831-7d2b-4156-85ac-626f085d0cd3`, config
+  `/etc/cloudflared/id-vps-2026.yml`, ingress `health-tracker.co.uk` +
   `*.health-tracker.co.uk` → `127.0.0.1:80`), so origin requests arrive from
   `127.0.0.1` and TLS terminates at the Cloudflare edge.
+* **Tunnel history (corrected 2026-11-16).** The tunnel named here before,
+  `85b56df3-da06-4521-9b4d-d90c593e3846`, was **deleted 2026-11-12T06:45:35Z**;
+  its unit (`cloudflared.service`) had no config file and had restarted 50k+
+  times registering "Unauthorized: Tunnel not found". It is now stopped and
+  disabled, and `ht-services-watchdog` watches `cloudflared-id-vps` instead.
+  Two other stale units were retired the same day: `cloudflared-proto.service`
+  on the app box (`~/.cloudflared/prod-config.yml` still named the deleted
+  tunnel) and `~/.cloudflared/prod-config.yml` itself.
 * **TLS Certificate:** Cloudflare (edge). The origin Caddy serves plain HTTP on `:80`.
 * **Access Logs:** `/var/log/caddy/health-tracker-couk-access.log` (JSON rolled log).
 
 ### Routes & Handlers
 * `GET /` → Reverse proxy to Node/Express app `:3000`.
 * `GET /api/status` → Health check returning runtime timestamp.
+* `GET /photos/{key}` and `GET /api/r2/photos/{key}` → meal photo bytes from the
+  private R2 bucket. Every R2 read is bounded by `R2_READ_TIMEOUT_MS` (5s
+  default); a timed-out read answers **504 + `no-store`** rather than holding
+  the request until Cloudflare's 524 (~125s).
 * `POST /webhook/*` → Reverse proxy to deploy webhook `:9000` (auto-deploy on git push).
 * `GET /privacy` & `GET /terms` → Static legal pages served from `/srv/www-legal/`.
 

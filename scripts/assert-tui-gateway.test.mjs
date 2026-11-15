@@ -778,6 +778,38 @@ console.log('assert-tui-gateway:');
   agenda.close();
 }
 
+// 12c. Meal photos (2026-11-16). The app renders them same-origin as
+//      `/photos/{key}`; the upstream serves that path, this gateway's asset
+//      proxy did not cover it, so every meal thumbnail on a page proxied
+//      through this host was a broken image. Public bytes, no session needed.
+{
+  const seen = [];
+  const app = http.createServer((rq, rs) => {
+    seen.push(rq.url);
+    rs.writeHead(200, { 'content-type': 'image/jpeg' });
+    rs.end('JPEGBYTES');
+  });
+  await new Promise((r) => app.listen(0, '127.0.0.1', r));
+  const env = { TUI_GATEWAY_SECRET: SECRET, BUG_BOARD_UPSTREAM: `http://127.0.0.1:${app.address().port}` };
+  const call = (url, headers = {}) => new Promise((resolve, reject) => {
+    let code = 0; let body = '';
+    const res = { writeHead: (c) => { code = c; }, write: () => true,
+      end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+    createGateway({ env, log: () => {} })(
+      { method: 'GET', url, headers, [Symbol.asyncIterator]: async function* () {} }, res).catch(reject);
+    setTimeout(() => resolve({ code: -2, body: '' }), 5000).unref?.();
+  });
+  const photo = await call('/photos/food_1783421756721.jpg', { host: 'app.example' });
+  check('a meal photo path proxies to the app upstream', photo.code === 200);
+  check('the photo key reaches the upstream unchanged',
+    seen.some((u) => u === '/photos/food_1783421756721.jpg'));
+  check('no token is needed for a public photo',
+    (await call('/photos/food_1783421756721.jpg', { host: 'app.example' })).code === 200);
+  const lookalike = await call('/photosx/food_1.jpg', { host: 'app.example' });
+  check('a lookalike photo path is not proxied', lookalike.code !== 200 || !seen.some((u) => u === '/photosx/food_1.jpg'));
+  app.close();
+}
+
 // 12b. The bootstrap we do serve is ours, so it is executed with stubs.
   const boot = await bootstrapThroughGateway();
   const scripts = [...boot.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]);
