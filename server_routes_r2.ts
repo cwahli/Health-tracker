@@ -37,6 +37,45 @@ export function getS3Client() {
   return s3Client;
 }
 
+/**
+ * Hard deadline for every R2 *read*. When the R2 endpoint is unreachable the
+ * SDK retries with no ceiling, so `/photos/{key}` used to hold a request open
+ * until Cloudflare itself gave up (524 at ~125s) — the meal image never
+ * rendered and the browser kept the connection busy. A bounded abort turns
+ * that into a fast, cacheable failure the client's fallback chain can act on.
+ */
+export const R2_READ_TIMEOUT_MS = Math.max(
+  500,
+  Number(process.env.R2_READ_TIMEOUT_MS || 5000)
+);
+
+export function isR2TimeoutError(err: any): boolean {
+  if (!err) return false;
+  if (err.code === 'R2_TIMEOUT') return true;
+  const name = String(err.name || '');
+  if (name === 'AbortError' || name === 'TimeoutError') return true;
+  return /timed? ?out|aborted/i.test(String(err.message || ''));
+}
+
+/** `client.send` under an abort deadline; timeouts are re-thrown as R2_TIMEOUT. */
+async function sendWithDeadline<T = any>(
+  client: any,
+  command: any,
+  timeoutMs: number = R2_READ_TIMEOUT_MS
+): Promise<T> {
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    return (await client.send(command, { abortSignal: signal })) as T;
+  } catch (err: any) {
+    if (signal.aborted || isR2TimeoutError(err)) {
+      const timeoutErr: any = new Error(`R2 read timed out after ${timeoutMs}ms`);
+      timeoutErr.code = 'R2_TIMEOUT';
+      throw timeoutErr;
+    }
+    throw err;
+  }
+}
+
 export async function uploadBase64ToR2(id: string, base64Data: string, _index: number = 0): Promise<string> {
   const client = getS3Client();
 
@@ -186,7 +225,7 @@ export async function fetchLogsFromR2Direct(jobId: string): Promise<string | nul
       Bucket: CLOUDFLARE_R2_BUCKET_NAME,
       Key: key,
     });
-    const res = await client.send(cmd);
+    const res = await sendWithDeadline(client, cmd);
     if (res.Body) {
       return await (res.Body as any).transformToString();
     }
@@ -211,13 +250,15 @@ export async function fetchDebugPayloadFromR2Direct(jobId: string, userId?: stri
 
   for (const key of candidates) {
     try {
-      const res = await client.send(new GetObjectCommand({ Bucket: CLOUDFLARE_R2_BUCKET_NAME, Key: key }));
+      const res = await sendWithDeadline(client, new GetObjectCommand({ Bucket: CLOUDFLARE_R2_BUCKET_NAME, Key: key }));
       if (res.Body) {
         const str = await (res.Body as any).transformToString();
         return JSON.parse(str);
       }
-    } catch {
+    } catch (err: any) {
       // NotFound / AccessDenied on a guessed key is expected — try the next.
+      // A timeout means the endpoint itself is unreachable: stop guessing.
+      if (err?.code === 'R2_TIMEOUT') return null;
     }
   }
 
@@ -226,14 +267,14 @@ export async function fetchDebugPayloadFromR2Direct(jobId: string, userId?: stri
   // basename is `<safeId>.json`.
   try {
     const { ListObjectsV2Command } = await import('@aws-sdk/client-s3');
-    const listed = await client.send(new ListObjectsV2Command({
+    const listed = await sendWithDeadline(client, new ListObjectsV2Command({
       Bucket: CLOUDFLARE_R2_BUCKET_NAME,
       Prefix: 'debug/',
       MaxKeys: 1000,
     }));
     const match = (listed.Contents || []).find((o: any) => String(o.Key || '').endsWith(`/${safeId}.json`));
     if (match?.Key) {
-      const res = await client.send(new GetObjectCommand({ Bucket: CLOUDFLARE_R2_BUCKET_NAME, Key: match.Key }));
+      const res = await sendWithDeadline(client, new GetObjectCommand({ Bucket: CLOUDFLARE_R2_BUCKET_NAME, Key: match.Key }));
       if (res.Body) {
         const str = await (res.Body as any).transformToString();
         return JSON.parse(str);
@@ -275,7 +316,7 @@ export async function streamR2Photo(res: any, rawKey: string) {
         Bucket: CLOUDFLARE_R2_BUCKET_NAME,
         Key: k,
       });
-      const s3Res = await client.send(command);
+      const s3Res = await sendWithDeadline(client, command);
       if (s3Res.ContentType) res.setHeader('Content-Type', s3Res.ContentType);
       else res.setHeader('Content-Type', 'image/jpeg');
       res.setHeader('Cache-Control', 'public, max-age=86400');
@@ -292,7 +333,15 @@ export async function streamR2Photo(res: any, rawKey: string) {
       }
     } catch (err: any) {
       lastErr = err;
+      // A timeout is not a missing object: retrying the legacy key would spend
+      // a second full deadline on the same unreachable endpoint.
+      if (err?.code === 'R2_TIMEOUT') break;
     }
+  }
+  if (lastErr?.code === 'R2_TIMEOUT') {
+    console.warn(`[R2 photo] fail-fast timeout key=${key} after ${R2_READ_TIMEOUT_MS}ms`);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(504).json({ ok: false, error: 'photo storage timed out' });
   }
   res.status(404).send(lastErr?.message || 'Photo not found');
 }
@@ -782,7 +831,7 @@ export async function fetchJobResultFromR2Direct(jobId: string): Promise<any> {
   if (!safeId) return null;
   try {
     const { GetObjectCommand } = await import('@aws-sdk/client-s3');
-    const res = await client.send(new GetObjectCommand({
+    const res = await sendWithDeadline(client, new GetObjectCommand({
       Bucket: CLOUDFLARE_R2_BUCKET_NAME,
       Key: `jobs/${safeId}_result.json`,
     }));
@@ -792,6 +841,7 @@ export async function fetchJobResultFromR2Direct(jobId: string): Promise<any> {
     }
   } catch {
     // NotFound on a missing/expired result is expected — caller falls back.
+    // A timeout is likewise "no result available now", never a hang.
   }
   return null;
 }

@@ -2403,6 +2403,16 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
       return proxyPass(req, res, boardUpstream(env) + url.pathname + url.search);
     }
 
+    // Meal photos (2026-11-16). The app renders them same-origin as
+    // /photos/{key} (client rewrite of the R2 public host), and the upstream
+    // serves that path itself. Without this line every meal thumbnail on a
+    // page proxied through this host 404'd — the board pages showed broken
+    // images while the same key loaded on the apex host. Public data, no
+    // session needed: the app serves it to anonymous readers already.
+    if (url.pathname === '/photos/' || url.pathname.startsWith('/photos/')) {
+      return proxyPass(req, res, boardUpstream(env) + url.pathname + url.search);
+    }
+
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       return proxyPass(req, res, boardUpstream(env) + url.pathname + url.search);
     }
