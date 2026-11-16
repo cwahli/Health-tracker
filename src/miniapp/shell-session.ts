@@ -64,22 +64,67 @@ export function statusKeyMaps(rows: TtyStatusRow[], tmux: TmuxEntry[] = []): {
 export const TTY_IDLE_RED_MS = 15 * 60 * 1000;
 
 /** Hide bare rows without backend memory. Status truth is required: before
- * the first good status response nothing is known, so bare rows stay hidden
- * rather than flashing numberless (a status outage degrades the viewer, but
- * the alternative is exactly the wrongly-placed numberless rows). Doors,
- * tty, tmux and box rows always show. */
-export function filterBareRows<T extends { kind?: string; bot: string; id?: string }>(
+ * the first good status response nothing is known, so unattached bare rows
+ * stay hidden rather than flashing numberless (a status outage degrades the
+ * viewer, but the alternative is exactly the wrongly-placed numberless rows).
+ * Doors, tty, tmux and box rows always show. Attached rows never hide: any
+ * row in `keep` (picker ids like `opencode:ses_…` or `ses:<id12>` session
+ * keys, plus the picked id) stays visible with or without memory — an
+ * attached turn is exactly the one the operator must see, like the session
+ * they are in now. */
+export function filterBareRows<T extends { kind?: string; bot: string; id?: string; sessionId?: string }>(
   rows: T[],
   mem: Record<string, number>,
   statusOk: boolean,
+  keep?: Set<string> | Record<string, unknown> | string[] | null,
 ): T[] {
-  if (!statusOk) return (rows || []).filter((r) => r && r.kind !== 'opencode');
+  const kept = new Set<string>();
+  if (keep instanceof Set) {
+    for (const k of keep) if (typeof k === 'string' && k) kept.add(k);
+  } else if (Array.isArray(keep)) {
+    for (const k of keep) if (typeof k === 'string' && k) kept.add(k);
+  } else if (keep && typeof keep === 'object') {
+    for (const k of Object.keys(keep)) if (k) kept.add(k);
+  }
+  const isKept = (r: T): boolean => {
+    if (!r) return false;
+    const rid = typeof r.id === 'string' && r.id ? r.id : '';
+    if (rid && kept.has(rid)) return true;
+    const sid = typeof r.sessionId === 'string' && r.sessionId
+      ? r.sessionId
+      : (rid.includes(':') ? rid.split(':').pop() || '' : '');
+    if (sid && kept.has(`ses:${String(sid).slice(0, 12)}`)) return true;
+    return false;
+  };
+  if (!statusOk) return (rows || []).filter((r) => (r && r.kind !== 'opencode') || isKept(r));
   return (rows || []).filter((r) => {
     if (!r || r.kind !== 'opencode') return true;
+    if (isKept(r)) return true;
     const key = typeof r.id === 'string' && r.id ? r.id : r.bot;
     const m = (mem || {})[key];
     return typeof m === 'number' && m > 0;
   });
+}
+
+/** Every session known to the activity hub, any state. Unlike the badge map
+ * (working/held only), this is the attached set: working, held AND idle
+ * turns all keep their row visible — an idle attached session is still
+ * attached, like the session the operator is in between turns. Keys are
+ * `tty:<bot>` per bot plus `ses:<sessionId8>` per session. */
+export function attachedKeyMaps(activity: ActivityEntry[] = []): {
+  attached: Set<string>;
+} {
+  const attached = new Set<string>();
+  for (const e of activity || []) {
+    if (!e || typeof e !== 'object') continue;
+    const bots = (e as ActivityEntry).bots;
+    if (Array.isArray(bots)) {
+      for (const b of bots) if (typeof b === 'string' && b) attached.add(`tty:${b}`);
+    }
+    const s8 = (e as ActivityEntry).sessionId8;
+    if (typeof s8 === 'string' && s8) attached.add(`ses:${s8}`);
+  }
+  return { attached };
 }
 /** Patch tty route objects with the agent their status row reports.
  * Status rows for ttyd bots are unkeyed ({bot, agent}); bare rows carry
