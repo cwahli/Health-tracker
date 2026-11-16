@@ -12,6 +12,7 @@ import { maybeRecalibrateDemographicOverlays } from '../utils/appProfileUtils';
 import { auth } from '../firebase';
 import { hasBmiPendingAlert, getProfileFingerprint } from '../utils/biomarkers';
 import type { UserProfile } from '../types';
+import { translations } from '../utils/translations';
 import AppTabs from './AppTabs';
 import AppModals from './AppModals';
 import VoiceReceptionistFab from './VoiceReceptionistFab';
@@ -133,6 +134,9 @@ export default function AppShell(p: AppViewProps) {
     saveAndSync,
     saved,
     selectedModelId,
+    sessionExpired,
+    clearSessionExpired,
+    handleSessionReauth,
     setActions,
     setActiveAgentType,
     setActiveDataReviewBatchIdx,
@@ -202,7 +206,7 @@ export default function AppShell(p: AppViewProps) {
   if (!profile) {
     return (
       <div className="relative min-h-screen bg-theme-bg text-theme-text font-sans">
-        <AuthScreen onLogin={handleLogin} onAuthModeChange={setAuthMode} />
+        <AuthScreen onLogin={handleLogin} onAuthModeChange={setAuthMode} sessionExpired={sessionExpired} />
         <VoiceReceptionistFab
           profile={null}
           setProfile={setProfile}
@@ -308,6 +312,38 @@ export default function AppShell(p: AppViewProps) {
           >
             <X className="w-4 h-4" />
           </button>
+        </div>
+      )}
+
+      {/* SILENT_AUTH_LOSS: the credential died, so the pull answered 401 and the
+          meal history silently shrank to the locally cached slice. Say it out
+          loud and offer the one action that fixes it. */}
+      {sessionExpired && (
+        <div className="px-5 py-2.5 bg-amber-600 text-white text-xs font-bold flex items-center justify-between gap-3 shadow-sm animate-in slide-in-from-top duration-200 shrink-0 z-30">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-100 shrink-0" />
+            <span>
+              {translations[profile?.language || 'en']?.sessionExpiredTitle || translations.en.sessionExpiredTitle}
+              {' — '}
+              {translations[profile?.language || 'en']?.sessionExpiredBody || translations.en.sessionExpiredBody}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleSessionReauth}
+              className="bg-white/15 hover:bg-white/25 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg transition-colors"
+            >
+              {translations[profile?.language || 'en']?.signInTitle || translations.en.signInTitle}
+            </button>
+            <button
+              type="button"
+              onClick={clearSessionExpired}
+              className="text-white/85 hover:text-white cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 

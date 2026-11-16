@@ -5,11 +5,14 @@ import { Activity, Mail, AlertCircle, RefreshCw, KeyRound, CheckCircle } from 'l
 import { supabase, isSupabaseConfigured, getAuthRedirectTo, cleanupAuthUrlParams } from '../utils/supabaseClient';
 import { auth } from '../firebase';
 import { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
+import { storeSessionCredentials, takeExpiredEmail } from '../utils/authSession';
 
 interface AuthScreenProps {
   onLogin: (profile: UserProfile) => void;
   /** Reports login vs signup mode so the voice receptionist can help accordingly. */
   onAuthModeChange?: (mode: 'login' | 'signup') => void;
+  /** Set when the last session was rejected: the gate explains why instead of silently showing short history. */
+  sessionExpired?: boolean;
 }
 
 const resolveUserDisplayName = (u: any, explicitNick?: string): string => {
@@ -29,7 +32,7 @@ const resolveUserDisplayName = (u: any, explicitNick?: string): string => {
   return chosen;
 };
 
-export default function AuthScreen({ onLogin, onAuthModeChange }: AuthScreenProps) {
+export default function AuthScreen({ onLogin, onAuthModeChange, sessionExpired }: AuthScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [nickname, setNickname] = useState('');
@@ -47,6 +50,14 @@ export default function AuthScreen({ onLogin, onAuthModeChange }: AuthScreenProp
   const [waExpired, setWaExpired] = useState(false);
 
   const t = translations[language] || translations.en;
+
+  // Silent-session-loss (SILENT_AUTH_LOSS): after a rejected credential the
+  // gate prefills the address the user last used, so "sign in again" is one
+  // password field away instead of a retyped email.
+  useEffect(() => {
+    const remembered = takeExpiredEmail();
+    if (remembered) setEmail(remembered);
+  }, []);
 
   useEffect(() => {
     let sbUnsub: (() => void) | undefined;
@@ -169,7 +180,7 @@ export default function AuthScreen({ onLogin, onAuthModeChange }: AuthScreenProp
         const data = await resp.json().catch(() => ({}));
         if (resp.ok && data.success) {
           clearInterval(timer);
-          if (data.token) localStorage.setItem('auth_token', data.token);
+          storeSessionCredentials({ token: data.token, refreshToken: data.refreshToken });
           if (data.userProfile?.email) localStorage.setItem('last_active_email', data.userProfile.email);
           setWaSession(null);
           setStatus('idle');
@@ -368,9 +379,9 @@ export default function AuthScreen({ onLogin, onAuthModeChange }: AuthScreenProp
       });
       const data = await resp.json().catch(() => ({}));
       if (resp.ok && data.success) {
-        if (data.token) {
-          localStorage.setItem('auth_token', data.token);
-        }
+        // Keep both halves of the credential: the 30-day access token plus the
+        // 90-day refresh token that prevents the next "silent expiry" bug.
+        storeSessionCredentials({ token: data.token, refreshToken: data.refreshToken });
         localStorage.setItem('last_active_email', cleanEmail);
         const isCwah = cleanEmail.includes('cwah.liu') || cleanEmail.includes('chiwah.liu');
         const resolvedProfile: UserProfile = {
@@ -799,6 +810,16 @@ export default function AuthScreen({ onLogin, onAuthModeChange }: AuthScreenProp
             {t.signInDesc}
           </p>
         </div>
+
+        {/* SILENT_AUTH_LOSS: after a rejected session, say why the user is back
+            here. Otherwise "sign in again" reads like the app randomly forgot
+            their 451 meals. */}
+        {sessionExpired && (
+          <div className="mb-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-left">
+            <p className="text-sm font-bold text-amber-800 dark:text-amber-200">{t.sessionExpiredTitle}</p>
+            <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">{t.sessionExpiredBody}</p>
+          </div>
+        )}
 
         {/* Localized switch for demo purposes inside Auth page */}
         <div className="flex justify-end mb-4">

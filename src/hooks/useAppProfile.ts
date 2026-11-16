@@ -26,7 +26,7 @@ import { useEffect, useState } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { BiomarkerLog, DailyBenefit, FoodIdea, FoodLog, HealthAction, RecommendationReport, UserProfile } from '../types';
 import { JobStore } from '../jobs/JobStore';
-import { get, set, getStorageKey, safeSaveToLocalStorage, clearChatMemoryKeys } from '../utils/storageUtils';
+import { get, getStorageKey, safeSaveToLocalStorage, clearChatMemoryKeys } from '../utils/storageUtils';
 import { purgeHallucinatedAndCorruptedData } from '../utils/dataSanitize';
 import { PRIMARY_NUTRIENTS } from '../utils/nutrients';
 import { resolveInitialLanguage } from '../utils/syncUtils';
@@ -261,7 +261,11 @@ export function useAppProfile(options: UseAppProfileOptions): UseAppProfileRetur
       foodIdeas,
       report: loadedReport
     };
-    await set(storageKey, bundle);
+    // Count durability (SILENT_AUTH_LOSS sibling): this loader rewrites the
+    // bundle on every sign-in/restore. A plain `set` dropped `totalFoodsCount`,
+    // so a remount forgot the real count and the pager fell back to the cached
+    // slice. `safeSaveToLocalStorage` carries the known total over.
+    await safeSaveToLocalStorage(storageKey, bundle);
 
     setProfile(loadedProfile);
     setFoodLogs(loadedFoods);
