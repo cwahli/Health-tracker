@@ -3580,6 +3580,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         commandcodeLevels = commandcodeEfforts(caches, ref.id, config);
         if (commandcodeLevels === null) {
           await api.sendMessage(chatId, `Could not read the reasoning-effort levels for ${ref.id} from the Command Code CLI — try again in a moment.`);
+
           return;
         }
         if (!commandcodeLevels.length) {
@@ -7117,6 +7118,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       || (!turnIsCommandcode && workSession?.viewMode === 'tui' && workSession.opencodeSessionId
         ? workSession.opencodeSessionId
         : undefined);
+    // Connectivity pings run throwaway: force a fresh session so their
+    // scaffolding never lands in the chat's transcript or the TUI (migrate intent).
+    if (isPingTurn) turnSessionId = null;
     // A TUI is open on this same conversation, so the user can watch this turn
     // happen in the terminal as well. It shares the session, so what runs here
     // shows up there — one turn at a time, never two at once.

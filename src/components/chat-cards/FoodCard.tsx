@@ -1448,10 +1448,10 @@ export const FoodCard: React.FC<AgentCardProps & {
                                const imgIdx = resolveTileImageIndex(item, messageImages.length);
                                const resolvedImgSrc = resolveHistoricalImgSrc(item, messageImages, foodLogs || [], imgIdx);
                                const itemWidthClass = cropTiles.length > 4
-                                 ? 'w-[135px] sm:w-[158px] shrink-0'
+                                 ? 'w-[90px] sm:w-[105px] shrink-0'
                                  : cropTiles.length === 1 
-                                   ? 'w-[195px] sm:w-[225px] shrink-0' 
-                                   : 'w-full max-w-[240px]';
+                                   ? 'w-[130px] sm:w-[150px] shrink-0' 
+                                   : 'w-full max-w-[160px]';
                                return (
                                  <div key={tile.key} className={`flex flex-col items-center gap-1 shrink-0 relative group ${itemWidthClass}`}>
                                    <div className="relative w-full">
