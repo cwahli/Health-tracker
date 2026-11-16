@@ -8,6 +8,7 @@
 | [PACKS.md](./PACKS.md) | Retired — execute `plan/ROADMAP.md` |
 | [TEMPLATES.md](./TEMPLATES.md) | SELF-CHECK, GATE LOG paste format (IMPACT = locked spec file) |
 | [JOURNEY.md](./JOURNEY.md) | **The process** (Studio + Antigravity + Grok). Planner → Guard → **go** → Builder → Guard → Reviewer |
+| [PROTO_FIRST.md](./PROTO_FIRST.md) | **Proto → dev promotion**: iterate on `proto.health-tracker.co.uk/ht/`, human `go for dev`, only then `main` → dev site |
 | [BUG_PIPELINE.md](./BUG_PIPELINE.md) | **Bug lane**: states, roles, gates, §4.10 answers — ticket-first handoff for any card work |
 | [standing.json](./standing.json) | Must-keep journeys/features. Guard enforces. Add a row when something was overwritten |
 | [LOCKED_SPEC_PROCESS.md](./LOCKED_SPEC_PROCESS.md) | Packet internals (agent-written) |
