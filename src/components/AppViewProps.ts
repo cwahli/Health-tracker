@@ -97,6 +97,10 @@ export interface AppViewProps {
   report: RecommendationReport | null;
   saveAndSync: (...args: any[]) => Promise<any>;
   selectedModelId: string;
+  /** SILENT_AUTH_LOSS: a pull stayed 401 after a refresh — credential is gone. */
+  sessionExpired: boolean;
+  clearSessionExpired: () => void;
+  handleSessionReauth: () => void;
   setActions: Dispatch<SetStateAction<HealthAction[]>>;
   setActiveAgentType: Dispatch<SetStateAction<JobRuntimeAgentType>>;
   setActiveDataReviewBatchIdx: Dispatch<SetStateAction<number | string | null>>;

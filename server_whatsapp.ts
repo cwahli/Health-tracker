@@ -474,9 +474,22 @@ whatsappRouter.post('/api/auth/whatsapp/complete', async (req, res) => {
       nickname: user.nickname,
       userType: user.user_type || 'Standard',
     });
+    let refreshToken: string | undefined;
+    try {
+      const { signRefreshToken } = await import('./server_auth.js');
+      refreshToken = signRefreshToken({
+        uid: user.id,
+        email: user.email,
+        nickname: user.nickname,
+        userType: user.user_type || 'Standard',
+      });
+    } catch {
+      /* refresh is best-effort: a missing one only means the 30-day re-sign-in */
+    }
     return res.json({
       success: true,
       token,
+      refreshToken,
       userProfile: { uid: user.id, email: user.email, nickname: user.nickname, userType: user.user_type || 'Standard' },
     });
   } catch (err: any) {

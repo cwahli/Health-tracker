@@ -1386,6 +1386,8 @@ export const id = {
   "servingSizeLabel": "Serving Size Label",
   "servingSizePlaceholder": "Serving Size Placeholder",
   "sessionData": "Session Data",
+  "sessionExpiredBody": "Sesi Anda berakhir, jadi makanan tersimpan tidak dapat diperiksa ulang. Masuk lagi untuk melihat semuanya.",
+  "sessionExpiredTitle": "Sesi berakhir",
   "sessionEvents": "Session Events",
   "sessionId": "Session Id",
   "sessionLabel": "Session Label",

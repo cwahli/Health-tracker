@@ -60,8 +60,14 @@ const BASELINE_TOTAL_KEYS = 3956;
  * keys added to all four packs (applyPortions, portionsSelected,
  * selectAllPortionsHint, stagedBadge) for the composite-dish Apply bar.
  * Growth only — no existing copy value edited.
+ *
+ * Re-recorded for SILENT_AUTH_LOSS (2026-11-16): two keys added to all four
+ * packs (`sessionExpiredTitle`, `sessionExpiredBody`) so the "session expired —
+ * sign in again" banner is not hardcoded English. The page-count collapse
+ * ("Page 1 Of 3" for a 451-meal account) happened silently; these strings are
+ * what makes it visible. Growth only — no existing copy value edited.
  */
-const FROZEN_DIGESTS = { en: '8f67b6a431e1ab39', id: 'f0fe4be58077f598', fr: '2f996389d041f12c', zh: '8be15e8d619ef213' } as const;
+const FROZEN_DIGESTS = { en: '580d50e190dab263', id: 'a1f7c3ce05c14844', fr: 'd245d2cc134f3adb', zh: 'c75cf3d2fe9f9a1b' } as const;
 
 const stablePairs = (pack: Record<string, unknown>) =>
   JSON.stringify(Object.keys(pack).sort().map((key) => [key, pack[key]]));

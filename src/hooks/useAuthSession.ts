@@ -5,6 +5,11 @@ import { supabase, isSupabaseConfigured, cleanupAuthUrlParams } from '../utils/s
 import { clearCachedAppData } from '../utils/storageUtils';
 import { JobStore } from '../jobs/JobStore';
 import { UserProfile } from '../types';
+import {
+  clearSessionCredentials,
+  onSessionExpired,
+  rememberExpiredEmail,
+} from '../utils/authSession';
 
 /**
  * Q-11.2 — auth & session, moved out of `src/App.tsx` (move-only).
@@ -46,10 +51,25 @@ export interface UseAuthSessionReturn {
   getEffectiveUser: () => { uid: string; email: string; displayName: string } | null;
   handleLogin: (loggedProfile: UserProfile) => Promise<void>;
   handleSignOut: () => Promise<void>;
+  /**
+   * True when a pull was rejected with 401 even after a token refresh, i.e.
+   * the credential is genuinely gone. The shell shows the "session expired —
+   * sign in again" banner instead of a silently short meal history.
+   */
+  sessionExpired: boolean;
+  /** Clear the flag once the user has signed in again (or dismissed it). */
+  clearSessionExpired: () => void;
+  /**
+   * Return to the sign-in gate **without** wiping the cached bundle, so a
+   * re-sign-in reloads the same 451 meals instead of an empty account.
+   */
+  handleSessionReauth: () => void;
 }
 
 export function useAuthSession(options: UseAuthSessionOptions): UseAuthSessionReturn {
   const { profile, isAuthChecking, setIsAuthChecking, onAuthResolved, onUser, clearSessionState, applyLoginProfile } = options;
+
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   // The bootstrap effect must subscribe once and still see fresh callbacks, so the
   // options it uses are read through refs instead of being effect dependencies.
@@ -59,6 +79,17 @@ export function useAuthSession(options: UseAuthSessionOptions): UseAuthSessionRe
   onUserRef.current = onUser;
   onAuthResolvedRef.current = onAuthResolved;
   clearSessionStateRef.current = clearSessionState;
+
+  // SILENT_AUTH_LOSS: sync code emits `auth_session_expired` only when a 401
+  // survived a refresh attempt. Surface it here so the shell can show the
+  // banner + sign-in CTA; never leave a dead session looking "signed in".
+  useEffect(() => {
+    const unsubscribe = onSessionExpired((detail) => {
+      rememberExpiredEmail(detail?.email || profile?.email || null);
+      setSessionExpired(true);
+    });
+    return unsubscribe;
+  }, [profile?.email]);
 
   useEffect(() => {
     let unsubs: (() => void)[] = [];
@@ -72,7 +103,19 @@ export function useAuthSession(options: UseAuthSessionOptions): UseAuthSessionRe
     const restoreLocalSession = async (): Promise<boolean> => {
       const lastEmail = (localStorage.getItem('last_active_email') || '').toLowerCase().trim();
       if (!lastEmail) return false;
-      const uid = 'usr_' + lastEmail.replace(/[^a-z0-9]/gi, '_');
+      // SILENT_AUTH_LOSS sibling: the cached bundle already knows this account's
+      // real uid (`usr_<ts>_<hex>` for D1 signups, the Firebase uid for Google).
+      // Synthesizing `usr_<email>` sent a uid that owns no rows, so the pull
+      // answered 0 meals and the pager looked "complete". Prefer the stored uid.
+      let cachedUid = '';
+      try {
+        const { getAggregatedAppData } = await import('../utils/storageUtils');
+        const bundle = await getAggregatedAppData(lastEmail);
+        cachedUid = String(bundle?.profile?.uid || '').trim();
+      } catch {
+        cachedUid = '';
+      }
+      const uid = cachedUid || ('usr_' + lastEmail.replace(/[^a-z0-9]/gi, '_'));
       await onUserRef.current(uid, lastEmail);
       return true;
     };
@@ -283,6 +326,8 @@ export function useAuthSession(options: UseAuthSessionOptions): UseAuthSessionRe
     if (loggedProfile.email) {
       localStorage.setItem('last_active_email', loggedProfile.email.toLowerCase().trim());
     }
+    // A successful sign-in is the cure for an expired session.
+    setSessionExpired(false);
     setIsAuthChecking(false);
     onAuthResolved(); // was: setIsInitialDataLoading(false)
     if (loggedProfile.email) {
@@ -296,6 +341,19 @@ export function useAuthSession(options: UseAuthSessionOptions): UseAuthSessionRe
     }
   };
 
+  /**
+   * Re-authentication door for an expired session: drop the in-memory profile
+   * (so the gate renders) but keep `last_active_email` and the cached bundle,
+   * so signing back in restores this account's own history. Distinct from
+   * `handleSignOut`, which deliberately wipes the cache.
+   */
+  const handleSessionReauth = () => {
+    clearSessionCredentials();
+    setSessionExpired(true);
+    clearSessionState();
+    setIsAuthChecking(false);
+  };
+
   const handleSignOut = async () => {
     try {
       // Clear all React state immediately so no glimpse of user data after sign-out
@@ -303,6 +361,8 @@ export function useAuthSession(options: UseAuthSessionOptions): UseAuthSessionRe
       localStorage.removeItem('last_active_email');
       localStorage.removeItem('demo_profile_type');
       localStorage.removeItem('demo_fresh_login');
+      clearSessionCredentials();
+      setSessionExpired(false);
       sessionStorage.clear();
       // Clear IndexedDB + localStorage app cache so the next login starts clean
       // instead of resurrecting this user's stale state.
@@ -339,5 +399,5 @@ export function useAuthSession(options: UseAuthSessionOptions): UseAuthSessionRe
   // Kept for signature parity with the pre-move code: the auth gate reads this flag.
   void isAuthChecking;
 
-  return { getEffectiveUser, handleLogin, handleSignOut };
+  return { getEffectiveUser, handleLogin, handleSignOut, sessionExpired, clearSessionExpired: () => setSessionExpired(false), handleSessionReauth };
 }

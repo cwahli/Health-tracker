@@ -5,6 +5,7 @@ import { sanitizeForFirestore } from '../utils/firestoreUtils';
 import { JobStore, isStalePriorTurn, mealSnapshotKey } from './JobStore';
 import { AgentJob } from './types';
 import { toPendingFoodLog } from '../mealBuild/adapters';
+import { AUTH_TOKEN_KEY, getRefreshToken, isSessionTokenUsable, refreshSession } from '../utils/authSession';
 
 // [FreeTier] thin clean_result - direct client Supabase calls disabled in favor of D1 backend routes
 let isDirectClientSupabaseDisabled = true;
@@ -16,6 +17,10 @@ const backendDeleteTried = new Set<string>();
 // back to the htk session token in localStorage (same credential
 // /api/auth/me verifies server-side). Without it the server answers 401 and
 // hydration silently yields nothing.
+//
+// SILENT_AUTH_LOSS sibling (2026-11-16): never send an expired `auth_token` —
+// it is a guaranteed 401 that makes the app look signed out while still
+// rendering the cached shell. Refresh first, and if that fails send nothing.
 async function jobApiAuthHeaders(): Promise<Record<string, string>> {
   try {
     if (auth.currentUser) {
@@ -23,8 +28,12 @@ async function jobApiAuthHeaders(): Promise<Record<string, string>> {
       if (t) return { Authorization: `Bearer ${t}` };
     }
     if (typeof localStorage !== 'undefined') {
-      const local = localStorage.getItem('auth_token');
-      if (local) return { Authorization: `Bearer ${local}` };
+      const local = localStorage.getItem(AUTH_TOKEN_KEY);
+      if (isSessionTokenUsable(local)) return { Authorization: `Bearer ${local}` };
+      if (getRefreshToken()) {
+        const outcome = await refreshSession();
+        if (outcome.status === 'ok') return { Authorization: `Bearer ${outcome.token}` };
+      }
     }
   } catch { /* offline / signed out: server decides */ }
   return {};

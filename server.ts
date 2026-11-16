@@ -1455,9 +1455,35 @@ app.use((req, res, next) => {
       if (!result.success) {
         return res.status(401).json({ error: result.error || 'Invalid email or password' });
       }
-      return res.json({ success: true, token: result.token, userProfile: result.user });
+      return res.json({ success: true, token: result.token, refreshToken: result.refreshToken, userProfile: result.user });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || 'Login failed' });
+    }
+  });
+
+  // SILENT_AUTH_LOSS (2026-11-16): trade a 90-day refresh token for a new
+  // 30-day access token. Without this route an expired `htk` token left a
+  // password-less local session sending 401s forever, and Food History
+  // silently collapsed to `loaded rows / 15` pages ("Page 1 Of 3").
+  app.post("/api/auth/refresh", async (req, res) => {
+    try {
+      const refreshToken = String((req.body && req.body.refreshToken) || '');
+      const { verifyRefreshToken, signSessionToken, signRefreshToken } = await import('./server_auth.js');
+      const payload = verifyRefreshToken(refreshToken);
+      if (!payload || !payload.uid) {
+        return res.status(401).json({ error: 'Invalid or expired refresh token' });
+      }
+      const base = {
+        uid: payload.uid,
+        email: payload.email,
+        nickname: payload.nickname,
+        userType: payload.userType,
+      };
+      const token = signSessionToken(base);
+      const newRefreshToken = signRefreshToken(base);
+      return res.json({ success: true, token, refreshToken: newRefreshToken, userProfile: base });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Token refresh failed' });
     }
   });
 
@@ -1469,7 +1495,7 @@ app.use((req, res, next) => {
       if (!result.success) {
         return res.status(400).json({ error: result.error || 'Registration failed' });
       }
-      return res.json({ success: true, token: result.token, userProfile: result.user });
+      return res.json({ success: true, token: result.token, refreshToken: result.refreshToken, userProfile: result.user });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || 'Registration failed' });
     }

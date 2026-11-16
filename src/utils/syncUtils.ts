@@ -2,6 +2,13 @@ import { FoodLog, BiomarkerLog, HealthAction, DailyBenefit, FoodIdea, Recommenda
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { resolveMealVerdict } from './verdictUtils.js';
 import { translations } from './translations';
+import {
+  AUTH_TOKEN_KEY,
+  emitSessionExpired,
+  getRefreshToken,
+  isSessionTokenUsable,
+  refreshSession,
+} from './authSession';
 
 
 // Attach the Firebase ID token when signed in so the authenticated
@@ -24,9 +31,20 @@ export async function pullAuthHeaders(): Promise<Record<string, string>> {
     if (token) {
       headers['Authorization'] = 'Bearer ' + token;
     } else {
-      const localToken = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
-      if (localToken) {
+      const localToken = typeof localStorage !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) : null;
+      // SILENT_AUTH_LOSS: never send a token we already know is dead — it
+      // guarantees a 401 and hides the real state (page count collapses to
+      // `loaded rows / 15`). Refresh first; if that fails, ask the server
+      // with no credential and let the 401 branch surface it.
+      if (isSessionTokenUsable(localToken)) {
         headers['Authorization'] = 'Bearer ' + localToken;
+      } else if (getRefreshToken()) {
+        const outcome = await refreshSession();
+        if (outcome.status === 'ok') {
+          headers['Authorization'] = 'Bearer ' + outcome.token;
+        } else if (outcome.status === 'invalid') {
+          emitSessionExpired();
+        }
       }
     }
   } catch { /* offline / signed out: server decides */ }
@@ -332,26 +350,44 @@ export async function fetchAllConsolidatedLogs(
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 30000);
-    const resp = await fetch('/api/sync/supabase-pull', {
+    const body = JSON.stringify({
+      uid,
+      email,
+      lastSyncTime: options.lastSyncTime,
+      listOnly: options.listOnly ?? false,
+      pageSize: options.pageSize,
+      offset: options.offset,
+      cursor: options.cursor
+    });
+    let resp = await fetch('/api/sync/supabase-pull', {
       method: 'POST',
       headers: await pullAuthHeaders(),
-      body: JSON.stringify({
-        uid,
-        email,
-        lastSyncTime: options.lastSyncTime,
-        listOnly: options.listOnly ?? false,
-        pageSize: options.pageSize,
-        offset: options.offset,
-        cursor: options.cursor
-      }),
+      body,
       signal: controller.signal
     });
     clearTimeout(timeoutId);
 
+    // SILENT_AUTH_LOSS: one retry after a *forced* token refresh. A 401 here
+    // used to be swallowed, so no `totalFoodsCount` reached the UI and Food
+    // History silently rendered `loaded rows / 15` pages ("Page 1 Of 3" for a
+    // 451-meal account). Retry once, then surface the real state.
     if (resp.status === 401) {
-      // Class: silent 401 hides totalFoodsCount → UI collapses to ~1–2 pages.
-      // Fail loud so the next regression is visible in the console/net log.
-      console.error('[syncUtils] supabase-pull 401 Unauthorized — missing/expired Firebase ID token (uid=%s)', uid);
+      console.error('[syncUtils] supabase-pull 401 Unauthorized — retrying after session refresh (uid=%s)', uid);
+      const outcome = await refreshSession({ force: true });
+      if (outcome.status === 'ok') {
+        resp = await fetch('/api/sync/supabase-pull', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + outcome.token,
+          },
+          body
+        });
+      }
+      if (resp.status === 401) {
+        console.error('[syncUtils] supabase-pull still 401 after refresh — the session is genuinely gone (uid=%s)', uid);
+        emitSessionExpired(email);
+      }
     }
 
     if (resp.ok) {
@@ -395,10 +431,13 @@ export async function fetchAllConsolidatedLogs(
     console.warn('[syncUtils] /api/sync/supabase-pull proxy fetch error:', err);
   }
 
-  // 2. Direct client fallback if proxy returned nothing and direct client is configured
+  // 2. Direct client fallback if proxy returned nothing and direct client is configured.
+  // SILENT_AUTH_LOSS sibling: `food_logs` / `biomarker_logs` / `profiles` key rows on
+  // `firebase_uid` (there is no `user_id` column), so the old `.eq('user_id', uid)`
+  // matched nothing and the fallback silently returned an empty history.
   if (serverFoods.length === 0 && serverBiomarkers.length === 0 && isSupabaseConfigured && supabase) {
     try {
-      const { data: foodRows } = await supabase.from('food_logs').select('*').eq('user_id', uid);
+      const { data: foodRows } = await supabase.from('food_logs').select('*').eq('firebase_uid', uid);
       if (foodRows) {
         foodRows.forEach(r => {
           if (!deleteMapFoods[r.id]) {
@@ -406,7 +445,7 @@ export async function fetchAllConsolidatedLogs(
           }
         });
       }
-      const { data: bioRows } = await supabase.from('biomarker_logs').select('*').eq('user_id', uid);
+      const { data: bioRows } = await supabase.from('biomarker_logs').select('*').eq('firebase_uid', uid);
       if (bioRows) {
         bioRows.forEach(r => {
           if (!deleteMapBiomarkers[r.id]) {
@@ -430,17 +469,36 @@ export async function fetchFoodLogsPage(
 ): Promise<{ foods: FoodLog[]; totalFoodsCount: number }> {
   const offset = Math.max(0, (page - 1) * pageSize);
   try {
-    const resp = await fetch('/api/sync/supabase-pull', {
+    const body = JSON.stringify({
+      uid,
+      email,
+      listOnly: true,
+      pageSize,
+      offset
+    });
+    let resp = await fetch('/api/sync/supabase-pull', {
       method: 'POST',
       headers: await pullAuthHeaders(),
-      body: JSON.stringify({
-        uid,
-        email,
-        listOnly: true,
-        pageSize,
-        offset
-      })
+      body
     });
+    // SILENT_AUTH_LOSS (same class as fetchAllConsolidatedLogs): a bare 401
+    // returns `foods: []` and loses the count, so the pager silently shrinks
+    // to the cached slice. Buy one fresh token, retry once, and when that
+    // also fails say so out loud instead of pretending the history is short.
+    if (resp.status === 401) {
+      const outcome = await refreshSession({ force: true });
+      if (outcome.status === 'ok') {
+        resp = await fetch('/api/sync/supabase-pull', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + outcome.token,
+          },
+          body
+        });
+      }
+      if (resp.status === 401) emitSessionExpired(email);
+    }
     if (resp.ok) {
       const data = await resp.json();
       if (data && data.success && Array.isArray(data.foods)) {

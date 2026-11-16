@@ -1374,6 +1374,8 @@ export const zh = {
   "servingSizeLabel": "份量大小",
   "servingSizePlaceholder": "份量大小占位符",
   "sessionData": "会话数据",
+  "sessionExpiredBody": "您的会话已过期，因此无法重新核验已保存的餐食。请重新登录以查看全部。",
+  "sessionExpiredTitle": "会话已过期",
   "sessionEvents": "会话事件",
   "sessionId": "会话 ID",
   "sessionLabel": "会话",

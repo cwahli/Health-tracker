@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { pullAuthHeaders } from '../syncUtils';
+import { __resetSessionRefreshState } from '../authSession';
+
+/** Build a syntactically valid, unexpired `htk` session token (signature is not checked client-side). */
+function liveToken(uid = 'uid-1', email = 'a@b.com'): string {
+  const payload = { uid, email, exp: Math.floor(Date.now() / 1000) + 3600 };
+  const b64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  return `htk.${b64}.testsig`;
+}
 
 // Minimal localStorage mock for Node environment
 const mockStorage: Record<string, string> = {};
@@ -14,6 +22,7 @@ describe('Food Pagination Count & Auth Header Regression Sensor (BUG-1)', () => 
   beforeEach(() => {
     localStorageMock.clear();
     (globalThis as any).localStorage = localStorageMock;
+    __resetSessionRefreshState();
   });
 
   afterEach(() => {
@@ -22,7 +31,7 @@ describe('Food Pagination Count & Auth Header Regression Sensor (BUG-1)', () => 
 
   describe('pullAuthHeaders — mobile & custom session resilience', () => {
     it('attaches auth_token from localStorage when Firebase auth has no currentUser (mobile / custom auth)', async () => {
-      localStorageMock.setItem('auth_token', 'custom-session-jwt-token-12345');
+      localStorageMock.setItem('auth_token', liveToken());
       // Mock firebase auth without currentUser
       vi.doMock('../../firebase', () => ({
         auth: { currentUser: null, authStateReady: vi.fn().mockResolvedValue(undefined) }
@@ -30,7 +39,7 @@ describe('Food Pagination Count & Auth Header Regression Sensor (BUG-1)', () => 
 
       const headers = await pullAuthHeaders();
       expect(headers['Content-Type']).toBe('application/json');
-      expect(headers['Authorization']).toBe('Bearer custom-session-jwt-token-12345');
+      expect(headers['Authorization']).toBe('Bearer ' + localStorageMock.getItem('auth_token'));
     });
 
     it('prefers Firebase ID token when auth.currentUser is available', async () => {

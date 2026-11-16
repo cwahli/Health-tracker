@@ -57,6 +57,45 @@ export function verifySessionToken(token: string): SessionPayload | null {
   }
 }
 
+/**
+ * SILENT_AUTH_LOSS (2026-11-16): a 30-day `htk` access token with no refresh
+ * path is what turned a real 451-meal account into "Page 1 Of 3" — the client
+ * kept a password-less local session after the token died, and every pull
+ * answered 401. These refresh tokens (90 days, same HMAC scheme, `htr.` prefix)
+ * let the client mint a new access token without a new password, or fail
+ * *visibly* when the credential is genuinely gone.
+ */
+export const REFRESH_TOKEN_TTL_SECONDS = 90 * 24 * 60 * 60;
+
+export interface RefreshPayload extends SessionPayload {
+  typ?: 'refresh';
+}
+
+export function signRefreshToken(payload: SessionPayload): string {
+  const exp = payload.exp || Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL_SECONDS;
+  const data = JSON.stringify({ ...payload, typ: 'refresh', exp });
+  const b64Data = Buffer.from(data, 'utf8').toString('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(b64Data).digest('base64url');
+  return `htr.${b64Data}.${sig}`;
+}
+
+export function verifyRefreshToken(token: string): RefreshPayload | null {
+  if (!token || !token.startsWith('htr.')) return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const [, b64Data, sig] = parts;
+  const expectedSig = crypto.createHmac('sha256', SESSION_SECRET).update(b64Data).digest('base64url');
+  if (sig !== expectedSig) return null;
+  try {
+    const payload: RefreshPayload = JSON.parse(Buffer.from(b64Data, 'base64url').toString('utf8'));
+    if (payload.typ !== 'refresh') return null;
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 export async function findUserByEmail(email: string): Promise<any | null> {
   const cleanEmail = (email || '').trim().toLowerCase();
   if (!cleanEmail) return null;
@@ -82,7 +121,7 @@ export async function findUserByEmail(email: string): Promise<any | null> {
   return inMemoryUsers.get(cleanEmail) || null;
 }
 
-export async function authenticateUser(email: string, password: string): Promise<{ success: boolean; user?: any; token?: string; error?: string }> {
+export async function authenticateUser(email: string, password: string): Promise<{ success: boolean; user?: any; token?: string; refreshToken?: string; error?: string }> {
   const cleanEmail = (email || '').trim().toLowerCase();
   if (!cleanEmail || !password) {
     return { success: false, error: 'Email and password required' };
@@ -97,6 +136,12 @@ export async function authenticateUser(email: string, password: string): Promise
         nickname: ADMIN_CREDENTIALS.nickname,
         userType: ADMIN_CREDENTIALS.userType
       });
+      const refreshToken = signRefreshToken({
+        uid: ADMIN_CREDENTIALS.uid,
+        email: ADMIN_CREDENTIALS.email,
+        nickname: ADMIN_CREDENTIALS.nickname,
+        userType: ADMIN_CREDENTIALS.userType
+      });
       return {
         success: true,
         user: {
@@ -105,7 +150,8 @@ export async function authenticateUser(email: string, password: string): Promise
           nickname: ADMIN_CREDENTIALS.nickname,
           userType: ADMIN_CREDENTIALS.userType
         },
-        token
+        token,
+        refreshToken
       };
     }
     return { success: false, error: 'Invalid email or password' };
@@ -122,12 +168,14 @@ export async function authenticateUser(email: string, password: string): Promise
     return { success: false, error: 'Invalid email or password' };
   }
 
-  const token = signSessionToken({
+  const sessionPayload = {
     uid: user.id,
     email: user.email,
     nickname: user.nickname,
     userType: user.user_type || 'Standard'
-  });
+  };
+  const token = signSessionToken(sessionPayload);
+  const refreshToken = signRefreshToken(sessionPayload);
 
   return {
     success: true,
@@ -137,11 +185,12 @@ export async function authenticateUser(email: string, password: string): Promise
       nickname: user.nickname,
       userType: user.user_type || 'Standard'
     },
-    token
+    token,
+    refreshToken
   };
 }
 
-export async function registerUser(email: string, password: string, nickname?: string): Promise<{ success: boolean; user?: any; token?: string; error?: string }> {
+export async function registerUser(email: string, password: string, nickname?: string): Promise<{ success: boolean; user?: any; token?: string; refreshToken?: string; error?: string }> {
   const cleanEmail = (email || '').trim().toLowerCase();
   if (!cleanEmail) {
     return { success: false, error: 'Valid email required' };
@@ -184,12 +233,14 @@ export async function registerUser(email: string, password: string, nickname?: s
     });
   }
 
-  const token = signSessionToken({
+  const sessionPayload = {
     uid,
     email: cleanEmail,
     nickname: cleanNick,
     userType: 'Standard'
-  });
+  };
+  const token = signSessionToken(sessionPayload);
+  const refreshToken = signRefreshToken(sessionPayload);
 
   return {
     success: true,
@@ -199,7 +250,8 @@ export async function registerUser(email: string, password: string, nickname?: s
       nickname: cleanNick,
       userType: 'Standard'
     },
-    token
+    token,
+    refreshToken
   };
 }
 

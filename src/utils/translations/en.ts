@@ -1386,6 +1386,8 @@ export const en = {
   "servingSizeLabel": "Serving Size Label",
   "servingSizePlaceholder": "Serving Size Placeholder",
   "sessionData": "Session Data",
+  "sessionExpiredBody": "Your session expired, so your saved meals could not be re-checked. Sign in again to see all of them.",
+  "sessionExpiredTitle": "Session expired",
   "sessionEvents": "Session Events",
   "sessionId": "Session Id",
   "sessionLabel": "Session Label",

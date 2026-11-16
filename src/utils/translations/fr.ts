@@ -1374,6 +1374,8 @@ export const fr = {
   "servingSizeLabel": "Étiquette de taille de portion",
   "servingSizePlaceholder": "Espace réservé de taille de portion",
   "sessionData": "Données de session",
+  "sessionExpiredBody": "Votre session a expiré, donc vos repas enregistrés n'ont pas pu être vérifiés. Reconnectez-vous pour les voir tous.",
+  "sessionExpiredTitle": "Session expirée",
   "sessionEvents": "Événements de session",
   "sessionId": "Identifiant de session",
   "sessionLabel": "Étiquette de session",

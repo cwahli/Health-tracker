@@ -92,7 +92,7 @@ export default function App() {
     setSyncState('local');
   };
 
-  const { getEffectiveUser, handleLogin, handleSignOut } = useAuthSession({
+  const { getEffectiveUser, handleLogin, handleSignOut, sessionExpired, clearSessionExpired, handleSessionReauth } = useAuthSession({
     profile,
     isAuthChecking,
     setIsAuthChecking,
@@ -281,6 +281,9 @@ export default function App() {
       handleUpdateFoodLog={handleUpdateFoodLog}
       healthSubTab={healthSubTab}
       hideSensitive={hideSensitive}
+      sessionExpired={sessionExpired}
+      clearSessionExpired={clearSessionExpired}
+      handleSessionReauth={handleSessionReauth}
       initiallyExpandedFoodId={initiallyExpandedFoodId}
       isAuthChecking={isAuthChecking}
       isConflictModalOpen={isConflictModalOpen}
