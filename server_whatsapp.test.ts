@@ -307,6 +307,14 @@ describe('server_whatsapp: HTTP flow (WA-1..WA-3)', () => {
     const session = verifySessionToken(done.token);
     expect(session?.uid).toBe(done.userProfile.uid);
 
+    // SILENT_AUTH_LOSS sibling (2026-11-16): the WhatsApp path used to store
+    // only `auth_token`. A `htk` access token is terminal after 30 days, so a
+    // WhatsApp-only user hit the same silent 401 that collapsed meal history to
+    // "Page 1 Of 3". The completion response must carry the 90-day refresh half
+    // too — and it must be a real refresh token, not the access token echoed.
+    expect(done.refreshToken).toMatch(/^htr\./);
+    expect(done.refreshToken).not.toBe(done.token);
+
     // replay of complete is dead (single-use)
     const replay = await (
       await fetch(`${base}/api/auth/whatsapp/complete`, {
