@@ -37,7 +37,7 @@ export function lazyWithRetry<T extends React.ComponentType<any>>(
 
           // Fallback UI Component if module fetch remains unavailable
           const FallbackComponent: React.ComponentType<any> = (props: any) => (
-            React.createElement('div', { className: 'p-4 m-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-sm text-center' },
+            React.createElement('div', { className: 'p-4 m-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 text-sm text-center' },
               React.createElement('p', null, 'Component temporarily unavailable due to a network update.'),
               React.createElement('button', {
                 type: 'button',
@@ -47,7 +47,7 @@ export function lazyWithRetry<T extends React.ComponentType<any>>(
                     window.location.reload();
                   }
                 },
-                className: 'mt-2 px-3 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600 font-medium cursor-pointer'
+                className: 'mt-2 px-3 py-1 bg-amber-700 text-white rounded text-xs hover:bg-amber-800 font-medium cursor-pointer'
               }, 'Reload App')
             )
           );

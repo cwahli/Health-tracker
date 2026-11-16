@@ -96,6 +96,15 @@ const evaluateNutrientStatus = (value: number, bounds: { min: number, max: numbe
   return { color: 'bg-slate-300 dark:bg-slate-600', text: 'Unknown' };
 };
 
+// Accessible text counterpart for dot bg colors (WCAG AA 4.5:1 on white cards).
+// Dots themselves are non-text indicators; this is for the status label next to them.
+const dotTextClass = (bg: string): string => {
+  if (bg.includes('amber')) return 'text-amber-800 dark:text-amber-300';
+  if (bg.includes('emerald')) return 'text-emerald-700 dark:text-emerald-300';
+  if (bg.includes('rose')) return 'text-rose-700 dark:text-rose-300';
+  return 'text-slate-600 dark:text-slate-300';
+};
+
 interface TrendsTabProps {
   profile: UserProfile;
   foodLogs: FoodLog[];
@@ -546,7 +555,7 @@ export default function TrendsTab({
                       </div>
                     </div>
                     <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700">
-                      <span className={`text-[10px] font-bold ${dot.color.replace('bg-', 'text-')}`}>{dot.statusText}</span>
+                      <span className={`text-[10px] font-bold ${dotTextClass(dot.color)}`}>{dot.statusText}</span>
                     </div>
                   </div>
                 </div>
@@ -588,7 +597,7 @@ export default function TrendsTab({
                       </div>
                     </div>
                     <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700">
-                      <span className={`text-[10px] font-bold ${dot.color.replace('bg-', 'text-')}`}>{dot.statusText}</span>
+                      <span className={`text-[10px] font-bold ${dotTextClass(dot.color)}`}>{dot.statusText}</span>
                     </div>
                   </div>
                 </div>

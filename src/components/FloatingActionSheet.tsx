@@ -79,7 +79,7 @@ export default function FloatingActionSheet({
                   onHealthInfo();
                   onClose();
                 }}
-                className="flex items-center justify-center py-3.5 px-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition-all shadow-lg shadow-emerald-600/20 hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap"
+                className="flex items-center justify-center py-3.5 px-3 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm transition-all shadow-lg shadow-emerald-600/20 hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap"
               >
                 {t.healthInfo || "Health Info"}
               </button>

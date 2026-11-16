@@ -506,7 +506,7 @@ export default function CombineBiomarkersModal({
                 type="button"
                 disabled={logsToKeep.length === 0}
                 onClick={handleSave}
-                className={`px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/10 transition-all ${logsToKeep.length === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-emerald-700'}`}
+                className={`px-4 py-2 bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/10 transition-all ${logsToKeep.length === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-emerald-800'}`}
               >
                 <Merge className="w-4 h-4" />
                 <span>Save Consolidated Biomarker</span>
