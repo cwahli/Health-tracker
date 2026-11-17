@@ -1,6 +1,6 @@
 # Domain Architecture & Production Endpoints
 
-**Updated:** 2026-11-16
+**Updated:** 2026-11-17
 
 ---
 
@@ -9,13 +9,23 @@
 * **Apex Domain:** `health-tracker.co.uk`
 * **WWW Domain:** `www.health-tracker.co.uk`
 * **Registrar:** Cloudflare Registrar (owned directly by Chiwah).
-* **Target Host:** the re-homed production VM (`standar-c3r3a-1845`, public IP
-  `103.147.32.117`). No OVH host serves the site any more. It is published
-  through a **Cloudflare Tunnel** (`cloudflared-id-vps`, tunnel
-  `d9f81831-7d2b-4156-85ac-626f085d0cd3`, config
-  `/etc/cloudflared/id-vps-2026.yml`, ingress `health-tracker.co.uk` +
-  `*.health-tracker.co.uk` → `127.0.0.1:80`), so origin requests arrive from
-  `127.0.0.1` and TLS terminates at the Cloudflare edge.
+* **Target Host:** `VM-0-6-ubuntu`, public IP `43.173.42.248`. It runs the
+  dedicated deploy clone (`/home/ubuntu/deploy/Health-tracker`, unit
+  `health-tracker.service`, Node `dist/server.cjs` on `:3000`) behind Caddy on
+  `:80`, and publishes the whole domain fleet through a **Cloudflare Tunnel**
+  (`cloudflared-id-vps`, tunnel `d9f81831-7d2b-4156-85ac-626f085d0cd3`, unit
+  `cloudflared-id-vps.service`, config `/etc/cloudflared/config-id-vps.yml`).
+  Ingress is `health-tracker.co.uk` + `*.health-tracker.co.uk` → `127.0.0.1:80`,
+  so origin requests arrive from `127.0.0.1` and TLS terminates at the edge.
+* **Outage 2026-11-17 (Cloudflare Error 1033), fixed.** The previous origin
+  (`standar-c3r3a-1845`, `103.147.32.117`) went away around 11:22 UTC — SSH
+  ports 22/20133 refused, and the provider re-assigned the IP to a shared
+  "domain not connected" landing page. That box ran the only connector for
+  `d9f81831`, so every hostname on it returned 530/1033 while DNS and the edge
+  stayed healthy. The connector was re-established on `VM-0-6-ubuntu` (which
+  already served the app and hosted `cloudflared-proto` /
+  `cloudflared-studio-authority`) with 4 registered edge connections; no DNS
+  record was changed. Detail: [INCIDENT_1033_20261117.md](./INCIDENT_1033_20261117.md).
 * **Tunnel history (corrected 2026-11-16).** The tunnel named here before,
   `85b56df3-da06-4521-9b4d-d90c593e3846`, was **deleted 2026-11-12T06:45:35Z**;
   its unit (`cloudflared.service`) had no config file and had restarted 50k+
@@ -24,6 +34,12 @@
   Two other stale units were retired the same day: `cloudflared-proto.service`
   on the app box (`~/.cloudflared/prod-config.yml` still named the deleted
   tunnel) and `~/.cloudflared/prod-config.yml` itself.
+* **Retired tunnels (still down, still routed).** `746fb2e4` (`app`, `web`,
+  `codebuddy`, `orca4`, `orca-v4`), `7fdb9cea` (`orca`), `3f01c7ae` (`colab`),
+  `4406917c` (`figma`) and `3a03ac30` (`codebuddy` name) have zero connectors,
+  so their hostnames answer 530. Restoring them is a separate decision from the
+  apex; `dsh`, `mc`, `omb`, `tgtg`, `agenda`, `tui`, `web`, `app` all have a
+  local Caddy block on `VM-0-6-ubuntu` and need a connector on a live tunnel.
 * **TLS Certificate:** Cloudflare (edge). The origin Caddy serves plain HTTP on `:80`.
 * **Access Logs:** `/var/log/caddy/health-tracker-couk-access.log` (JSON rolled log).
 
@@ -68,7 +84,10 @@
 * **Webhook ID:** `682068098`
 * **Target URL:** `https://health-tracker.co.uk/webhook/deploy?secret=...`
 * **Event:** `push`
-* **Action:** Triggers `/scripts/deploy-prod.sh` on the VPS. Verified with HTTP 200 delivery.
+* **Action:** Triggers `/scripts/deploy-prod.sh` on `VM-0-6-ubuntu` (via
+  `/home/ubuntu/deploy.sh`), which `git reset --hard origin/main`, rebuilds, and
+  restarts `health-tracker.service`. Verified end-to-end 2026-11-17 after the
+  1033 recovery: a POST through the live edge logged `finished handling deploy`.
 
 ---
 
