@@ -2001,9 +2001,6 @@ export default function FoodHistoryTab({
                           nutrients={log.nutrients}
                           report={report}
                           profile={profile}
-                          activeFoodLogs={activeFoodLogs}
-                          logDate={log.date}
-                          logId={log.id}
                         />
                       </div>
 
