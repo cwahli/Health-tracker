@@ -31,22 +31,23 @@ describe('computeMealAllowanceRings', () => {
     expect(rings[0].max).toBe(2000);
   });
 
-  it('sums the full day across logs sharing the date', () => {
-    const rings = computeMealAllowanceRings({
+  it('shows this meal only, never a same-day total shared with other cards', () => {
+    const lunch = computeMealAllowanceRings({
       nutrients: { saturatedFat: 8, sodium: 900, calories: 500 },
       report,
       profile: { language: 'en' },
-      activeFoodLogs: [
-        { id: 'a', date: '2026-10-17', nutrients: { saturatedFat: 8, sodium: 900, calories: 500 } },
-        { id: 'b', date: '2026-10-17', nutrients: { saturatedFat: 10.7, sodium: 1850, calories: 693 } },
-        { id: 'c', date: '2026-10-16', nutrients: { saturatedFat: 99, sodium: 9999, calories: 9999 } },
-      ],
-      logDate: '2026-10-17',
-      logId: 'b',
     });
-    expect(rings[1].value).toBeCloseTo(18.7, 5);
-    expect(rings[2].value).toBeCloseTo(2.75, 5);
-    expect(rings[0].value).toBe(1193);
+    const dinner = computeMealAllowanceRings({
+      nutrients: { saturatedFat: 10.7, sodium: 1850, calories: 693 },
+      report,
+      profile: { language: 'en' },
+    });
+    expect(lunch[0].value).toBe(500);
+    expect(dinner[0].value).toBe(693);
+    expect(lunch[1].value).toBeCloseTo(8, 5);
+    expect(dinner[1].value).toBeCloseTo(10.7, 5);
+    expect(lunch[2].value).toBeCloseTo(0.9, 5);
+    expect(dinner[2].value).toBeCloseTo(1.85, 5);
   });
 
   it('falls back to app defaults without a report', () => {
@@ -79,7 +80,7 @@ describe('formatRingNumber', () => {
 });
 
 describe('MealAllowanceRings render', () => {
-  it('renders three allowance rings with day values', () => {
+  it("renders three allowance rings with this meal's values", () => {
     const html = renderToStaticMarkup(
       <MealAllowanceRings
         nutrients={{ saturatedFat: 18.7, sodium: 2750, calories: 1193 }}
@@ -93,6 +94,27 @@ describe('MealAllowanceRings render', () => {
     expect(html).toContain('data-testid="allowance-ring-calories"');
     expect(html).toContain('2.75');
     expect(html).toContain('1193');
+  });
+
+  it('does not repeat a shared day total on two same-day cards', () => {
+    const lunch = renderToStaticMarkup(
+      <MealAllowanceRings
+        nutrients={{ saturatedFat: 8, sodium: 900, calories: 500 }}
+        report={report}
+        profile={{ language: 'en' }}
+      />,
+    );
+    const dinner = renderToStaticMarkup(
+      <MealAllowanceRings
+        nutrients={{ saturatedFat: 10.7, sodium: 1850, calories: 693 }}
+        report={report}
+        profile={{ language: 'en' }}
+      />,
+    );
+    expect(lunch).toContain('500');
+    expect(dinner).toContain('693');
+    expect(lunch).not.toContain('1193');
+    expect(dinner).not.toContain('1193');
   });
 });
 

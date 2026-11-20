@@ -8,21 +8,18 @@ export interface MealAllowanceRingsProps {
   report?: any;
   profile?: any;
   allowanceObj?: any;
-  activeFoodLogs?: any[];
-  logDate?: string;
-  logId?: string;
   className?: string;
 }
 
 export interface AllowanceRing {
   key: string;
   name: string;
-  /** Day total in display units (g, or g converted from mg for sodium). */
+  /** This meal's total in display units (g, or g converted from mg for sodium). */
   value: number;
   /** Daily allowance in display units. */
   max: number;
   unit: string;
-  /** Day total / allowance, uncapped (over = >1). */
+  /** Meal total / allowance, uncapped (over = >1). */
   pct: number;
   color: string;
 }
@@ -89,11 +86,8 @@ export function computeMealAllowanceRings(input: {
   report?: any;
   profile?: any;
   allowanceObj?: any;
-  activeFoodLogs?: any[];
-  logDate?: string;
-  logId?: string;
 }): AllowanceRing[] {
-  const { nutrients, report, profile, allowanceObj, activeFoodLogs, logDate } = input;
+  const { nutrients, report, profile, allowanceObj } = input;
   const lang = profile?.language || 'en';
   const ringKeys = resolveRingKeys(report, profile);
   return ringKeys.map((key) => {
@@ -106,14 +100,10 @@ export function computeMealAllowanceRings(input: {
         1000,
       RING_DEFAULTS[key] ?? 1000,
     );
-    let dayTotal = extractNutrientValue(nutrients, key);
-    if (activeFoodLogs && logDate) {
-      const dayLogs = activeFoodLogs.filter((f) => f && f.date === logDate);
-      if (dayLogs.length > 0) {
-        dayTotal = dayLogs.reduce((acc, curr) => acc + extractNutrientValue(curr.nutrients, key), 0);
-      }
-    }
-    const shown = toDisplay(key, dayTotal);
+    // This card is one meal: show that meal's own nutrients. Summing every log
+    // that shares the date made all same-day cards print the same day total.
+    const mealTotal = extractNutrientValue(nutrients, key);
+    const shown = toDisplay(key, mealTotal);
     const maxShown = key === 'sodium' ? allowance / 1000 : allowance;
     const nutrientDef = nutrientDefinitions.find((n) => n.key === key);
     const name = nutrientDef
@@ -125,7 +115,7 @@ export function computeMealAllowanceRings(input: {
       value: shown.value,
       max: maxShown,
       unit: shown.unit,
-      pct: maxShown > 0 ? dayTotal / allowance : 0,
+      pct: maxShown > 0 ? mealTotal / allowance : 0,
       color: getNutrientColor(key),
     };
   });
@@ -141,15 +131,11 @@ export const MealAllowanceRings: React.FC<MealAllowanceRingsProps> = ({
   report,
   profile,
   allowanceObj,
-  activeFoodLogs,
-  logDate,
-  logId,
   className = '',
 }) => {
   const rings = React.useMemo(
-    () =>
-      computeMealAllowanceRings({ nutrients, report, profile, allowanceObj, activeFoodLogs, logDate, logId }),
-    [nutrients, report, profile, allowanceObj, activeFoodLogs, logDate, logId],
+    () => computeMealAllowanceRings({ nutrients, report, profile, allowanceObj }),
+    [nutrients, report, profile, allowanceObj],
   );
   return (
     <div data-testid="meal-allowance-rings" className={`flex items-start gap-3 max-w-full overflow-x-auto snap-x snap-mandatory scrollbar-none py-1 ${className}`}>
