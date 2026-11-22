@@ -88,7 +88,11 @@
   .offline-banner.visible { display: flex; }
   .renew { color: #fbbf24; white-space: nowrap; }
   .task-cell { min-width: 220px; max-width: 420px; color: #e2e8f0; }
+  .working-cell { min-width: 260px; max-width: 520px; color: #e2e8f0; }
+  .status-cell { min-width: 240px; max-width: 360px; }
   .model-cell { min-width: 160px; }
+  .fleet-sub { color: #94a3b8; font-size: 11px; margin-top: 2px; }
+  #table-fleet th:first-child, #table-fleet td:first-child { width: 200px; min-width: 200px; max-width: 200px; }
   .tool-cell { white-space: nowrap; }
 
   /* Switch pill in masthead */
@@ -129,73 +133,18 @@
   .btn-act.btn-off { background: #7f1d1d; border-color: #dc2626; color: #fecaca; }
   .btn-act:disabled { opacity: 0.45; cursor: not-allowed; }
 
-  #table-fleet { min-width: 980px; }
-  #table-fleet .col-brief { width: 280px; min-width: 240px; }
-  #table-fleet .col-working { width: 340px; min-width: 300px; }
-  #table-fleet .col-model { width: 210px; min-width: 190px; }
-  #table-fleet .col-activity { width: 180px; min-width: 160px; }
-  #table-fleet .col-allowance { width: 180px; min-width: 160px; }
-  #table-fleet th:first-child, #table-fleet td:first-child {
-    position: sticky; left: 0; z-index: 3;
-    width: 280px; min-width: 240px; max-width: 320px;
-    white-space: normal; background: #1e293b; box-shadow: 2px 0 0 0 #334155;
-  }
-  #table-fleet thead th:first-child { z-index: 7; background: #1d4ed8; }
-
-  /* The first column stays pinned while the rest of the Fleet row scrolls on phones. */
+  /* Phones: Brief stays pinned as the first column (sticky, from the base rule)
+     and the other columns scroll sideways inside .st-scroll. */
   @media (max-width: 720px) {
-    #table-fleet { table-layout: fixed; min-width: 1080px; }
-    #table-fleet .col-brief { width: 240px; min-width: 240px; }
-    #table-fleet th, #table-fleet td {
-      padding: 6px 5px; font-size: 11px; line-height: 1.35;
-      word-break: normal; overflow-wrap: break-word;
-    }
-    #table-fleet th { font-size: 9px; letter-spacing: 0; white-space: normal; }
-    #table-fleet th:first-child, #table-fleet td:first-child {
-      width: 240px; min-width: 240px; max-width: 240px;
-      position: sticky; left: 0; box-shadow: 2px 0 0 0 #334155;
-    }
-    #table-fleet .col-working { width: 320px; }
-    #table-fleet .col-model { width: 200px; }
-    #table-fleet .col-activity { width: 170px; }
-    #table-fleet .col-allowance { width: 170px; }
-    #table-fleet .badge { font-size: 8px; padding: 1px 4px; }
-    #table-fleet .renew { white-space: normal; }
+    #table-fleet { width: max-content; min-width: 100%; }
+    #table-fleet th, #table-fleet td { padding: 6px 8px; font-size: 12px; line-height: 1.35; }
+    #table-fleet th { font-size: 10px; }
+    #table-fleet .status-cell { min-width: 200px; max-width: 280px; }
+    #table-fleet .model-cell { min-width: 150px; max-width: 220px; }
+    #table-fleet .last-cell { white-space: nowrap; }
     .tabbar .masthead { flex-wrap: wrap; }
     .tabbar .tabs label { padding: 5px 9px; font-size: 11.5px; }
   }
-
-  .fleet-text-wrap { display: flex; align-items: flex-start; gap: 5px; }
-  .fleet-text { min-width: 0; flex: 1; color: #cbd5e1; }
-  .fleet-text-clamp {
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  }
-  .fleet-text-wrap.expanded .fleet-text-clamp { display: block; }
-  .fleet-text-toggle {
-    flex: none; padding: 0 4px; border: 0; background: transparent; color: #7dd3fc;
-    font: inherit; cursor: pointer;
-  }
-  .fleet-model-name { color: #f8fafc; font-weight: 600; }
-  .fleet-model-origin { color: #94a3b8; font-size: 11px; }
-  .fleet-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
-  .fleet-actions .btn-act { padding: 3px 7px; }
-  .fleet-actions .btn-act:disabled { opacity: 0.6; }
-  .fleet-dialog {
-    width: min(560px, calc(100vw - 28px)); max-height: 85vh; overflow: auto;
-    padding: 18px; border: 1px solid #475569; border-radius: 10px;
-    background: #0f172a; color: #e2e8f0;
-  }
-  .fleet-dialog::backdrop { background: rgba(2, 6, 23, .72); }
-  .fleet-dialog h3 { margin: 0 0 8px; color: #f8fafc; font-size: 16px; }
-  .fleet-dialog p { margin: 6px 0 10px; }
-  .fleet-dialog textarea {
-    display: block; width: 100%; min-height: 140px; resize: vertical;
-    padding: 9px; border: 1px solid #475569; border-radius: 6px;
-    background: #1e293b; color: #e2e8f0; font: inherit;
-  }
-  .fleet-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-  .fleet-history-item { padding: 10px 0; border-top: 1px solid #334155; }
-  .fleet-history-meta { color: #94a3b8; font-size: 11px; }
 
   /* Long agent sentences must not turn one fleet row into half the screen. */
   .task-clamp {
@@ -204,6 +153,32 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+
+  /* Fleet brief and working-on text: two lines until the row is expanded. */
+  .fleet-text {
+    white-space: pre-line; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .fleet-text.open { display: block; overflow: visible; }
+  /* Brief and working-on cells: text with a + / - toggle at the right edge, collapsed by default. */
+  .fleet-cell { display: flex; align-items: flex-start; gap: 6px; }
+  .fleet-cell .fleet-text { flex: 1; min-width: 0; }
+  .fleet-more { flex: none; width: 20px; height: 20px; padding: 0; line-height: 18px; text-align: center; font-size: 14px; color: #7dd3fc; background: transparent; border: 1px solid #334155; border-radius: 4px; cursor: pointer; }
+  .fleet-hist-btn { margin-top: 4px; padding: 2px 8px; font-size: 11px; color: #7dd3fc; background: transparent; border: 1px solid #334155; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  .fleet-send-btn { margin-top: 4px; padding: 1px 7px; font-size: 11px; color: #7dd3fc; background: transparent; border: 1px solid #334155; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  .fleet-send-btn:disabled { color: #475569; cursor: not-allowed; }
+  .fleet-pending { margin-top: 4px; font-size: 12px; color: #94a3b8; }
+  .fleet-pending.err { color: #fca5a5; }
+  .fleet-send { margin: 8px 0; padding: 8px 10px; border: 1px solid #334155; border-radius: 6px; background: #0f172a; }
+  .fleet-send[hidden] { display: none; }
+  .fleet-send-to { font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
+  .fleet-send textarea { width: 100%; box-sizing: border-box; resize: vertical; color: #e2e8f0; background: #020617; border: 1px solid #334155; border-radius: 4px; padding: 6px; font: inherit; }
+  .fleet-send-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .fleet-send-bar span { flex: 1; font-size: 12px; color: #94a3b8; }
+  .fleet-hist-panel td { background: rgba(15, 23, 42, 0.6); padding: 8px 12px; }
+  .fleet-hist-item { font-size: 12px; color: #e2e8f0; margin-bottom: 8px; }
+  .fleet-hist-item .fleet-hist-at { color: #94a3b8; margin-right: 8px; }
+  .fleet-hist-item .fleet-hist-wo { color: #cbd5e1; white-space: pre-line; overflow-wrap: anywhere; margin-top: 2px; }
 
   /* Tab Navigation */
   .tabbar > input { position: absolute; opacity: 0; pointer-events: none; }
@@ -284,14 +259,23 @@
     <!-- VIEW 0: LIVE FLEET -->
     <section class="view btabs-v-0">
       <div class="fleet-summary" id="fleet-summary">Waiting for the live fleet snapshot…</div>
+      <div class="fleet-send" id="fleet-send" hidden>
+        <div class="fleet-send-to">Send to <b id="fleet-send-to"></b></div>
+        <textarea id="fleet-send-text" rows="2" maxlength="2000" placeholder="Message for the agent"></textarea>
+        <div class="fleet-send-bar">
+          <span id="fleet-send-status"></span>
+          <button type="button" class="btn-act" id="fleet-send-cancel">Cancel</button>
+          <button type="button" class="btn-act" id="fleet-send-go">Send</button>
+        </div>
+      </div>
       <div class="sticky-table">
         <div class="st-scroll">
           <table class="st-table" id="table-fleet">
             <colgroup>
               <col class="col-brief">
-              <col class="col-working">
+              <col class="col-status">
               <col class="col-model">
-              <col class="col-activity">
+              <col class="col-last">
               <col class="col-allowance">
             </colgroup>
             <thead>
@@ -304,7 +288,7 @@
               </tr>
             </thead>
             <tbody id="body-fleet">
-              <tr><td colspan="5" style="text-align:center;padding:24px;color:#94a3b8">Loading fleet…</td></tr>
+              <tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8">Loading fleet…</td></tr>
             </tbody>
           </table>
         </div>
@@ -424,23 +408,6 @@
   </div>
 </div>
 
-<dialog id="fleet-send-dialog" class="fleet-dialog">
-  <h3 id="fleet-send-title">Send a message</h3>
-  <p id="fleet-send-context"></p>
-  <textarea id="fleet-send-message" maxlength="2000" aria-label="Message to agent" placeholder="Enter the instruction to send"></textarea>
-  <div class="fleet-dialog-actions">
-    <button class="btn-act" type="button" onclick="window._closeFleetSend()">Cancel</button>
-    <button class="btn-act btn-on" id="fleet-send-submit" type="button" onclick="window._submitFleetSend()">Send message</button>
-  </div>
-</dialog>
-<dialog id="fleet-history-dialog" class="fleet-dialog">
-  <h3 id="fleet-history-title">Fleet history</h3>
-  <div id="fleet-history-list"></div>
-  <div class="fleet-dialog-actions">
-    <button class="btn-act" type="button" onclick="window._closeFleetHistory()">Close</button>
-  </div>
-</dialog>
-
 <script>
 (function () {
   var CACHE_KEY = 'ht_fleet_state_v1';
@@ -462,7 +429,7 @@
     } catch (e) {}
   }
 
-  var state = { tickets: [], terminals: [], bots: [], fleet: null, pendingMacActions: [], cachedAt: null, offline: false };
+  var state = { tickets: [], terminals: [], bots: [], fleet: null, cachedAt: null, offline: false };
 
   function saveOfflineCache() {
     try {
@@ -521,7 +488,7 @@
     }
     if (s === 'disabled') return '<span class="badge badge-disabled"><span class="badge-dot"></span>Disabled</span>';
     if (s === 'stale') return '<span class="badge badge-stale"><span class="badge-dot"></span>Stale</span>';
-    if (s === 'unknown') return '<span class="badge badge-stale"><span class="badge-dot"></span>Unknown</span>';
+    if (s === 'unknown') return '<span class="badge badge-idle"><span class="badge-dot"></span>Unknown</span>';
     if (s === 'waiting_prompt' || s === 'waiting') return '<span class="badge badge-waiting"><span class="badge-dot"></span>Waiting</span>';
     return '<span class="badge badge-idle"><span class="badge-dot"></span>' + esc(s) + '</span>';
   }
@@ -616,168 +583,128 @@
     });
   }
 
+  /* Which Brief / Working-on cells the user expanded, keyed per row. */
+  var fleetToggled = {};
+  /* Which rows show their History panel. */
+  var fleetHistOpen = {};
+  /* Messages sent from the composer, keyed like the row. Cleared once the watcher brief shows them. */
+  var fleetPending = {};
+  /* Row the composer is open for. */
+  var fleetSendTarget = null;
+
+  function rowKey(r) {
+    return String(r.sid || r.id || ((r.location || '') + '|' + (r.tool || '') + '|' + (r.model || '')));
+  }
+
+  /* Only Mac watcher rows with a supported send path can receive a message. */
+  function sendTargetOf(r) {
+    var parts = String(r.id || '').split(':');
+    if (parts[0] !== 'watch' || (parts[1] !== 'opencode' && parts[1] !== 'commandcode' && parts[1] !== 'vscode') || !parts[2]) return null;
+    return { tool: parts[1], sid: parts.slice(2).join(':') };
+  }
+
+  /* Shows two lines (last two for live output, first two otherwise) with a + / - toggle at the right edge.
+     defaultOpen is the state before the user clicks. */
+  function clampText(text, key, defaultOpen, tail) {
+    var lines = String(text || '').split('\n').filter(function (l) { return l.trim(); });
+    if (!lines.length) return '<span class="empty-cell">—</span>';
+    var long = lines.length > 2 || String(text).length > 140;
+    if (!long) return '<div class="fleet-text">' + rawEsc(lines.join('\n')) + '</div>';
+    var open = defaultOpen !== !!fleetToggled[key];
+    var shown = open ? lines : (tail ? lines.slice(-2) : lines.slice(0, 2));
+    return '<div class="fleet-cell"><div class="fleet-text' + (open ? ' open' : '') + '">' + rawEsc(shown.join('\n')) + '</div>' +
+      '<button type="button" class="fleet-more" data-key="' + rawEsc(key) + '" aria-expanded="' + open + '" title="' +
+      (open ? 'Collapse' : 'Show more') + '">' + (open ? '−' : '+') + '</button></div>';
+  }
+
+  function formatHistoryTime(isoString) {
+    var d = new Date(isoString);
+    return isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+
   function renderFleet() {
     var tb = document.getElementById('body-fleet');
     if (!tb) return;
-    var rows = fleetRows();
+    var rows = fleetRows().slice().sort(function (a, b) {
+      return (Date.parse(b.lastActivity || '') || 0) - (Date.parse(a.lastActivity || '') || 0);
+    });
+    if (!tb.dataset.toggleWired) {
+      tb.addEventListener('click', function (e) {
+        var send = e.target.closest ? e.target.closest('.fleet-send-btn') : null;
+        if (send) {
+          if (!send.disabled) openFleetSend(send.getAttribute('data-id'));
+          return;
+        }
+        var more = e.target.closest ? e.target.closest('.fleet-more') : null;
+        var hist = e.target.closest ? e.target.closest('.fleet-hist-btn') : null;
+        if (!more && !hist) return;
+        var k = (more || hist).getAttribute('data-key');
+        if (more) fleetToggled[k] = !fleetToggled[k];
+        else fleetHistOpen[k] = !fleetHistOpen[k];
+        renderFleet();
+      });
+      tb.dataset.toggleWired = '1';
+    }
     if (!rows.length) {
       tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#94a3b8">No live fleet data yet</td></tr>';
       document.getElementById('count-fleet').textContent = '0';
       renderFleetSummary();
       return;
     }
+    var macRes = state.fleet && state.fleet.mac ? state.fleet.mac.lastActionResult : null;
     tb.innerHTML = rows.map(function (r) {
-      var brief = r.brief ? rawEsc(r.brief) : '<span class="empty-cell">—</span>';
-      var workingOn = r.working_on ? rawEsc(r.working_on) : '<span class="empty-cell">—</span>';
-      var model = r.model && r.model !== '—' ? rawEsc(r.model) : '<span class="empty-cell">—</span>';
-      var origin = fleetToolLabel(r.tool) + ' (' + fleetLocationLabel(r.location) + ')';
+      var key = rowKey(r);
+      var brief = clampText(r.brief || r.task || '', key + '|brief', false, false);
+      var working = clampText(r.workingOn || '', key + '|working', false, true);
+      var hist = Array.isArray(r.history) ? r.history : [];
+      var pend = fleetPending[key];
+      var pendHtml = '';
+      if (pend) {
+        var briefNow = String(r.brief || r.task || '').replace(/\s+/g, ' ');
+        var seen = briefNow.indexOf(pend.message.replace(/\s+/g, ' ').slice(0, 25)) !== -1;
+        if (seen || Date.now() - pend.sentAt > 10 * 60 * 1000) {
+          delete fleetPending[key];
+        } else if (macRes && pend.actionId && macRes.id === pend.actionId && !macRes.ok) {
+          pendHtml = '<div class="fleet-pending err">Not sent: ' + rawEsc(macRes.message || 'refused') + '</div>';
+        } else {
+          pendHtml = '<div class="fleet-pending">Sent, waiting for the watcher: ' + rawEsc(pend.message.slice(0, 200)) + '</div>';
+        }
+      }
+      var target = sendTargetOf(r);
+      var status = String(r.status || '').toUpperCase();
+      var canSend = status === 'AVAILABLE';
+      var sendTitle = !target ? 'Send is only available for opencode, Command Code, and VS Code'
+        : status === 'WORKING' ? 'Agent is working; send when it stops'
+          : !canSend ? 'Agent status is unknown or unavailable' : 'Send a message to this agent';
+      var sendBtn = '<button type="button" class="fleet-send-btn" data-id="' + rawEsc(r.id || '') + '"' +
+        ((!target || !canSend) ? ' disabled' : '') + ' title="' + rawEsc(sendTitle) + '">✉ Send</button>';
+      var toolLabels = { vscode: 'VS Code', commandcode: 'Command Code', opencode: 'opencode', freebuff: 'Freebuff', antigravity: 'Antigravity', claude: 'Claude' };
+      var toolKey = String(r.tool || '').toLowerCase();
+      var toolName = r.tool && r.tool !== '—' ? (toolLabels[toolKey] || String(r.tool).charAt(0).toUpperCase() + String(r.tool).slice(1)) : '';
+      var locName = String(r.location || '').replace(/\s*\(local\)$/, '');
+      var where = [toolName, locName && locName !== '—' ? '(' + locName + ')' : ''].filter(Boolean).join(' ');
+      var model = (r.model && r.model !== '—' ? rawEsc(r.model) : '<span class="empty-cell">—</span>') +
+        (where ? '<div class="fleet-sub">' + rawEsc(where) + '</div>' : '');
       var title = r.detail ? ' title="' + rawEsc(r.detail) + '"' : '';
-      var history = Array.isArray(r.history) ? r.history : [];
-      var historyButton = (r.source === 'agent-watch' || history.length)
-        ? '<button class="btn-act" type="button" data-row-id="' + rawEsc(r.id) + '" onclick="window._openFleetHistory(this)">History (' + history.length + ')</button>'
-        : '';
-      var sendControl = fleetSendControl(r);
-      var activity = Number(r.lastActivity) > 0
-        ? formatTimeAgo(new Date(Number(r.lastActivity) * 1000).toISOString())
-        : '<span class="empty-cell">—</span>';
-      return '<tr>' +
-        '<td class="fleet-brief-cell"' + title + '><div class="fleet-text-wrap"><div class="fleet-text fleet-text-clamp">' + brief + '</div>' +
-          '<button class="fleet-text-toggle" type="button" aria-label="Expand brief" onclick="window._toggleFleetText(this)">+</button></div>' +
-          '<div class="fleet-actions">' + sendControl + historyButton + '</div></td>' +
-        '<td><div>' + renderStatusBadge(r.status) + '</div><div class="fleet-text-wrap" style="margin-top:5px"><div class="fleet-text fleet-text-clamp">' + workingOn + '</div>' +
-          '<button class="fleet-text-toggle" type="button" aria-label="Expand status text" onclick="window._toggleFleetText(this)">+</button></div></td>' +
-        '<td class="model-cell"><div class="fleet-model-name">' + model + '</div><div class="fleet-model-origin">' + rawEsc(origin) + '</div></td>' +
-        '<td>' + activity + '</td>' +
-        '<td>' + allowanceCell(r) + '</td>' +
+      var histBtn = '<button type="button" class="fleet-hist-btn" data-key="' + rawEsc(key) + '">History (' + hist.length + ')</button>';
+      var main = '<tr>' +
+        '<td class="task-cell"' + title + '>' + brief + pendHtml + '<div>' + sendBtn + '</div></td>' +
+        '<td class="status-cell">' + renderStatusBadge(r.status) + '<div>' + working + '</div></td>' +
+        '<td class="model-cell">' + model + '</td>' +
+        '<td class="last-cell">' + formatTimeAgo(r.lastActivity) + '</td>' +
+        '<td>' + allowanceCell(r) + '<br>' + histBtn + '</td>' +
         '</tr>';
+      if (!fleetHistOpen[key]) return main;
+      var items = hist.length ? hist.map(function (h) {
+        return '<div class="fleet-hist-item"><span class="fleet-hist-at">' + rawEsc(formatHistoryTime(h.at)) + '</span>' +
+          '<strong>' + rawEsc(h.brief || '—') + '</strong>' +
+          (h.workingOn ? '<div class="fleet-hist-wo">' + rawEsc(h.workingOn) + '</div>' : '') + '</div>';
+      }).join('') : '<div class="fleet-hist-item">No history yet</div>';
+      return main + '<tr class="fleet-hist-panel"><td colspan="5">' + items + '</td></tr>';
     }).join('');
     document.getElementById('count-fleet').textContent = String(rows.length);
     renderFleetSummary();
   }
-
-  function fleetToolLabel(tool) {
-    var labels = { vscode: 'Vscode', commandcode: 'Command Code', opencode: 'OpenCode', freebuff: 'Freebuff', antigravity: 'Antigravity' };
-    return labels[String(tool || '').toLowerCase()] || String(tool || 'Unknown');
-  }
-
-  function fleetLocationLabel(location) {
-    return String(location || '').replace(/\s*\(local\)\s*$/i, '') || 'Unknown';
-  }
-
-  function fleetSendReason(row) {
-    var supported = ['opencode', 'commandcode', 'vscode'];
-    if (!row || row.source !== 'agent-watch' || !/^watch:(vscode|commandcode|opencode):[A-Za-z0-9_-]{4,80}$/.test(String(row.id || ''))) {
-      return 'Only supported local watcher sessions can receive messages';
-    }
-    if (supported.indexOf(String(row.tool || '').toLowerCase()) < 0) return 'Sending is not verified for ' + fleetToolLabel(row.tool);
-    if (!state.fleet || state.fleet.stale || state.offline) return 'Fleet snapshot is stale or offline';
-    if (!state.fleet.mac || state.fleet.mac.reporterOnline !== true) return 'Mac reporter is offline';
-    var status = String(row.status || '').toLowerCase();
-    if (status !== 'available' && status !== 'working') return 'Agent must be WORKING or AVAILABLE to queue a message';
-    return '';
-  }
-
-  function openFleetDialog(dialog) {
-    if (typeof dialog.showModal === 'function') dialog.showModal();
-    else dialog.setAttribute('open', '');
-  }
-
-  function closeFleetDialog(dialog) {
-    if (typeof dialog.close === 'function') dialog.close();
-    else dialog.removeAttribute('open');
-  }
-
-  function fleetSendControl(row) {
-    if (!row || row.source !== 'agent-watch') return '';
-    var queued = state.pendingMacActions.some(function (action) {
-      return action.type === 'send_message' && action.rowId === row.id;
-    });
-    if (queued) {
-      return '<button class="btn-act" type="button" disabled title="Queued until this session reports AVAILABLE">Queued</button>';
-    }
-    var reason = fleetSendReason(row);
-    return reason
-      ? '<button class="btn-act" type="button" disabled title="' + rawEsc(reason) + '">Send unavailable</button>'
-      : '<button class="btn-act btn-on" type="button" data-row-id="' + rawEsc(row.id) + '" onclick="window._openFleetSend(this)">Send</button>';
-  }
-
-  var pendingFleetSendRowId = '';
-  window._toggleFleetText = function (button) {
-    var wrap = button.parentNode;
-    var expanded = wrap.classList.toggle('expanded');
-    button.textContent = expanded ? '−' : '+';
-    button.setAttribute('aria-label', expanded ? 'Collapse text' : 'Expand text');
-  };
-
-  window._openFleetSend = function (button) {
-    var rowId = button.getAttribute('data-row-id');
-    var matches = fleetRows().filter(function (row) { return row.id === rowId; });
-    var row = matches.length === 1 ? matches[0] : null;
-    if (!row || fleetSendReason(row)) return;
-    pendingFleetSendRowId = row.id;
-    document.getElementById('fleet-send-title').textContent = 'Send to ' + fleetToolLabel(row.tool);
-    document.getElementById('fleet-send-context').textContent =
-      (row.brief || row.id) + ' · If busy, the message waits until this session is AVAILABLE.';
-    document.getElementById('fleet-send-message').value = '';
-    openFleetDialog(document.getElementById('fleet-send-dialog'));
-    document.getElementById('fleet-send-message').focus();
-  };
-
-  window._closeFleetSend = function () {
-    closeFleetDialog(document.getElementById('fleet-send-dialog'));
-    pendingFleetSendRowId = '';
-  };
-
-  window._submitFleetSend = function () {
-    var rowMatches = fleetRows().filter(function (row) { return row.id === pendingFleetSendRowId; });
-    var row = rowMatches.length === 1 ? rowMatches[0] : null;
-    var input = document.getElementById('fleet-send-message');
-    var button = document.getElementById('fleet-send-submit');
-    var message = String(input.value || '').trim();
-    if (!row || fleetSendReason(row)) {
-      document.getElementById('fleet-send-context').textContent = 'Refused: the session is no longer uniquely available.';
-      return;
-    }
-    if (!message || message.length > 2000) {
-      document.getElementById('fleet-send-context').textContent = 'Enter a message between 1 and 2000 characters.';
-      return;
-    }
-    button.disabled = true;
-    sendMacAction({
-      type: 'send_message',
-      tool: row.tool,
-      rowId: row.id,
-      message: message,
-    }, 'message to ' + fleetToolLabel(row.tool)).then(function (ok) {
-      button.disabled = false;
-      if (ok) window._closeFleetSend();
-    });
-  };
-
-  window._openFleetHistory = function (button) {
-    var rowId = button.getAttribute('data-row-id');
-    var matches = fleetRows().filter(function (candidate) { return candidate.id === rowId; });
-    var row = matches.length === 1 ? matches[0] : null;
-    var history = row && Array.isArray(row.history) ? row.history : [];
-    function timestamp(value) {
-      var date = new Date(value);
-      return isNaN(date.getTime()) ? 'Timestamp unavailable' : date.toLocaleString();
-    }
-    document.getElementById('fleet-history-title').textContent = 'History · ' + fleetToolLabel(row && row.tool);
-    document.getElementById('fleet-history-list').innerHTML = history.length
-      ? history.map(function (entry) {
-          return '<div class="fleet-history-item"><div class="fleet-history-meta">' +
-            rawEsc(timestamp(entry.at)) + ' · ' + rawEsc(entry.model || fleetToolLabel(entry.tool)) +
-            '</div><div><b>User:</b> ' + (entry.brief ? rawEsc(entry.brief) : '—') + '</div>' +
-            '<div><b>Agent:</b> ' + (entry.working_on ? rawEsc(entry.working_on) : '—') + '</div></div>';
-        }).join('')
-      : '<p>No recorded messages for this session yet.</p>';
-    openFleetDialog(document.getElementById('fleet-history-dialog'));
-  };
-
-  window._closeFleetHistory = function () {
-    closeFleetDialog(document.getElementById('fleet-history-dialog'));
-  };
 
   function renderFleetSummary() {
     var el = document.getElementById('fleet-summary');
@@ -960,10 +887,9 @@
   function sendMacAction(payload, btnText) {
     var sumEl = document.getElementById('mac-summary');
     if (sumEl) {
-      sumEl.innerHTML = (payload.type === 'send_message' ? 'Queueing message to agent: <b>' : 'Sending to Mac: <b>') +
-        rawEsc(btnText) + '</b>…';
+      sumEl.innerHTML = 'Sending to Mac: <b>' + rawEsc(btnText) + '</b> (applies on next 5s heartbeat)…';
     }
-    return fetch('/fleet/api/mac-action' + (location.search || ''), {
+    fetch('/fleet/api/mac-action' + (location.search || ''), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(payload),
@@ -972,27 +898,73 @@
       .then(function (res) {
         if (sumEl) {
           sumEl.innerHTML = res.ok
-            ? (payload.type === 'send_message'
-                ? 'Queued: <b>' + rawEsc(btnText) + '</b> will be sent when the session is AVAILABLE.'
-                : 'Queued for Mac: <b>' + rawEsc(btnText) + '</b> — waiting for Mac confirmation…')
+            ? 'Queued for Mac: <b>' + rawEsc(btnText) + '</b> — waiting for Mac confirmation…'
             : '<span class="warn">Failed: ' + rawEsc(res.error || 'unknown error') + '</span>';
-        }
-        if (res.ok && payload.type === 'send_message' && res.action) {
-          state.pendingMacActions = state.pendingMacActions.filter(function (action) {
-            return action.id !== res.action.id;
-          });
-          state.pendingMacActions.push(res.action);
-          renderFleet();
         }
         setTimeout(function () { fetchState(null, true); }, 2500);
         setTimeout(function () { fetchState(null, true); }, 5500);
-        return Boolean(res.ok);
       })
       .catch(function (err) {
         if (sumEl) {
           sumEl.innerHTML = '<span class="warn">Offline — cannot reach gateway to send Mac action.</span>';
         }
-        return false;
+      });
+  }
+
+  function setSendStatus(text, isErr) {
+    var el = document.getElementById('fleet-send-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.style.color = isErr ? '#fca5a5' : '';
+  }
+
+  function closeFleetSend() {
+    fleetSendTarget = null;
+    var box = document.getElementById('fleet-send');
+    if (box) box.hidden = true;
+  }
+
+  function openFleetSend(rowId) {
+    var row = fleetRows().find(function (r) { return r.id === rowId; });
+    var target = row && sendTargetOf(row);
+    if (!target) return;
+    fleetSendTarget = { key: rowKey(row), tool: target.tool, sid: target.sid };
+    var label = String(row.brief || row.task || target.sid).replace(/\s+/g, ' ').slice(0, 80);
+    document.getElementById('fleet-send-to').textContent = target.tool + ' · ' + (row.location || '') + ' · ' + label;
+    document.getElementById('fleet-send-text').value = '';
+    setSendStatus('');
+    document.getElementById('fleet-send').hidden = false;
+    document.getElementById('fleet-send-text').focus();
+  }
+
+  function submitFleetSend() {
+    var t = fleetSendTarget;
+    if (!t) return;
+    var text = document.getElementById('fleet-send-text');
+    var go = document.getElementById('fleet-send-go');
+    var msg = text.value.trim();
+    if (!msg) { setSendStatus('Type a message first.', true); return; }
+    if (msg.length > 2000) { setSendStatus('Message is over 2000 characters.', true); return; }
+    go.disabled = true;
+    setSendStatus('Sending…');
+    fetch('/fleet/api/mac-action' + (location.search || ''), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ type: 'send_message', tool: t.tool, sessionId: t.sid, message: msg }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        go.disabled = false;
+        if (!res.ok) { setSendStatus('Failed: ' + (res.error || 'unknown error'), true); return; }
+        fleetPending[t.key] = { message: msg, sentAt: Date.now(), actionId: res.action ? res.action.id : '' };
+        closeFleetSend();
+        renderFleet();
+        setTimeout(function () { fetchState(null, true); }, 2500);
+        setTimeout(function () { fetchState(null, true); }, 5500);
+      })
+      .catch(function () {
+        go.disabled = false;
+        setSendStatus('Offline — cannot reach gateway.', true);
       });
   }
 
@@ -1011,6 +983,11 @@
   window._retryOnline = function () {
     fetchState(null, true);
   };
+
+  var sendGoBtn = document.getElementById('fleet-send-go');
+  if (sendGoBtn) sendGoBtn.addEventListener('click', submitFleetSend);
+  var sendCancelBtn = document.getElementById('fleet-send-cancel');
+  if (sendCancelBtn) sendCancelBtn.addEventListener('click', closeFleetSend);
 
   var macPillBtn = document.getElementById('mac-switch-pill');
   if (macPillBtn) {
@@ -1097,7 +1074,6 @@
     if (data.terminals) state.terminals = data.terminals;
     if (data.bots) state.bots = data.bots;
     if (data.fleet !== undefined) state.fleet = data.fleet;
-    if (Array.isArray(data.pendingMacActions)) state.pendingMacActions = data.pendingMacActions;
     if (!fromCache) {
       state.cachedAt = data.generatedAt || new Date().toISOString();
       saveOfflineCache();
@@ -1198,15 +1174,6 @@
           renderTickets();
           renderBots();
           renderMac();
-        } catch (err) {}
-      });
-      sse.addEventListener('mac_actions_acknowledged', function (e) {
-        try {
-          var dispatchedIds = new Set(JSON.parse(e.data).map(function (action) { return action && action.id; }));
-          state.pendingMacActions = state.pendingMacActions.filter(function (action) {
-            return !dispatchedIds.has(action.id);
-          });
-          renderFleet();
         } catch (err) {}
       });
       sse.addEventListener('heartbeat', function (e) {

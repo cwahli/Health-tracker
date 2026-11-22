@@ -82,9 +82,7 @@ function sqliteDriver() {
 /**
  * One row per live opencode session on the VM host — never an aggregate:
  * the user asked for one agent per row, so each session carries its own
- * model, working marker and title. Model-less `opencode run` children
- * (triage/worker) show as `worker` rows when titled `sheet-todo …`,
- * so a spawned session is visible with its ticket key.
+ * model, working marker and title.
  * Each row may carry lastType/lastCompleted from its newest session_message:
  * a streaming assistant message (no completed stamp) means working.
  */
@@ -423,109 +421,12 @@ export function recordFleetHeartbeat(data, { now = Date.now() } = {}) {
   return { ok: true, node: record };
 }
 
-// ---- Live fleet snapshot ----------------------------------------------------
-// The machine that runs the local fleet dashboard (`fleet-status.py --serve`)
-// owns the authoritative location/tool/model/status/task/allowance rows. The
-// deployed gateway cannot reach that loopback server, so the reporter pushes
-// the dashboard's own status.json here and every Fleet client reads one shape.
+/** Explicit mapping table: one pane per ticket, no loose substring overlap. */
 export const FLEET_SNAPSHOT_STALE_MS = 90 * 1000;
 export const MAC_REPORTER_OFFLINE_SEC = 20;
 
 let fleetSnapshotCache = { at: 0, data: null };
-const MAC_ACTION_QUEUE_LIMIT = 20;
-
-function storedMacAction(action) {
-  if (!action || typeof action !== 'object' || typeof action.id !== 'string' || !action.id) {
-    throw new Error('Fleet action queue contains an invalid action');
-  }
-  if (!['queued', 'in_flight'].includes(action.status)) {
-    throw new Error(`Fleet action ${action.id} has an invalid status`);
-  }
-  if (action.type === 'send_message') {
-    if (typeof action.message !== 'string' || action.message.length < 1 || action.message.length > 2000) {
-      throw new Error(`Fleet message action ${action.id} has invalid message text`);
-    }
-    return {
-      id: action.id,
-      type: action.type,
-      tool: action.tool,
-      rowId: action.rowId,
-      sessionId: action.sessionId,
-      message: action.message,
-      status: action.status,
-      requestedAt: action.requestedAt,
-    };
-  }
-  if (action.type === 'toggle_switch') {
-    return {
-      id: action.id,
-      type: action.type,
-      target: action.target,
-      state: action.state,
-      status: action.status,
-      requestedAt: action.requestedAt,
-    };
-  }
-  if (action.type === 'kill_pid') {
-    return {
-      id: action.id,
-      type: action.type,
-      pid: action.pid,
-      status: action.status,
-      requestedAt: action.requestedAt,
-    };
-  }
-  throw new Error(`Fleet action ${action.id} has an unsupported type`);
-}
-
-function readMacActionQueue(filePath) {
-  try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      throw new Error(`Fleet action queue is not valid JSON: ${err.message}`);
-    }
-    if (parsed?.version !== 1 || !Array.isArray(parsed.actions) || parsed.actions.length > MAC_ACTION_QUEUE_LIMIT) {
-      throw new Error('Fleet action queue has an unsupported or invalid format');
-    }
-    return parsed.actions.map(storedMacAction);
-  } catch (err) {
-    if (err.code === 'ENOENT') return [];
-    throw new Error(`Unable to load Fleet action queue at ${filePath}: ${err.message}`, { cause: err });
-  }
-}
-
-export function createMacActionQueue({ filePath = '' } = {}) {
-  let actions = filePath ? readMacActionQueue(filePath) : [];
-  const replace = (next) => {
-    if (!Array.isArray(next) || next.length > MAC_ACTION_QUEUE_LIMIT) {
-      throw new Error('Fleet action queue exceeds its limit');
-    }
-    const normalized = next.map(storedMacAction);
-    if (filePath) {
-      const directory = path.dirname(filePath);
-      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-      const temporaryPath = `${filePath}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
-      const fd = fs.openSync(temporaryPath, 'wx', 0o600);
-      try {
-        fs.writeFileSync(fd, `${JSON.stringify({ version: 1, actions: normalized })}\n`, 'utf8');
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
-      }
-      fs.renameSync(temporaryPath, filePath);
-    }
-    actions = normalized;
-  };
-  return Object.freeze({
-    getPending: () => actions.map((action) => ({ ...action })),
-    replace,
-  });
-}
-
-const defaultMacActionQueue = createMacActionQueue();
+let macPendingActions = [];
 
 export function normalizeMacTelemetry(mac) {
   if (!mac || typeof mac !== 'object') return null;
@@ -595,52 +496,32 @@ export function normalizeMacTelemetry(mac) {
   };
 }
 
-export function queueMacAction(action, { now = Date.now(), queue = defaultMacActionQueue } = {}) {
+export function queueMacAction(action, { now = Date.now() } = {}) {
   if (!action || typeof action !== 'object') return { ok: false, error: 'invalid action' };
   const type = String(action.type || '').trim();
   if (type !== 'toggle_switch' && type !== 'kill_pid' && type !== 'send_message') {
     return { ok: false, error: 'unsupported action type' };
   }
-  const pendingActions = queue.getPending();
-  if (pendingActions.length >= MAC_ACTION_QUEUE_LIMIT) return { ok: false, error: 'Mac action queue is full' };
   if (type === 'send_message') {
-    const rowId = String(action.rowId || '').trim();
-    const match = rowId.match(/^watch:(vscode|commandcode|opencode):([A-Za-z0-9_-]{4,80})$/);
-    if (!match) return { ok: false, error: 'invalid watcher row id' };
-    const [, tool, sessionId] = match;
-    if (action.tool !== tool) return { ok: false, error: 'tool does not match watcher row id' };
-    if (typeof action.message !== 'string') return { ok: false, error: 'message must be text' };
-    const message = action.message.replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '').trim();
+    const tool = String(action.tool || '').trim();
+    if (tool !== 'opencode' && tool !== 'commandcode' && tool !== 'vscode') {
+      return { ok: false, error: 'send is only supported for opencode, commandcode, and vscode' };
+    }
+    const sessionId = String(action.sessionId || '').trim();
+    if (!/^[A-Za-z0-9_-]{4,40}$/.test(sessionId)) return { ok: false, error: 'invalid session id' };
+    const message = String(action.message || '').replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '').trim();
     if (!message || message.length > 2000) return { ok: false, error: 'message must be 1-2000 characters' };
-
-    const snapshot = getFleetSnapshot({ now });
-    if (!snapshot) return { ok: false, error: 'fleet snapshot is unavailable' };
-    if (snapshot.stale) return { ok: false, error: 'fleet snapshot is stale' };
-    if (snapshot.mac?.reporterOnline !== true) return { ok: false, error: 'Mac reporter is offline' };
-    const matches = snapshot.rows.filter((row) => row.id === rowId);
-    if (matches.length !== 1) return { ok: false, error: 'watcher row is missing or ambiguous' };
-    const row = matches[0];
-    if (row.source !== 'agent-watch' || row.location !== 'Mac (local)' || row.tool !== tool) {
-      return { ok: false, error: 'watcher row does not match a local Mac agent' };
-    }
-    if (row.status !== 'available' && row.status !== 'working') {
-      return { ok: false, error: `refused: agent status is ${row.status}` };
-    }
-    if (pendingActions.some((pending) => pending.type === 'send_message' && pending.rowId === rowId)) {
-      return { ok: false, error: 'a message is already queued for this session' };
-    }
     const item = {
       id: `act-${now}-${Math.random().toString(36).slice(2, 7)}`,
       type,
       tool,
-      rowId,
       sessionId,
       message,
-      status: 'queued',
       requestedAt: new Date(now).toISOString(),
     };
-    queue.replace([...pendingActions, item]);
-    return { ok: true, action: item, pending: pendingActions.length + 1 };
+    macPendingActions.push(item);
+    if (macPendingActions.length > 20) macPendingActions = macPendingActions.slice(-20);
+    return { ok: true, action: { id: item.id, type, tool, sessionId, requestedAt: item.requestedAt }, pending: macPendingActions.length };
   }
   if (type === 'toggle_switch') {
     const target = String(action.target || '').trim();
@@ -653,11 +534,11 @@ export function queueMacAction(action, { now = Date.now(), queue = defaultMacAct
       type,
       target,
       state,
-      status: 'queued',
       requestedAt: new Date(now).toISOString(),
     };
-    queue.replace([...pendingActions, item]);
-    return { ok: true, action: item, pending: pendingActions.length + 1 };
+    macPendingActions.push(item);
+    if (macPendingActions.length > 20) macPendingActions = macPendingActions.slice(-20);
+    return { ok: true, action: item, pending: macPendingActions.length };
   }
   const pid = Number(action.pid);
   if (!Number.isInteger(pid) || pid <= 100) {
@@ -667,64 +548,21 @@ export function queueMacAction(action, { now = Date.now(), queue = defaultMacAct
     id: `act-${now}-${Math.random().toString(36).slice(2, 7)}`,
     type,
     pid,
-    status: 'queued',
     requestedAt: new Date(now).toISOString(),
   };
-  queue.replace([...pendingActions, item]);
-  return { ok: true, action: item, pending: pendingActions.length + 1 };
+  macPendingActions.push(item);
+  if (macPendingActions.length > 20) macPendingActions = macPendingActions.slice(-20);
+  return { ok: true, action: item, pending: macPendingActions.length };
 }
 
-export function getDispatchableMacActions({ now = Date.now(), queue = defaultMacActionQueue } = {}) {
-  const snapshot = getFleetSnapshot({ now });
-  const out = [];
-  const next = [];
-  let changed = false;
-  for (const action of queue.getPending()) {
-    if (action.status === 'in_flight') {
-      out.push(action);
-      next.push(action);
-      continue;
-    }
-    if (action.type !== 'send_message') {
-      const inFlight = { ...action, status: 'in_flight' };
-      out.push(inFlight);
-      next.push(inFlight);
-      changed = true;
-      continue;
-    }
-    const matches = snapshot?.rows.filter((row) => row.id === action.rowId) || [];
-    const ready = snapshot && !snapshot.stale && snapshot.mac?.reporterOnline === true &&
-      matches.length === 1 &&
-      matches[0].source === 'agent-watch' &&
-      matches[0].location === 'Mac (local)' &&
-      matches[0].tool === action.tool &&
-      matches[0].status === 'available';
-    if (ready) {
-      const inFlight = { ...action, status: 'in_flight' };
-      out.push(inFlight);
-      next.push(inFlight);
-      changed = true;
-    } else {
-      next.push(action);
-    }
-  }
-  if (changed) queue.replace(next);
+export function drainMacActions() {
+  const out = macPendingActions.slice();
+  macPendingActions = [];
   return out;
 }
 
-export function acknowledgeMacAction(id, { queue = defaultMacActionQueue } = {}) {
-  const actionId = String(id || '');
-  if (!actionId) return null;
-  const pending = queue.getPending();
-  const index = pending.findIndex((action) => action.id === actionId);
-  if (index < 0) return null;
-  const [acknowledged] = pending.splice(index, 1);
-  queue.replace(pending);
-  return acknowledged;
-}
-
-export function getPendingMacActions({ queue = defaultMacActionQueue } = {}) {
-  return queue.getPending();
+export function getPendingMacActions() {
+  return macPendingActions.slice();
 }
 
 const SNAPSHOT_STATUS = new Map([
@@ -740,8 +578,8 @@ const SNAPSHOT_STATUS = new Map([
   ['unreachable', 'down'],
   ['offline', 'down'],
   ['disabled', 'disabled'],
-  ['unknown', 'unknown'],
   ['stale', 'stale'],
+  ['unknown', 'unknown'],
   ['error', 'error'],
   ['failed', 'error'],
 ]);
@@ -751,20 +589,33 @@ function snapshotText(value, max = 240) {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
-function snapshotTimestamp(value) {
-  if (value === null || value === undefined || value === '') return '';
-  const numeric = Number(value);
-  let timestamp = Number.NaN;
-  if (Number.isFinite(numeric) && numeric >= 1_000_000_000) {
-    timestamp = numeric >= 100_000_000_000 ? numeric : numeric * 1000;
-  } else {
-    timestamp = Date.parse(String(value));
-  }
-  return Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toISOString() : '';
+/** Agent output keeps its line breaks; the newest end is kept when it is too long. */
+function snapshotOutput(value, max = 4000) {
+  const s = String(value ?? '').replace(/\r/g, '').trim();
+  return s.length > max ? `…${s.slice(-(max - 1))}` : s;
+}
+
+/** Recent brief/working-on changes for one session, newest first; entries without a time are dropped. */
+function snapshotHistory(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries.slice(0, 8).map((h) => ({
+    at: snapshotActivityIso(h?.at),
+    brief: snapshotText(h?.brief || '', 400),
+    workingOn: snapshotOutput(h?.working_on || '', 600),
+    model: snapshotText(h?.model || '', 120),
+  })).filter((h) => h.at);
 }
 
 export function snapshotStatus(raw) {
   return SNAPSHOT_STATUS.get(String(raw ?? '').trim().toLowerCase()) || 'idle';
+}
+
+/** Epoch seconds (or ms, or a date string) to ISO; null when there is no real activity. */
+export function snapshotActivityIso(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  const ms = Number.isFinite(n) ? (n > 1e12 ? n : n * 1000) : Date.parse(String(value));
+  return Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : null;
 }
 
 /** The thread title a channel card embeds as `thread <title>` (not `thread state 3m`). */
@@ -842,6 +693,8 @@ export function snapshotTask(row, agents, lanes) {
 /** Freebuff rows share the daily allowance: what is left and when it renews. */
 export function snapshotAllowance(row, quota) {
   const tool = String(row?.tool || '').toLowerCase();
+  // Watcher rows come from local session data; the Freebuff quota is a separate, older source.
+  if (String(row?.id || '').startsWith('watch:')) return { text: '—', renewAt: null, stale: false };
   if (tool !== 'freebuff') return { text: '—', renewAt: null, stale: false };
   const q = quota && typeof quota === 'object' ? quota : {};
   const weight = snapshotText(row?.weight || '', 12);
@@ -897,44 +750,18 @@ export function normalizeFleetSnapshot(payload, { now = Date.now() } = {}) {
     for (const row of resources) {
       if (!row || typeof row !== 'object') continue;
       const status = snapshotStatus(row.state);
-      const tool = snapshotText(row.tool || '—', 40);
-      const model = snapshotText(row.model_name || row.model || '—', 120);
-      const source = snapshotText(row.source || '', 40);
-      const brief = snapshotText(row.brief || snapshotTask(row, agents, lanes), 600);
-      const workingOn = snapshotText(row.working_on || '', 800);
-      const lastActivity = Number(row.last_activity) || 0;
-      const history = Array.isArray(row.history)
-        ? row.history.map((entry) => ({
-            at: snapshotTimestamp(entry?.at),
-            tool: snapshotText(entry?.tool || '', 40),
-            id: snapshotText(entry?.id || '', 120),
-            brief: snapshotText(entry?.brief || '', 400),
-            working_on: snapshotText(entry?.working_on || '', 400),
-            model: snapshotText(entry?.model || '', 120),
-          })).filter((entry) => entry.brief || entry.working_on)
-        : [];
-      if (!history.length && source === 'agent-watch' && (brief || workingOn)) {
-        history.push({
-          at: snapshotTimestamp(lastActivity) || snapshotTimestamp(payload.updated) || receivedAt,
-          tool,
-          id: snapshotText(row.id || '', 120).split(':').pop() || '',
-          brief,
-          working_on: workingOn,
-          model: snapshotText(row.model || '', 120),
-        });
-      }
       rows.push({
         id: snapshotText(row.id || '', 120),
         location,
-        tool,
-        model,
+        tool: snapshotText(row.tool || '—', 40),
+        model: snapshotText(row.model_name || row.model || '—', 120),
         modelId: snapshotText(row.model || '', 120),
         status,
         task: snapshotTask(row, agents, lanes),
-        brief,
-        working_on: workingOn,
-        lastActivity,
-        history,
+        brief: snapshotText(row.brief || row.task || '', 400),
+        workingOn: snapshotOutput(row.working_on || ''),
+        history: snapshotHistory(row.history),
+        lastActivity: snapshotActivityIso(row.last_activity),
         allowance: snapshotAllowance(row, quota),
         weight: snapshotText(row.weight || '', 12),
         role: snapshotText(row.role || 'worker', 20),
@@ -1008,23 +835,8 @@ function withSnapshotAge(data, now) {
       });
     }
   }
-  const rows = data.rows.map((row) => {
-    const watcherOffline = row.source === 'agent-watch' &&
-      row.location === 'Mac (local)' &&
-      (!mac || mac.reporterOnline !== true);
-    if (!stale && !watcherOffline) return row;
-    const reason = stale
-      ? `status unknown: snapshot is stale (${ageSec}s old)`
-      : `status unknown: Mac reporter is offline (${ageSec}s since last push)`;
-    return {
-      ...row,
-      status: 'unknown',
-      detail: snapshotText(row.detail ? `${row.detail} · ${reason}` : reason, 440),
-    };
-  });
   return {
     ...data,
-    rows,
     mac,
     ageSec,
     stale,
@@ -1527,85 +1339,7 @@ function splitScopedSession(raw) {
  * `workspace` scopes the session row the same way /status does (an exact
  * workspace match, or the row belongs to another project).
  */
-/**
- * Group presence, learned from the group's own traffic.
- *
- * "Which agents are in THIS group" has no registry answer: seats join chats at
- * runtime and nothing on disk said so. What IS true is that a bot only receives
- * an update for a chat it belongs to, so every message in a group is proof of
- * presence for the bots that saw it. Recording that turns membership into a fact
- * instead of a guess, which is what lets a fleet-wide read work in any group —
- * including one created a minute ago — with no per-group config.
- *
- * Kept out of totals.json on purpose: presence churns on every message and must
- * not rewrite the usage ledger to record "I was here".
- */
-const PRESENCE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const PRESENCE_MIN_GAP_MS = 60 * 1000;
-
-function presencePath(seatId, home) {
-  return path.join(home, '.local', 'state', 'bot-host', seatId, 'presence.json');
-}
-
-/**
- * Record that this seat has seen this chat. Cheap: an entry written inside the
- * gap window writes nothing, so a busy group does not become a write per
- * message. Returns true when the file was written.
- */
-export function noteChatPresence(seatId, chatId, { home = os.homedir(), now = Date.now() } = {}) {
-  const key = String(chatId ?? '');
-  if (!key || !seatId) return false;
-  try {
-    const file = presencePath(seatId, home);
-    const prev = readJsonObject(file) || {};
-    const at = Number(prev[key]) || 0;
-    const age = now - at;
-    if (at && age >= 0 && age < PRESENCE_MIN_GAP_MS) return false;
-    const next = {};
-    for (const [k, v] of Object.entries(prev)) {
-      const t = Number(v) || 0;
-      // Bounded, or this file grows with every group the fleet ever sat in.
-      if (t && now - t >= 0 && now - t < PRESENCE_TTL_MS) next[k] = t;
-    }
-    next[key] = now;
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, `${JSON.stringify(next)}\n`, 'utf8');
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * The agents present in one chat, in registry order.
- *
- * Presence first (they are in the room), then per-chat work records (they have
- * been in the room), then null for "nothing known here yet" — so a caller can
- * fall back to the full council instead of claiming the room is empty.
- */
-export function chatRoster({ fleetBots, chatId, home = os.homedir(), now = Date.now() } = {}) {
-  const key = String(chatId ?? '');
-  if (!key) return null;
-  const here = [];
-  const worked = [];
-  for (const b of fleetBots || []) {
-    if (!b || b.enabled === false) continue;
-    if (!FLEET_CHAT_RUNTIMES.has(b.runtime || 'bot-host')) continue;
-    const at = Number((readJsonObject(presencePath(b.id, home)) || {})[key]) || 0;
-    // age >= 0 matters: a file written by a host whose clock ran ahead reads as a
-    // negative age, which is < TTL, so the seat would sit in the roster forever.
-    const age = now - at;
-    if (at && age >= 0 && age < PRESENCE_TTL_MS) { here.push(b.id); continue; }
-    const dir = path.join(home, '.local', 'state', 'bot-host', b.id);
-    const totals = readJsonObject(path.join(dir, 'totals.json'));
-    if (Object.prototype.hasOwnProperty.call(totals || {}, key)) worked.push(b.id);
-  }
-  if (here.length) return here;
-  if (worked.length) return worked;
-  return null;
-}
-
-export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home = os.homedir(), seats = null, roleOf = null, masterId = null, onlySeats = null } = {}) {
+export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home = os.homedir(), seats = null, roleOf = null, masterId = null } = {}) {
   const key = String(chatId ?? '');
   if (!key) return [];
   let bots = [];
@@ -1619,11 +1353,7 @@ export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home
     return [];
   }
   const ws = String(workspace || '');
-  // When the caller scoped this chat (see chatRoster), the room's own seats
-  // win over the council: a group is not every seat that exists.
-  const scopedIds = Array.isArray(onlySeats) && onlySeats.length ? new Set(onlySeats) : null;
   const inCouncil = (b) => {
-    if (scopedIds) return scopedIds.has(b.id);
     if (!Array.isArray(seats) || typeof roleOf !== 'function') return true;
     if (master && b.id === master) return true;
     return seats.includes(roleOf(b));
@@ -1646,12 +1376,6 @@ export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home
       const tokens = Number(totalsRow.tokens) || 0;
       const cost = Number(totalsRow.cost) || 0;
       const last = totalsRow.last && typeof totalsRow.last === 'object' ? totalsRow.last : null;
-      // What this seat RAN on beats what it is CONFIGURED to run on. noteUsage
-      // records the answering lane (seat-model's `answeredBy`), which differs
-      // from the registry default the moment a lane fails over. Reading only
-      // the config made the table claim a lane the answer did not come from —
-      // the opposite of the point of the column.
-      const usedModel = typeof last?.model === 'string' ? last.model.trim() : '';
       const lastTokens = Number(last?.tokens?.total ?? last?.tokens) || 0;
       const lastLimit = Number(last?.contextLimit) || 0;
       const enabled = b.enabled !== false;
@@ -1661,7 +1385,7 @@ export function fleetChatStatus({ chatId, workspace = '', root = REPO_ROOT, home
         name: b.name || b.id,
         enabled,
         role: master && b.id === master ? 'coordinator' : seat || null,
-        model: usedModel || pref.model || b.agent?.model || null,
+        model: pref.model || b.agent?.model || null,
         agent: pref.agent || b.agent?.defaultAgent || null,
         sessionId,
         foreignSession,
@@ -1744,11 +1468,7 @@ export function formatFleetStatusTable(rows, { chatId, via } = {}) {
     }
     out.push('```');
   } else {
-    // Wide enough for a full model id ("opencode/nemotron-3.5-lightning-free" is
-    // 38). A truncated lane name defeats the column — it cannot tell you which
-    // lane ran. Only reached when the seats disagree, so the narrow uniform
-    // table above is unaffected.
-    const W = { bot: 8, role: 13, model: 38, agent: 5, sess: 9, task: 7, runs: 10 };
+    const W = { bot: 8, role: 14, model: 18, agent: 5, sess: 9, task: 7, runs: 14 };
     out.push('```');
     out.push(
       `${padEnd('Bot', W.bot)} ${padEnd('Role', W.role)} ${padEnd('Model', W.model)} ${padEnd('Ag', W.agent)} ${padEnd('Session', W.sess)} ${padEnd('Task', W.task)} ${padEnd('Usage', W.runs)}`.trimEnd(),
@@ -1770,5 +1490,6 @@ export function resetFleetState() {
   fleetNodeHeartbeats.clear();
   fleetSnapshotCache = { at: 0, data: null };
   vmSessionsCaches.clear();
-  defaultMacActionQueue.replace([]);
+  macPendingActions = [];
+
 }
