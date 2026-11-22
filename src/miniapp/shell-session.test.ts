@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMem, statusKeyMaps, formatIdle, lookForRow, sortByMem, filterBareRows, applyRouteAgents, activityKeyMaps, TTY_IDLE_RED_MS } from './shell-session';
+import { formatMem, statusKeyMaps, formatIdle, lookForRow, sortByMem, filterBareRows, applyRouteAgents, activityKeyMaps, attachedKeyMaps, TTY_IDLE_RED_MS } from './shell-session';
 import type { TmuxEntry } from './shell-session';
 
 describe('formatMem (picker memory readout shows a number or nothing)', () => {
@@ -187,6 +187,49 @@ describe('filterBareRows (visible implies measurable, never numberless)', () => 
   it('hides mem-less bare rows once status is known, keeps the rest', () => {
     expect(filterBareRows(rows, { 'opencode:s1': 100 }, true).map((r) => r.bot))
       .toEqual(['vm', 's1', 'colab']);
+  });
+  it('keeps attached mem-less bare rows visible, like the session in use', () => {
+    const attached = [
+      { bot: 'vm', id: 'opencode:ses_abc000001', kind: 'opencode', sessionId: 'ses_abc000001' },
+      { bot: 'vm', id: 'opencode:ses_zzz000002', kind: 'opencode', sessionId: 'ses_zzz000002' },
+    ];
+    expect(filterBareRows(attached, {}, true, new Set(['ses:ses_abc00000'])).map((r) => r.id))
+      .toEqual(['opencode:ses_abc000001']);
+  });
+  it('keeps the picked row visible without memory', () => {
+    const attached = [
+      { bot: 'vm', id: 'opencode:ses_abc000001', kind: 'opencode', sessionId: 'ses_abc000001' },
+      { bot: 'vm', id: 'opencode:ses_zzz000002', kind: 'opencode', sessionId: 'ses_zzz000002' },
+    ];
+    expect(filterBareRows(attached, {}, true, new Set(['opencode:ses_zzz000002'])).map((r) => r.id))
+      .toEqual(['opencode:ses_zzz000002']);
+  });
+  it('keeps attached rows even before status truth arrives', () => {
+    const attached = [
+      { bot: 'vm', id: 'tty:vm', kind: 'tty' },
+      { bot: 'vm', id: 'opencode:ses_abc000001', kind: 'opencode', sessionId: 'ses_abc000001' },
+      { bot: 'vm', id: 'opencode:ses_zzz000002', kind: 'opencode', sessionId: 'ses_zzz000002' },
+    ];
+    expect(filterBareRows(attached, {}, false, new Set(['ses:ses_abc00000'])).map((r) => r.id))
+      .toEqual(['tty:vm', 'opencode:ses_abc000001']);
+  });
+});
+
+describe('attachedKeyMaps (every hub session keeps its row, any state)', () => {
+  it('maps working, held AND idle sessions, not just badges', () => {
+    const { attached } = attachedKeyMaps([
+      { chat: '1', sessionId8: 'ses_abc00000', bots: ['vm'], lane: 'opencode', host: 'vps', state: 'working', elapsedMs: 1 },
+      { chat: '2', sessionId8: 'ses_zzz00000', bots: [], lane: 'cline', host: 'grok', state: 'held', elapsedMs: null },
+      { chat: '3', sessionId8: 'ses_idle00000', bots: [], lane: 'opencode', host: 'vps', state: 'idle', elapsedMs: null },
+    ] as Parameters<typeof attachedKeyMaps>[0]);
+    expect(attached.has('ses:ses_abc00000')).toBe(true);
+    expect(attached.has('ses:ses_zzz00000')).toBe(true);
+    expect(attached.has('ses:ses_idle00000')).toBe(true);
+    expect(attached.has('tty:vm')).toBe(true);
+  });
+  it('tolerates missing input', () => {
+    expect(attachedKeyMaps().attached.size).toBe(0);
+    expect(attachedKeyMaps(null as unknown as []).attached.size).toBe(0);
   });
 });
 
