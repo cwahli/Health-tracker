@@ -21,7 +21,10 @@
  *    and /freemodel reflect it. Still limited with no vendor time → default TTL.
  * 5. When a lane flips to available: ONE Telegram ping to TELEGRAM_ALLOWED_USER_ID
  *    via TELEGRAM_BOT_TOKEN (Bot API sendMessage), rate-limited to max 1 per lane
- *    per reset window (state/allowance-watch-pings.json).
+ *    per reset window (state/allowance-watch-pings.json). Freebuff is never
+ *    probed (terminal-only skip): zero usable ledger rows or a stuck session
+ *    pane sends ONE alert to the VM1 owner (FREEBUFF_NOTIFY_* else the same
+ *    owner route), max 1 per key per UTC day.
  *
  * Modes: --once (single sweep) · --daemon (loop) · --exit-on-available (exit 0,
  * lane name printed, as soon as any lane opens — wakes the PM).
@@ -233,6 +236,96 @@ function pingWindowMark(state, laneKey, windowId) {
   state[laneKey] = { window: windowId, sentAt: core.isoZ(Date.now()) };
 }
 
+// ---------- freebuff stuck/stopped alert (sendMessage only; never a second poller) ----------
+// Freebuff is terminal-only and the watcher skips probing it, so a stuck
+// session or an emptied ledger would otherwise go quiet. This check only
+// reads: the ledger rows plus (best-effort) the visible tmux pane of the
+// Freebuff session. Absent tmux/session is NOT evidence — it stays silent.
+// A positive stuck signal (takeover / session-ended with 0 left / quota line)
+// or zero usable ledger rows sends ONE Telegram message to the VM1 owner,
+// rate-limited to 1 per key per UTC day. Token/chat default to the watcher's
+// own owner ping; set FREEBUFF_NOTIFY_BOT_TOKEN to the VM1 (vm) bot token and
+// FREEBUFF_NOTIFY_CHAT_ID to the owner id to have it arrive from VM1.
+async function sendFreebuffAlert(env, text) {
+  const token = env.FREEBUFF_NOTIFY_BOT_TOKEN || env.VM_BOT_TOKEN || env.TELEGRAM_BOT_TOKEN || "";
+  const chatId = env.FREEBUFF_NOTIFY_CHAT_ID || env.TELEGRAM_ALLOWED_USER_ID || env.TELEGRAM_USER_ID || "";
+  if (!token || !chatId) { log("freebuff alert: missing notify token/chat — skipped"); return false; }
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: String(text).slice(0, PING_MAX_CHARS * 2), disable_notification: false }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (r.ok && body.ok) { log("freebuff alert sent"); return true; }
+    log(`freebuff alert failed: HTTP ${r.status} ${String(body.description || "").slice(0, 120)}`);
+    return false;
+  } catch (e) {
+    log(`freebuff alert failed: ${String(e.message || e).slice(0, 120)}`);
+    return false;
+  }
+}
+
+function checkFreebuff(env, tbl, pings) {
+  // Returns { line, sent } — never throws; silence on no evidence.
+  try {
+    const lanes = Array.isArray(tbl?.lanes) ? tbl.lanes : [];
+    const fb = lanes.filter((l) => String(l?.provider || "").toLowerCase() === "freebuff");
+    const day = new Date().toISOString().slice(0, 10);
+    // (1) Ledger: no usable Freebuff row left = stopped working at allowance level.
+    if (fb.length) {
+      const usable = fb.filter((l) => {
+        const s = String(l?.status || "").toLowerCase();
+        return s === "available" && !l.catalogStale && !l.planRequired;
+      });
+      if (!usable.length) {
+        const key = "freebuff/ledger";
+        if (pingWindowAllowed(pings, key, day)) {
+          const states = [...new Set(fb.map((l) => String(l?.status || "unknown")))].join(",");
+          const text = `🛑 Freebuff stopped: 0 of ${fb.length} ledger lanes usable (${states}). /allowance shows the board; terminal \`freebuff\` will also refuse.`;
+          return sendFreebuffAlert(env, text).then((sent) => {
+            if (sent) pingWindowMark(pings, key, day);
+            return { line: `  freebuff: ledger 0/${fb.length} usable → alert ${sent ? "sent" : "skipped"}`, sent };
+          });
+        }
+        return Promise.resolve({ line: "  freebuff: ledger 0 usable (already alerted today)", sent: false });
+      }
+    }
+    // (2) Session: stuck markers on the visible pane only (never scrollback).
+    const session = String(env.FREEBUFF_TMUX_SESSION || "freebuff").trim() || "freebuff";
+    let pane = "";
+    try {
+      const r = spawnSync("tmux", ["capture-pane", "-p", "-t", session], { encoding: "utf8", timeout: 10000 });
+      if (r.status !== 0) return Promise.resolve({ line: null, sent: false }); // no session: no evidence
+      pane = String(r.stdout || "");
+    } catch {
+      return Promise.resolve({ line: null, sent: false }); // no tmux: no evidence
+    }
+    if (!pane.trim()) return Promise.resolve({ line: null, sent: false });
+    const st = core.freebuffSessionEndState(pane);
+    const quota = core.matchFreebuffQuotaLine(pane);
+    const stuckKind = st.tookOver ? "took over by another instance"
+      : st.sessionEnded && st.freebucksLeft === 0 ? "session ended with 0 Freebucks left"
+      : st.sessionEnded && st.pressEnter ? "session ended (Press Enter to continue)"
+      : quota && st.freebucksLeft === 0 ? "out of Freebucks" : "";
+    if (!stuckKind) return Promise.resolve({ line: null, sent: false });
+    const key = "freebuff/session";
+    const windowId = `${day}:${stuckKind}`;
+    if (!pingWindowAllowed(pings, key, windowId)) {
+      return Promise.resolve({ line: `  freebuff: stuck (${stuckKind}, already alerted)`, sent: false });
+    }
+    const text = `🛑 Freebuff stuck on \`${session}\`: ${stuckKind}. Pane needs a human (Enter / resume / takeover).`;
+    return sendFreebuffAlert(env, text).then((sent) => {
+      if (sent) pingWindowMark(pings, key, windowId);
+      return { line: `  freebuff: stuck (${stuckKind}) → alert ${sent ? "sent" : "skipped"}`, sent };
+    });
+  } catch (e) {
+    log(`freebuff check failed: ${String(e?.message || e).slice(0, 120)}`);
+    return Promise.resolve({ line: null, sent: false });
+  }
+}
+
 // ---------- sweep ----------
 /**
  * One sweep: probe every due lane (shared buckets: probe the first due member,
@@ -247,6 +340,13 @@ async function sweep(env, { doWrite = true } = {}) {
   const lines = [];
   let probed = 0, flips = 0, restamps = 0, uncertainProbes = 0;
   const probedBuckets = new Set();
+
+  // Freebuff is never probed (terminal-only skip), so check it separately:
+  // ledger-empty or a stuck session pane alerts the VM1 owner (rate-limited).
+  let freebuffAlertSent = false;
+  const fbCheck = await checkFreebuff(env, tbl, pings);
+  if (fbCheck?.line) lines.push(fbCheck.line);
+  if (fbCheck?.sent) freebuffAlertSent = true;
 
   // Probe budget order: due lanes by pref. Shared buckets: first due member only.
   const dueLanes = [...plan.due].sort((a, b) => (Number(a.pref) || 0) - (Number(b.pref) || 0));
@@ -327,12 +427,12 @@ async function sweep(env, { doWrite = true } = {}) {
     if (res.status === "available" && bid) { pings.probes[laneKey].window = "cleared"; }
   }
 
-  if (doWrite && (probed > 0)) {
+  if (doWrite && (probed > 0 || freebuffAlertSent)) {
     tbl.updatedAt = core.isoZ(Date.now());
     writeJsonAtomic(TABLE_PATH, tbl);
     writeJsonAtomic(SESSION_PATH, session);
     writeJsonAtomic(PING_PATH, pings);
-  } else if (probed > 0) {
+  } else if (probed > 0 || freebuffAlertSent) {
     writeJsonAtomic(PING_PATH, pings);
   }
 
@@ -343,11 +443,12 @@ async function sweep(env, { doWrite = true } = {}) {
     flips,
     restamps,
     uncertainProbes,
+    freebuffAlert: freebuffAlertSent,
     openedLane: plan.openedLane || null,
     soonestResetAt: Number.isFinite(plan.soonest) ? core.isoZ(plan.soonest) : null,
     lines,
   };
-  log(`sweep: ${plan.due.length} due / ${plan.depleted.length} depleted / ${plan.lanes.length} lanes — probed ${probed}, flips ${flips}, re-stamps ${restamps}, uncertain ${uncertainProbes}${plan.openedLane ? ` — OPENED: ${plan.openedLane}` : ""}`);
+  log(`sweep: ${plan.due.length} due / ${plan.depleted.length} depleted / ${plan.lanes.length} lanes — probed ${probed}, flips ${flips}, re-stamps ${restamps}, uncertain ${uncertainProbes}, freebuffAlert ${freebuffAlertSent ? "sent" : "none"}${plan.openedLane ? ` — OPENED: ${plan.openedLane}` : ""}`);
   for (const l of lines) log(l);
   return summary;
 }

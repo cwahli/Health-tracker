@@ -1,11 +1,13 @@
 ---
 name: browser-screenshot
-description: Use when the user asks to browse a web page, open a URL, look something up online, or send a screenshot of a website. Drives the Playwright MCP browser and shares images with MEDIA:.
+description: Use ONLY when the user explicitly asks to browse a web page, open a URL, look something up online, or send a screenshot of a website. Never for greetings, status checks, or smalltalk. Drives the Playwright MCP browser and shares images with MEDIA:.
 ---
 
 # Browse the web and share screenshots
 
 A Playwright MCP server named `playwright` is available. Use its tools.
+
+Use ONLY the tools already available in this turn: never install, download, or launch browser servers yourself, and if a tool is absent, say what is missing instead of improvising a workaround.
 
 ## Tools
 

@@ -203,17 +203,31 @@ export const FREE_NAME_DENYLIST = {
 /** The one Go-plan model /model_go must show. Kept out of the free inventory above. */
 export const GO_SPACE_BUNNY_REF = 'opencode-go/space-bunny-free';
 
-function goSpaceBunnyEntry(location) {
+function goSpaceBunnyEntry(location, { selectable = true, note = 'paid Go plan, shown by /model_go; not a free lane and not a zen failover' } = {}) {
   return {
     ref: GO_SPACE_BUNNY_REF,
     label: 'Go Space Bunny',
     surface: 'opencode',
     tool: 'opencode',
     provider: 'opencode-go',
-    selectable: true,
+    selectable,
     location,
-    note: 'paid Go plan, shown by /model_go; not a free lane and not a zen failover',
+    note,
   };
+}
+
+/**
+ * Positive evidence this host has no Go-plan auth: the OpenCode auth file
+ * parses as an object with keys and none of them is `opencode-go` — the same
+ * condition that makes listGoOpenCode return []. Absent/unreadable auth is
+ * NOT evidence (the picker must not call a working Go host unrunnable).
+ */
+function opencodeGoDenied({ authPath, readJson = defaultReadJson, home = os.homedir() } = {}) {
+  const auth = readJson(authPath || defaultPaths(home).authPath);
+  if (!auth || typeof auth !== 'object') return false;
+  const keys = Object.keys(auth);
+  if (!keys.length) return false;
+  return !keys.some((k) => String(k).toLowerCase() === 'opencode-go');
 }
 
 /**
@@ -558,7 +572,19 @@ export function buildFreeModelList(opts = {}) {
         });
       }
     } else if (!entries.some((e) => e && e.ref === GO_SPACE_BUNNY_REF)) {
-      entries.push(goSpaceBunnyEntry(location));
+      // No Go auth and no cached catalog still gets the one authored bunny, so
+      // the picker is never empty on a host where OpenCode itself is up — but
+      // when the auth file positively lacks `opencode-go`, the row must not
+      // read as usable: it would render "1 lane · 1 usable" and then refuse
+      // every turn on the single-lane paid walk (live 2026-11-06).
+      if (opencodeGoDenied({ ...opts, env, home })) {
+        entries.push(goSpaceBunnyEntry(location, {
+          selectable: false,
+          note: 'paid Go plan is not signed in on this host (/setup) — pick /model_free to keep chatting',
+        }));
+      } else {
+        entries.push(goSpaceBunnyEntry(location));
+      }
     }
     const geminiRefs = listGeminiOpenCode({ ...opts, env, home });
     for (const ref of geminiRefs) {
