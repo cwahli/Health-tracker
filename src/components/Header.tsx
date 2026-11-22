@@ -327,7 +327,7 @@ export default function Header({
 
   return (
     <>
-      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800/80 px-6 py-4 sticky top-0 z-40 shadow-sm transition-colors duration-200">
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800/80 px-3 py-2 sticky top-0 z-40 shadow-sm transition-colors duration-200">
         <div className="max-w-md mx-auto flex items-center justify-between gap-3">
         {/* Profile Info Row */}
         <div className="flex items-center gap-4 flex-1 min-w-0">

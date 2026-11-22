@@ -1488,7 +1488,7 @@ export const FoodCard: React.FC<AgentCardProps & {
                                            e.stopPropagation();
                                            setReviewsOpen(true);
                                          }}
-                                         className="absolute -top-1.5 -right-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-full w-4 h-4 flex items-center justify-center shadow-sm z-10 cursor-pointer hover:scale-110 transition-transform"
+                                         className="absolute -top-1.5 -right-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-full w-4 h-4 flex items-center justify-center shadow-sm z-10 cursor-pointer hover:scale-110 transition-transform"
                                          title={t.showLowConfidencePanel || "Show low confidence identification panel"}
                                        >
                                          <span className="text-[10px] font-bold">!</span>
@@ -2409,7 +2409,7 @@ export const FoodCard: React.FC<AgentCardProps & {
                                              e.stopPropagation();
                                              setReviewsOpen(true);
                                            }}
-                                           className="absolute -top-1.5 -right-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-full w-4 h-4 flex items-center justify-center shadow-sm z-10 cursor-pointer hover:scale-110 transition-transform"
+                                           className="absolute -top-1.5 -right-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-full w-4 h-4 flex items-center justify-center shadow-sm z-10 cursor-pointer hover:scale-110 transition-transform"
                                            title={t.showLowConfidencePanel || "Show low confidence identification panel"}
                                          >
                                            <span className="text-[10px] font-bold">!</span>
@@ -3012,7 +3012,7 @@ export const FoodCard: React.FC<AgentCardProps & {
                               <button
                                 type="button"
                                 onClick={handleReviewStagedPortions}
-                                className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer font-sans"
+                                className="w-full py-2 bg-amber-700 hover:bg-amber-800 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer font-sans"
                               >
                                 <Sparkles className="w-4 h-4" />
                                 {shortLabel}
