@@ -230,6 +230,9 @@ jobs:
       - name: 'PR body contract sensor (Next: pointer fails closed)'
         run: node scripts/assert-pr-summary.test.mjs
 
+      - name: Proto-first gate (proto proof before dev merge)
+        run: node scripts/assert-proto-first.test.mjs
+
       - name: Work queue sensor (generated list fails closed)
         run: node scripts/assert-work-queue.test.mjs
 

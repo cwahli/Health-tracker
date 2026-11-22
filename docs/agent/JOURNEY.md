@@ -1,6 +1,7 @@
 # Journey graph (the process)
 
-**You:** one sentence, then **go** or **stop**.  
+**You:** one sentence, then **go** or **stop**.
+**Proto-first:** every user-visible change is proven on `proto.health-tracker.co.uk/ht/` and only your **`go for dev`** promotes it to `health-tracker.co.uk` (`main` + `deploy.sh`). Detail: `docs/agent/PROTO_FIRST.md`. CI: `node scripts/assert-proto-first.test.mjs`.  
 **The system:** Planner → Guard → (you) → Builder → Guard → Reviewer (on fail or when you ask).
 
 This is the aggregation of harness / loop / graph / skills / standing invariants. It replaces you locking files, and it replaces one-off “don’t overwrite compare” reminders.
@@ -81,6 +82,8 @@ Chat does not carry over between tools. A packet in `specs/active/` and a checkp
 | **You** | human | **go** / **stop** / **promote** | file lists, YAML, locking |
 
 Skills: `.agents/skills/{planner,builder,guard,reviewer}/SKILL.md`.
+
+**Proto gate (2026-11-09):** After Guard passes, Builder deploys to proto (`node scripts/proto-deploy.mjs`), attaches screenshot proof to the PR `## Proto` (URL + SHA + Proof), and stops. Only your `go for dev` lets it merge to `main` → dev site. See `docs/agent/PROTO_FIRST.md`.
 
 Reviewer is the *compile learning* node (Ichigo layer 6 / loop “turn failure into infrastructure”). It is not a second Guard. An LLM must not be allowed to edit the script that says fail. After **promote**, a new packet may *add* a standing row or a skill line; Guard still has to pass.
 

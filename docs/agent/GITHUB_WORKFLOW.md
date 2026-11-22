@@ -33,6 +33,12 @@ agent worktree (agent/<area>)  ──push──►  PR to main
 GitHub has **no native temporary per-path lock** — this is the standard
 workaround (open-PR-as-lock + CI guard + CODEOWNERS).
 
+**Proto-first gate (2026-11-09):** merge to `main` is also a **promotion to dev**
+(`health-tracker.co.uk`). A PR touching user-visible code (`src/`, `server*.ts`,
+`app.html`, `index.html`) must carry `## Proto` (proto URL + SHA + Proof).
+The human's `go for dev` flips it to Approved. Sensor: `node scripts/assert-proto-first.test.mjs`.
+Detail: `docs/agent/PROTO_FIRST.md`. Docs/process-only PRs write `Proto: exempt — <reason>`.
+
 ### 1b. PAT-free automation (no `gh`, no token on the agent box)
 
 A local agent only has SSH (git), not the GitHub API. Two pieces remove the

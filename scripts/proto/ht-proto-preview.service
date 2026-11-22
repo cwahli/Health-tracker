@@ -1,0 +1,35 @@
+# Health-tracker proto preview service (2026-11-09, PROTO_FIRST)
+# Serves the current branch build at /ht/<sha>/ for human approval.
+# This is NOT the dev site (health-tracker.service on :3000) and never
+# touches /home/ubuntu/deploy/Health-tracker.
+#
+# Install on the VPS (from this repo checkout):
+#   sudo cp scripts/proto/ht-proto-preview.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ht-proto-preview
+#   sudo systemctl reload caddy   # after adding scripts/proto/caddy-ht.snippet
+#
+# Working directory holds the preview build (dist/ from `npm run build:web`).
+# scripts/proto-deploy.mjs is the local form of the same preview; on the
+# VPS, rebuild dist/ from the agent branch and restart this unit.
+
+[Unit]
+Description=Health-tracker proto preview (PROTO_FIRST, /ht/ on proto.health-tracker.co.uk)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/dev/proto-preview
+ExecStart=/usr/bin/node scripts/proto-deploy.mjs --port 3100
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
