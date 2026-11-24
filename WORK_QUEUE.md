@@ -1,15 +1,15 @@
-# Work queue (generated 2026-11-23T17:20:47Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
+# Work queue (generated 2026-11-24T16:56:27Z by scripts/work-queue.mjs — do not hand-edit; rerun --write)
 
 ## Ready to merge (8)
 
-- #781 `agent/meal-qa-queue` — chore(meal-qa): snapshot pending loop queue (5 requests + state, 2026-10-08/09) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 254)
-- #804 `agent/attach-visible` — fix(picker): attached sessions never hide, like the session in use (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 135)
-- #875 `ship/food-rings` — fix(ui): darken status colors so small badges clear contrast (owner: Grok 4.7 (High) VM; behind main: 48)
-- #891 `agent/bot-vm-fixes` — fix(bot): VM3 Command Code ENOENT, Go-pool honesty, Freebuff→VM1 alert (owner: Muse Spark 1.3 (none) VM; behind main: 26)
-- #895 `agent/perf-gateway-streaming` — fix(gateway): stream request bodies instead of buffering (owner: (no trailer); behind main: 24)
-- #896 `agent/perf-gateway-sync` — fix(gateway): off-loop VM session reads + stream request bodies (owner: (no trailer); behind main: 257)
-- #897 `agent/proto-first` — feat(process): proto-first — iterate on proto.health-tracker, dev only after human go for dev (owner: Muse Spark 1.3 (xhigh) Mac; behind main: 21)
-- #898 `migrate-bothost-fr-20261017` — wip(infra): migrate bothost fr 20261017 (owner: Gemini 3.8 Flash (high) Mac; behind main: 24)
+- #781 `agent/meal-qa-queue` — chore(meal-qa): snapshot pending loop queue (5 requests + state, 2026-10-08/09) (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 255)
+- #804 `agent/attach-visible` — fix(picker): attached sessions never hide, like the session in use (owner: Muse Spark 1.3 Contributor (high) VM; behind main: 136)
+- #875 `ship/food-rings` — fix(ui): darken status colors so small badges clear contrast (owner: Grok 4.7 (High) VM; behind main: 49)
+- #891 `agent/bot-vm-fixes` — fix(bot): VM3 Command Code ENOENT, Go-pool honesty, Freebuff→VM1 alert (owner: Muse Spark 1.3 (none) VM; behind main: 27)
+- #895 `agent/perf-gateway-streaming` — fix(gateway): stream request bodies instead of buffering (owner: (no trailer); behind main: 25)
+- #896 `agent/perf-gateway-sync` — fix(gateway): off-loop VM session reads + stream request bodies (owner: (no trailer); behind main: 258)
+- #897 `agent/proto-first` — feat(process): proto-first — iterate on proto.health-tracker, dev only after human go for dev (owner: Muse Spark 1.3 (xhigh) Mac; behind main: 22)
+- #898 `migrate-bothost-fr-20261017` — wip(infra): migrate bothost fr 20261017 (owner: Gemini 3.8 Flash (high) Mac; behind main: 25)
 
 ## In flight (0)
 
