@@ -2624,6 +2624,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
           if (authenticatedHost && payloadLoc) {
             const allowed = [authenticatedHost];
             if (authenticatedHost === 'vps' || authenticatedHost === 'vm') allowed.push('vm', 'vps');
+            if (authenticatedHost === 'vps4') allowed.push('vps4');
             if (authenticatedHost === 'mac') allowed.push('mac');
             if (authenticatedHost === 'grok') allowed.push('grok', 'grok vm');
             if (authenticatedHost === 'collab') allowed.push('collab');
@@ -2638,6 +2639,7 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
             const ch = claimedHost.toLowerCase();
             const allowed = [ch];
             if (ch === 'vps' || ch === 'vm') allowed.push('vm', 'vps');
+            if (ch === 'vps4') allowed.push('vps4');
             if (ch === 'mac') allowed.push('mac');
             if (ch === 'grok') allowed.push('grok', 'grok vm');
             if (ch === 'collab') allowed.push('collab');
